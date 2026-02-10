@@ -1,38 +1,235 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
-
-// modify the interface with any CRUD methods
-// you might need
+import {
+  admins, merchants, merchantCountries, transactions, smsLogs, numbers, settings, loginLogs,
+  type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
+  type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
+  type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
+  type Setting, type InsertSetting, type LoginLog, type InsertLoginLog,
+} from "@shared/schema";
+import { db } from "./db";
+import { eq, desc, sql, and } from "drizzle-orm";
 
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  getAdminByEmail(email: string): Promise<Admin | undefined>;
+  getAdminById(id: number): Promise<Admin | undefined>;
+  createAdmin(admin: InsertAdmin): Promise<Admin>;
+  updateAdminPassword(id: number, passwordHash: string): Promise<void>;
+
+  getMerchants(): Promise<Merchant[]>;
+  getMerchantById(id: number): Promise<Merchant | undefined>;
+  getMerchantByEmail(email: string): Promise<Merchant | undefined>;
+  getMerchantBySlug(slug: string): Promise<Merchant | undefined>;
+  createMerchant(merchant: InsertMerchant): Promise<Merchant>;
+  updateMerchant(id: number, data: Partial<Merchant>): Promise<void>;
+  deleteMerchant(id: number): Promise<void>;
+
+  getMerchantCountries(merchantId?: number): Promise<MerchantCountry[]>;
+  getMerchantCountryById(id: number): Promise<MerchantCountry | undefined>;
+  addMerchantCountry(mc: InsertMerchantCountry): Promise<MerchantCountry>;
+  updateMerchantCountryBalance(id: number, balance: number): Promise<void>;
+  incrementMerchantCountryBalance(id: number, amount: number): Promise<void>;
+  findMerchantCountryBySimAndCountry(merchantId: number, country: string): Promise<MerchantCountry | undefined>;
+
+  getTransactions(merchantId?: number): Promise<Transaction[]>;
+  getTransactionByTxId(txId: string): Promise<Transaction | undefined>;
+  createTransaction(tx: InsertTransaction): Promise<Transaction>;
+
+  getSmsLogs(): Promise<SmsLog[]>;
+  createSmsLog(log: InsertSmsLog): Promise<SmsLog>;
+
+  getNumbers(): Promise<PhoneNumber[]>;
+  getNumberByPhone(phone: string): Promise<PhoneNumber | undefined>;
+  addNumber(num: InsertNumber): Promise<PhoneNumber>;
+  deleteNumber(id: number): Promise<void>;
+
+  getSetting(key: string): Promise<string | undefined>;
+  setSetting(key: string, value: string): Promise<void>;
+
+  createLoginLog(log: InsertLoginLog): Promise<void>;
+  getFailedLoginCount(userId: number, role: string): Promise<number>;
+
+  getStats(): Promise<{ merchantCount: number; transactionCount: number; totalVolume: number; activeNumbers: number }>;
+  getMerchantStats(merchantId: number): Promise<{ transactionCount: number; totalVolume: number }>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
-
-  constructor() {
-    this.users = new Map();
+export class DatabaseStorage implements IStorage {
+  async getAdminByEmail(email: string): Promise<Admin | undefined> {
+    const [admin] = await db.select().from(admins).where(eq(admins.email, email));
+    return admin;
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+  async getAdminById(id: number): Promise<Admin | undefined> {
+    const [admin] = await db.select().from(admins).where(eq(admins.id, id));
+    return admin;
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+  async createAdmin(admin: InsertAdmin): Promise<Admin> {
+    const [created] = await db.insert(admins).values(admin).returning();
+    return created;
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+  async updateAdminPassword(id: number, passwordHash: string): Promise<void> {
+    await db.update(admins).set({ passwordHash }).where(eq(admins.id, id));
+  }
+
+  async getMerchants(): Promise<Merchant[]> {
+    return db.select().from(merchants).orderBy(desc(merchants.createdAt));
+  }
+
+  async getMerchantById(id: number): Promise<Merchant | undefined> {
+    const [merchant] = await db.select().from(merchants).where(eq(merchants.id, id));
+    return merchant;
+  }
+
+  async getMerchantByEmail(email: string): Promise<Merchant | undefined> {
+    const [merchant] = await db.select().from(merchants).where(eq(merchants.email, email));
+    return merchant;
+  }
+
+  async getMerchantBySlug(slug: string): Promise<Merchant | undefined> {
+    const [merchant] = await db.select().from(merchants).where(eq(merchants.slug, slug));
+    return merchant;
+  }
+
+  async createMerchant(merchant: InsertMerchant): Promise<Merchant> {
+    const [created] = await db.insert(merchants).values(merchant).returning();
+    return created;
+  }
+
+  async updateMerchant(id: number, data: Partial<Merchant>): Promise<void> {
+    await db.update(merchants).set(data).where(eq(merchants.id, id));
+  }
+
+  async deleteMerchant(id: number): Promise<void> {
+    await db.delete(merchants).where(eq(merchants.id, id));
+  }
+
+  async getMerchantCountries(merchantId?: number): Promise<MerchantCountry[]> {
+    if (merchantId) {
+      return db.select().from(merchantCountries).where(eq(merchantCountries.merchantId, merchantId));
+    }
+    return db.select().from(merchantCountries);
+  }
+
+  async getMerchantCountryById(id: number): Promise<MerchantCountry | undefined> {
+    const [mc] = await db.select().from(merchantCountries).where(eq(merchantCountries.id, id));
+    return mc;
+  }
+
+  async addMerchantCountry(mc: InsertMerchantCountry): Promise<MerchantCountry> {
+    const [created] = await db.insert(merchantCountries).values(mc).returning();
+    return created;
+  }
+
+  async updateMerchantCountryBalance(id: number, balance: number): Promise<void> {
+    await db.update(merchantCountries).set({ balance }).where(eq(merchantCountries.id, id));
+  }
+
+  async incrementMerchantCountryBalance(id: number, amount: number): Promise<void> {
+    await db.update(merchantCountries)
+      .set({ balance: sql`${merchantCountries.balance} + ${amount}` })
+      .where(eq(merchantCountries.id, id));
+  }
+
+  async findMerchantCountryBySimAndCountry(merchantId: number, country: string): Promise<MerchantCountry | undefined> {
+    const [mc] = await db.select().from(merchantCountries)
+      .where(and(eq(merchantCountries.merchantId, merchantId), eq(merchantCountries.country, country)));
+    return mc;
+  }
+
+  async getTransactions(merchantId?: number): Promise<Transaction[]> {
+    if (merchantId) {
+      return db.select().from(transactions).where(eq(transactions.merchantId, merchantId)).orderBy(desc(transactions.createdAt));
+    }
+    return db.select().from(transactions).orderBy(desc(transactions.createdAt));
+  }
+
+  async getTransactionByTxId(txId: string): Promise<Transaction | undefined> {
+    const [tx] = await db.select().from(transactions).where(eq(transactions.txId, txId));
+    return tx;
+  }
+
+  async createTransaction(tx: InsertTransaction): Promise<Transaction> {
+    const [created] = await db.insert(transactions).values(tx).returning();
+    return created;
+  }
+
+  async getSmsLogs(): Promise<SmsLog[]> {
+    return db.select().from(smsLogs).orderBy(desc(smsLogs.createdAt));
+  }
+
+  async createSmsLog(log: InsertSmsLog): Promise<SmsLog> {
+    const [created] = await db.insert(smsLogs).values(log).returning();
+    return created;
+  }
+
+  async getNumbers(): Promise<PhoneNumber[]> {
+    return db.select().from(numbers);
+  }
+
+  async getNumberByPhone(phone: string): Promise<PhoneNumber | undefined> {
+    const [num] = await db.select().from(numbers).where(eq(numbers.phoneNumber, phone));
+    return num;
+  }
+
+  async addNumber(num: InsertNumber): Promise<PhoneNumber> {
+    const [created] = await db.insert(numbers).values(num).returning();
+    return created;
+  }
+
+  async deleteNumber(id: number): Promise<void> {
+    await db.delete(numbers).where(eq(numbers.id, id));
+  }
+
+  async getSetting(key: string): Promise<string | undefined> {
+    const [setting] = await db.select().from(settings).where(eq(settings.key, key));
+    return setting?.value;
+  }
+
+  async setSetting(key: string, value: string): Promise<void> {
+    const existing = await this.getSetting(key);
+    if (existing !== undefined) {
+      await db.update(settings).set({ value }).where(eq(settings.key, key));
+    } else {
+      await db.insert(settings).values({ key, value });
+    }
+  }
+
+  async createLoginLog(log: InsertLoginLog): Promise<void> {
+    await db.insert(loginLogs).values(log);
+  }
+
+  async getFailedLoginCount(userId: number, role: string): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` })
+      .from(loginLogs)
+      .where(and(
+        eq(loginLogs.userId, userId),
+        eq(loginLogs.role, role),
+        eq(loginLogs.success, false),
+      ));
+    return result[0]?.count || 0;
+  }
+
+  async getStats() {
+    const [mc] = await db.select({ count: sql<number>`count(*)` }).from(merchants);
+    const [tc] = await db.select({ count: sql<number>`count(*)` }).from(transactions);
+    const [tv] = await db.select({ total: sql<number>`coalesce(sum(amount), 0)` }).from(transactions);
+    const [an] = await db.select({ count: sql<number>`count(*)` }).from(numbers).where(eq(numbers.status, "active"));
+    return {
+      merchantCount: Number(mc?.count || 0),
+      transactionCount: Number(tc?.count || 0),
+      totalVolume: Number(tv?.total || 0),
+      activeNumbers: Number(an?.count || 0),
+    };
+  }
+
+  async getMerchantStats(merchantId: number) {
+    const [tc] = await db.select({ count: sql<number>`count(*)` }).from(transactions).where(eq(transactions.merchantId, merchantId));
+    const [tv] = await db.select({ total: sql<number>`coalesce(sum(amount), 0)` }).from(transactions).where(eq(transactions.merchantId, merchantId));
+    return {
+      transactionCount: Number(tc?.count || 0),
+      totalVolume: Number(tv?.total || 0),
+    };
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();

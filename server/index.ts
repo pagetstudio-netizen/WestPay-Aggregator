@@ -60,6 +60,15 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  const { pool } = await import("./db");
+  const { seedDatabase } = await import("./seed");
+
+  try {
+    await seedDatabase();
+  } catch (err) {
+    console.log("Seed skipped or already done:", (err as any).message);
+  }
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
