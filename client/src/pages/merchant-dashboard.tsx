@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
@@ -364,8 +364,14 @@ export default function MerchantDashboard() {
   const [, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState<MerchantTab>("overview");
 
+  useEffect(() => {
+    if (!authLoading && (!user || user.role !== "merchant")) {
+      setLocation("/merchant-login");
+    }
+  }, [authLoading, user, setLocation]);
+
   if (authLoading) return <div className="min-h-screen bg-background flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
-  if (!user || user.role !== "merchant") { setLocation("/merchant-login"); return null; }
+  if (!user || user.role !== "merchant") return <div className="min-h-screen bg-background flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
 
   const menuItems: { title: string; icon: any; tab: MerchantTab }[] = [
     { title: "Vue d'ensemble", icon: Wallet, tab: "overview" },

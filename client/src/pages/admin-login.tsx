@@ -29,7 +29,8 @@ export default function AdminLogin() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Erreur de connexion");
       login(data.token, { id: data.user.id, email: data.user.email, role: "admin" });
-      setLocation("/admin-access-9584/dashboard");
+      toast({ title: "Connexion reussie", description: "Redirection vers le tableau de bord..." });
+      setTimeout(() => setLocation("/admin-access-9584/dashboard"), 300);
     } catch (err: any) {
       toast({ title: "Erreur", description: err.message, variant: "destructive" });
     } finally {

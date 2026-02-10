@@ -35,7 +35,9 @@ export default function MerchantLogin() {
         name: data.user.name,
         slug: data.user.slug,
       });
-      setLocation(`/merchant/${data.user.slug}`);
+      toast({ title: "Connexion reussie", description: "Redirection vers votre espace..." });
+      const slug = data.user.slug;
+      setTimeout(() => setLocation(`/merchant/${slug}`), 300);
     } catch (err: any) {
       toast({ title: "Erreur", description: err.message, variant: "destructive" });
     } finally {
