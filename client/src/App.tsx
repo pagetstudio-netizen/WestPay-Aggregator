@@ -11,6 +11,7 @@ import AdminDashboard from "@/pages/admin-dashboard";
 import MerchantLogin from "@/pages/merchant-login";
 import MerchantDashboard from "@/pages/merchant-dashboard";
 import ApiDocsPage from "@/pages/api-docs";
+import PaymentPage from "@/pages/payment";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -22,6 +23,7 @@ function Router() {
       <Route path="/merchant-login" component={MerchantLogin} />
       <Route path="/merchant/:slug" component={MerchantDashboard} />
       <Route path="/api-docs" component={ApiDocsPage} />
+      <Route path="/pay/:slug" component={PaymentPage} />
       <Route component={NotFound} />
     </Switch>
   );

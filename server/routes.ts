@@ -472,6 +472,91 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== PAYMENT PAGE (public) ====================
+  app.get("/api/payment/:slug/info", async (req, res) => {
+    try {
+      const merchant = await storage.getMerchantBySlug(req.params.slug);
+      if (!merchant || merchant.suspended) {
+        return res.status(404).json({ message: "Marchand introuvable ou suspendu" });
+      }
+
+      const countries = await storage.getMerchantCountries(merchant.id);
+      const activeCountries = countries.filter(c => c.active).map(c => c.country);
+
+      const allNumbers = await storage.getNumbers();
+      const merchantNumbers = allNumbers.filter(
+        n => n.merchantId === merchant.id && n.status === "active"
+      );
+
+      res.json({
+        merchant: {
+          name: merchant.name,
+          slug: merchant.slug,
+          countries: activeCountries,
+        },
+        numbers: merchantNumbers.map(n => ({
+          id: n.id,
+          phoneNumber: n.phoneNumber,
+          country: n.country,
+          operator: n.operator,
+        })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ==================== VERIFY TRANSACTION (public) ====================
+  app.post("/api/verify-transaction", async (req, res) => {
+    try {
+      const { txId, merchantSlug } = req.body;
+      if (!txId || !merchantSlug) {
+        return res.status(400).json({ verified: false, message: "ID de transaction et marchand requis" });
+      }
+
+      const merchant = await storage.getMerchantBySlug(merchantSlug);
+      if (!merchant) {
+        return res.status(404).json({ verified: false, message: "Marchand introuvable" });
+      }
+
+      const transaction = await storage.getTransactionByTxId(txId);
+      if (!transaction) {
+        return res.json({
+          verified: false,
+          message: "Transaction non trouvee. Si vous venez d'envoyer le paiement, veuillez patienter quelques instants et reessayer. Le traitement peut prendre jusqu'a 2 minutes.",
+        });
+      }
+
+      if (transaction.merchantId !== merchant.id) {
+        return res.json({
+          verified: false,
+          message: "Cette transaction n'appartient pas a ce marchand.",
+        });
+      }
+
+      await storage.createApiLog({
+        merchantId: merchant.id,
+        action: "transaction_verified",
+        ip: req.ip || "",
+        description: `Transaction ${txId} verifiee - Montant: ${transaction.amount} F CFA`,
+      });
+
+      res.json({
+        verified: true,
+        transaction: {
+          txId: transaction.txId,
+          amount: transaction.amount,
+          country: transaction.country,
+          status: transaction.status,
+          createdAt: transaction.createdAt,
+        },
+        message: "Transaction verifiee avec succes. Le montant a ete credite sur le compte du marchand.",
+      });
+    } catch (err: any) {
+      res.status(500).json({ verified: false, message: err.message });
+    }
+  });
+
   // ==================== SMS RECEIVE (for Android SMS Forwarder) ====================
   app.post("/sms/receive", async (req, res) => {
     try {

@@ -16,6 +16,7 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 - `/merchant-login` - Merchant login
 - `/merchant/:slug` - Merchant dashboard
 - `/api-docs` - PIN-protected API documentation
+- `/pay/:slug` - Public payment page (shows numbers + TX ID verification)
 
 ## Default Credentials (Seeded)
 - **Admin**: admin@westpay.com / Admin@2026!

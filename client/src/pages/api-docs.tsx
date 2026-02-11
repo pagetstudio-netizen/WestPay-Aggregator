@@ -302,6 +302,88 @@ X-API-KEY: <VOTRE_CLE_API>`}
 
           <Separator />
 
+          <section className="space-y-6">
+            <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
+              <CheckCircle className="w-5 h-5 text-primary" />
+              Verification de transaction (Page de paiement)
+            </h2>
+            <p className="text-muted-foreground">
+              WestPay fournit une page de paiement integree accessible a <code className="text-foreground bg-muted px-1 rounded">/pay/VOTRE_SLUG</code>.
+              Cette page permet a vos utilisateurs de voir les numeros de paiement et de soumettre l'ID de transaction pour verification.
+            </p>
+
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-start gap-3">
+                  <Zap className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Flux de paiement</p>
+                    <ol className="text-sm text-muted-foreground mt-2 space-y-1 list-decimal pl-4">
+                      <li>Redirigez votre utilisateur vers <code className="bg-muted px-1 rounded">/pay/votre-slug</code></li>
+                      <li>L'utilisateur voit les numeros Mobile Money et envoie le paiement</li>
+                      <li>L'utilisateur soumet l'ID de transaction (TX) recu par SMS</li>
+                      <li>WestPay verifie l'ID contre les SMS recus par le telephone Android</li>
+                      <li>Si verifie, la transaction est confirmee et le solde du marchand est credite</li>
+                    </ol>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <EndpointDoc
+              method="GET"
+              path="/api/payment/:slug/info"
+              description="Recupere les informations publiques du marchand et ses numeros de paiement actifs. Utilise par la page de paiement."
+              responseBody={`{
+  "merchant": {
+    "name": "EcoMat Togo",
+    "slug": "ecomat",
+    "countries": ["Togo", "Benin"]
+  },
+  "numbers": [
+    {
+      "id": 1,
+      "phoneNumber": "+22899935673",
+      "country": "Togo",
+      "operator": "Moov Money"
+    }
+  ]
+}`}
+              auth={false}
+            />
+
+            <EndpointDoc
+              method="POST"
+              path="/api/verify-transaction"
+              description="Verifie si un ID de transaction (TX) soumis par un utilisateur correspond a une transaction recue par SMS. Utilise par la page de paiement et peut etre integre directement dans votre application."
+              requestBody={`{
+  "txId": "TX12345",
+  "merchantSlug": "ecomat"
+}`}
+              responseBody={`// Succes
+{
+  "verified": true,
+  "transaction": {
+    "txId": "TX12345",
+    "amount": 5000,
+    "country": "Togo",
+    "status": "confirmed",
+    "createdAt": "2026-01-15T10:30:00Z"
+  },
+  "message": "Transaction verifiee avec succes."
+}
+
+// Echec
+{
+  "verified": false,
+  "message": "Transaction non trouvee. Veuillez patienter..."
+}`}
+              auth={false}
+            />
+          </section>
+
+          <Separator />
+
           <section className="space-y-4">
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
               <Code className="w-5 h-5 text-primary" />
@@ -348,7 +430,9 @@ X-API-KEY: <VOTRE_CLE_API>`}
           <Separator />
 
           <section className="space-y-4">
-            <h2 className="text-xl font-bold text-foreground">Exemple d'integration (JavaScript)</h2>
+            <h2 className="text-xl font-bold text-foreground">Exemples d'integration (JavaScript)</h2>
+
+            <p className="text-sm font-semibold text-foreground">Authentification et consultation</p>
             <Card>
               <CardContent className="p-4">
                 <pre className="text-sm font-mono text-foreground overflow-x-auto whitespace-pre-wrap">
@@ -381,6 +465,41 @@ const txRes = await fetch("/api/merchant/transactions", {
   }
 });
 const transactions = await txRes.json();`}
+                </pre>
+              </CardContent>
+            </Card>
+
+            <p className="text-sm font-semibold text-foreground mt-4">Verification de transaction (pour vos utilisateurs)</p>
+            <Card>
+              <CardContent className="p-4">
+                <pre className="text-sm font-mono text-foreground overflow-x-auto whitespace-pre-wrap">
+{`// Option 1 : Rediriger l'utilisateur vers la page WestPay
+window.location.href = "https://westpay.example.com/pay/ecomat";
+
+// Option 2 : Integrer la verification dans votre application
+async function verifierTransaction(txId) {
+  const res = await fetch("https://westpay.example.com/api/verify-transaction", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      txId: txId,          // L'ID soumis par l'utilisateur
+      merchantSlug: "ecomat"  // Votre slug marchand
+    })
+  });
+
+  const result = await res.json();
+
+  if (result.verified) {
+    // Transaction confirmee !
+    console.log("Montant:", result.transaction.amount, "F CFA");
+    console.log("Pays:", result.transaction.country);
+    // Creditez le compte de votre utilisateur ici
+  } else {
+    // Transaction non trouvee ou en attente
+    console.log("Message:", result.message);
+    // Demandez a l'utilisateur de reessayer
+  }
+}`}
                 </pre>
               </CardContent>
             </Card>
