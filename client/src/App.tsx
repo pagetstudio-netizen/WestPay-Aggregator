@@ -23,6 +23,7 @@ function Router() {
       <Route path="/merchant-login" component={MerchantLogin} />
       <Route path="/merchant/:slug" component={MerchantDashboard} />
       <Route path="/api-docs" component={ApiDocsPage} />
+      <Route path="/pay" component={PaymentPage} />
       <Route path="/pay/:slug" component={PaymentPage} />
       <Route component={NotFound} />
     </Switch>

@@ -16,7 +16,8 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 - `/merchant-login` - Merchant login
 - `/merchant/:slug` - Merchant dashboard
 - `/api-docs` - PIN-protected API documentation
-- `/pay/:slug` - Public payment page (shows numbers + TX ID verification)
+- `/pay?merchant=slug&amount=3000&country=Togo&redirect=https://...` - 3-step payment wizard
+- `/pay/:slug` - Legacy payment page (backwards compatible)
 
 ## Default Credentials (Seeded)
 - **Admin**: admin@westpay.com / Admin@2026!
@@ -29,6 +30,8 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 - `/api/admin/*` - Admin endpoints (JWT required)
 - `/api/merchant/*` - Merchant endpoints (JWT required)
 - `/api/docs/access` - PIN-protected docs access
+- `/api/payment/initiate` - Create pending payment (Step 1)
+- `/api/payment/validate` - Validate TX ID (Step 2)
 - `/sms/receive` - SMS webhook for Android SMS Forwarder
 
 ## API Management System
@@ -39,7 +42,7 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 - All API activities logged in api_logs table
 
 ## Database Tables
-admins, merchants, merchant_countries, transactions, sms_logs, numbers, settings, login_logs, merchant_pins, api_logs
+admins, merchants, merchant_countries, transactions, sms_logs, numbers, settings, login_logs, merchant_pins, api_logs, pending_payments
 
 ## SMS Payment Flow
 1. Android phone receives Mobile Money SMS
