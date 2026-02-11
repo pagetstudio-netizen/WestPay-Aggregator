@@ -74,6 +74,23 @@ export const loginLogs = pgTable("login_logs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const merchantPins = pgTable("merchant_pins", {
+  id: serial("id").primaryKey(),
+  merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }).unique(),
+  pinHash: text("pin_hash").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const apiLogs = pgTable("api_logs", {
+  id: serial("id").primaryKey(),
+  merchantId: integer("merchant_id").references(() => merchants.id, { onDelete: "set null" }),
+  action: text("action").notNull(),
+  ip: text("ip"),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const insertAdminSchema = createInsertSchema(admins).omit({ id: true, createdAt: true });
 export const insertMerchantSchema = createInsertSchema(merchants).omit({ id: true, createdAt: true });
 export const insertMerchantCountrySchema = createInsertSchema(merchantCountries).omit({ id: true });
@@ -82,6 +99,8 @@ export const insertSmsLogSchema = createInsertSchema(smsLogs).omit({ id: true, c
 export const insertNumberSchema = createInsertSchema(numbers).omit({ id: true });
 export const insertSettingSchema = createInsertSchema(settings).omit({ id: true });
 export const insertLoginLogSchema = createInsertSchema(loginLogs).omit({ id: true, createdAt: true });
+export const insertMerchantPinSchema = createInsertSchema(merchantPins).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertApiLogSchema = createInsertSchema(apiLogs).omit({ id: true, createdAt: true });
 
 export const loginSchema = z.object({
   email: z.string().email(),
@@ -104,3 +123,7 @@ export type Setting = typeof settings.$inferSelect;
 export type InsertSetting = z.infer<typeof insertSettingSchema>;
 export type LoginLog = typeof loginLogs.$inferSelect;
 export type InsertLoginLog = z.infer<typeof insertLoginLogSchema>;
+export type MerchantPin = typeof merchantPins.$inferSelect;
+export type InsertMerchantPin = z.infer<typeof insertMerchantPinSchema>;
+export type ApiLog = typeof apiLogs.$inferSelect;
+export type InsertApiLog = z.infer<typeof insertApiLogSchema>;

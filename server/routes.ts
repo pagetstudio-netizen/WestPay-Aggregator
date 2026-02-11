@@ -7,28 +7,14 @@ import crypto from "crypto";
 
 const JWT_SECRET = process.env.SESSION_SECRET || "westpay-secret-key-change-me";
 
-function generateApiKey(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  const prefix = (country: string) => {
-    const map: Record<string, string> = {
-      "Togo": "TGO", "Benin": "BEN", "Cote d'Ivoire": "CIV", "Guinee": "GIN",
-      "Senegal": "SEN", "Mali": "MLI", "Burkina Faso": "BFA", "Niger": "NER", "Ghana": "GHA", "Nigeria": "NGA",
-    };
-    return map[country] || country.substring(0, 3).toUpperCase();
-  };
-  let key = "";
-  for (let i = 0; i < 32; i++) key += chars[Math.floor(Math.random() * chars.length)];
-  return key;
-}
-
-function generateCountryApiKey(country: string): string {
+function generateSecureApiKey(country: string): string {
   const prefixes: Record<string, string> = {
     "Togo": "TGO", "Benin": "BEN", "Cote d'Ivoire": "CIV", "Guinee": "GIN",
     "Senegal": "SEN", "Mali": "MLI", "Burkina Faso": "BFA", "Niger": "NER", "Ghana": "GHA", "Nigeria": "NGA",
   };
   const prefix = prefixes[country] || country.substring(0, 3).toUpperCase();
-  const id = crypto.randomBytes(4).toString("hex").toUpperCase();
-  return `${prefix}-${id.substring(0, 4)}-${id.substring(4, 8)}`;
+  const randomPart = crypto.randomBytes(20).toString("hex").toUpperCase();
+  return `${prefix}-${randomPart}`;
 }
 
 function signToken(payload: { id: number; role: string; email: string }) {
@@ -120,8 +106,13 @@ export async function registerRoutes(
 
   app.get("/api/admin/merchants", authMiddleware("admin"), async (_req, res) => {
     try {
-      const merchants = await storage.getMerchants();
-      res.json(merchants);
+      const merchantsList = await storage.getMerchants();
+      const result = [];
+      for (const m of merchantsList) {
+        const pin = await storage.getMerchantPin(m.id);
+        result.push({ ...m, hasPin: !!pin });
+      }
+      res.json(result);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -129,7 +120,7 @@ export async function registerRoutes(
 
   app.post("/api/admin/create-merchant", authMiddleware("admin"), async (req, res) => {
     try {
-      const { name, email, slug, password } = req.body;
+      const { name, email, slug, password, pin } = req.body;
       if (!name || !email || !slug || !password) return res.status(400).json({ message: "Tous les champs sont requis" });
 
       const existing = await storage.getMerchantByEmail(email);
@@ -140,6 +131,19 @@ export async function registerRoutes(
 
       const passwordHash = await bcrypt.hash(password, 10);
       const merchant = await storage.createMerchant({ name, email, slug, passwordHash, suspended: false });
+
+      if (pin && pin.length === 6) {
+        const pinHash = await bcrypt.hash(pin, 10);
+        await storage.upsertMerchantPin(merchant.id, pinHash);
+      }
+
+      await storage.createApiLog({
+        merchantId: merchant.id,
+        action: "merchant_created",
+        ip: req.ip || "",
+        description: `Marchand ${name} cree par l'administrateur`,
+      });
+
       res.json(merchant);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -170,8 +174,16 @@ export async function registerRoutes(
     try {
       const { merchantId, country } = req.body;
       if (!merchantId || !country) return res.status(400).json({ message: "Marchand et pays requis" });
-      const apiKey = generateCountryApiKey(country);
+      const apiKey = generateSecureApiKey(country);
       const mc = await storage.addMerchantCountry({ merchantId, country, apiKey, balance: 0, active: true });
+
+      await storage.createApiLog({
+        merchantId,
+        action: "country_added",
+        ip: req.ip || "",
+        description: `Pays ${country} active avec cle API generee`,
+      });
+
       res.json(mc);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -181,8 +193,8 @@ export async function registerRoutes(
   app.get("/api/admin/countries", authMiddleware("admin"), async (_req, res) => {
     try {
       const countries = await storage.getMerchantCountries();
-      const merchants = await storage.getMerchants();
-      const merchantMap = new Map(merchants.map(m => [m.id, m.name]));
+      const merchantsList = await storage.getMerchants();
+      const merchantMap = new Map(merchantsList.map(m => [m.id, m.name]));
       const enriched = countries.map(c => ({
         ...c,
         merchantName: merchantMap.get(c.merchantId) || `Marchand #${c.merchantId}`,
@@ -207,8 +219,8 @@ export async function registerRoutes(
   app.get("/api/admin/transactions", authMiddleware("admin"), async (_req, res) => {
     try {
       const txs = await storage.getTransactions();
-      const merchants = await storage.getMerchants();
-      const merchantMap = new Map(merchants.map(m => [m.id, m.name]));
+      const merchantsList = await storage.getMerchants();
+      const merchantMap = new Map(merchantsList.map(m => [m.id, m.name]));
       const enriched = txs.map(t => ({
         ...t,
         merchantName: merchantMap.get(t.merchantId) || `Marchand #${t.merchantId}`,
@@ -277,6 +289,75 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/merchant/:id/api-keys", authMiddleware("admin"), async (req, res) => {
+    try {
+      const merchantId = parseInt(req.params.id);
+      const countries = await storage.getMerchantCountries(merchantId);
+      res.json(countries);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/update-pin", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { merchantId, pin } = req.body;
+      if (!merchantId || !pin) return res.status(400).json({ message: "Marchand et PIN requis" });
+      if (pin.length !== 6 || !/^\d{6}$/.test(pin)) return res.status(400).json({ message: "Le PIN doit etre exactement 6 chiffres" });
+
+      const merchant = await storage.getMerchantById(merchantId);
+      if (!merchant) return res.status(404).json({ message: "Marchand non trouve" });
+
+      const pinHash = await bcrypt.hash(pin, 10);
+      await storage.upsertMerchantPin(merchantId, pinHash);
+
+      await storage.createApiLog({
+        merchantId,
+        action: "pin_updated",
+        ip: req.ip || "",
+        description: `PIN mis a jour par l'administrateur pour ${merchant.name}`,
+      });
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/regenerate-api", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { merchantCountryId } = req.body;
+      if (!merchantCountryId) return res.status(400).json({ message: "ID requis" });
+
+      const mc = await storage.getMerchantCountryById(merchantCountryId);
+      if (!mc) return res.status(404).json({ message: "Configuration pays non trouvee" });
+
+      const newKey = generateSecureApiKey(mc.country);
+      await storage.updateMerchantCountryApiKey(mc.id, newKey);
+
+      await storage.createApiLog({
+        merchantId: mc.merchantId,
+        action: "api_key_regenerated_admin",
+        ip: req.ip || "",
+        description: `Cle API regeneree par l'admin pour ${mc.country}`,
+      });
+
+      res.json({ success: true, apiKey: newKey });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/api-logs", authMiddleware("admin"), async (req, res) => {
+    try {
+      const merchantId = req.query.merchantId ? parseInt(req.query.merchantId as string) : undefined;
+      const logs = await storage.getApiLogs(merchantId);
+      res.json(logs);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // ==================== MERCHANT ROUTES ====================
   app.get("/api/merchant/balance", authMiddleware("merchant"), async (req, res) => {
     try {
@@ -305,6 +386,31 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/merchant/regenerate-api", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const { merchantCountryId } = req.body;
+      const merchantId = (req as any).user.id;
+      if (!merchantCountryId) return res.status(400).json({ message: "ID du pays requis" });
+
+      const mc = await storage.getMerchantCountryById(merchantCountryId);
+      if (!mc || mc.merchantId !== merchantId) return res.status(403).json({ message: "Acces interdit" });
+
+      const newKey = generateSecureApiKey(mc.country);
+      await storage.updateMerchantCountryApiKey(mc.id, newKey);
+
+      await storage.createApiLog({
+        merchantId,
+        action: "api_key_regenerated",
+        ip: req.ip || "",
+        description: `Cle API regeneree par le marchand pour ${mc.country}`,
+      });
+
+      res.json({ success: true, apiKey: newKey });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/merchant/stats", authMiddleware("merchant"), async (req, res) => {
     try {
       const stats = await storage.getMerchantStats((req as any).user.id);
@@ -324,6 +430,43 @@ export async function registerRoutes(
       const hash = await bcrypt.hash(newPassword, 10);
       await storage.updateMerchant(merchant.id, { passwordHash: hash });
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ==================== API DOCS ACCESS (PIN protected) ====================
+  app.post("/api/docs/access", async (req, res) => {
+    try {
+      const { email, pin } = req.body;
+      if (!email || !pin) return res.status(400).json({ message: "Email et code PIN requis" });
+
+      const merchant = await storage.getMerchantByEmail(email);
+      if (!merchant) return res.status(401).json({ message: "Acces refuse. Veuillez contacter l'administrateur." });
+
+      const merchantPin = await storage.getMerchantPin(merchant.id);
+      if (!merchantPin) return res.status(401).json({ message: "Acces refuse. Aucun code PIN configure. Veuillez contacter l'administrateur." });
+
+      const valid = await bcrypt.compare(pin, merchantPin.pinHash);
+      if (!valid) {
+        await storage.createApiLog({
+          merchantId: merchant.id,
+          action: "docs_access_failed",
+          ip: req.ip || "",
+          description: `Tentative d'acces echouee a la documentation API`,
+        });
+        return res.status(401).json({ message: "Acces refuse. Code PIN incorrect." });
+      }
+
+      await storage.createApiLog({
+        merchantId: merchant.id,
+        action: "docs_access_granted",
+        ip: req.ip || "",
+        description: `Acces accorde a la documentation API`,
+      });
+
+      const docsToken = jwt.sign({ merchantId: merchant.id, purpose: "docs" }, JWT_SECRET, { expiresIn: "1h" });
+      res.json({ success: true, token: docsToken, merchant: { name: merchant.name, email: merchant.email } });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

@@ -1,9 +1,11 @@
 import {
   admins, merchants, merchantCountries, transactions, smsLogs, numbers, settings, loginLogs,
+  merchantPins, apiLogs,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
   type Setting, type InsertSetting, type LoginLog, type InsertLoginLog,
+  type MerchantPin, type InsertMerchantPin, type ApiLog, type InsertApiLog,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and } from "drizzle-orm";
@@ -28,6 +30,7 @@ export interface IStorage {
   updateMerchantCountryBalance(id: number, balance: number): Promise<void>;
   incrementMerchantCountryBalance(id: number, amount: number): Promise<void>;
   findMerchantCountryBySimAndCountry(merchantId: number, country: string): Promise<MerchantCountry | undefined>;
+  updateMerchantCountryApiKey(id: number, apiKey: string): Promise<void>;
 
   getTransactions(merchantId?: number): Promise<Transaction[]>;
   getTransactionByTxId(txId: string): Promise<Transaction | undefined>;
@@ -49,6 +52,12 @@ export interface IStorage {
 
   getStats(): Promise<{ merchantCount: number; transactionCount: number; totalVolume: number; activeNumbers: number }>;
   getMerchantStats(merchantId: number): Promise<{ transactionCount: number; totalVolume: number }>;
+
+  getMerchantPin(merchantId: number): Promise<MerchantPin | undefined>;
+  upsertMerchantPin(merchantId: number, pinHash: string): Promise<MerchantPin>;
+
+  createApiLog(log: InsertApiLog): Promise<ApiLog>;
+  getApiLogs(merchantId?: number): Promise<ApiLog[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -134,6 +143,10 @@ export class DatabaseStorage implements IStorage {
     const [mc] = await db.select().from(merchantCountries)
       .where(and(eq(merchantCountries.merchantId, merchantId), eq(merchantCountries.country, country)));
     return mc;
+  }
+
+  async updateMerchantCountryApiKey(id: number, apiKey: string): Promise<void> {
+    await db.update(merchantCountries).set({ apiKey }).where(eq(merchantCountries.id, id));
   }
 
   async getTransactions(merchantId?: number): Promise<Transaction[]> {
@@ -229,6 +242,38 @@ export class DatabaseStorage implements IStorage {
       transactionCount: Number(tc?.count || 0),
       totalVolume: Number(tv?.total || 0),
     };
+  }
+
+  async getMerchantPin(merchantId: number): Promise<MerchantPin | undefined> {
+    const [pin] = await db.select().from(merchantPins).where(eq(merchantPins.merchantId, merchantId));
+    return pin;
+  }
+
+  async upsertMerchantPin(merchantId: number, pinHash: string): Promise<MerchantPin> {
+    const existing = await this.getMerchantPin(merchantId);
+    if (existing) {
+      const [updated] = await db.update(merchantPins)
+        .set({ pinHash, updatedAt: new Date() })
+        .where(eq(merchantPins.merchantId, merchantId))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(merchantPins)
+      .values({ merchantId, pinHash })
+      .returning();
+    return created;
+  }
+
+  async createApiLog(log: InsertApiLog): Promise<ApiLog> {
+    const [created] = await db.insert(apiLogs).values(log).returning();
+    return created;
+  }
+
+  async getApiLogs(merchantId?: number): Promise<ApiLog[]> {
+    if (merchantId) {
+      return db.select().from(apiLogs).where(eq(apiLogs.merchantId, merchantId)).orderBy(desc(apiLogs.createdAt));
+    }
+    return db.select().from(apiLogs).orderBy(desc(apiLogs.createdAt));
   }
 }
 

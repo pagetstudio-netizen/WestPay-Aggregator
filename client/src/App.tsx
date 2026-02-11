@@ -10,6 +10,7 @@ import AdminLogin from "@/pages/admin-login";
 import AdminDashboard from "@/pages/admin-dashboard";
 import MerchantLogin from "@/pages/merchant-login";
 import MerchantDashboard from "@/pages/merchant-dashboard";
+import ApiDocsPage from "@/pages/api-docs";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -20,6 +21,7 @@ function Router() {
       <Route path="/admin-access-9584/dashboard" component={AdminDashboard} />
       <Route path="/merchant-login" component={MerchantLogin} />
       <Route path="/merchant/:slug" component={MerchantDashboard} />
+      <Route path="/api-docs" component={ApiDocsPage} />
       <Route component={NotFound} />
     </Switch>
   );

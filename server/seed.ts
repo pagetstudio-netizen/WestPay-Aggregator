@@ -1,18 +1,34 @@
 import { storage } from "./storage";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
+
+function generateSecureApiKey(country: string): string {
+  const prefixes: Record<string, string> = {
+    "Togo": "TGO", "Benin": "BEN", "Cote d'Ivoire": "CIV", "Guinee": "GIN",
+    "Senegal": "SEN", "Mali": "MLI", "Burkina Faso": "BFA", "Niger": "NER", "Ghana": "GHA", "Nigeria": "NGA",
+  };
+  const prefix = prefixes[country] || country.substring(0, 3).toUpperCase();
+  const randomPart = crypto.randomBytes(20).toString("hex").toUpperCase();
+  return `${prefix}-${randomPart}`;
+}
 
 export async function seedDatabase() {
   const existingAdmin = await storage.getAdminByEmail("admin@westpay.com");
-  if (existingAdmin) return;
+  if (existingAdmin) {
+    await ensurePinsExist();
+    return;
+  }
 
   const adminHash = await bcrypt.hash("Admin@2026!", 10);
   await storage.createAdmin({
     email: "admin@westpay.com",
     passwordHash: adminHash,
-    apiKey: "WP-ADMIN-" + Array.from({ length: 24 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[Math.floor(Math.random() * 36)]).join(""),
+    apiKey: "WP-ADMIN-" + crypto.randomBytes(16).toString("hex").toUpperCase(),
   });
 
   const merchantHash = await bcrypt.hash("Merchant@2026!", 10);
+  const pinHash = await bcrypt.hash("123456", 10);
+
   const ecomat = await storage.createMerchant({
     name: "EcoMat Togo",
     email: "contact@ecomat.com",
@@ -20,6 +36,8 @@ export async function seedDatabase() {
     passwordHash: merchantHash,
     suspended: false,
   });
+
+  await storage.upsertMerchantPin(ecomat.id, pinHash);
 
   const payfast = await storage.createMerchant({
     name: "PayFast Benin",
@@ -29,10 +47,13 @@ export async function seedDatabase() {
     suspended: false,
   });
 
+  const pinHash2 = await bcrypt.hash("654321", 10);
+  await storage.upsertMerchantPin(payfast.id, pinHash2);
+
   await storage.addMerchantCountry({
     merchantId: ecomat.id,
     country: "Togo",
-    apiKey: "TGO-12F9-ABCD",
+    apiKey: generateSecureApiKey("Togo"),
     balance: 12500,
     active: true,
   });
@@ -40,7 +61,7 @@ export async function seedDatabase() {
   await storage.addMerchantCountry({
     merchantId: ecomat.id,
     country: "Benin",
-    apiKey: "BEN-78GH-54KL",
+    apiKey: generateSecureApiKey("Benin"),
     balance: 18000,
     active: true,
   });
@@ -48,7 +69,7 @@ export async function seedDatabase() {
   await storage.addMerchantCountry({
     merchantId: payfast.id,
     country: "Benin",
-    apiKey: "BEN-A4C2-9F3E",
+    apiKey: generateSecureApiKey("Benin"),
     balance: 45000,
     active: true,
   });
@@ -56,7 +77,7 @@ export async function seedDatabase() {
   await storage.addMerchantCountry({
     merchantId: payfast.id,
     country: "Cote d'Ivoire",
-    apiKey: "CIV-B7D1-2K8M",
+    apiKey: generateSecureApiKey("Cote d'Ivoire"),
     balance: 22000,
     active: true,
   });
@@ -123,4 +144,17 @@ export async function seedDatabase() {
   });
 
   console.log("Database seeded successfully");
+}
+
+async function ensurePinsExist() {
+  const merchants = await storage.getMerchants();
+  for (const merchant of merchants) {
+    const existingPin = await storage.getMerchantPin(merchant.id);
+    if (!existingPin) {
+      const defaultPin = merchant.email === "contact@ecomat.com" ? "123456" : "654321";
+      const pinHash = await bcrypt.hash(defaultPin, 10);
+      await storage.upsertMerchantPin(merchant.id, pinHash);
+      console.log(`PIN backfilled for merchant ${merchant.name}`);
+    }
+  }
 }

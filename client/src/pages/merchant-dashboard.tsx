@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth";
 import { useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,13 +12,14 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger
 } from "@/components/ui/sidebar";
 import {
   Wallet, ArrowRightLeft, Key, Settings, LogOut, Loader2, Download,
-  Copy, Globe, DollarSign, Hash, TrendingUp, Search
+  Copy, Globe, DollarSign, Hash, TrendingUp, Search, RefreshCw, BookOpen, Lock, ExternalLink
 } from "lucide-react";
 import type { MerchantCountry, Transaction } from "@shared/schema";
 
@@ -225,14 +227,40 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
 
 function ApiKeysPanel({ token }: { token: string | null }) {
   const { toast } = useToast();
+  const [showPinDialog, setShowPinDialog] = useState(false);
   const { data: apiKeys = [], isLoading } = useMerchantFetch("/api/merchant/api-keys", ["/api/merchant/api-keys"], token);
+
+  const regenerateMutation = useMutation({
+    mutationFn: async (merchantCountryId: number) => {
+      const res = await fetch("/api/merchant/regenerate-api", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ merchantCountryId }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/api-keys"] });
+      toast({ title: "Cle API regeneree", description: "L'ancienne cle est maintenant invalidee." });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
 
   if (isLoading) return <MerchantLoadingSkeleton />;
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold text-foreground">Mes cles API</h2>
-      <p className="text-sm text-muted-foreground">Utilisez ces cles pour integrer WestPay dans vos applications.</p>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Cles API & Integration</h2>
+          <p className="text-sm text-muted-foreground">Utilisez ces cles pour integrer WestPay dans vos applications.</p>
+        </div>
+        <Button variant="outline" onClick={() => window.open("/api-docs", "_blank")} data-testid="button-open-api-docs">
+          <BookOpen className="w-4 h-4 mr-2" />Documentation API
+        </Button>
+      </div>
+
       <div className="space-y-3">
         {(apiKeys as MerchantCountry[]).length === 0 ? (
           <Card><CardContent className="p-6 text-center text-muted-foreground text-sm">Aucune cle API disponible</CardContent></Card>
@@ -263,12 +291,43 @@ function ApiKeysPanel({ token }: { token: string | null }) {
                       </Button>
                     </div>
                   </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (confirm("Regenerer cette cle API ? L'ancienne cle sera immediatement invalidee.")) {
+                        regenerateMutation.mutate(key.id);
+                      }
+                    }}
+                    disabled={regenerateMutation.isPending}
+                    data-testid={`button-regenerate-key-${key.id}`}
+                  >
+                    {regenerateMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}
+                    Regenerer
+                  </Button>
                 </div>
               </CardContent>
             </Card>
           ))
         )}
       </div>
+
+      <Card className="border-dashed">
+        <CardContent className="p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
+              <BookOpen className="w-5 h-5 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-foreground">Documentation d'integration</p>
+              <p className="text-xs text-muted-foreground">Accedez a la documentation complete de l'API WestPay. Un code PIN est requis.</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => window.open("/api-docs", "_blank")} data-testid="button-docs-link">
+              <ExternalLink className="w-3 h-3 mr-1" />Ouvrir
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

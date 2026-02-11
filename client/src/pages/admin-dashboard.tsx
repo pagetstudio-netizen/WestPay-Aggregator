@@ -21,11 +21,12 @@ import {
 import {
   Users, ArrowRightLeft, Globe, Phone, Settings, LogOut, Plus,
   Trash2, Ban, CheckCircle, Copy, Shield, Loader2, Download,
-  MessageSquare, Key, DollarSign, Hash, Calendar, Search
+  MessageSquare, Key, DollarSign, Hash, Calendar, Search,
+  RefreshCw, Lock, BookOpen, FileText
 } from "lucide-react";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog } from "@shared/schema";
 
-type AdminTab = "merchants" | "transactions" | "countries" | "numbers" | "sms" | "settings";
+type AdminTab = "merchants" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "settings";
 
 function useAdminFetch(url: string, key: string[]) {
   const { token } = useAuth();
@@ -68,6 +69,7 @@ function MerchantsPanel() {
   const [email, setEmail] = useState("");
   const [slug, setSlug] = useState("");
   const [password, setPassword] = useState("");
+  const [pin, setPin] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
 
   const { data: merchants = [], isLoading } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
@@ -77,7 +79,7 @@ function MerchantsPanel() {
       const res = await fetch("/api/admin/create-merchant", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name, email, slug, password }),
+        body: JSON.stringify({ name, email, slug, password, pin: pin || undefined }),
       });
       if (!res.ok) {
         const data = await res.json();
@@ -88,7 +90,7 @@ function MerchantsPanel() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
       setShowCreate(false);
-      setName(""); setEmail(""); setSlug(""); setPassword("");
+      setName(""); setEmail(""); setSlug(""); setPassword(""); setPin("");
       toast({ title: "Marchand cree avec succes" });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
@@ -156,6 +158,17 @@ function MerchantsPanel() {
               <div className="space-y-2">
                 <Label>Mot de passe</Label>
                 <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mot de passe" required data-testid="input-merchant-create-password" />
+              </div>
+              <div className="space-y-2">
+                <Label>Code PIN (6 chiffres, optionnel)</Label>
+                <Input
+                  value={pin}
+                  onChange={(e) => { const val = e.target.value.replace(/\D/g, "").slice(0, 6); setPin(val); }}
+                  placeholder="123456"
+                  maxLength={6}
+                  data-testid="input-merchant-create-pin"
+                />
+                <p className="text-xs text-muted-foreground">Requis pour acceder a la documentation API</p>
               </div>
               <Button type="submit" className="w-full" disabled={createMutation.isPending} data-testid="button-submit-create-merchant">
                 {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
@@ -609,6 +622,219 @@ function SmsPanel() {
   );
 }
 
+function ApiKeysManagementPanel() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const [selectedMerchant, setSelectedMerchant] = useState<number | null>(null);
+  const [pinInput, setPinInput] = useState("");
+  const [pinMerchantId, setPinMerchantId] = useState<number | null>(null);
+  const [showPinDialog, setShowPinDialog] = useState(false);
+
+  const { data: merchants = [] } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
+  const { data: allCountries = [] } = useAdminFetch("/api/admin/countries", ["/api/admin/countries"]);
+  const { data: apiLogs = [] } = useAdminFetch("/api/admin/api-logs", ["/api/admin/api-logs"]);
+
+  const updatePinMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/update-pin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ merchantId: pinMerchantId, pin: pinInput }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
+      toast({ title: "PIN mis a jour" });
+      setShowPinDialog(false); setPinInput(""); setPinMerchantId(null);
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const regenerateMutation = useMutation({
+    mutationFn: async (merchantCountryId: number) => {
+      const res = await fetch("/api/admin/regenerate-api", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ merchantCountryId }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/countries"] });
+      toast({ title: "Cle API regeneree" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const merchantsList = merchants as (Merchant & { hasPin: boolean })[];
+  const countriesList = allCountries as (MerchantCountry & { merchantName: string })[];
+  const filteredCountries = selectedMerchant
+    ? countriesList.filter(c => c.merchantId === selectedMerchant)
+    : countriesList;
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold text-foreground">Gestion des cles API & PIN</h2>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Lock className="w-4 h-4" />PIN des marchands
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {merchantsList.map((m) => (
+              <div key={m.id} className="flex items-center justify-between gap-2 p-2 rounded-md hover-elevate">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{m.name}</p>
+                  <p className="text-xs text-muted-foreground">{m.email}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={m.hasPin ? "default" : "secondary"} className="text-xs">
+                    {m.hasPin ? "PIN actif" : "Pas de PIN"}
+                  </Badge>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => { setPinMerchantId(m.id); setPinInput(""); setShowPinDialog(true); }}
+                    data-testid={`button-set-pin-${m.id}`}
+                  >
+                    <Lock className="w-3 h-3 mr-1" />{m.hasPin ? "Modifier" : "Definir"}
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <FileText className="w-4 h-4" />Journal d'activite API
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-64">
+              <div className="space-y-2">
+                {(apiLogs as any[]).length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-4">Aucune activite enregistree</p>
+                ) : (
+                  (apiLogs as any[]).slice(0, 20).map((log: any) => (
+                    <div key={log.id} className="flex items-start gap-2 p-2 rounded-md text-xs">
+                      <Badge variant={log.action.includes("failed") ? "destructive" : "secondary"} className="text-xs shrink-0">
+                        {log.action}
+                      </Badge>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-muted-foreground truncate">{log.description}</p>
+                        <p className="text-muted-foreground/60">{new Date(log.createdAt).toLocaleString("fr-FR")}</p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Key className="w-4 h-4" />Cles API par pays
+            </CardTitle>
+            <select
+              className="text-sm border rounded-md px-2 py-1 bg-background text-foreground"
+              value={selectedMerchant || ""}
+              onChange={(e) => setSelectedMerchant(e.target.value ? parseInt(e.target.value) : null)}
+              data-testid="select-filter-merchant"
+            >
+              <option value="">Tous les marchands</option>
+              {merchantsList.map(m => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </select>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            {filteredCountries.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">Aucune cle API</p>
+            ) : (
+              filteredCountries.map(c => (
+                <div key={c.id} className="flex items-center justify-between gap-2 p-3 rounded-md border flex-wrap">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium text-foreground">{c.merchantName}</span>
+                      <Badge variant="outline">{c.country}</Badge>
+                    </div>
+                    <code className="text-xs text-muted-foreground font-mono mt-1 block break-all" data-testid={`text-admin-apikey-${c.id}`}>
+                      {c.apiKey}
+                    </code>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => { navigator.clipboard.writeText(c.apiKey); toast({ title: "Cle copiee" }); }}
+                      data-testid={`button-admin-copy-key-${c.id}`}
+                    >
+                      <Copy className="w-3 h-3" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (confirm("Regenerer cette cle API ? L'ancienne sera invalidee.")) {
+                          regenerateMutation.mutate(c.id);
+                        }
+                      }}
+                      disabled={regenerateMutation.isPending}
+                      data-testid={`button-admin-regenerate-${c.id}`}
+                    >
+                      <RefreshCw className="w-3 h-3 mr-1" />Regenerer
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Dialog open={showPinDialog} onOpenChange={setShowPinDialog}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Definir le code PIN</DialogTitle></DialogHeader>
+          <form onSubmit={(e) => { e.preventDefault(); updatePinMutation.mutate(); }} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Nouveau PIN (6 chiffres)</Label>
+              <Input
+                value={pinInput}
+                onChange={(e) => { const val = e.target.value.replace(/\D/g, "").slice(0, 6); setPinInput(val); }}
+                placeholder="123456"
+                maxLength={6}
+                required
+                data-testid="input-admin-pin"
+              />
+              <p className="text-xs text-muted-foreground">
+                Ce PIN sera utilise par le marchand pour acceder a la documentation API.
+              </p>
+            </div>
+            <Button type="submit" className="w-full" disabled={updatePinMutation.isPending || pinInput.length !== 6} data-testid="button-submit-pin">
+              {updatePinMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Lock className="w-4 h-4 mr-2" />}
+              Enregistrer le PIN
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 function SettingsPanel() {
   const { user, logout } = useAuth();
   const [, setLocation] = useLocation();
@@ -717,6 +943,7 @@ export default function AdminDashboard() {
     { title: "Pays & API", icon: Globe, tab: "countries" },
     { title: "Numeros SIM", icon: Phone, tab: "numbers" },
     { title: "SMS recus", icon: MessageSquare, tab: "sms" },
+    { title: "API & PIN", icon: Key, tab: "apikeys" },
     { title: "Parametres", icon: Settings, tab: "settings" },
   ];
 
@@ -774,7 +1001,7 @@ export default function AdminDashboard() {
           </header>
 
           <main className="flex-1 overflow-auto p-4 md:p-6">
-            {activeTab !== "settings" && activeTab !== "sms" && (
+            {activeTab !== "settings" && activeTab !== "sms" && activeTab !== "apikeys" && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                 <StatCard title="Marchands" value={stats?.merchantCount || 0} icon={Users} />
                 <StatCard title="Transactions" value={stats?.transactionCount || 0} icon={Hash} />
@@ -788,6 +1015,7 @@ export default function AdminDashboard() {
             {activeTab === "countries" && <CountriesPanel />}
             {activeTab === "numbers" && <NumbersPanel />}
             {activeTab === "sms" && <SmsPanel />}
+            {activeTab === "apikeys" && <ApiKeysManagementPanel />}
             {activeTab === "settings" && <SettingsPanel />}
           </main>
         </div>
