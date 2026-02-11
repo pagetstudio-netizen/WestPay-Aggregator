@@ -1,11 +1,12 @@
 import {
   admins, merchants, merchantCountries, transactions, smsLogs, numbers, settings, loginLogs,
-  merchantPins, apiLogs,
+  merchantPins, apiLogs, pendingPayments,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
   type Setting, type InsertSetting, type LoginLog, type InsertLoginLog,
   type MerchantPin, type InsertMerchantPin, type ApiLog, type InsertApiLog,
+  type PendingPayment, type InsertPendingPayment,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and } from "drizzle-orm";
@@ -59,6 +60,13 @@ export interface IStorage {
 
   createApiLog(log: InsertApiLog): Promise<ApiLog>;
   getApiLogs(merchantId?: number): Promise<ApiLog[]>;
+
+  createPendingPayment(payment: InsertPendingPayment): Promise<PendingPayment>;
+  getPendingPaymentById(id: number): Promise<PendingPayment | undefined>;
+  updatePendingPaymentTxId(id: number, txId: string): Promise<PendingPayment>;
+  updatePendingPaymentStatus(id: number, status: string): Promise<void>;
+  cleanupExpiredPayments(): Promise<number>;
+  getPendingPayments(merchantId?: number): Promise<PendingPayment[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -283,6 +291,42 @@ export class DatabaseStorage implements IStorage {
       return db.select().from(apiLogs).where(eq(apiLogs.merchantId, merchantId)).orderBy(desc(apiLogs.createdAt));
     }
     return db.select().from(apiLogs).orderBy(desc(apiLogs.createdAt));
+  }
+
+  async createPendingPayment(payment: InsertPendingPayment): Promise<PendingPayment> {
+    const [created] = await db.insert(pendingPayments).values(payment).returning();
+    return created;
+  }
+
+  async getPendingPaymentById(id: number): Promise<PendingPayment | undefined> {
+    const [pp] = await db.select().from(pendingPayments).where(eq(pendingPayments.id, id));
+    return pp;
+  }
+
+  async updatePendingPaymentTxId(id: number, txId: string): Promise<PendingPayment> {
+    const [updated] = await db.update(pendingPayments).set({ txId }).where(eq(pendingPayments.id, id)).returning();
+    return updated;
+  }
+
+  async updatePendingPaymentStatus(id: number, status: string): Promise<void> {
+    await db.update(pendingPayments).set({ status }).where(eq(pendingPayments.id, id));
+  }
+
+  async cleanupExpiredPayments(): Promise<number> {
+    const result = await db.delete(pendingPayments)
+      .where(and(
+        eq(pendingPayments.status, "pending"),
+        sql`${pendingPayments.expiresAt} < NOW()`
+      ))
+      .returning();
+    return result.length;
+  }
+
+  async getPendingPayments(merchantId?: number): Promise<PendingPayment[]> {
+    if (merchantId) {
+      return db.select().from(pendingPayments).where(eq(pendingPayments.merchantId, merchantId)).orderBy(desc(pendingPayments.createdAt));
+    }
+    return db.select().from(pendingPayments).orderBy(desc(pendingPayments.createdAt));
   }
 }
 
