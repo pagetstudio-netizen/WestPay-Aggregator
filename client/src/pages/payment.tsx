@@ -373,13 +373,18 @@ export default function PaymentPage() {
                 </label>
                 <div className="space-y-2">
                   {availableMethods.map((method) => (
-                    <label
+                    <div
                       key={method}
+                      onClick={() => setSelectedMethod(method)}
                       className="flex items-center gap-3 p-3 border rounded-md cursor-pointer hover-elevate"
                       style={{
                         borderColor: selectedMethod === method ? "#00b050" : "#e5e7eb",
                         backgroundColor: selectedMethod === method ? "#f0fdf4" : "white",
                       }}
+                      role="radio"
+                      aria-checked={selectedMethod === method}
+                      tabIndex={0}
+                      onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); setSelectedMethod(method); } }}
                       data-testid={`radio-method-${method.replace(/\s+/g, "-").toLowerCase()}`}
                     >
                       <div
@@ -391,7 +396,7 @@ export default function PaymentPage() {
                         )}
                       </div>
                       <span className="text-sm font-medium text-gray-800">{method}</span>
-                    </label>
+                    </div>
                   ))}
                 </div>
                 {availableMethods.length === 0 && (
