@@ -231,6 +231,23 @@ export default function PaymentPage() {
         </div>
 
         <div className="bg-white rounded-md p-6">
+          <div className="mb-2">
+            <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full"
+                style={{
+                  width: step === 1 ? "33%" : step === 2 ? "66%" : "100%",
+                  backgroundColor: "#00b050",
+                  transition: "width 0.5s ease-in-out",
+                }}
+                data-testid="progress-bar"
+              />
+            </div>
+            <p className="text-xs text-gray-400 text-right mt-1" data-testid="text-step-count">
+              Etape {step} sur 3
+            </p>
+          </div>
+
           <div className="flex items-center justify-between mb-6 px-2">
             {stepLabels.map((label, i) => {
               const stepNum = i + 1;
