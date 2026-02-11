@@ -256,6 +256,15 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/admin/toggle-number/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      const updated = await storage.toggleNumberStatus(parseInt(req.params.id));
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.delete("/api/admin/delete-number/:id", authMiddleware("admin"), async (req, res) => {
     try {
       await storage.deleteNumber(parseInt(req.params.id));

@@ -42,6 +42,7 @@ export interface IStorage {
   getNumbers(): Promise<PhoneNumber[]>;
   getNumberByPhone(phone: string): Promise<PhoneNumber | undefined>;
   addNumber(num: InsertNumber): Promise<PhoneNumber>;
+  toggleNumberStatus(id: number): Promise<PhoneNumber>;
   deleteNumber(id: number): Promise<void>;
 
   getSetting(key: string): Promise<string | undefined>;
@@ -187,6 +188,14 @@ export class DatabaseStorage implements IStorage {
   async addNumber(num: InsertNumber): Promise<PhoneNumber> {
     const [created] = await db.insert(numbers).values(num).returning();
     return created;
+  }
+
+  async toggleNumberStatus(id: number): Promise<PhoneNumber> {
+    const [num] = await db.select().from(numbers).where(eq(numbers.id, id));
+    if (!num) throw new Error("Numero introuvable");
+    const newStatus = num.status === "active" ? "inactive" : "active";
+    const [updated] = await db.update(numbers).set({ status: newStatus }).where(eq(numbers.id, id)).returning();
+    return updated;
   }
 
   async deleteNumber(id: number): Promise<void> {

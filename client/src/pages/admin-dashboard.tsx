@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/sidebar";
 import {
   Users, ArrowRightLeft, Globe, Phone, Settings, LogOut, Plus,
-  Trash2, Ban, CheckCircle, Copy, Shield, Loader2, Download,
+  Trash2, Ban, CheckCircle, XCircle, Copy, Shield, Loader2, Download,
   MessageSquare, Key, DollarSign, Hash, Calendar, Search,
   RefreshCw, Lock, BookOpen, FileText
 } from "lucide-react";
@@ -479,6 +479,22 @@ function NumbersPanel() {
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
+  const toggleNumberMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/admin/toggle-number/${id}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Erreur");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/numbers"] });
+      toast({ title: "Statut mis a jour" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
   const deleteNumberMutation = useMutation({
     mutationFn: async (id: number) => {
       const res = await fetch(`/api/admin/delete-number/${id}`, {
@@ -565,14 +581,28 @@ function NumbersPanel() {
                       </Badge>
                     </div>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => { if (confirm("Supprimer ce numero ?")) deleteNumberMutation.mutate(num.id); }}
-                    data-testid={`button-delete-number-${num.id}`}
-                  >
-                    <Trash2 className="w-4 h-4 text-destructive" />
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => toggleNumberMutation.mutate(num.id)}
+                      data-testid={`button-toggle-number-${num.id}`}
+                    >
+                      {num.status === "active" ? (
+                        <XCircle className="w-4 h-4 text-amber-500" />
+                      ) : (
+                        <CheckCircle className="w-4 h-4 text-green-500" />
+                      )}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => { if (confirm("Supprimer ce numero ?")) deleteNumberMutation.mutate(num.id); }}
+                      data-testid={`button-delete-number-${num.id}`}
+                    >
+                      <Trash2 className="w-4 h-4 text-destructive" />
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>
