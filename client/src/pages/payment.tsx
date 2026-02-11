@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useRoute } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Copy, ChevronLeft, ChevronRight, Check } from "lucide-react";
 
@@ -30,9 +31,10 @@ const PAYMENT_METHODS: Record<string, string[]> = {
 
 export default function PaymentPage() {
   const { toast } = useToast();
+  const [, routeParams] = useRoute("/pay/:slug");
 
   const urlParams = new URLSearchParams(window.location.search);
-  const merchantSlug = urlParams.get("merchant") || "";
+  const merchantSlug = urlParams.get("merchant") || routeParams?.slug || "";
   const amountParam = urlParams.get("amount");
   const countryParam = urlParams.get("country") || "";
   const redirectUrl = urlParams.get("redirect") || "";

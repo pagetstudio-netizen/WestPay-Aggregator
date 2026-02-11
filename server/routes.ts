@@ -523,6 +523,11 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Marchand, pays, montant et methode de paiement requis" });
       }
 
+      const parsedAmount = parseInt(amount);
+      if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        return res.status(400).json({ message: "Le montant doit etre un nombre positif" });
+      }
+
       const merchant = await storage.getMerchantBySlug(merchantSlug);
       if (!merchant || merchant.suspended) {
         return res.status(404).json({ message: "Marchand introuvable ou suspendu" });
@@ -539,7 +544,7 @@ export async function registerRoutes(
       const pending = await storage.createPendingPayment({
         merchantId: merchant.id,
         country,
-        amount: parseInt(amount),
+        amount: parsedAmount,
         payerPhone: payerPhone || null,
         payerName: payerName || null,
         paymentMethod,
