@@ -216,7 +216,23 @@ export default function PaymentPage() {
   const stepLabels = ["Informations\ngenerales", "Compte\nde paiement", "Paiement\ntermine"];
 
   return (
-    <div className="min-h-screen" style={{ background: "#00b050" }}>
+    <div className="min-h-screen payment-page-root" style={{ background: "#00b050" }}>
+      <style>{`
+        .payment-page-root input,
+        .payment-page-root select,
+        .payment-page-root textarea {
+          color: #111827 !important;
+          background-color: white !important;
+          border-color: #d1d5db !important;
+        }
+        .payment-page-root input::placeholder {
+          color: #9ca3af !important;
+        }
+        .payment-page-root select option {
+          color: #111827 !important;
+          background-color: white !important;
+        }
+      `}</style>
       <div className="max-w-lg mx-auto px-4 py-6">
         <div className="mb-4">
           <h1 className="text-white font-bold text-lg" data-testid="text-brand">WestPay</h1>
@@ -230,7 +246,7 @@ export default function PaymentPage() {
           </p>
         </div>
 
-        <div className="bg-white rounded-md p-6">
+        <div className="bg-white rounded-md p-6" style={{ color: "#1f2937" }}>
           <div className="mb-2">
             <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
               <div
@@ -313,6 +329,7 @@ export default function PaymentPage() {
                     onChange={(e) => setPayerPhone(e.target.value)}
                     placeholder="Ex: 90123456"
                     className="flex-1 py-2 px-3 text-sm outline-none border-l"
+                    style={{ color: "#111827", backgroundColor: "white" }}
                     data-testid="input-payer-phone"
                   />
                 </div>
@@ -328,6 +345,7 @@ export default function PaymentPage() {
                   onChange={(e) => setPayerName(e.target.value)}
                   placeholder="Ex: Jean Dupont"
                   className="w-full py-2 px-3 text-sm border rounded-md outline-none"
+                  style={{ color: "#111827", backgroundColor: "white" }}
                   data-testid="input-payer-name"
                 />
               </div>
@@ -339,6 +357,7 @@ export default function PaymentPage() {
                     value={selectedCountry}
                     onChange={(e) => { setSelectedCountry(e.target.value); setSelectedMethod(""); }}
                     className="w-full py-2 px-3 text-sm border rounded-md outline-none"
+                    style={{ color: "#111827", backgroundColor: "white" }}
                     data-testid="select-country"
                   >
                     {merchantInfo.countries.map((c) => (
@@ -467,6 +486,7 @@ export default function PaymentPage() {
                   onChange={(e) => setTxId(e.target.value.toUpperCase())}
                   placeholder="Ex: TRF123456789"
                   className="w-full py-2 px-3 text-sm border rounded-md outline-none"
+                  style={{ color: "#111827", backgroundColor: "white" }}
                   data-testid="input-tx-id"
                 />
               </div>
