@@ -515,6 +515,93 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== PAYMENT WIZARD (public) ====================
+  app.post("/api/payment/initiate", async (req, res) => {
+    try {
+      const { merchantSlug, country, amount, payerPhone, payerName, paymentMethod, redirectUrl } = req.body;
+      if (!merchantSlug || !country || !amount || !paymentMethod) {
+        return res.status(400).json({ message: "Marchand, pays, montant et methode de paiement requis" });
+      }
+
+      const merchant = await storage.getMerchantBySlug(merchantSlug);
+      if (!merchant || merchant.suspended) {
+        return res.status(404).json({ message: "Marchand introuvable ou suspendu" });
+      }
+
+      const countries = await storage.getMerchantCountries(merchant.id);
+      const hasCountry = countries.some(c => c.country === country && c.active);
+      if (!hasCountry) {
+        return res.status(400).json({ message: "Pays non disponible pour ce marchand" });
+      }
+
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+      const pending = await storage.createPendingPayment({
+        merchantId: merchant.id,
+        country,
+        amount: parseInt(amount),
+        payerPhone: payerPhone || null,
+        payerName: payerName || null,
+        paymentMethod,
+        txId: null,
+        status: "pending",
+        redirectUrl: redirectUrl || null,
+        expiresAt,
+      });
+
+      res.json({ success: true, paymentId: pending.id });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/payment/validate", async (req, res) => {
+    try {
+      const { paymentId, txId } = req.body;
+      if (!paymentId || !txId) {
+        return res.status(400).json({ success: false, message: "ID de paiement et ID de transaction requis" });
+      }
+
+      const pending = await storage.getPendingPaymentById(parseInt(paymentId));
+      if (!pending) {
+        return res.status(404).json({ success: false, message: "Paiement introuvable ou expire" });
+      }
+
+      if (pending.status !== "pending") {
+        return res.status(400).json({ success: false, message: "Ce paiement a deja ete traite" });
+      }
+
+      if (new Date(pending.expiresAt) < new Date()) {
+        await storage.updatePendingPaymentStatus(pending.id, "expired");
+        return res.status(400).json({ success: false, message: "Ce paiement a expire. Veuillez recommencer." });
+      }
+
+      const encryptedTxId = crypto.createHash("sha256").update(txId.trim()).digest("hex").substring(0, 16).toUpperCase();
+
+      await storage.updatePendingPaymentTxId(pending.id, txId.trim());
+      await storage.updatePendingPaymentStatus(pending.id, "submitted");
+
+      const merchant = await storage.getMerchantById(pending.merchantId);
+
+      await storage.createApiLog({
+        merchantId: pending.merchantId,
+        action: "payment_submitted",
+        ip: req.ip || "",
+        description: `Paiement #${pending.id} soumis - TX: ${txId.trim()} - Montant: ${pending.amount} F CFA - ${pending.paymentMethod}`,
+      });
+
+      res.json({
+        success: true,
+        message: "Votre paiement a ete enregistre avec succes.",
+        redirectUrl: pending.redirectUrl,
+        amount: pending.amount,
+        txId: txId.trim(),
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
   // ==================== VERIFY TRANSACTION (public) ====================
   app.post("/api/verify-transaction", async (req, res) => {
     try {
@@ -576,6 +663,13 @@ export async function registerRoutes(
       res.status(500).json({ verified: false, message: err.message });
     }
   });
+
+  setInterval(async () => {
+    try {
+      const cleaned = await storage.cleanupExpiredPayments();
+      if (cleaned > 0) console.log(`[Cleanup] ${cleaned} paiement(s) expire(s) supprime(s)`);
+    } catch (err) {}
+  }, 60 * 1000);
 
   // ==================== SMS RECEIVE (for Android SMS Forwarder) ====================
   app.post("/sms/receive", async (req, res) => {
