@@ -91,6 +91,21 @@ export const apiLogs = pgTable("api_logs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const pendingPayments = pgTable("pending_payments", {
+  id: serial("id").primaryKey(),
+  merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),
+  country: text("country").notNull(),
+  amount: integer("amount").notNull(),
+  payerPhone: text("payer_phone"),
+  payerName: text("payer_name"),
+  paymentMethod: text("payment_method").notNull(),
+  txId: text("tx_id"),
+  status: text("status").notNull().default("pending"),
+  redirectUrl: text("redirect_url"),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const insertAdminSchema = createInsertSchema(admins).omit({ id: true, createdAt: true });
 export const insertMerchantSchema = createInsertSchema(merchants).omit({ id: true, createdAt: true });
 export const insertMerchantCountrySchema = createInsertSchema(merchantCountries).omit({ id: true });
@@ -101,6 +116,7 @@ export const insertSettingSchema = createInsertSchema(settings).omit({ id: true 
 export const insertLoginLogSchema = createInsertSchema(loginLogs).omit({ id: true, createdAt: true });
 export const insertMerchantPinSchema = createInsertSchema(merchantPins).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertApiLogSchema = createInsertSchema(apiLogs).omit({ id: true, createdAt: true });
+export const insertPendingPaymentSchema = createInsertSchema(pendingPayments).omit({ id: true, createdAt: true });
 
 export const loginSchema = z.object({
   email: z.string().email(),
@@ -127,3 +143,5 @@ export type MerchantPin = typeof merchantPins.$inferSelect;
 export type InsertMerchantPin = z.infer<typeof insertMerchantPinSchema>;
 export type ApiLog = typeof apiLogs.$inferSelect;
 export type InsertApiLog = z.infer<typeof insertApiLogSchema>;
+export type PendingPayment = typeof pendingPayments.$inferSelect;
+export type InsertPendingPayment = z.infer<typeof insertPendingPaymentSchema>;
