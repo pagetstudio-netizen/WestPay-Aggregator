@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import {
   Shield, Loader2, Phone, Copy, CheckCircle, XCircle,
-  Clock, ArrowRight, AlertTriangle, Smartphone
+  Clock, ArrowRight, AlertTriangle, Smartphone, Lock, User
 } from "lucide-react";
 
 type PaymentNumber = {
@@ -42,16 +42,23 @@ export default function PaymentPage() {
   const slug = params?.slug || "";
   const { toast } = useToast();
 
+  const urlParams = new URLSearchParams(window.location.search);
+  const fixedAmount = urlParams.get("amount");
+
   const [merchantInfo, setMerchantInfo] = useState<MerchantInfo | null>(null);
   const [paymentNumbers, setPaymentNumbers] = useState<PaymentNumber[]>([]);
   const [isLoadingInfo, setIsLoadingInfo] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [txId, setTxId] = useState("");
+  const [payerPhone, setPayerPhone] = useState("");
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null);
 
   const [selectedCountry, setSelectedCountry] = useState<string>("");
+
+  const amountValue = fixedAmount ? parseInt(fixedAmount, 10) : null;
+  const hasValidAmount = amountValue !== null && !isNaN(amountValue) && amountValue > 0;
 
   useEffect(() => {
     if (!slug) return;
@@ -82,7 +89,7 @@ export default function PaymentPage() {
 
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!txId.trim()) return;
+    if (!txId.trim() || !payerPhone.trim()) return;
 
     setIsVerifying(true);
     setVerificationResult(null);
@@ -90,7 +97,12 @@ export default function PaymentPage() {
       const res = await fetch("/api/verify-transaction", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ txId: txId.trim(), merchantSlug: slug }),
+        body: JSON.stringify({
+          txId: txId.trim(),
+          merchantSlug: slug,
+          payerPhone: payerPhone.trim(),
+          amount: hasValidAmount ? amountValue : undefined,
+        }),
       });
       const data = await res.json();
       setVerificationResult(data);
@@ -159,6 +171,22 @@ export default function PaymentPage() {
           </p>
         </div>
 
+        {hasValidAmount && (
+          <Card className="border-primary/30">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Lock className="w-4 h-4 text-primary" />
+                  <span className="text-sm text-muted-foreground">Montant a payer</span>
+                </div>
+                <span className="text-xl font-bold text-foreground" data-testid="text-pay-amount">
+                  {amountValue!.toLocaleString("fr-FR")} F CFA
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {merchantInfo.countries.length > 1 && (
           <div className="flex items-center gap-2 justify-center flex-wrap">
             {merchantInfo.countries.map(country => (
@@ -184,7 +212,9 @@ export default function PaymentPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Envoyez le montant souhaite a l'un des numeros suivants via Mobile Money :
+              {hasValidAmount
+                ? `Envoyez exactement ${amountValue!.toLocaleString("fr-FR")} F CFA a l'un des numeros suivants via Mobile Money :`
+                : "Envoyez le montant souhaite a l'un des numeros suivants via Mobile Money :"}
             </p>
 
             {filteredNumbers.length === 0 ? (
@@ -252,6 +282,22 @@ export default function PaymentPage() {
           <CardContent>
             <form onSubmit={handleVerify} className="space-y-4">
               <div className="space-y-2">
+                <Label htmlFor="payer-phone">Votre numero de telephone</Label>
+                <Input
+                  id="payer-phone"
+                  type="tel"
+                  value={payerPhone}
+                  onChange={(e) => { setPayerPhone(e.target.value); setVerificationResult(null); }}
+                  placeholder="Ex: +22898123456"
+                  required
+                  data-testid="input-payer-phone"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Le numero que vous avez utilise pour envoyer le paiement Mobile Money.
+                </p>
+              </div>
+
+              <div className="space-y-2">
                 <Label htmlFor="tx-id">ID de transaction (TX)</Label>
                 <Input
                   id="tx-id"
@@ -265,10 +311,26 @@ export default function PaymentPage() {
                   Entrez l'ID de transaction que vous avez recu par SMS apres votre paiement Mobile Money.
                 </p>
               </div>
+
+              {hasValidAmount && (
+                <div className="space-y-2">
+                  <Label>Montant</Label>
+                  <div className="flex items-center gap-2 p-2 rounded-md border bg-muted/50">
+                    <Lock className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-sm font-semibold text-foreground" data-testid="text-pay-amount-locked">
+                      {amountValue!.toLocaleString("fr-FR")} F CFA
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Le montant est defini par la plateforme et ne peut pas etre modifie.
+                  </p>
+                </div>
+              )}
+
               <Button
                 type="submit"
                 className="w-full"
-                disabled={isVerifying || !txId.trim()}
+                disabled={isVerifying || !txId.trim() || !payerPhone.trim()}
                 data-testid="button-verify-tx"
               >
                 {isVerifying ? (

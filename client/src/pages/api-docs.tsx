@@ -319,8 +319,9 @@ X-API-KEY: <VOTRE_CLE_API>`}
                   <div>
                     <p className="text-sm font-semibold text-foreground">Flux de paiement</p>
                     <ol className="text-sm text-muted-foreground mt-2 space-y-1 list-decimal pl-4">
-                      <li>Redirigez votre utilisateur vers <code className="bg-muted px-1 rounded">/pay/votre-slug</code></li>
-                      <li>L'utilisateur voit les numeros Mobile Money et envoie le paiement</li>
+                      <li>Redirigez votre utilisateur vers <code className="bg-muted px-1 rounded">/pay/votre-slug?amount=5000</code></li>
+                      <li>Le montant est affiche et verrouille (non modifiable par l'utilisateur)</li>
+                      <li>L'utilisateur entre son numero de telephone et envoie le paiement</li>
                       <li>L'utilisateur soumet l'ID de transaction (TX) recu par SMS</li>
                       <li>WestPay verifie l'ID contre les SMS recus par le telephone Android</li>
                       <li>Si verifie, la transaction est confirmee et le solde du marchand est credite</li>
@@ -358,7 +359,9 @@ X-API-KEY: <VOTRE_CLE_API>`}
               description="Verifie si un ID de transaction (TX) soumis par un utilisateur correspond a une transaction recue par SMS. Utilise par la page de paiement et peut etre integre directement dans votre application."
               requestBody={`{
   "txId": "TX12345",
-  "merchantSlug": "ecomat"
+  "merchantSlug": "ecomat",
+  "payerPhone": "+22898123456",
+  "amount": 5000
 }`}
               responseBody={`// Succes
 {
@@ -473,17 +476,21 @@ const transactions = await txRes.json();`}
             <Card>
               <CardContent className="p-4">
                 <pre className="text-sm font-mono text-foreground overflow-x-auto whitespace-pre-wrap">
-{`// Option 1 : Rediriger l'utilisateur vers la page WestPay
-window.location.href = "https://westpay.example.com/pay/ecomat";
+{`// Option 1 : Rediriger l'utilisateur avec le montant verrouille
+const montant = 5000; // Montant en F CFA
+window.location.href = \`https://westpay.example.com/pay/ecomat?amount=\${montant}\`;
+// Le montant sera affiche mais non modifiable par l'utilisateur
 
 // Option 2 : Integrer la verification dans votre application
-async function verifierTransaction(txId) {
+async function verifierTransaction(txId, payerPhone) {
   const res = await fetch("https://westpay.example.com/api/verify-transaction", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      txId: txId,          // L'ID soumis par l'utilisateur
-      merchantSlug: "ecomat"  // Votre slug marchand
+      txId: txId,              // L'ID soumis par l'utilisateur
+      merchantSlug: "ecomat",  // Votre slug marchand
+      payerPhone: payerPhone,  // Numero de l'utilisateur
+      amount: 5000             // Montant attendu (optionnel)
     })
   });
 

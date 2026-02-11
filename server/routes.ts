@@ -509,7 +509,7 @@ export async function registerRoutes(
   // ==================== VERIFY TRANSACTION (public) ====================
   app.post("/api/verify-transaction", async (req, res) => {
     try {
-      const { txId, merchantSlug } = req.body;
+      const { txId, merchantSlug, payerPhone, amount } = req.body;
       if (!txId || !merchantSlug) {
         return res.status(400).json({ verified: false, message: "ID de transaction et marchand requis" });
       }
@@ -534,11 +534,22 @@ export async function registerRoutes(
         });
       }
 
+      if (amount && typeof amount === "number" && transaction.amount !== amount) {
+        return res.json({
+          verified: false,
+          message: `Le montant de la transaction (${transaction.amount} F CFA) ne correspond pas au montant attendu (${amount} F CFA).`,
+        });
+      }
+
+      const logDescription = payerPhone
+        ? `Transaction ${txId} verifiee - Montant: ${transaction.amount} F CFA - Numero: ${payerPhone}`
+        : `Transaction ${txId} verifiee - Montant: ${transaction.amount} F CFA`;
+
       await storage.createApiLog({
         merchantId: merchant.id,
         action: "transaction_verified",
         ip: req.ip || "",
-        description: `Transaction ${txId} verifiee - Montant: ${transaction.amount} F CFA`,
+        description: logDescription,
       });
 
       res.json({
