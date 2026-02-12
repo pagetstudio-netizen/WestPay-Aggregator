@@ -1,12 +1,13 @@
 import {
   admins, merchants, merchantCountries, transactions, smsLogs, numbers, settings, loginLogs,
-  merchantPins, apiLogs, pendingPayments,
+  merchantPins, apiLogs, pendingPayments, webhookLogs,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
   type Setting, type InsertSetting, type LoginLog, type InsertLoginLog,
   type MerchantPin, type InsertMerchantPin, type ApiLog, type InsertApiLog,
   type PendingPayment, type InsertPendingPayment,
+  type WebhookLog, type InsertWebhookLog,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and } from "drizzle-orm";
@@ -68,6 +69,10 @@ export interface IStorage {
   updatePendingPaymentStatus(id: number, status: string): Promise<void>;
   cleanupExpiredPayments(): Promise<number>;
   getPendingPayments(merchantId?: number): Promise<PendingPayment[]>;
+
+  updateMerchantWebhook(id: number, webhookUrl: string | null, webhookSecret: string | null): Promise<void>;
+  createWebhookLog(log: InsertWebhookLog): Promise<WebhookLog>;
+  getWebhookLogs(merchantId?: number): Promise<WebhookLog[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -333,6 +338,22 @@ export class DatabaseStorage implements IStorage {
       return db.select().from(pendingPayments).where(eq(pendingPayments.merchantId, merchantId)).orderBy(desc(pendingPayments.createdAt));
     }
     return db.select().from(pendingPayments).orderBy(desc(pendingPayments.createdAt));
+  }
+
+  async updateMerchantWebhook(id: number, webhookUrl: string | null, webhookSecret: string | null): Promise<void> {
+    await db.update(merchants).set({ webhookUrl, webhookSecret }).where(eq(merchants.id, id));
+  }
+
+  async createWebhookLog(log: InsertWebhookLog): Promise<WebhookLog> {
+    const [created] = await db.insert(webhookLogs).values(log).returning();
+    return created;
+  }
+
+  async getWebhookLogs(merchantId?: number): Promise<WebhookLog[]> {
+    if (merchantId) {
+      return db.select().from(webhookLogs).where(eq(webhookLogs.merchantId, merchantId)).orderBy(desc(webhookLogs.createdAt));
+    }
+    return db.select().from(webhookLogs).orderBy(desc(webhookLogs.createdAt));
   }
 }
 

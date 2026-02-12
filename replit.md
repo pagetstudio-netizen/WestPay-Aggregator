@@ -32,6 +32,11 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 - `/api/docs/access` - PIN-protected docs access
 - `/api/payment/initiate` - Create pending payment (Step 1)
 - `/api/payment/validate` - Validate TX ID (Step 2)
+- `/api/merchant/webhook` - GET/PUT merchant webhook config
+- `/api/merchant/webhook/test` - POST test webhook notification
+- `/api/merchant/webhook/logs` - GET webhook send logs
+- `/api/admin/webhook-logs` - GET all webhook logs (admin)
+- `/api/admin/merchant/:id/webhook` - PUT merchant webhook (admin)
 - `/sms/receive` - SMS webhook for Android SMS Forwarder
 
 ## API Management System
@@ -41,8 +46,18 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 - Admin manages PINs via "API & PIN" tab in admin dashboard
 - All API activities logged in api_logs table
 
+## Webhook Notification System
+- Merchants configure a webhook URL in their dashboard ("Webhook" tab)
+- Each merchant gets a unique webhook secret (HMAC-SHA256 signing key)
+- On payment confirmation via SMS, WestPay sends POST to merchant's webhook URL
+- Payload includes: event, txId, amount, currency, payer, country, merchantSlug, timestamp
+- Signature sent in `X-WestPay-Signature` header for verification
+- Event type sent in `X-WestPay-Event` header
+- Webhook logs stored in webhook_logs table for auditing
+- Admin can view webhook URLs for each merchant in the merchants panel
+
 ## Database Tables
-admins, merchants, merchant_countries, transactions, sms_logs, numbers, settings, login_logs, merchant_pins, api_logs, pending_payments
+admins, merchants, merchant_countries, transactions, sms_logs, numbers, settings, login_logs, merchant_pins, api_logs, pending_payments, webhook_logs
 
 ## SMS Payment Flow
 1. Android phone receives Mobile Money SMS

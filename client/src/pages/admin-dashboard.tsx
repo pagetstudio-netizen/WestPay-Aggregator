@@ -22,7 +22,7 @@ import {
   Users, ArrowRightLeft, Globe, Phone, Settings, LogOut, Plus,
   Trash2, Ban, CheckCircle, XCircle, Copy, Shield, Loader2, Download,
   MessageSquare, Key, DollarSign, Hash, Calendar, Search,
-  RefreshCw, Lock, BookOpen, FileText
+  RefreshCw, Lock, BookOpen, FileText, Webhook
 } from "lucide-react";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog } from "@shared/schema";
 
@@ -207,6 +207,12 @@ function MerchantsPanel() {
                     </div>
                     <p className="text-sm text-muted-foreground mt-1">{merchant.email}</p>
                     <p className="text-xs text-muted-foreground mt-1">Slug: /{merchant.slug}</p>
+                    {merchant.webhookUrl && (
+                      <div className="flex items-center gap-1 mt-1">
+                        <Webhook className="w-3 h-3 text-green-500" />
+                        <p className="text-xs text-muted-foreground truncate max-w-xs" data-testid={`text-webhook-url-${merchant.id}`}>{merchant.webhookUrl}</p>
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-1">
                     <Button

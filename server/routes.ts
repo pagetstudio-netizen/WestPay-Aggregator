@@ -367,6 +367,36 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/webhook-logs", authMiddleware("admin"), async (req, res) => {
+    try {
+      const merchantId = req.query.merchantId ? parseInt(req.query.merchantId as string) : undefined;
+      const logs = await storage.getWebhookLogs(merchantId);
+      res.json(logs);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/admin/merchant/:id/webhook", authMiddleware("admin"), async (req, res) => {
+    try {
+      const merchantId = parseInt(String(req.params.id));
+      const { webhookUrl } = req.body;
+      const merchant = await storage.getMerchantById(merchantId);
+      if (!merchant) return res.status(404).json({ message: "Marchand non trouve" });
+
+      if (webhookUrl && !/^https?:\/\/.+/.test(webhookUrl)) {
+        return res.status(400).json({ message: "URL invalide" });
+      }
+
+      const webhookSecret = webhookUrl ? (merchant.webhookSecret || crypto.randomBytes(32).toString("hex")) : null;
+      await storage.updateMerchantWebhook(merchantId, webhookUrl || null, webhookSecret);
+
+      res.json({ success: true, webhookUrl: webhookUrl || "", webhookSecret: webhookSecret || "" });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // ==================== MERCHANT ROUTES ====================
   app.get("/api/merchant/balance", authMiddleware("merchant"), async (req, res) => {
     try {
@@ -439,6 +469,150 @@ export async function registerRoutes(
       const hash = await bcrypt.hash(newPassword, 10);
       await storage.updateMerchant(merchant.id, { passwordHash: hash });
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ==================== MERCHANT WEBHOOK ====================
+
+  async function sendWebhookNotification(merchantId: number, payload: Record<string, any>): Promise<{ success: boolean; statusCode?: number; error?: string }> {
+    try {
+      const merchant = await storage.getMerchantById(merchantId);
+      if (!merchant?.webhookUrl) return { success: false, error: "Aucune URL webhook configuree" };
+
+      const payloadStr = JSON.stringify(payload);
+      const signature = merchant.webhookSecret
+        ? crypto.createHmac("sha256", merchant.webhookSecret).update(payloadStr).digest("hex")
+        : "";
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+
+      try {
+        const response = await fetch(merchant.webhookUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-WestPay-Signature": signature,
+            "X-WestPay-Event": payload.event || "payment.confirmed",
+          },
+          body: payloadStr,
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        const responseText = await response.text().catch(() => "");
+        const success = response.status >= 200 && response.status < 300;
+
+        await storage.createWebhookLog({
+          merchantId,
+          url: merchant.webhookUrl,
+          payload: payloadStr,
+          statusCode: response.status,
+          response: responseText.substring(0, 500),
+          success,
+        });
+
+        console.log(`[WEBHOOK] ${success ? "Succes" : "Echec"} pour marchand #${merchantId}: ${response.status}`);
+        return { success, statusCode: response.status };
+      } catch (fetchErr: any) {
+        clearTimeout(timeout);
+        const errorMsg = fetchErr.name === "AbortError" ? "Timeout (10s)" : fetchErr.message;
+
+        await storage.createWebhookLog({
+          merchantId,
+          url: merchant.webhookUrl,
+          payload: payloadStr,
+          statusCode: 0,
+          response: errorMsg,
+          success: false,
+        });
+
+        console.error(`[WEBHOOK] Erreur envoi pour marchand #${merchantId}:`, errorMsg);
+        return { success: false, error: errorMsg };
+      }
+    } catch (err: any) {
+      console.error(`[WEBHOOK] Erreur generale:`, err.message);
+      return { success: false, error: err.message };
+    }
+  }
+
+  app.get("/api/merchant/webhook", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchant = await storage.getMerchantById((req as any).user.id);
+      if (!merchant) return res.status(404).json({ message: "Marchand non trouve" });
+      res.json({
+        webhookUrl: merchant.webhookUrl || "",
+        webhookSecret: merchant.webhookSecret || "",
+        hasWebhook: !!merchant.webhookUrl,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/merchant/webhook", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const { webhookUrl } = req.body;
+      const merchantId = (req as any).user.id;
+
+      if (webhookUrl && !/^https?:\/\/.+/.test(webhookUrl)) {
+        return res.status(400).json({ message: "URL invalide. Elle doit commencer par http:// ou https://" });
+      }
+
+      const webhookSecret = webhookUrl ? crypto.randomBytes(32).toString("hex") : null;
+      await storage.updateMerchantWebhook(merchantId, webhookUrl || null, webhookSecret);
+
+      await storage.createApiLog({
+        merchantId,
+        action: webhookUrl ? "webhook_configured" : "webhook_removed",
+        ip: req.ip || "",
+        description: webhookUrl ? `Webhook configure: ${webhookUrl}` : "Webhook supprime",
+      });
+
+      res.json({
+        success: true,
+        webhookUrl: webhookUrl || "",
+        webhookSecret: webhookSecret || "",
+        hasWebhook: !!webhookUrl,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/merchant/webhook/test", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const merchant = await storage.getMerchantById(merchantId);
+      if (!merchant?.webhookUrl) {
+        return res.status(400).json({ message: "Aucune URL webhook configuree" });
+      }
+
+      const testPayload = {
+        event: "test",
+        txId: "TEST-" + Date.now(),
+        amount: 1000,
+        currency: "XOF",
+        payer: "+22890000000",
+        country: "Togo",
+        merchantSlug: merchant.slug,
+        timestamp: new Date().toISOString(),
+        test: true,
+      };
+
+      const result = await sendWebhookNotification(merchantId, testPayload);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/merchant/webhook/logs", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const logs = await storage.getWebhookLogs((req as any).user.id);
+      res.json(logs);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -909,6 +1083,20 @@ export async function registerRoutes(
 
         await reconcilePendingPayments(txId, found.merchantId, amount);
 
+        const foundMerchant = await storage.getMerchantById(found.merchantId);
+        if (foundMerchant?.webhookUrl) {
+          sendWebhookNotification(found.merchantId, {
+            event: "payment.confirmed",
+            txId,
+            amount,
+            currency: "XOF",
+            payer: payerNumber || "",
+            country: found.country,
+            merchantSlug: foundMerchant.slug,
+            timestamp: new Date().toISOString(),
+          }).catch(err => console.error("[WEBHOOK] Erreur async:", err));
+        }
+
         console.log(`[SMS] Transaction confirmee: TX=${txId}, Montant=${amount}, Marchand=#${found.merchantId}, Pays=${found.country}`);
         return res.json({ status: "processed", txId, amount, country: found.country });
       }
@@ -974,6 +1162,20 @@ export async function registerRoutes(
       });
 
       await reconcilePendingPayments(txId, simNumber.merchantId, amount);
+
+      const simMerchant = await storage.getMerchantById(simNumber.merchantId);
+      if (simMerchant?.webhookUrl) {
+        sendWebhookNotification(simNumber.merchantId, {
+          event: "payment.confirmed",
+          txId,
+          amount,
+          currency: "XOF",
+          payer: payerNumber || "",
+          country: simNumber.country,
+          merchantSlug: simMerchant.slug,
+          timestamp: new Date().toISOString(),
+        }).catch(err => console.error("[WEBHOOK] Erreur async:", err));
+      }
 
       console.log(`[SMS] Transaction confirmee: TX=${txId}, Montant=${amount}, Marchand=#${simNumber.merchantId}, Pays=${simNumber.country}`);
       return res.json({ status: "processed", txId, amount, country: simNumber.country });

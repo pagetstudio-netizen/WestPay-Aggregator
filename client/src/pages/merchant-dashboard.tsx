@@ -19,11 +19,12 @@ import {
 } from "@/components/ui/sidebar";
 import {
   Wallet, ArrowRightLeft, Key, Settings, LogOut, Loader2, Download,
-  Copy, Globe, DollarSign, Hash, TrendingUp, Search, RefreshCw, BookOpen, Lock, ExternalLink
+  Copy, Globe, DollarSign, Hash, TrendingUp, Search, RefreshCw, BookOpen, Lock, ExternalLink,
+  Webhook, Send, CheckCircle2, XCircle, Clock
 } from "lucide-react";
-import type { MerchantCountry, Transaction } from "@shared/schema";
+import type { MerchantCountry, Transaction, WebhookLog } from "@shared/schema";
 
-type MerchantTab = "overview" | "transactions" | "apikeys" | "settings";
+type MerchantTab = "overview" | "transactions" | "apikeys" | "webhook" | "settings";
 
 function useMerchantFetch(url: string, key: string[], token: string | null) {
   return useQuery({
@@ -332,6 +333,217 @@ function ApiKeysPanel({ token }: { token: string | null }) {
   );
 }
 
+function WebhookPanel({ token }: { token: string | null }) {
+  const { toast } = useToast();
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+
+  const { data: webhookData, isLoading } = useMerchantFetch("/api/merchant/webhook", ["/api/merchant/webhook"], token);
+  const { data: logs = [], isLoading: logsLoading } = useMerchantFetch("/api/merchant/webhook/logs", ["/api/merchant/webhook/logs"], token);
+
+  useEffect(() => {
+    if (webhookData?.webhookUrl) {
+      setWebhookUrl(webhookData.webhookUrl);
+    }
+  }, [webhookData]);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      const res = await fetch("/api/merchant/webhook", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ webhookUrl: webhookUrl.trim() }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      const data = await res.json();
+      toast({ title: webhookUrl.trim() ? "Webhook configure" : "Webhook supprime" });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook/logs"] });
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleTest = async () => {
+    setIsTesting(true);
+    try {
+      const res = await fetch("/api/merchant/webhook/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast({ title: "Test reussi", description: `Reponse: ${data.statusCode}` });
+      } else {
+        toast({ title: "Test echoue", description: data.error || `Code: ${data.statusCode}`, variant: "destructive" });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook/logs"] });
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const handleRemove = async () => {
+    setWebhookUrl("");
+    setIsSaving(true);
+    try {
+      const res = await fetch("/api/merchant/webhook", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ webhookUrl: "" }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      toast({ title: "Webhook supprime" });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook/logs"] });
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (isLoading) return <MerchantLoadingSkeleton />;
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold text-foreground">Notifications Webhook</h2>
+      <p className="text-sm text-muted-foreground">
+        Recevez une notification automatique sur votre serveur a chaque paiement confirme.
+      </p>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Configuration du Webhook</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>URL du Webhook</Label>
+            <Input
+              type="url"
+              placeholder="https://votre-site.com/webhook/westpay"
+              value={webhookUrl}
+              onChange={(e) => setWebhookUrl(e.target.value)}
+              data-testid="input-webhook-url"
+            />
+            <p className="text-xs text-muted-foreground">
+              WestPay enverra une requete POST a cette URL pour chaque paiement confirme.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button onClick={handleSave} disabled={isSaving} data-testid="button-save-webhook">
+              {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              Enregistrer
+            </Button>
+            {webhookData?.hasWebhook && (
+              <>
+                <Button variant="outline" onClick={handleTest} disabled={isTesting} data-testid="button-test-webhook">
+                  {isTesting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Send className="w-4 h-4 mr-2" />}
+                  Tester
+                </Button>
+                <Button variant="destructive" onClick={handleRemove} disabled={isSaving} data-testid="button-remove-webhook">
+                  <XCircle className="w-4 h-4 mr-2" />Supprimer
+                </Button>
+              </>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {webhookData?.hasWebhook && webhookData.webhookSecret && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Cle secrete (Signature HMAC)</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Utilisez cette cle pour verifier l'authenticite des notifications recues. La signature HMAC-SHA256 est envoyee dans le header <code className="bg-muted px-1 rounded text-foreground">X-WestPay-Signature</code>.
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="text-xs bg-muted p-2 rounded flex-1 break-all text-foreground" data-testid="text-webhook-secret">{webhookData.webhookSecret}</code>
+              <Button
+                size="icon"
+                variant="outline"
+                onClick={() => {
+                  navigator.clipboard.writeText(webhookData.webhookSecret);
+                  toast({ title: "Cle copiee" });
+                }}
+                data-testid="button-copy-webhook-secret"
+              >
+                <Copy className="w-4 h-4" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Format de la notification</CardTitle></CardHeader>
+        <CardContent>
+          <pre className="text-xs bg-muted p-3 rounded overflow-x-auto text-foreground">{`{
+  "event": "payment.confirmed",
+  "txId": "TM240612.1234.A56789",
+  "amount": 3000,
+  "currency": "XOF",
+  "payer": "+22890001234",
+  "country": "Togo",
+  "merchantSlug": "ecomat",
+  "timestamp": "2026-02-12T10:30:00Z"
+}`}</pre>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <CardTitle className="text-base">Historique des envois</CardTitle>
+            <Badge variant="secondary">{(logs as WebhookLog[]).length} envoi(s)</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {logsLoading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : (logs as WebhookLog[]).length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">Aucun envoi pour le moment</p>
+          ) : (
+            <ScrollArea className="max-h-64">
+              <div className="space-y-2">
+                {(logs as WebhookLog[]).slice(0, 20).map((log) => (
+                  <div key={log.id} className="flex items-center justify-between gap-2 p-2 rounded border text-sm" data-testid={`webhook-log-${log.id}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      {log.success ? (
+                        <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
+                      ) : (
+                        <XCircle className="w-4 h-4 text-red-500 shrink-0" />
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-xs text-foreground truncate">
+                          {log.statusCode ? `HTTP ${log.statusCode}` : "Erreur"} - {log.response?.substring(0, 80) || "Pas de reponse"}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(log.createdAt).toLocaleString("fr-FR")}
+                        </p>
+                      </div>
+                    </div>
+                    <Badge variant={log.success ? "default" : "destructive"} className="shrink-0">
+                      {log.success ? "OK" : "Echec"}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function MerchantSettingsPanel({ token }: { token: string | null }) {
   const { user, logout } = useAuth();
   const [, setLocation] = useLocation();
@@ -436,6 +648,7 @@ export default function MerchantDashboard() {
     { title: "Vue d'ensemble", icon: Wallet, tab: "overview" },
     { title: "Transactions", icon: ArrowRightLeft, tab: "transactions" },
     { title: "Cles API", icon: Key, tab: "apikeys" },
+    { title: "Webhook", icon: Webhook, tab: "webhook" },
     { title: "Parametres", icon: Settings, tab: "settings" },
   ];
 
@@ -496,6 +709,7 @@ export default function MerchantDashboard() {
             {activeTab === "overview" && <OverviewPanel token={token} />}
             {activeTab === "transactions" && <MerchantTransactionsPanel token={token} />}
             {activeTab === "apikeys" && <ApiKeysPanel token={token} />}
+            {activeTab === "webhook" && <WebhookPanel token={token} />}
             {activeTab === "settings" && <MerchantSettingsPanel token={token} />}
           </main>
         </div>

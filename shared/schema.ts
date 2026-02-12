@@ -18,6 +18,8 @@ export const merchants = pgTable("merchants", {
   slug: text("slug").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   suspended: boolean("suspended").default(false).notNull(),
+  webhookUrl: text("webhook_url"),
+  webhookSecret: text("webhook_secret"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -110,6 +112,17 @@ export const pendingPayments = pgTable("pending_payments", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const webhookLogs = pgTable("webhook_logs", {
+  id: serial("id").primaryKey(),
+  merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),
+  url: text("url").notNull(),
+  payload: text("payload").notNull(),
+  statusCode: integer("status_code"),
+  response: text("response"),
+  success: boolean("success").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const insertAdminSchema = createInsertSchema(admins).omit({ id: true, createdAt: true });
 export const insertMerchantSchema = createInsertSchema(merchants).omit({ id: true, createdAt: true });
 export const insertMerchantCountrySchema = createInsertSchema(merchantCountries).omit({ id: true });
@@ -121,6 +134,7 @@ export const insertLoginLogSchema = createInsertSchema(loginLogs).omit({ id: tru
 export const insertMerchantPinSchema = createInsertSchema(merchantPins).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertApiLogSchema = createInsertSchema(apiLogs).omit({ id: true, createdAt: true });
 export const insertPendingPaymentSchema = createInsertSchema(pendingPayments).omit({ id: true, createdAt: true });
+export const insertWebhookLogSchema = createInsertSchema(webhookLogs).omit({ id: true, createdAt: true });
 
 export const loginSchema = z.object({
   email: z.string().email(),
@@ -149,3 +163,5 @@ export type ApiLog = typeof apiLogs.$inferSelect;
 export type InsertApiLog = z.infer<typeof insertApiLogSchema>;
 export type PendingPayment = typeof pendingPayments.$inferSelect;
 export type InsertPendingPayment = z.infer<typeof insertPendingPaymentSchema>;
+export type WebhookLog = typeof webhookLogs.$inferSelect;
+export type InsertWebhookLog = z.infer<typeof insertWebhookLogSchema>;
