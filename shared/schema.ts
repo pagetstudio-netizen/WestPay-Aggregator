@@ -46,6 +46,10 @@ export const smsLogs = pgTable("sms_logs", {
   fromSim: text("from_sim").notNull(),
   smsText: text("sms_text").notNull(),
   parsed: boolean("parsed").default(false).notNull(),
+  errorMessage: text("error_message"),
+  parsedAmount: integer("parsed_amount"),
+  parsedTxId: text("parsed_tx_id"),
+  parsedPayer: text("parsed_payer"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

@@ -163,7 +163,7 @@ export async function registerRoutes(
 
   app.delete("/api/admin/delete-merchant/:id", authMiddleware("admin"), async (req, res) => {
     try {
-      await storage.deleteMerchant(parseInt(req.params.id));
+      await storage.deleteMerchant(parseInt(req.params.id as string));
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -258,7 +258,7 @@ export async function registerRoutes(
 
   app.patch("/api/admin/toggle-number/:id", authMiddleware("admin"), async (req, res) => {
     try {
-      const updated = await storage.toggleNumberStatus(parseInt(req.params.id));
+      const updated = await storage.toggleNumberStatus(parseInt(req.params.id as string));
       res.json(updated);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -267,7 +267,7 @@ export async function registerRoutes(
 
   app.delete("/api/admin/delete-number/:id", authMiddleware("admin"), async (req, res) => {
     try {
-      await storage.deleteNumber(parseInt(req.params.id));
+      await storage.deleteNumber(parseInt(req.params.id as string));
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -300,7 +300,7 @@ export async function registerRoutes(
 
   app.get("/api/admin/merchant/:id/api-keys", authMiddleware("admin"), async (req, res) => {
     try {
-      const merchantId = parseInt(req.params.id);
+      const merchantId = parseInt(req.params.id as string);
       const countries = await storage.getMerchantCountries(merchantId);
       res.json(countries);
     } catch (err: any) {
@@ -677,62 +677,308 @@ export async function registerRoutes(
   }, 60 * 1000);
 
   // ==================== SMS RECEIVE (for Android SMS Forwarder) ====================
+
+  function normalizePhone(phone: string): string {
+    let cleaned = phone.replace(/[\s\-\(\)]/g, "").trim();
+    if (cleaned.startsWith("00")) {
+      cleaned = "+" + cleaned.substring(2);
+    }
+    return cleaned;
+  }
+
+  function parseSmsContent(smsText: string): { txId: string | null; amount: number | null; payerNumber: string | null; errors: string[] } {
+    const errors: string[] = [];
+    let txId: string | null = null;
+    let amount: number | null = null;
+    let payerNumber: string | null = null;
+
+    const txPatterns = [
+      /(?:Transaction\s*ID|Trans\.?\s*ID|TXN?\s*ID|TX\s*N°)\s*[:\s]?\s*([A-Za-z0-9\-\.]{5,})/i,
+      /(?:Ref(?:erence)?|N°)\s*[:\s]?\s*([A-Za-z0-9\-\.]{5,})/i,
+      /(?:ID)\s*[:\s]\s*([A-Za-z0-9\-\.]{5,})/i,
+      /\b(TX[A-Za-z0-9\-]{4,})\b/i,
+      /\b(TM\d{6,})\b/i,
+      /\b(MM\d{6,})\b/i,
+      /\b(OM\d{6,})\b/i,
+      /\b([A-Z]{2,4}\d{8,})\b/,
+      /\b(\d{12,})\b/,
+    ];
+
+    for (const pattern of txPatterns) {
+      const match = smsText.match(pattern);
+      if (match && match[1]) {
+        txId = match[1].trim();
+        break;
+      }
+    }
+
+    const amountPatterns = [
+      /([\d\s.,]+)\s*(?:F\s*CFA|FCFA|XOF|CFA)/i,
+      /(?:montant|amount|recu|received|envoye|sent)\s*[:\s]?\s*([\d\s.,]+)/i,
+      /(?:GHS|NGN|XOF)\s*([\d\s.,]+)/i,
+      /([\d.,]+)\s*(?:cedis?|naira)/i,
+    ];
+
+    for (const pattern of amountPatterns) {
+      const match = smsText.match(pattern);
+      if (match && match[1]) {
+        const cleaned = match[1].replace(/[\s]/g, "").replace(/,/g, ".");
+        const parts = cleaned.split(".");
+        let numStr: string;
+        if (parts.length > 1) {
+          const lastPart = parts[parts.length - 1];
+          if (lastPart.length <= 2) {
+            numStr = parts.slice(0, -1).join("") + "." + lastPart;
+          } else {
+            numStr = parts.join("");
+          }
+        } else {
+          numStr = cleaned;
+        }
+        const parsed = parseFloat(numStr);
+        if (!isNaN(parsed) && parsed > 0) {
+          amount = Math.round(parsed);
+          break;
+        }
+      }
+    }
+
+    const phonePatterns = [
+      /(?:de|from|par|numero)\s*[:\s]?\s*(\+?\d[\d\s\-]{8,15})/i,
+      /(\+\d{10,15})/,
+    ];
+
+    for (const pattern of phonePatterns) {
+      const match = smsText.match(pattern);
+      if (match && match[1]) {
+        payerNumber = normalizePhone(match[1]);
+        break;
+      }
+    }
+
+    if (!txId) errors.push("ID de transaction non trouve dans le SMS");
+    if (!amount) errors.push("Montant non trouve dans le SMS");
+
+    return { txId, amount, payerNumber, errors };
+  }
+
+  async function reconcilePendingPayments(txId: string, merchantId: number, amount: number) {
+    try {
+      const pendingPayments = await storage.getPendingPaymentsByTxId(txId);
+      for (const pp of pendingPayments) {
+        if (pp.merchantId === merchantId && pp.amount === amount) {
+          await storage.updatePendingPaymentStatus(pp.id, "confirmed");
+          console.log(`[SMS] Paiement en attente #${pp.id} confirme (TX: ${txId})`);
+        }
+      }
+    } catch (err) {
+      console.error(`[SMS] Erreur reconciliation paiement en attente:`, err);
+    }
+  }
+
   app.post("/sms/receive", async (req, res) => {
     try {
       const { from_sim, sms_text, received_at } = req.body;
-      if (!from_sim || !sms_text) return res.status(400).json({ message: "Donnees SMS manquantes" });
 
-      const smsLog = await storage.createSmsLog({
-        fromSim: from_sim,
-        smsText: sms_text,
-        parsed: false,
-      });
-
-      const txIdMatch = sms_text.match(/TX\d+/i);
-      const amountMatch = sms_text.match(/([\d\s,.]+)\s*F\s*CFA/i);
-      const payerMatch = sms_text.match(/(\+?\d{10,15})/);
-
-      if (txIdMatch && amountMatch) {
-        const txId = txIdMatch[0];
-        const amount = parseInt(amountMatch[1].replace(/[\s,.]/g, ""));
-
-        const existingTx = await storage.getTransactionByTxId(txId);
-        if (existingTx) {
-          return res.json({ status: "duplicate", txId });
-        }
-
-        const simNumber = await storage.getNumberByPhone(from_sim);
-        if (simNumber && simNumber.merchantId) {
-          const merchantCountry = await storage.findMerchantCountryBySimAndCountry(
-            simNumber.merchantId,
-            simNumber.country
-          );
-
-          if (merchantCountry && merchantCountry.active) {
-            await storage.createTransaction({
-              merchantId: simNumber.merchantId,
-              country: simNumber.country,
-              txId,
-              amount,
-              payerNumber: payerMatch ? payerMatch[1] : null,
-              status: "confirmed",
-            });
-
-            await storage.incrementMerchantCountryBalance(merchantCountry.id, amount);
-
-            await storage.createSmsLog({
-              fromSim: from_sim,
-              smsText: `[TRAITE] ${sms_text}`,
-              parsed: true,
-            });
-
-            return res.json({ status: "processed", txId, amount, country: simNumber.country });
-          }
-        }
+      if (!from_sim || !sms_text) {
+        console.log("[SMS] Requete invalide - donnees manquantes:", { from_sim: !!from_sim, sms_text: !!sms_text });
+        return res.status(400).json({ message: "Donnees SMS manquantes (from_sim et sms_text requis)" });
       }
 
-      res.json({ status: "logged", message: "SMS enregistre mais non traite automatiquement" });
+      const normalizedSim = normalizePhone(from_sim);
+      console.log(`[SMS] Recu de ${normalizedSim}: ${sms_text.substring(0, 100)}...`);
+
+      const { txId, amount, payerNumber, errors } = parseSmsContent(sms_text);
+
+      if (errors.length > 0 || !txId || !amount) {
+        const errorMsg = errors.join("; ");
+        console.log(`[SMS] Parsing partiel - Erreurs: ${errorMsg}`);
+
+        await storage.createSmsLog({
+          fromSim: normalizedSim,
+          smsText: sms_text,
+          parsed: false,
+          errorMessage: errorMsg || "Parsing incomplet",
+          parsedAmount: amount,
+          parsedTxId: txId,
+          parsedPayer: payerNumber,
+        });
+
+        return res.json({
+          status: "logged",
+          message: "SMS enregistre mais non traite - parsing incomplet",
+          errors,
+          parsed: { txId, amount, payerNumber },
+        });
+      }
+
+      const existingTx = await storage.getTransactionByTxId(txId);
+      if (existingTx) {
+        console.log(`[SMS] Transaction dupliquee: ${txId}`);
+        await storage.createSmsLog({
+          fromSim: normalizedSim,
+          smsText: sms_text,
+          parsed: false,
+          errorMessage: `Transaction dupliquee: ${txId}`,
+          parsedAmount: amount,
+          parsedTxId: txId,
+          parsedPayer: payerNumber,
+        });
+        return res.json({ status: "duplicate", txId, message: "Cette transaction a deja ete enregistree" });
+      }
+
+      const simNumber = await storage.getNumberByPhone(normalizedSim);
+
+      if (!simNumber) {
+        const allNumbers = await storage.getNumbers();
+        const found = allNumbers.find(n => {
+          const norm = normalizePhone(n.phoneNumber);
+          return norm === normalizedSim || norm.endsWith(normalizedSim.slice(-8)) || normalizedSim.endsWith(norm.slice(-8));
+        });
+
+        if (!found) {
+          console.log(`[SMS] Numero SIM non reconnu: ${normalizedSim}`);
+          await storage.createSmsLog({
+            fromSim: normalizedSim,
+            smsText: sms_text,
+            parsed: false,
+            errorMessage: `Numero SIM non reconnu: ${normalizedSim}`,
+            parsedAmount: amount,
+            parsedTxId: txId,
+            parsedPayer: payerNumber,
+          });
+          return res.json({ status: "unmatched", message: "Numero SIM non associe a un marchand", txId, amount });
+        }
+
+        if (!found.merchantId) {
+          console.log(`[SMS] Numero ${normalizedSim} trouve mais non associe a un marchand`);
+          await storage.createSmsLog({
+            fromSim: normalizedSim,
+            smsText: sms_text,
+            parsed: false,
+            errorMessage: `Numero trouve (${found.phoneNumber}) mais non associe a un marchand`,
+            parsedAmount: amount,
+            parsedTxId: txId,
+            parsedPayer: payerNumber,
+          });
+          return res.json({ status: "unmatched", message: "Numero non associe a un marchand", txId, amount });
+        }
+
+        const merchantCountry = await storage.findMerchantCountryBySimAndCountry(found.merchantId, found.country);
+
+        if (!merchantCountry || !merchantCountry.active) {
+          console.log(`[SMS] Pays ${found.country} non actif pour le marchand #${found.merchantId}`);
+          await storage.createSmsLog({
+            fromSim: normalizedSim,
+            smsText: sms_text,
+            parsed: false,
+            errorMessage: `Pays ${found.country} inactif pour le marchand`,
+            parsedAmount: amount,
+            parsedTxId: txId,
+            parsedPayer: payerNumber,
+          });
+          return res.json({ status: "inactive", message: "Le pays n'est pas actif pour ce marchand" });
+        }
+
+        await storage.createTransaction({
+          merchantId: found.merchantId,
+          country: found.country,
+          txId,
+          amount,
+          payerNumber: payerNumber || null,
+          status: "confirmed",
+        });
+
+        await storage.incrementMerchantCountryBalance(merchantCountry.id, amount);
+
+        await storage.createSmsLog({
+          fromSim: normalizedSim,
+          smsText: sms_text,
+          parsed: true,
+          parsedAmount: amount,
+          parsedTxId: txId,
+          parsedPayer: payerNumber,
+        });
+
+        await storage.createApiLog({
+          merchantId: found.merchantId,
+          action: "sms_payment_confirmed",
+          ip: "",
+          description: `Paiement confirme par SMS - TX: ${txId} - Montant: ${amount} F CFA - De: ${payerNumber || "inconnu"} - SIM: ${normalizedSim}`,
+        });
+
+        await reconcilePendingPayments(txId, found.merchantId, amount);
+
+        console.log(`[SMS] Transaction confirmee: TX=${txId}, Montant=${amount}, Marchand=#${found.merchantId}, Pays=${found.country}`);
+        return res.json({ status: "processed", txId, amount, country: found.country });
+      }
+
+      if (!simNumber.merchantId) {
+        console.log(`[SMS] Numero ${normalizedSim} non associe a un marchand`);
+        await storage.createSmsLog({
+          fromSim: normalizedSim,
+          smsText: sms_text,
+          parsed: false,
+          errorMessage: `Numero non associe a un marchand`,
+          parsedAmount: amount,
+          parsedTxId: txId,
+          parsedPayer: payerNumber,
+        });
+        return res.json({ status: "unmatched", message: "Numero non associe a un marchand", txId, amount });
+      }
+
+      const merchantCountry = await storage.findMerchantCountryBySimAndCountry(
+        simNumber.merchantId,
+        simNumber.country
+      );
+
+      if (!merchantCountry || !merchantCountry.active) {
+        console.log(`[SMS] Pays ${simNumber.country} non actif pour le marchand #${simNumber.merchantId}`);
+        await storage.createSmsLog({
+          fromSim: normalizedSim,
+          smsText: sms_text,
+          parsed: false,
+          errorMessage: `Pays ${simNumber.country} inactif pour le marchand`,
+          parsedAmount: amount,
+          parsedTxId: txId,
+          parsedPayer: payerNumber,
+        });
+        return res.json({ status: "inactive", message: "Le pays n'est pas actif pour ce marchand" });
+      }
+
+      await storage.createTransaction({
+        merchantId: simNumber.merchantId,
+        country: simNumber.country,
+        txId,
+        amount,
+        payerNumber: payerNumber || null,
+        status: "confirmed",
+      });
+
+      await storage.incrementMerchantCountryBalance(merchantCountry.id, amount);
+
+      await storage.createSmsLog({
+        fromSim: normalizedSim,
+        smsText: sms_text,
+        parsed: true,
+        parsedAmount: amount,
+        parsedTxId: txId,
+        parsedPayer: payerNumber,
+      });
+
+      await storage.createApiLog({
+        merchantId: simNumber.merchantId,
+        action: "sms_payment_confirmed",
+        ip: "",
+        description: `Paiement confirme par SMS - TX: ${txId} - Montant: ${amount} F CFA - De: ${payerNumber || "inconnu"} - SIM: ${normalizedSim}`,
+      });
+
+      await reconcilePendingPayments(txId, simNumber.merchantId, amount);
+
+      console.log(`[SMS] Transaction confirmee: TX=${txId}, Montant=${amount}, Marchand=#${simNumber.merchantId}, Pays=${simNumber.country}`);
+      return res.json({ status: "processed", txId, amount, country: simNumber.country });
     } catch (err: any) {
+      console.error("[SMS] Erreur serveur:", err.message);
       res.status(500).json({ message: err.message });
     }
   });

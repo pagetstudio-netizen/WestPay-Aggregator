@@ -615,32 +615,70 @@ function NumbersPanel() {
 
 function SmsPanel() {
   const { data: smsLogs = [], isLoading } = useAdminFetch("/api/admin/sms-logs", ["/api/admin/sms-logs"]);
+  const [filter, setFilter] = useState<"all" | "parsed" | "errors">("all");
 
   if (isLoading) return <LoadingSkeleton />;
 
+  const allLogs = smsLogs as any[];
+  const filteredLogs = allLogs.filter((sms) => {
+    if (filter === "parsed") return sms.parsed;
+    if (filter === "errors") return !sms.parsed;
+    return true;
+  });
+
+  const parsedCount = allLogs.filter((s) => s.parsed).length;
+  const errorCount = allLogs.filter((s) => !s.parsed).length;
+
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold text-foreground">SMS recus</h2>
-      <ScrollArea className="h-[calc(100vh-220px)]">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <h2 className="text-lg font-semibold text-foreground" data-testid="text-sms-title">SMS recus ({allLogs.length})</h2>
+        <div className="flex items-center gap-1">
+          <Button size="sm" variant={filter === "all" ? "default" : "outline"} onClick={() => setFilter("all")} data-testid="button-filter-all">
+            Tous ({allLogs.length})
+          </Button>
+          <Button size="sm" variant={filter === "parsed" ? "default" : "outline"} onClick={() => setFilter("parsed")} data-testid="button-filter-parsed">
+            Traites ({parsedCount})
+          </Button>
+          <Button size="sm" variant={filter === "errors" ? "default" : "outline"} onClick={() => setFilter("errors")} data-testid="button-filter-errors">
+            Erreurs ({errorCount})
+          </Button>
+        </div>
+      </div>
+      <ScrollArea className="h-[calc(100vh-260px)]">
         <div className="space-y-2">
-          {(smsLogs as SmsLog[]).length === 0 ? (
-            <Card><CardContent className="p-6 text-center text-muted-foreground text-sm">Aucun SMS recu</CardContent></Card>
+          {filteredLogs.length === 0 ? (
+            <Card><CardContent className="p-6 text-center text-muted-foreground text-sm">Aucun SMS {filter === "parsed" ? "traite" : filter === "errors" ? "en erreur" : "recu"}</CardContent></Card>
           ) : (
-            (smsLogs as SmsLog[]).map((sms) => (
+            filteredLogs.map((sms: any) => (
               <Card key={sms.id}>
                 <CardContent className="p-4">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <MessageSquare className="w-4 h-4 text-primary shrink-0" />
-                        <span className="font-mono text-sm text-foreground">{sms.fromSim}</span>
-                        <Badge variant={sms.parsed ? "default" : "secondary"}>
-                          {sms.parsed ? "Traite" : "Non traite"}
-                        </Badge>
-                      </div>
-                      <p className="text-sm text-muted-foreground mt-2 break-all">{sms.smsText}</p>
-                      <p className="text-xs text-muted-foreground mt-1">{new Date(sms.createdAt).toLocaleString("fr-FR")}</p>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <MessageSquare className="w-4 h-4 text-primary shrink-0" />
+                      <span className="font-mono text-sm text-foreground">{sms.fromSim}</span>
+                      <Badge variant={sms.parsed ? "default" : "destructive"} data-testid={`badge-sms-status-${sms.id}`}>
+                        {sms.parsed ? "Traite" : "Non traite"}
+                      </Badge>
                     </div>
+                    <p className="text-sm text-muted-foreground mt-2 break-all">{sms.smsText}</p>
+                    {(sms.parsedTxId || sms.parsedAmount || sms.parsedPayer) && (
+                      <div className="flex items-center gap-3 mt-2 flex-wrap">
+                        {sms.parsedTxId && (
+                          <span className="text-xs font-mono bg-muted px-2 py-0.5 rounded text-foreground">TX: {sms.parsedTxId}</span>
+                        )}
+                        {sms.parsedAmount && (
+                          <span className="text-xs font-mono bg-muted px-2 py-0.5 rounded text-foreground">{sms.parsedAmount.toLocaleString("fr-FR")} F CFA</span>
+                        )}
+                        {sms.parsedPayer && (
+                          <span className="text-xs font-mono bg-muted px-2 py-0.5 rounded text-foreground">{sms.parsedPayer}</span>
+                        )}
+                      </div>
+                    )}
+                    {sms.errorMessage && (
+                      <p className="text-xs text-destructive mt-2" data-testid={`text-sms-error-${sms.id}`}>{sms.errorMessage}</p>
+                    )}
+                    <p className="text-xs text-muted-foreground mt-1">{new Date(sms.createdAt).toLocaleString("fr-FR")}</p>
                   </div>
                 </CardContent>
               </Card>
