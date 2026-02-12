@@ -60,8 +60,14 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  const { pool } = await import("./db");
+  const { pool, runMigrations } = await import("./db");
   const { seedDatabase } = await import("./seed");
+
+  try {
+    await runMigrations();
+  } catch (err) {
+    console.log("Migration skipped:", (err as any).message);
+  }
 
   try {
     await seedDatabase();
