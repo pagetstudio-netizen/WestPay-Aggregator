@@ -118,8 +118,9 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
               Introduction
             </h2>
             <p className="text-muted-foreground leading-relaxed">
-              L'API WestPay permet d'integrer les paiements Mobile Money dans vos applications.
-              Chaque marchand dispose de cles API uniques par pays pour authentifier les requetes.
+              WestPay gere les paiements Mobile Money pour vos utilisateurs via une page de paiement securisee.
+              Redirigez simplement vos clients vers WestPay, et ils seront renvoyes sur votre site apres le paiement.
+              L'API ci-dessous vous permet de consulter vos transactions et soldes.
             </p>
             <Card>
               <CardContent className="p-4">
@@ -308,8 +309,8 @@ X-API-KEY: <VOTRE_CLE_API>`}
               Verification de transaction (Page de paiement)
             </h2>
             <p className="text-muted-foreground">
-              WestPay fournit une page de paiement integree accessible a <code className="text-foreground bg-muted px-1 rounded">/pay/VOTRE_SLUG</code>.
-              Cette page permet a vos utilisateurs de voir les numeros de paiement et de soumettre l'ID de transaction pour verification.
+              WestPay fournit une page de paiement securisee. Redirigez simplement vos utilisateurs vers cette page avec le montant et le pays.
+              Apres le paiement, l'utilisateur est automatiquement renvoye sur votre site avec les informations de la transaction.
             </p>
 
             <Card>
@@ -319,12 +320,11 @@ X-API-KEY: <VOTRE_CLE_API>`}
                   <div>
                     <p className="text-sm font-semibold text-foreground">Flux de paiement</p>
                     <ol className="text-sm text-muted-foreground mt-2 space-y-1 list-decimal pl-4">
-                      <li>Redirigez votre utilisateur vers <code className="bg-muted px-1 rounded">/pay/votre-slug?amount=5000</code></li>
+                      <li>Redirigez votre utilisateur vers <code className="bg-muted px-1 rounded">/pay?merchant=votre-slug&amount=5000&country=Togo&redirect=https://votresite.com/merci</code></li>
                       <li>Le montant est affiche et verrouille (non modifiable par l'utilisateur)</li>
-                      <li>L'utilisateur entre son numero de telephone et envoie le paiement</li>
+                      <li>L'utilisateur choisit sa methode de paiement et effectue le transfert</li>
                       <li>L'utilisateur soumet l'ID de transaction (TX) recu par SMS</li>
-                      <li>WestPay verifie l'ID contre les SMS recus par le telephone Android</li>
-                      <li>Si verifie, la transaction est confirmee et le solde du marchand est credite</li>
+                      <li>WestPay enregistre le paiement et redirige l'utilisateur vers votre site avec les parametres <code className="bg-muted px-1 rounded">?status=success&amount=5000&tx_id=TRF123</code></li>
                     </ol>
                   </div>
                 </div>
@@ -353,36 +353,6 @@ X-API-KEY: <VOTRE_CLE_API>`}
               auth={false}
             />
 
-            <EndpointDoc
-              method="POST"
-              path="/api/verify-transaction"
-              description="Verifie si un ID de transaction (TX) soumis par un utilisateur correspond a une transaction recue par SMS. Utilise par la page de paiement et peut etre integre directement dans votre application."
-              requestBody={`{
-  "txId": "TX12345",
-  "merchantSlug": "ecomat",
-  "payerPhone": "+22898123456",
-  "amount": 5000
-}`}
-              responseBody={`// Succes
-{
-  "verified": true,
-  "transaction": {
-    "txId": "TX12345",
-    "amount": 5000,
-    "country": "Togo",
-    "status": "confirmed",
-    "createdAt": "2026-01-15T10:30:00Z"
-  },
-  "message": "Transaction verifiee avec succes."
-}
-
-// Echec
-{
-  "verified": false,
-  "message": "Transaction non trouvee. Veuillez patienter..."
-}`}
-              auth={false}
-            />
           </section>
 
           <Separator />
@@ -472,41 +442,24 @@ const transactions = await txRes.json();`}
               </CardContent>
             </Card>
 
-            <p className="text-sm font-semibold text-foreground mt-4">Verification de transaction (pour vos utilisateurs)</p>
+            <p className="text-sm font-semibold text-foreground mt-4">Rediriger vos utilisateurs vers la page de paiement</p>
             <Card>
               <CardContent className="p-4">
                 <pre className="text-sm font-mono text-foreground overflow-x-auto whitespace-pre-wrap">
-{`// Option 1 : Rediriger l'utilisateur avec le montant verrouille
+{`// Rediriger l'utilisateur vers la page de paiement WestPay
 const montant = 5000; // Montant en F CFA
-window.location.href = \`https://westpay.example.com/pay/ecomat?amount=\${montant}\`;
-// Le montant sera affiche mais non modifiable par l'utilisateur
+const pays = "Togo";
+const retour = "https://votresite.com/merci"; // URL de retour
 
-// Option 2 : Integrer la verification dans votre application
-async function verifierTransaction(txId, payerPhone) {
-  const res = await fetch("https://westpay.example.com/api/verify-transaction", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      txId: txId,              // L'ID soumis par l'utilisateur
-      merchantSlug: "ecomat",  // Votre slug marchand
-      payerPhone: payerPhone,  // Numero de l'utilisateur
-      amount: 5000             // Montant attendu (optionnel)
-    })
-  });
+window.location.href = \`https://westpay.replit.app/pay?merchant=ecomat&amount=\${montant}&country=\${pays}&redirect=\${encodeURIComponent(retour)}\`;
 
-  const result = await res.json();
+// Apres le paiement, l'utilisateur sera redirige vers :
+// https://votresite.com/merci?status=success&amount=5000&tx_id=TRF123456
 
-  if (result.verified) {
-    // Transaction confirmee !
-    console.log("Montant:", result.transaction.amount, "F CFA");
-    console.log("Pays:", result.transaction.country);
-    // Creditez le compte de votre utilisateur ici
-  } else {
-    // Transaction non trouvee ou en attente
-    console.log("Message:", result.message);
-    // Demandez a l'utilisateur de reessayer
-  }
-}`}
+// Parametres retournes :
+// - status : "success" (paiement enregistre)
+// - amount : le montant paye
+// - tx_id  : l'identifiant de la transaction`}
                 </pre>
               </CardContent>
             </Card>
