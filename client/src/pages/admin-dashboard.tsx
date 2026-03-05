@@ -29,9 +29,9 @@ import {
   Check, ChevronsUpDown, ArrowUpRight
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
-import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer } from "@shared/schema";
+import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal } from "@shared/schema";
 
-type AdminTab = "overview" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "virements" | "settings";
+type AdminTab = "overview" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "virements" | "reversements" | "settings";
 
 function useAdminFetch(url: string, key: string[]) {
   const { token } = useAuth();
@@ -748,6 +748,26 @@ function MerchantsPanel() {
                       <Eye className="w-3 h-3" />Détails
                     </Button>
                     <TelegramDialog merchant={merchant} token={token || ""} />
+                    <Select
+                      value={(merchant as any).withdrawalMode || "manual"}
+                      onValueChange={async (mode) => {
+                        await fetch(`/api/admin/merchants/${merchant.id}/withdrawal-mode`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                          body: JSON.stringify({ mode }),
+                        });
+                        queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-xs w-28" data-testid={`select-withdrawal-mode-${merchant.id}`}>
+                        <Download className="w-3 h-3 mr-1" />
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="manual">Manuel</SelectItem>
+                        <SelectItem value="auto">Auto</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -2046,6 +2066,183 @@ function AdminWalletTransfersPanel() {
   );
 }
 
+function AdminWithdrawalsPanel() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const { data: wdList = [], isLoading } = useAdminFetch("/api/admin/withdrawals", ["/api/admin/withdrawals"]);
+
+  const [noteDialogOpen, setNoteDialogOpen] = useState(false);
+  const [selectedWd, setSelectedWd] = useState<(Withdrawal & { merchantName: string }) | null>(null);
+  const [wdAction, setWdAction] = useState<"approve" | "reject">("approve");
+  const [note, setNote] = useState("");
+
+  const actionMutation = useMutation({
+    mutationFn: async ({ id, action, note: n }: { id: number; action: "approve" | "reject"; note: string }) => {
+      const res = await fetch(`/api/admin/withdrawals/${id}/${action}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ note: n }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawals"] });
+      toast({ title: vars.action === "approve" ? "Reversement approuve" : "Reversement rejete (solde restitue)" });
+      setNoteDialogOpen(false);
+      setNote("");
+      setSelectedWd(null);
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const openAction = (wd: Withdrawal & { merchantName: string }, action: "approve" | "reject") => {
+    setSelectedWd(wd);
+    setWdAction(action);
+    setNote("");
+    setNoteDialogOpen(true);
+  };
+
+  const statusBadge = (status: string) => {
+    if (status === "pending") return <Badge variant="secondary" className="gap-1"><Clock className="w-3 h-3" />En attente</Badge>;
+    if (status === "approved") return <Badge className="bg-green-500 gap-1"><CheckCircle className="w-3 h-3" />Approuve</Badge>;
+    return <Badge variant="destructive" className="gap-1"><XCircle className="w-3 h-3" />Rejete</Badge>;
+  };
+
+  const allWd = (wdList as (Withdrawal & { merchantName: string })[]);
+  const pending = allWd.filter(w => w.status === "pending");
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold text-foreground">Reversements (Retraits Marchands)</h2>
+
+      {pending.length > 0 && (
+        <Card className="border-orange-200 dark:border-orange-800">
+          <CardHeader>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-base text-orange-600 dark:text-orange-400">Demandes en attente</CardTitle>
+              <Badge variant="secondary">{pending.length}</Badge>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {pending.map((wd) => (
+                <div key={wd.id} className="p-3 rounded border bg-muted/30 space-y-2" data-testid={`withdrawal-pending-${wd.id}`}>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <span className="font-medium text-sm">{wd.merchantName}</span>
+                      <span className="text-muted-foreground text-xs ml-2">#{wd.id}</span>
+                      <Badge variant="outline" className="ml-2 text-xs">{wd.withdrawalMode === "auto" ? "Auto" : "Manuel"}</Badge>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1"
+                        onClick={() => openAction(wd, "approve")} data-testid={`button-approve-wd-${wd.id}`}>
+                        <CheckCircle className="w-3 h-3" />Approuver
+                      </Button>
+                      <Button size="sm" variant="destructive" className="gap-1"
+                        onClick={() => openAction(wd, "reject")} data-testid={`button-reject-wd-${wd.id}`}>
+                        <XCircle className="w-3 h-3" />Rejeter
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">{wd.amount.toLocaleString("fr-FR")} FCFA</span>
+                    <span>Pays : {wd.country}</span>
+                    <span>Tel : {wd.phone}</span>
+                    <span>{new Date(wd.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-base">Tous les reversements</CardTitle>
+            <Badge variant="secondary">{allWd.length}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="space-y-2"><Skeleton className="h-12 w-full" /><Skeleton className="h-12 w-full" /></div>
+          ) : allWd.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">Aucun reversement</p>
+          ) : (
+            <ScrollArea className="max-h-[500px]">
+              <div className="space-y-2">
+                {allWd.map((wd) => (
+                  <div key={wd.id} className="p-3 rounded border bg-muted/20 text-sm" data-testid={`withdrawal-row-${wd.id}`}>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">{wd.amount.toLocaleString("fr-FR")} FCFA</span>
+                        <span className="text-muted-foreground">— {wd.country}</span>
+                        <span className="text-muted-foreground text-xs">({wd.merchantName})</span>
+                      </div>
+                      {statusBadge(wd.status)}
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-xs text-muted-foreground">
+                      <span>Tel : {wd.phone}</span>
+                      <Badge variant="outline" className="text-xs py-0">{wd.withdrawalMode === "auto" ? "Auto" : "Manuel"}</Badge>
+                      <span>{new Date(wd.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                    </div>
+                    {wd.adminNote && <p className="text-xs italic text-muted-foreground mt-0.5">Note : {wd.adminNote}</p>}
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={noteDialogOpen} onOpenChange={setNoteDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{wdAction === "approve" ? "Approuver le reversement" : "Rejeter le reversement"}</DialogTitle>
+          </DialogHeader>
+          {selectedWd && (
+            <div className="space-y-4">
+              <div className="p-3 rounded bg-muted text-sm space-y-1">
+                <p><span className="text-muted-foreground">Marchand :</span> <span className="font-medium">{selectedWd.merchantName}</span></p>
+                <p><span className="text-muted-foreground">Montant :</span> <span className="font-semibold">{selectedWd.amount.toLocaleString("fr-FR")} FCFA</span></p>
+                <p><span className="text-muted-foreground">Pays :</span> {selectedWd.country}</p>
+                <p><span className="text-muted-foreground">Numéro :</span> {selectedWd.phone}</p>
+              </div>
+              {wdAction === "reject" && (
+                <p className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-950 p-2 rounded">Le solde sera restitué au marchand en cas de rejet.</p>
+              )}
+              <div className="space-y-2">
+                <Label>Note (optionnelle)</Label>
+                <Input
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder={wdAction === "approve" ? "Ex: Paiement effectué" : "Ex: Informations insuffisantes"}
+                  data-testid="input-wd-note"
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => setNoteDialogOpen(false)}>Annuler</Button>
+                <Button
+                  onClick={() => actionMutation.mutate({ id: selectedWd.id, action: wdAction, note })}
+                  disabled={actionMutation.isPending}
+                  className={wdAction === "approve" ? "bg-green-600 hover:bg-green-700 text-white" : ""}
+                  variant={wdAction === "reject" ? "destructive" : "default"}
+                  data-testid="button-confirm-wd-action"
+                >
+                  {actionMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                  {wdAction === "approve" ? "Confirmer l'approbation" : "Confirmer le rejet"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 function SettingsPanel() {
   const { user, logout } = useAuth();
   const [, setLocation] = useLocation();
@@ -2417,6 +2614,7 @@ export default function AdminDashboard() {
     { title: "API & PIN", icon: Key, tab: "apikeys" },
     { title: "Paiement", icon: Zap, tab: "omnipay" },
     { title: "Virements", icon: ArrowUpRight, tab: "virements" },
+    { title: "Reversements", icon: Download, tab: "reversements" },
     { title: "Parametres", icon: Settings, tab: "settings" },
   ];
 
@@ -2484,6 +2682,7 @@ export default function AdminDashboard() {
             {activeTab === "apikeys" && <ApiKeysManagementPanel />}
             {activeTab === "omnipay" && <OmniPayPanel />}
             {activeTab === "virements" && <AdminWalletTransfersPanel />}
+            {activeTab === "reversements" && <AdminWithdrawalsPanel />}
             {activeTab === "settings" && <SettingsPanel />}
           </main>
         </div>

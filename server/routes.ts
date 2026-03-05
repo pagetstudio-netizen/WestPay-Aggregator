@@ -2091,5 +2091,95 @@ export async function registerRoutes(
     }
   });
 
+  // ─── Reversements (Withdrawals) ──────────────────────────────────────────
+
+  app.get("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const list = await storage.getWithdrawals(merchantId);
+      res.json(list);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const { merchantCountryId, amount, phone } = req.body;
+      if (!merchantCountryId || !amount || !phone) return res.status(400).json({ message: "Champs requis manquants" });
+      const mc = await storage.getMerchantCountryById(Number(merchantCountryId));
+      if (!mc || mc.merchantId !== merchantId) return res.status(403).json({ message: "Wallet introuvable" });
+      if (amount <= 0) return res.status(400).json({ message: "Montant invalide" });
+      if (mc.balance < amount) return res.status(400).json({ message: "Solde insuffisant" });
+      const merchant = await storage.getMerchantById(merchantId);
+      if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
+      const w = await storage.createWithdrawal({
+        merchantId,
+        merchantCountryId: mc.id,
+        country: mc.country,
+        amount,
+        phone,
+        status: "pending",
+        withdrawalMode: merchant.withdrawalMode || "manual",
+        adminNote: null,
+      });
+      await storage.decrementMerchantCountryBalance(mc.id, amount);
+      res.json(w);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/withdrawals", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const list = await storage.getWithdrawals();
+      res.json(list);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/admin/withdrawals/:id/approve", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { note } = req.body;
+      const w = await storage.getWithdrawalById(id);
+      if (!w) return res.status(404).json({ message: "Reversement introuvable" });
+      if (w.status !== "pending") return res.status(400).json({ message: "Reversement deja traite" });
+      await storage.updateWithdrawalStatus(id, "approved", note);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/admin/withdrawals/:id/reject", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { note } = req.body;
+      const w = await storage.getWithdrawalById(id);
+      if (!w) return res.status(404).json({ message: "Reversement introuvable" });
+      if (w.status !== "pending") return res.status(400).json({ message: "Reversement deja traite" });
+      await storage.updateWithdrawalStatus(id, "rejected", note);
+      await storage.incrementMerchantCountryBalance(w.merchantCountryId, w.amount);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.patch("/api/admin/merchants/:id/withdrawal-mode", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { mode } = req.body;
+      if (!["auto", "manual"].includes(mode)) return res.status(400).json({ message: "Mode invalide" });
+      await storage.updateMerchant(id, { withdrawalMode: mode });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   return httpServer;
 }

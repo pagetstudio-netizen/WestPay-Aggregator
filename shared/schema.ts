@@ -22,6 +22,7 @@ export const merchants = pgTable("merchants", {
   webhookSecret: text("webhook_secret"),
   telegramChatId: text("telegram_chat_id"),
   telegramBotLanguage: text("telegram_bot_language").default("fr").notNull(),
+  withdrawalMode: text("withdrawal_mode").default("manual").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -157,6 +158,20 @@ export const paymentLinks = pgTable("payment_links", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const withdrawals = pgTable("withdrawals", {
+  id: serial("id").primaryKey(),
+  merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),
+  merchantCountryId: integer("merchant_country_id").notNull(),
+  country: text("country").notNull(),
+  amount: integer("amount").notNull(),
+  phone: text("phone").notNull(),
+  status: text("status").notNull().default("pending"),
+  withdrawalMode: text("withdrawal_mode").notNull().default("manual"),
+  adminNote: text("admin_note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  processedAt: timestamp("processed_at"),
+});
+
 export const walletTransferCountries = pgTable("wallet_transfer_countries", {
   id: serial("id").primaryKey(),
   country: text("country").notNull().unique(),
@@ -239,3 +254,7 @@ export type InsertWalletTransfer = z.infer<typeof insertWalletTransferSchema>;
 export const insertWalletTransferCountrySchema = createInsertSchema(walletTransferCountries).omit({ id: true, createdAt: true });
 export type WalletTransferCountry = typeof walletTransferCountries.$inferSelect;
 export type InsertWalletTransferCountry = z.infer<typeof insertWalletTransferCountrySchema>;
+
+export const insertWithdrawalSchema = createInsertSchema(withdrawals).omit({ id: true, createdAt: true, processedAt: true });
+export type Withdrawal = typeof withdrawals.$inferSelect;
+export type InsertWithdrawal = z.infer<typeof insertWithdrawalSchema>;

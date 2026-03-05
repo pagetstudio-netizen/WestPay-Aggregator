@@ -27,9 +27,9 @@ import {
   Trash2, Plus, ToggleLeft, ToggleRight, Edit3, BarChart3, MessageCircle, Phone
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
-import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry } from "@shared/schema";
+import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry, Withdrawal } from "@shared/schema";
 
-type MerchantTab = "overview" | "transactions" | "apikeys" | "webhook" | "transfers" | "settings" | "paymentlinks";
+type MerchantTab = "overview" | "transactions" | "apikeys" | "webhook" | "transfers" | "reversements" | "settings" | "paymentlinks";
 
 function useMerchantFetch(url: string, key: string[], token: string | null) {
   return useQuery({
@@ -803,6 +803,171 @@ function TransfersPanel({ token }: { token: string | null }) {
   );
 }
 
+function WithdrawalsPanel({ token }: { token: string | null }) {
+  const { toast } = useToast();
+  const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
+  const { data: withdrawalList = [], isLoading: wdLoading } = useMerchantFetch("/api/merchant/withdrawals", ["/api/merchant/withdrawals"], token);
+
+  const [selectedWalletId, setSelectedWalletId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [phone, setPhone] = useState("");
+
+  const activeWallets = (balance as MerchantCountry[]).filter(w => w.active);
+  const selectedWallet = activeWallets.find(w => String(w.id) === selectedWalletId);
+
+  const createMutation = useMutation({
+    mutationFn: async (data: { merchantCountryId: number; amount: number; phone: string }) => {
+      const res = await fetch("/api/merchant/withdrawals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/withdrawals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/balance"] });
+      setAmount("");
+      setPhone("");
+      toast({ title: "Demande de reversement soumise", description: "Votre demande est en cours de traitement." });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const handleSubmit = (e: { preventDefault: () => void }) => {
+    e.preventDefault();
+    if (!selectedWalletId || !amount || !phone) return;
+    const amountNum = parseInt(amount);
+    if (isNaN(amountNum) || amountNum <= 0) return;
+    if (selectedWallet && amountNum > selectedWallet.balance) {
+      toast({ title: "Solde insuffisant", description: `Solde disponible : ${selectedWallet.balance.toLocaleString("fr-FR")} FCFA`, variant: "destructive" });
+      return;
+    }
+    createMutation.mutate({ merchantCountryId: Number(selectedWalletId), amount: amountNum, phone });
+  };
+
+  const statusBadge = (status: string) => {
+    if (status === "pending") return <Badge variant="secondary" className="gap-1"><Clock className="w-3 h-3" />En attente</Badge>;
+    if (status === "approved") return <Badge className="bg-green-500 gap-1"><CheckCircle2 className="w-3 h-3" />Approuve</Badge>;
+    return <Badge variant="destructive" className="gap-1"><XCircle className="w-3 h-3" />Rejete</Badge>;
+  };
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold text-foreground">Reversements (Retraits)</h2>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {balLoading ? (
+          [1,2,3].map(i => <Skeleton key={i} className="h-20 w-full" />)
+        ) : activeWallets.map((w) => (
+          <Card key={w.id} className={`border-2 ${String(w.id) === selectedWalletId ? "border-primary" : "border-border"} cursor-pointer hover:border-primary/60 transition-colors`}
+            onClick={() => setSelectedWalletId(String(w.id))} data-testid={`wallet-card-${w.id}`}>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-medium text-foreground">{w.country}</span>
+                {String(w.id) === selectedWalletId && <CheckCircle2 className="w-4 h-4 text-primary" />}
+              </div>
+              <p className="text-xl font-bold text-foreground">{w.balance.toLocaleString("fr-FR")} <span className="text-sm font-normal text-muted-foreground">FCFA</span></p>
+              {w.balance === 0 && <p className="text-xs text-muted-foreground mt-0.5">Solde vide</p>}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base flex items-center gap-2"><Download className="w-4 h-4" />Nouvelle demande de reversement</CardTitle></CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Wallet (pays)</Label>
+              <Select value={selectedWalletId} onValueChange={setSelectedWalletId}>
+                <SelectTrigger data-testid="select-withdrawal-wallet">
+                  <SelectValue placeholder="Sélectionner un wallet..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {activeWallets.map(w => (
+                    <SelectItem key={w.id} value={String(w.id)}>
+                      {w.country} — {w.balance.toLocaleString("fr-FR")} FCFA
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Montant à retirer (FCFA)</Label>
+              <Input
+                type="number"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="Ex: 50000"
+                min="1"
+                max={selectedWallet?.balance}
+                data-testid="input-withdrawal-amount"
+              />
+              {selectedWallet && (
+                <p className="text-xs text-muted-foreground">Solde disponible : <span className="font-semibold text-foreground">{selectedWallet.balance.toLocaleString("fr-FR")} FCFA</span></p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>Numéro Mobile Money de réception</Label>
+              <Input
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="Ex: +22507XXXXXXXX"
+                data-testid="input-withdrawal-phone"
+              />
+              <p className="text-xs text-muted-foreground">Le retrait doit être effectué via le système de paiement du pays du wallet sélectionné.</p>
+            </div>
+            <Button type="submit" disabled={createMutation.isPending || !selectedWalletId || !amount || !phone} data-testid="button-submit-withdrawal">
+              {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Download className="w-4 h-4 mr-2" />}
+              Soumettre la demande
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">Historique des reversements</CardTitle>
+            <Badge variant="secondary">{(withdrawalList as Withdrawal[]).length}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {wdLoading ? (
+            <div className="space-y-2"><Skeleton className="h-12 w-full" /><Skeleton className="h-12 w-full" /></div>
+          ) : (withdrawalList as Withdrawal[]).length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">Aucune demande de reversement</p>
+          ) : (
+            <ScrollArea className="max-h-96">
+              <div className="space-y-2">
+                {(withdrawalList as Withdrawal[]).map((w) => (
+                  <div key={w.id} className="p-3 rounded border bg-muted/30" data-testid={`withdrawal-row-${w.id}`}>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm">{w.amount.toLocaleString("fr-FR")} FCFA</span>
+                        <span className="text-muted-foreground text-xs">— {w.country}</span>
+                      </div>
+                      {statusBadge(w.status)}
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-xs text-muted-foreground">
+                      <span><Phone className="w-3 h-3 inline mr-1" />{w.phone}</span>
+                      <span>{new Date(w.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                      <Badge variant="outline" className="text-xs py-0">{w.withdrawalMode === "auto" ? "Auto" : "Manuel"}</Badge>
+                    </div>
+                    {w.adminNote && <p className="text-xs text-muted-foreground mt-1 italic">Note : {w.adminNote}</p>}
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function WalletTransfersPanel({ token }: { token: string | null }) {
   const { toast } = useToast();
   const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
@@ -852,7 +1017,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: { preventDefault: () => void }) => {
     e.preventDefault();
     if (!fromCountryId || !toCountryId || !amount) {
       toast({ title: "Erreur", description: "Tous les champs sont requis", variant: "destructive" });
@@ -1349,6 +1514,7 @@ export default function MerchantDashboard() {
     { title: "Vue d'ensemble", icon: Wallet, tab: "overview" },
     { title: "Transactions", icon: ArrowRightLeft, tab: "transactions" },
     ...(hasOmnipay ? [{ title: "Transferts", icon: Send, tab: "transfers" as MerchantTab }] : []),
+    { title: "Reversements", icon: Download, tab: "reversements" },
     { title: "Liens de paiement", icon: Link, tab: "paymentlinks" },
     { title: "Cles API", icon: Key, tab: "apikeys" },
     { title: "Webhook", icon: Webhook, tab: "webhook" },
@@ -1413,7 +1579,7 @@ export default function MerchantDashboard() {
             {activeTab === "overview" && <OverviewPanel token={token} />}
             {activeTab === "transactions" && <MerchantTransactionsPanel token={token} />}
             {activeTab === "transfers" && <TransfersPanel token={token} />}
-
+            {activeTab === "reversements" && <WithdrawalsPanel token={token} />}
             {activeTab === "paymentlinks" && <PaymentLinksPanel token={token} />}
             {activeTab === "apikeys" && <ApiKeysPanel token={token} />}
             {activeTab === "webhook" && <WebhookPanel token={token} />}

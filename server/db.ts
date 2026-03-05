@@ -228,6 +228,22 @@ export async function runMigrations() {
       processed_at timestamp
     )`);
 
+    await client.query(`ALTER TABLE merchants ADD COLUMN IF NOT EXISTS withdrawal_mode text NOT NULL DEFAULT 'manual'`);
+
+    await client.query(`CREATE TABLE IF NOT EXISTS withdrawals (
+      id serial PRIMARY KEY,
+      merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+      merchant_country_id integer NOT NULL,
+      country text NOT NULL,
+      amount integer NOT NULL,
+      phone text NOT NULL,
+      status text NOT NULL DEFAULT 'pending',
+      withdrawal_mode text NOT NULL DEFAULT 'manual',
+      admin_note text,
+      created_at timestamp DEFAULT now() NOT NULL,
+      processed_at timestamp
+    )`);
+
     console.log("[DB] Migrations appliquees avec succes");
   } catch (err) {
     console.error("[DB] Erreur migration:", err);

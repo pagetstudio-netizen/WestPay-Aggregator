@@ -1,7 +1,7 @@
 import {
   admins, merchants, merchantCountries, transactions, smsLogs, numbers, settings, loginLogs,
   merchantPins, apiLogs, pendingPayments, webhookLogs, telegramActivationCodes, paymentLinks,
-  walletTransfers, walletTransferCountries,
+  walletTransfers, walletTransferCountries, withdrawals,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
@@ -12,6 +12,7 @@ import {
   type TelegramActivationCode, type PaymentLink, type InsertPaymentLink,
   type WalletTransfer, type InsertWalletTransfer,
   type WalletTransferCountry, type InsertWalletTransferCountry,
+  type Withdrawal, type InsertWithdrawal,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and } from "drizzle-orm";
@@ -110,6 +111,12 @@ export interface IStorage {
   createWalletTransferCountry(data: InsertWalletTransferCountry): Promise<WalletTransferCountry>;
   toggleWalletTransferCountry(id: number, active: boolean): Promise<void>;
   deleteWalletTransferCountry(id: number): Promise<void>;
+
+  createWithdrawal(data: InsertWithdrawal): Promise<Withdrawal>;
+  getWithdrawals(merchantId?: number): Promise<(Withdrawal & { merchantName: string })[]>;
+  getWithdrawalById(id: number): Promise<Withdrawal | undefined>;
+  updateWithdrawalStatus(id: number, status: string, adminNote?: string): Promise<void>;
+  applyWithdrawal(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -565,6 +572,55 @@ export class DatabaseStorage implements IStorage {
 
   async deleteWalletTransferCountry(id: number): Promise<void> {
     await db.delete(walletTransferCountries).where(eq(walletTransferCountries.id, id));
+  }
+
+  async createWithdrawal(data: InsertWithdrawal): Promise<Withdrawal> {
+    const [created] = await db.insert(withdrawals).values(data).returning();
+    return created;
+  }
+
+  async getWithdrawals(merchantId?: number): Promise<(Withdrawal & { merchantName: string })[]> {
+    const rows = await db
+      .select({
+        id: withdrawals.id,
+        merchantId: withdrawals.merchantId,
+        merchantCountryId: withdrawals.merchantCountryId,
+        country: withdrawals.country,
+        amount: withdrawals.amount,
+        phone: withdrawals.phone,
+        status: withdrawals.status,
+        withdrawalMode: withdrawals.withdrawalMode,
+        adminNote: withdrawals.adminNote,
+        createdAt: withdrawals.createdAt,
+        processedAt: withdrawals.processedAt,
+        merchantName: merchants.name,
+      })
+      .from(withdrawals)
+      .leftJoin(merchants, eq(withdrawals.merchantId, merchants.id))
+      .where(merchantId ? eq(withdrawals.merchantId, merchantId) : sql`1=1`)
+      .orderBy(desc(withdrawals.createdAt));
+    return rows.map(r => ({ ...r, merchantName: r.merchantName || "" }));
+  }
+
+  async getWithdrawalById(id: number): Promise<Withdrawal | undefined> {
+    const [row] = await db.select().from(withdrawals).where(eq(withdrawals.id, id));
+    return row;
+  }
+
+  async updateWithdrawalStatus(id: number, status: string, adminNote?: string): Promise<void> {
+    await db.update(withdrawals).set({
+      status,
+      adminNote: adminNote || null,
+      processedAt: new Date(),
+    }).where(eq(withdrawals.id, id));
+  }
+
+  async applyWithdrawal(id: number): Promise<void> {
+    const w = await this.getWithdrawalById(id);
+    if (!w) throw new Error("Reversement introuvable");
+    await db.update(merchantCountries)
+      .set({ balance: sql`${merchantCountries.balance} - ${w.amount}` })
+      .where(eq(merchantCountries.id, w.merchantCountryId));
   }
 }
 
