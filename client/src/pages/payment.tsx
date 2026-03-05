@@ -1,13 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Copy, ChevronLeft, ChevronRight, Check, Phone, ExternalLink } from "lucide-react";
-
-type PaymentNumber = {
-  id: number;
-  phoneNumber: string;
-  country: string;
-  operator: string | null;
-};
+import { Loader2, ChevronRight, Check, Phone, ExternalLink } from "lucide-react";
 
 type MerchantInfo = {
   name: string;
@@ -57,8 +50,6 @@ export default function PaymentPage() {
 
   const [step, setStep] = useState(omnipayStatusParam === "complete" ? 3 : 1);
   const [merchantInfo, setMerchantInfo] = useState<MerchantInfo | null>(null);
-  const [paymentNumbers, setPaymentNumbers] = useState<PaymentNumber[]>([]);
-  const [omnipayCountries, setOmnipayCountries] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -66,21 +57,15 @@ export default function PaymentPage() {
   const [payerName, setPayerName] = useState("");
   const [selectedCountry, setSelectedCountry] = useState(countryParam);
   const [selectedMethod, setSelectedMethod] = useState("");
-  const [txId, setTxId] = useState("");
   const [paymentId, setPaymentId] = useState<number | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isValidating, setIsValidating] = useState(false);
   const [redirectCountdown, setRedirectCountdown] = useState(5);
-  const [copied, setCopied] = useState(false);
 
-  const [isOmnipay, setIsOmnipay] = useState(false);
   const [omnipayPaymentUrl, setOmnipayPaymentUrl] = useState<string | null>(null);
   const [omnipayReference, setOmnipayReference] = useState<string | null>(null);
   const [omnipayPolling, setOmnipayPolling] = useState(false);
   const [omnipayFees, setOmnipayFees] = useState(0);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const isOmnipayCountry = omnipayCountries.includes(selectedCountry);
 
   useEffect(() => {
     if (!merchantSlug) {
@@ -101,8 +86,6 @@ export default function PaymentPage() {
       }
       const data = await res.json();
       setMerchantInfo(data.merchant);
-      setPaymentNumbers(data.numbers);
-      setOmnipayCountries(data.omnipayCountries || []);
 
       if (countryParam) {
         const match = data.merchant.countries.find(
@@ -119,15 +102,6 @@ export default function PaymentPage() {
       setIsLoading(false);
     }
   };
-
-  const filteredNumbers = paymentNumbers.filter(
-    (n) => n.country.toLowerCase() === selectedCountry.toLowerCase() &&
-      (!selectedMethod || (n.operator && n.operator.toLowerCase() === selectedMethod.toLowerCase()))
-  );
-
-  const displayNumber = filteredNumbers.length > 0
-    ? filteredNumbers[0]
-    : paymentNumbers.find((n) => n.country.toLowerCase() === selectedCountry.toLowerCase()) || null;
 
   const availableMethods = PAYMENT_METHODS[selectedCountry] || [];
 
@@ -174,10 +148,14 @@ export default function PaymentPage() {
       toast({ title: "Veuillez choisir une methode de paiement", variant: "destructive" });
       return;
     }
+    if (!payerName.trim()) {
+      toast({ title: "Veuillez entrer votre nom complet", variant: "destructive" });
+      return;
+    }
 
     setIsSubmitting(true);
     try {
-      const nameParts = (payerName.trim() || "Client WestPay").split(" ");
+      const nameParts = payerName.trim().split(" ");
       const firstName = nameParts[0] || "Client";
       const lastName = nameParts.slice(1).join(" ") || "WestPay";
 
@@ -189,7 +167,7 @@ export default function PaymentPage() {
           country: selectedCountry,
           amount,
           payerPhone: payerPhone.trim(),
-          payerName: payerName.trim() || null,
+          payerName: payerName.trim(),
           paymentMethod: selectedMethod,
           redirectUrl: redirectUrl || null,
           firstName,
@@ -201,50 +179,20 @@ export default function PaymentPage() {
       if (!res.ok) throw new Error(data.message);
 
       setPaymentId(data.paymentId);
+      setOmnipayReference(data.omnipayReference);
+      setOmnipayFees(data.fees || 0);
 
-      if (data.omnipay) {
-        setIsOmnipay(true);
-        setOmnipayReference(data.omnipayReference);
-        setOmnipayFees(data.fees || 0);
-
-        if (data.paymentUrl) {
-          setOmnipayPaymentUrl(data.paymentUrl);
-          setStep(2);
-        } else {
-          setStep(2);
-          startOmnipayPolling(data.paymentId);
-        }
-      } else {
-        setIsOmnipay(false);
+      if (data.paymentUrl) {
+        setOmnipayPaymentUrl(data.paymentUrl);
         setStep(2);
+      } else {
+        setStep(2);
+        startOmnipayPolling(data.paymentId);
       }
     } catch (err: any) {
       toast({ title: "Erreur", description: err.message, variant: "destructive" });
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const handleStep2Next = async () => {
-    if (!txId.trim()) {
-      toast({ title: "Veuillez saisir l'ID de transaction", variant: "destructive" });
-      return;
-    }
-
-    setIsValidating(true);
-    try {
-      const res = await fetch("/api/payment/validate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentId, txId: txId.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
-      setStep(3);
-    } catch (err: any) {
-      toast({ title: "Erreur", description: err.message, variant: "destructive" });
-    } finally {
-      setIsValidating(false);
     }
   };
 
@@ -266,7 +214,7 @@ export default function PaymentPage() {
               const url = new URL(redirectUrl);
               url.searchParams.set("status", "success");
               url.searchParams.set("amount", String(amount));
-              url.searchParams.set("tx_id", txId.trim() || omnipayReference || "");
+              url.searchParams.set("ref", omnipayReference || "");
               window.location.href = url.toString();
             } catch {
               window.location.href = redirectUrl;
@@ -279,28 +227,6 @@ export default function PaymentPage() {
     }, 1000);
     return () => clearInterval(timer);
   }, [step]);
-
-  const copyNumber = async (number: string) => {
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(number);
-      } else {
-        const textArea = document.createElement("textarea");
-        textArea.value = number;
-        textArea.style.position = "fixed";
-        textArea.style.left = "-9999px";
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textArea);
-      }
-      setCopied(true);
-      toast({ title: "Numero copie !" });
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toast({ title: "Impossible de copier", description: "Copiez manuellement le numero", variant: "destructive" });
-    }
-  };
 
   const formatAmount = (val: number) => val.toLocaleString("fr-FR");
 
@@ -328,7 +254,7 @@ export default function PaymentPage() {
     );
   }
 
-  const stepLabels = ["Informations", "Paiement", "Confirmation"];
+  const stepLabels = ["Informations", "Validation", "Confirmation"];
 
   return (
     <div className="min-h-screen payment-page-root" style={{ background: "#00b050" }}>
@@ -405,14 +331,6 @@ export default function PaymentPage() {
         .pay-btn-green:hover:not(:disabled) {
           background-color: #009a45;
         }
-        .pay-btn-green-sm {
-          background-color: #00b050;
-          color: #ffffff;
-          padding: 0.375rem 1rem;
-        }
-        .pay-btn-green-sm:hover:not(:disabled) {
-          background-color: #009a45;
-        }
         @keyframes pulse-ring {
           0% { transform: scale(0.95); opacity: 1; }
           50% { transform: scale(1.05); opacity: 0.7; }
@@ -425,7 +343,7 @@ export default function PaymentPage() {
       <div className="max-w-lg mx-auto px-4 py-6">
         <div className="mb-4">
           <h1 className="text-white font-bold text-lg" data-testid="text-brand">WestPay</h1>
-          <p className="text-white/80 text-sm">Assistant de paiement</p>
+          <p className="text-white/80 text-sm">Paiement securise</p>
         </div>
 
         <div className="mb-4">
@@ -433,11 +351,6 @@ export default function PaymentPage() {
           <p className="text-white font-bold text-4xl" data-testid="text-pay-amount">
             {formatAmount(amount)}<span className="text-lg ml-2">XOF</span>
           </p>
-          {isOmnipayCountry && step === 1 && (
-            <span className="inline-block mt-1 px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: "rgba(255,255,255,0.2)", color: "#fff" }}>
-              Paiement automatique via OmniPay
-            </span>
-          )}
         </div>
 
         <div className="bg-white rounded-md p-6 payment-card">
@@ -502,7 +415,7 @@ export default function PaymentPage() {
             <div className="space-y-4" data-testid="step-1-content">
               <div>
                 <label className="block text-sm font-medium mb-1" style={{ color: "#374151" }}>
-                  Entrez votre compte bancaire mobile:
+                  Numero de telephone mobile:
                 </label>
                 <div className="flex items-center border rounded-md overflow-hidden" style={{ borderColor: "#d1d5db" }}>
                   <span className="px-3 py-2 text-sm font-semibold" style={{ color: "#00b050", backgroundColor: "#f9fafb" }}>
@@ -522,7 +435,7 @@ export default function PaymentPage() {
 
               <div>
                 <label className="block text-sm font-medium mb-1" style={{ color: "#374151" }}>
-                  Nom complet {isOmnipayCountry ? "" : "(optionnel)"}:
+                  Nom complet:
                 </label>
                 <input
                   type="text"
@@ -552,7 +465,7 @@ export default function PaymentPage() {
 
               <div>
                 <label className="block text-sm font-medium mb-2" style={{ color: "#374151" }}>
-                  Choisissez la methode de transfert:
+                  Methode de paiement:
                 </label>
                 <div className="space-y-2" role="radiogroup" aria-label="Methode de paiement">
                   {availableMethods.map((method) => {
@@ -591,38 +504,29 @@ export default function PaymentPage() {
                 )}
               </div>
 
-              {isOmnipayCountry ? (
-                <div
-                  className="p-3 rounded-md text-sm"
-                  style={{ backgroundColor: "#dbeafe", color: "#1e40af" }}
-                >
-                  Le paiement sera traite automatiquement. Vous recevrez une demande de validation sur votre telephone.
-                </div>
-              ) : (
-                <div
-                  className="p-3 rounded-md text-sm"
-                  style={{ backgroundColor: "#dcfce7", color: "#166534" }}
-                >
-                  Veuillez selectionner la meme option que votre methode de transfert.
-                </div>
-              )}
+              <div
+                className="p-3 rounded-md text-sm"
+                style={{ backgroundColor: "#dbeafe", color: "#1e40af" }}
+              >
+                Vous recevrez une demande de validation sur votre telephone. Assurez-vous que votre numero est correct.
+              </div>
 
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   type="button"
                   onClick={handleStep1Next}
-                  disabled={isSubmitting || !payerPhone.trim() || !selectedMethod}
-                  className="pay-btn pay-btn-primary"
+                  disabled={isSubmitting || !payerPhone.trim() || !selectedMethod || !payerName.trim()}
+                  className="pay-btn pay-btn-green"
                   data-testid="button-step1-next"
                 >
                   {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  {isOmnipayCountry ? "Payer maintenant" : "Suivant"} <ChevronRight className="w-4 h-4" />
+                  Payer maintenant <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
             </div>
           )}
 
-          {step === 2 && isOmnipay && (
+          {step === 2 && (
             <div className="space-y-4" data-testid="step-2-omnipay-content">
               {omnipayPaymentUrl ? (
                 <>
@@ -708,97 +612,7 @@ export default function PaymentPage() {
                   className="pay-btn pay-btn-primary"
                   data-testid="button-step2-prev"
                 >
-                  <ChevronLeft className="w-4 h-4" /> Retour
-                </button>
-              </div>
-            </div>
-          )}
-
-          {step === 2 && !isOmnipay && (
-            <div className="space-y-4" data-testid="step-2-content">
-              <div
-                className="p-3 rounded-md text-center text-sm font-medium"
-                style={{ backgroundColor: "#fef3c7", color: "#92400e" }}
-              >
-                Virez {formatAmount(amount)} XOF sur le compte suivant :
-              </div>
-
-              <div>
-                <p className="text-sm mb-1" style={{ color: "#6b7280" }}>Numero de compte :</p>
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <p className="text-3xl font-bold font-mono" style={{ color: "#111827" }} data-testid="text-account-number">
-                    {displayNumber ? displayNumber.phoneNumber : "---"}
-                  </p>
-                  {displayNumber && (
-                    <button
-                      type="button"
-                      onClick={() => copyNumber(displayNumber.phoneNumber)}
-                      className="pay-btn pay-btn-green-sm"
-                      style={{ backgroundColor: copied ? "#16a34a" : undefined }}
-                      data-testid="button-copy-number"
-                    >
-                      {copied ? <><Check className="w-4 h-4" /> Copie !</> : <><Copy className="w-4 h-4" /> Copier</>}
-                    </button>
-                  )}
-                </div>
-                {displayNumber?.operator && (
-                  <p className="text-xs mt-1" style={{ color: "#6b7280" }}>{displayNumber.operator} - {displayNumber.country}</p>
-                )}
-              </div>
-
-              {displayNumber && (
-                <button
-                  type="button"
-                  className="pay-btn pay-btn-green w-full"
-                  onClick={() => {
-                    const code = dialCode.replace("+", "");
-                    window.location.href = `tel:${code}${displayNumber.phoneNumber}`;
-                  }}
-                  data-testid="button-go-pay"
-                >
-                  <Phone className="w-4 h-4" /> Allez payer
-                </button>
-              )}
-
-              <div
-                className="p-3 rounded-md text-sm"
-                style={{ backgroundColor: "#dcfce7", color: "#166534" }}
-              >
-                Une fois le transfert termine, veuillez saisir l'ID de transfert :
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1" style={{ color: "#374151" }}>
-                  Entrer l'ID de transfert :
-                </label>
-                <input
-                  type="text"
-                  value={txId}
-                  onChange={(e) => setTxId(e.target.value.toUpperCase())}
-                  placeholder="Ex: TRF123456789"
-                  className="w-full py-2 px-3 text-sm border rounded-md outline-none"
-                  data-testid="input-tx-id"
-                />
-              </div>
-
-              <div className="flex items-center justify-between gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setStep(1)}
-                  className="pay-btn pay-btn-primary"
-                  data-testid="button-step2-prev"
-                >
-                  <ChevronLeft className="w-4 h-4" /> Precedent
-                </button>
-                <button
-                  type="button"
-                  onClick={handleStep2Next}
-                  disabled={isValidating || !txId.trim()}
-                  className="pay-btn pay-btn-primary"
-                  data-testid="button-step2-next"
-                >
-                  {isValidating ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  Suivant <ChevronRight className="w-4 h-4" />
+                  Retour
                 </button>
               </div>
             </div>
@@ -814,14 +628,14 @@ export default function PaymentPage() {
               </div>
 
               <h2 className="text-lg font-bold" style={{ color: "#111827" }}>
-                Merci !
+                Paiement confirme !
               </h2>
               <p className="text-sm" style={{ color: "#4b5563" }}>
-                Votre paiement de <strong>{formatAmount(amount)} XOF</strong> a bien ete {isOmnipay ? "confirme" : "enregistre"}.
+                Votre paiement de <strong>{formatAmount(amount)} XOF</strong> a ete confirme avec succes.
               </p>
-              {(txId || omnipayReference) && (
+              {omnipayReference && (
                 <p className="text-xs" style={{ color: "#6b7280" }}>
-                  {isOmnipay ? "Reference" : "ID de transaction"} : <span className="font-mono font-semibold">{txId || omnipayReference}</span>
+                  Reference : <span className="font-mono font-semibold">{omnipayReference}</span>
                 </p>
               )}
 
@@ -836,7 +650,7 @@ export default function PaymentPage() {
                         const url = new URL(redirectUrl);
                         url.searchParams.set("status", "success");
                         url.searchParams.set("amount", String(amount));
-                        url.searchParams.set("tx_id", txId.trim() || omnipayReference || "");
+                        url.searchParams.set("ref", omnipayReference || "");
                         return url.toString();
                       } catch {
                         return redirectUrl;

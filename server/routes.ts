@@ -194,7 +194,7 @@ export async function registerRoutes(
       const { merchantId, country } = req.body;
       if (!merchantId || !country) return res.status(400).json({ message: "Marchand et pays requis" });
       const apiKey = generateSecureApiKey(country);
-      const mc = await storage.addMerchantCountry({ merchantId, country, apiKey, balance: 0, active: true });
+      const mc = await storage.addMerchantCountry({ merchantId, country, apiKey, balance: 0, active: true, omnipayEnabled: true });
 
       await storage.createApiLog({
         merchantId,
@@ -685,28 +685,12 @@ export async function registerRoutes(
       const countries = await storage.getMerchantCountries(merchant.id);
       const activeCountries = countries.filter(c => c.active);
 
-      const allNumbers = await storage.getNumbers();
-      const merchantNumbers = allNumbers.filter(
-        n => n.merchantId === merchant.id && n.status === "active"
-      );
-
-      const omnipayCountries = activeCountries
-        .filter(c => c.omnipayEnabled)
-        .map(c => c.country);
-
       res.json({
         merchant: {
           name: merchant.name,
           slug: merchant.slug,
           countries: activeCountries.map(c => c.country),
         },
-        numbers: merchantNumbers.map(n => ({
-          id: n.id,
-          phoneNumber: n.phoneNumber,
-          country: n.country,
-          operator: n.operator,
-        })),
-        omnipayCountries,
       });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -739,15 +723,16 @@ export async function registerRoutes(
 
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
-      if (merchantCountry.omnipayEnabled) {
-        const omnipayApiKey = await getOmnipayApiKey();
-        if (!omnipayApiKey) {
-          return res.status(500).json({ message: "OmniPay non configure. Contactez l'administrateur." });
-        }
+      const omnipayApiKey = await getOmnipayApiKey();
+      if (!omnipayApiKey) {
+        return res.status(500).json({ message: "OmniPay non configure. Contactez l'administrateur." });
+      }
 
-        if (!payerPhone) {
-          return res.status(400).json({ message: "Numero de telephone requis pour le paiement OmniPay" });
-        }
+      if (!payerPhone) {
+        return res.status(400).json({ message: "Numero de telephone requis" });
+      }
+
+      {
 
         const reference = omnipayGenerateRef();
         const nameParts = (payerName || "Client WestPay").split(" ");
@@ -821,24 +806,6 @@ export async function registerRoutes(
           console.error("[OMNIPAY] Erreur initiation:", omnipayErr.message);
           return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
         }
-      } else {
-        const pending = await storage.createPendingPayment({
-          merchantId: merchant.id,
-          country,
-          amount: parsedAmount,
-          payerPhone: payerPhone || null,
-          payerName: payerName || null,
-          paymentMethod,
-          txId: null,
-          status: "pending",
-          redirectUrl: redirectUrl || null,
-          omnipayReference: null,
-          omnipayTxId: null,
-          omnipayPaymentUrl: null,
-          expiresAt,
-        });
-
-        res.json({ success: true, paymentId: pending.id, omnipay: false });
       }
     } catch (err: any) {
       res.status(500).json({ message: err.message });
