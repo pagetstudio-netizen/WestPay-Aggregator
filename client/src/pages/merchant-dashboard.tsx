@@ -24,7 +24,7 @@ import {
   Wallet, ArrowRightLeft, Key, Settings, LogOut, Loader2, Download,
   Copy, Globe, DollarSign, Hash, TrendingUp, Search, RefreshCw, BookOpen, Lock, ExternalLink,
   Webhook, Send, CheckCircle2, XCircle, Clock, ArrowUpRight, Zap, Link, QrCode,
-  Trash2, Plus, ToggleLeft, ToggleRight, Edit3, BarChart3
+  Trash2, Plus, ToggleLeft, ToggleRight, Edit3, BarChart3, MessageCircle, Phone
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { MerchantCountry, Transaction, WebhookLog, PaymentLink } from "@shared/schema";
@@ -1082,6 +1082,41 @@ function MerchantLoadingSkeleton() {
   );
 }
 
+function SupportBanner() {
+  const { data: contacts } = useQuery<{
+    telegram1: string; telegram2: string;
+    whatsapp1: string; whatsapp2: string; hours: string;
+  }>({
+    queryKey: ["/api/public/support-contacts"],
+    staleTime: 5 * 60 * 1000,
+  });
+
+  if (!contacts) return null;
+
+  return (
+    <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 flex flex-wrap items-start gap-3 text-sm" data-testid="banner-support">
+      <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 shrink-0">
+        <MessageCircle className="w-4 h-4" />
+        <span className="font-semibold">Support client</span>
+      </div>
+      <div className="flex-1 min-w-0 flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
+        <span>Si vous rencontrez un problème, contactez notre support :</span>
+        <span className="flex items-center gap-1">
+          <MessageCircle className="w-3 h-3 text-blue-500 shrink-0" />
+          Telegram : <a href={`https://t.me/${contacts.telegram1.replace("@","")}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline font-medium">{contacts.telegram1}</a>
+          {contacts.telegram2 && <><span className="mx-1">·</span><a href={`https://t.me/${contacts.telegram2.replace("@","")}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline font-medium">{contacts.telegram2}</a></>}
+          <span className="text-muted-foreground text-xs ml-1">(disponible {contacts.hours})</span>
+        </span>
+        <span className="flex items-center gap-1">
+          <Phone className="w-3 h-3 text-green-500 shrink-0" />
+          WhatsApp : <a href={`https://wa.me/${contacts.whatsapp1.replace(/\D/g,"")}`} target="_blank" rel="noopener noreferrer" className="text-green-600 hover:underline font-medium">{contacts.whatsapp1}</a>
+          {contacts.whatsapp2 && <><span className="mx-1">·</span><a href={`https://wa.me/${contacts.whatsapp2.replace(/\D/g,"")}`} target="_blank" rel="noopener noreferrer" className="text-green-600 hover:underline font-medium">{contacts.whatsapp2}</a></>}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export default function MerchantDashboard() {
   const { user, token, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
@@ -1161,7 +1196,8 @@ export default function MerchantDashboard() {
             <Badge variant="outline" className="text-xs">{user.name}</Badge>
           </header>
 
-          <main className="flex-1 overflow-auto p-4 md:p-6">
+          <main className="flex-1 overflow-auto p-4 md:p-6 space-y-4">
+            <SupportBanner />
             {activeTab === "overview" && <OverviewPanel token={token} />}
             {activeTab === "transactions" && <MerchantTransactionsPanel token={token} />}
             {activeTab === "transfers" && <TransfersPanel token={token} />}

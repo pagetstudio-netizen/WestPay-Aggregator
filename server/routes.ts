@@ -1843,5 +1843,42 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== SUPPORT CONTACTS (public) ====================
+  app.get("/api/public/support-contacts", async (_req, res) => {
+    try {
+      const [tg1, tg2, wa1, wa2, hours] = await Promise.all([
+        storage.getSetting("support_telegram_1"),
+        storage.getSetting("support_telegram_2"),
+        storage.getSetting("support_whatsapp_1"),
+        storage.getSetting("support_whatsapp_2"),
+        storage.getSetting("support_hours"),
+      ]);
+      res.json({
+        telegram1: tg1 || "@Albertrobotpay",
+        telegram2: tg2 || "@Atfchalvt",
+        whatsapp1: wa1 || "+1 (226) 484-5698",
+        whatsapp2: wa2 || "+1 (226) 484-568",
+        hours: hours || "9h GMT à 12h",
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ==================== SUPPORT CONTACTS (admin) ====================
+  app.post("/api/admin/support-contacts", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { telegram1, telegram2, whatsapp1, whatsapp2, hours } = req.body;
+      if (telegram1 !== undefined) await storage.setSetting("support_telegram_1", telegram1);
+      if (telegram2 !== undefined) await storage.setSetting("support_telegram_2", telegram2);
+      if (whatsapp1 !== undefined) await storage.setSetting("support_whatsapp_1", whatsapp1);
+      if (whatsapp2 !== undefined) await storage.setSetting("support_whatsapp_2", whatsapp2);
+      if (hours !== undefined) await storage.setSetting("support_hours", hours);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   return httpServer;
 }

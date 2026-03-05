@@ -1735,6 +1735,8 @@ function SettingsPanel() {
 
       <AdminAccountsCard token={token} currentUserId={(user as any)?.id} />
 
+      <SupportContactsCard token={token} />
+
       <Card>
         <CardContent className="p-4">
           <Button
@@ -1747,6 +1749,95 @@ function SettingsPanel() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function SupportContactsCard({ token }: { token: string | null }) {
+  const { toast } = useToast();
+  const { data: contacts, refetch } = useQuery<{
+    telegram1: string; telegram2: string;
+    whatsapp1: string; whatsapp2: string; hours: string;
+  }>({
+    queryKey: ["/api/public/support-contacts"],
+    staleTime: 0,
+  });
+
+  const [tg1, setTg1] = useState("");
+  const [tg2, setTg2] = useState("");
+  const [wa1, setWa1] = useState("");
+  const [wa2, setWa2] = useState("");
+  const [hours, setHours] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (contacts) {
+      setTg1(contacts.telegram1 || "");
+      setTg2(contacts.telegram2 || "");
+      setWa1(contacts.whatsapp1 || "");
+      setWa2(contacts.whatsapp2 || "");
+      setHours(contacts.hours || "");
+    }
+  }, [contacts]);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSaving(true);
+    try {
+      const res = await fetch("/api/admin/support-contacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ telegram1: tg1, telegram2: tg2, whatsapp1: wa1, whatsapp2: wa2, hours }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      queryClient.invalidateQueries({ queryKey: ["/api/public/support-contacts"] });
+      await refetch();
+      toast({ title: "Contacts mis à jour" });
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <MessageSquare className="w-4 h-4 text-blue-500" />
+          Contacts Support (affichés sur le dashboard marchand)
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSave} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Telegram 1</Label>
+              <Input value={tg1} onChange={(e) => setTg1(e.target.value)} placeholder="@Albertrobotpay" data-testid="input-support-tg1" />
+            </div>
+            <div className="space-y-2">
+              <Label>Telegram 2</Label>
+              <Input value={tg2} onChange={(e) => setTg2(e.target.value)} placeholder="@Atfchalvt" data-testid="input-support-tg2" />
+            </div>
+            <div className="space-y-2">
+              <Label>WhatsApp 1</Label>
+              <Input value={wa1} onChange={(e) => setWa1(e.target.value)} placeholder="+1 (226) 484-5698" data-testid="input-support-wa1" />
+            </div>
+            <div className="space-y-2">
+              <Label>WhatsApp 2</Label>
+              <Input value={wa2} onChange={(e) => setWa2(e.target.value)} placeholder="+1 (226) 484-568" data-testid="input-support-wa2" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Horaires de disponibilité</Label>
+            <Input value={hours} onChange={(e) => setHours(e.target.value)} placeholder="9h GMT à 12h" data-testid="input-support-hours" />
+          </div>
+          <Button type="submit" disabled={isSaving} data-testid="button-save-support-contacts">
+            {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+            Enregistrer
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
   );
 }
 
