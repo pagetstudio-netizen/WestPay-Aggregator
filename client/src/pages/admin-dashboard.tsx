@@ -1257,6 +1257,9 @@ function SettingsPanel() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [isChanging, setIsChanging] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
+
+  const { data: profile } = useAdminFetch("/api/admin/profile", ["/api/admin/profile"]);
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1306,6 +1309,52 @@ function SettingsPanel() {
               Modifier
             </Button>
           </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <MessageSquare className="w-4 h-4 text-blue-500" />
+            Configuration Bot Telegram
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Pour enregistrer votre groupe admin dans le bot, envoyez cette commande dans le groupe :
+          </p>
+          <div className="bg-muted rounded p-3 space-y-2">
+            <p className="text-xs text-muted-foreground font-medium">Commande à envoyer dans le groupe :</p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-sm break-all">
+                /setgroup {showApiKey ? (profile as any)?.apiKey || "..." : "••••••••••••••••"}
+              </code>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowApiKey(!showApiKey)}
+                data-testid="button-toggle-apikey"
+              >
+                {showApiKey ? <Lock className="w-4 h-4" /> : <Key className="w-4 h-4" />}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  const key = (profile as any)?.apiKey;
+                  if (key) { navigator.clipboard.writeText(`/setgroup ${key}`); toast({ title: "Commande copiée !" }); }
+                }}
+                data-testid="button-copy-apikey"
+              >
+                <Copy className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+          <div className="text-xs text-muted-foreground space-y-1">
+            <p>1️⃣ Ajoutez le bot à votre groupe Telegram admin</p>
+            <p>2️⃣ Copiez la commande ci-dessus et envoyez-la dans le groupe</p>
+            <p>3️⃣ Le bot confirmera l'enregistrement</p>
+          </div>
         </CardContent>
       </Card>
 

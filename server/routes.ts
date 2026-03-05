@@ -115,6 +115,16 @@ export async function registerRoutes(
   });
 
   // ==================== ADMIN ROUTES ====================
+  app.get("/api/admin/profile", authMiddleware("admin"), async (req, res) => {
+    try {
+      const admin = await storage.getAdminById((req as any).user.id);
+      if (!admin) return res.status(404).json({ message: "Admin non trouve" });
+      res.json({ email: admin.email, apiKey: admin.apiKey });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/admin/stats", authMiddleware("admin"), async (_req, res) => {
     try {
       const stats = await storage.getStats();
