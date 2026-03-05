@@ -154,6 +154,32 @@ export function initTelegramBot(): Telegraf | null {
 
   bot = new Telegraf(token);
 
+  // ─── Initialisation : reconstruire la liste des groupes connus ────────────
+  (async () => {
+    try {
+      const known = await getKnownGroups();
+      const toAdd: string[] = [];
+
+      const adminGroupId = await storage.getSetting("telegram_group_id");
+      if (adminGroupId && !known.includes(adminGroupId)) toAdd.push(adminGroupId);
+
+      const merchants = await storage.getMerchants();
+      for (const m of merchants) {
+        if (m.telegramChatId && !known.includes(m.telegramChatId) && !toAdd.includes(m.telegramChatId)) {
+          toAdd.push(m.telegramChatId);
+        }
+      }
+
+      if (toAdd.length > 0) {
+        const updated = [...known, ...toAdd];
+        await storage.setSetting("telegram_known_groups", JSON.stringify(updated));
+        console.log(`[TELEGRAM] Groupes connus mis a jour : ${updated.length} groupe(s)`);
+      }
+    } catch (err) {
+      console.error("[TELEGRAM] Erreur init groupes:", (err as any).message);
+    }
+  })();
+
   // ─── /start (DM uniquement - liaison compte marchand) ────────────────────
   bot.command("start", async (ctx) => {
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
