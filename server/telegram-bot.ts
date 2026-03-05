@@ -530,6 +530,54 @@ export function initTelegramBot(): Telegraf | null {
     );
   });
 
+  // ─── /connexionid (groupe admin uniquement) ───────────────────────────────
+  bot.command("connexionid", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
+
+    if (isGroup) {
+      if (!await isAdminGroup(chatId)) return;
+    }
+
+    try {
+      const platformUrl = await storage.getSetting("platform_url") || "https://westpay.replit.app";
+      const adminEmail = await storage.getSetting("admin_email_hint") || "admin@westpay.com";
+
+      await ctx.reply(
+        `🔐 *Identifiants de connexion WestPay*\n\n` +
+        `━━━━━━━━━━━━━━━━\n` +
+        `👑 *Espace Administrateur*\n` +
+        `🌐 URL : ${platformUrl}/\n` +
+        `📧 Email : \`${adminEmail}\`\n` +
+        `🔑 Mot de passe : voir votre gestionnaire de mots de passe\n\n` +
+        `━━━━━━━━━━━━━━━━\n` +
+        `🏪 *Espace Marchand*\n` +
+        `🌐 URL : ${platformUrl}/merchant/login\n` +
+        `🔑 Email + mot de passe fournis par l'admin\n\n` +
+        `━━━━━━━━━━━━━━━━\n` +
+        `⚙️ _Pour modifier l'URL de la plateforme :_\n` +
+        `\`/seturl https://votre-domaine.com\``,
+        { parse_mode: "Markdown" }
+      );
+    } catch { await ctx.reply("❌ Erreur."); }
+  });
+
+  // ─── /seturl (groupe admin uniquement) ────────────────────────────────────
+  bot.command("seturl", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
+    if (!isGroup || !await isAdminGroup(chatId)) return;
+
+    const text = ctx.message.text || "";
+    const url = text.split(" ")[1]?.trim();
+    if (!url || !url.startsWith("http")) {
+      await ctx.reply("❌ Usage : `/seturl https://votre-domaine.com`", { parse_mode: "Markdown" });
+      return;
+    }
+    await storage.setSetting("platform_url", url);
+    await ctx.reply(`✅ URL de la plateforme mise à jour :\n${url}`, { parse_mode: "Markdown" });
+  });
+
   // ─── /aide ─────────────────────────────────────────────────────────────────
   bot.command("aide", async (ctx) => {
     const chatId = String(ctx.chat.id);
@@ -550,6 +598,9 @@ export function initTelegramBot(): Telegraf | null {
           `/solde — Soldes détaillés de tous les marchands\n\n` +
           `📢 *Diffusion*\n` +
           `/broadcast MESSAGE — Envoyer un message dans tous les groupes\n\n` +
+          `🔐 *Utilitaires*\n` +
+          `/connexionid — Rappel des URLs et identifiants admin\n` +
+          `/seturl URL — Définir l'URL de la plateforme\n\n` +
           `━━━━━━━━━━━━━━━━\n` +
           `💡 *Configurer un groupe marchand :*\n` +
           `1️⃣ Générer un code dans le dashboard WestPay\n` +
