@@ -11,6 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -23,7 +25,8 @@ import {
   Trash2, Ban, CheckCircle, XCircle, Copy, Shield, Loader2, Download,
   MessageSquare, Key, DollarSign, Hash, Calendar, Search,
   RefreshCw, Lock, BookOpen, FileText, Webhook, Zap, ToggleLeft, ToggleRight, Link2,
-  Link, BarChart3, TrendingUp, Eye, ToggleLeft as Toggle, ExternalLink, Filter
+  Link, BarChart3, TrendingUp, Eye, ToggleLeft as Toggle, ExternalLink, Filter,
+  Check, ChevronsUpDown
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink } from "@shared/schema";
@@ -792,6 +795,8 @@ function CountriesPanel() {
   const [merchantId, setMerchantId] = useState("");
   const [country, setCountry] = useState("");
   const [showAdd, setShowAdd] = useState(false);
+  const [openMerchantCombo, setOpenMerchantCombo] = useState(false);
+  const [filterSearch, setFilterSearch] = useState("");
 
   const { data: merchants = [] } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
   const { data: countries = [], isLoading } = useAdminFetch("/api/admin/countries", ["/api/admin/countries"]);
@@ -850,12 +855,19 @@ function CountriesPanel() {
   if (isLoading) return <LoadingSkeleton />;
 
   const availableCountries = ["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Gabon"];
+  const selectedMerchantName = (merchants as Merchant[]).find(m => m.id.toString() === merchantId)?.name;
+  const filteredCountries = filterSearch.trim()
+    ? (countries as any[]).filter((mc: any) =>
+        mc.country.toLowerCase().includes(filterSearch.toLowerCase()) ||
+        (mc.merchantName || "").toLowerCase().includes(filterSearch.toLowerCase())
+      )
+    : (countries as any[]);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-lg font-semibold text-foreground">Pays & API Keys</h2>
-        <Dialog open={showAdd} onOpenChange={setShowAdd}>
+        <Dialog open={showAdd} onOpenChange={(o) => { setShowAdd(o); if (!o) { setMerchantId(""); setCountry(""); setOpenMerchantCombo(false); } }}>
           <DialogTrigger asChild>
             <Button data-testid="button-add-country"><Plus className="w-4 h-4 mr-2" />Ajouter un pays</Button>
           </DialogTrigger>
@@ -864,19 +876,47 @@ function CountriesPanel() {
             <form onSubmit={(e) => { e.preventDefault(); addCountryMutation.mutate(); }} className="space-y-4">
               <div className="space-y-2">
                 <Label>Marchand</Label>
-                <Select value={merchantId} onValueChange={setMerchantId}>
-                  <SelectTrigger data-testid="select-merchant-country"><SelectValue placeholder="Selectionner" /></SelectTrigger>
-                  <SelectContent>
-                    {(merchants as Merchant[]).map((m) => (
-                      <SelectItem key={m.id} value={m.id.toString()}>{m.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Popover open={openMerchantCombo} onOpenChange={setOpenMerchantCombo}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={openMerchantCombo}
+                      className="w-full justify-between font-normal"
+                      data-testid="select-merchant-country"
+                    >
+                      {selectedMerchantName ?? "Rechercher un marchand..."}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-full p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Rechercher par nom..." data-testid="input-merchant-search" />
+                      <CommandList>
+                        <CommandEmpty>Aucun marchand trouvé.</CommandEmpty>
+                        <CommandGroup>
+                          {(merchants as Merchant[]).map((m) => (
+                            <CommandItem
+                              key={m.id}
+                              value={m.name}
+                              onSelect={() => { setMerchantId(m.id.toString()); setOpenMerchantCombo(false); }}
+                              data-testid={`merchant-option-${m.id}`}
+                            >
+                              <Check className={`mr-2 h-4 w-4 ${merchantId === m.id.toString() ? "opacity-100" : "opacity-0"}`} />
+                              <span>{m.name}</span>
+                              {m.suspended && <Badge variant="destructive" className="ml-auto text-xs">Suspendu</Badge>}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
               <div className="space-y-2">
                 <Label>Pays</Label>
                 <Select value={country} onValueChange={setCountry}>
-                  <SelectTrigger data-testid="select-country"><SelectValue placeholder="Selectionner" /></SelectTrigger>
+                  <SelectTrigger data-testid="select-country"><SelectValue placeholder="Selectionner un pays" /></SelectTrigger>
                   <SelectContent>
                     {availableCountries.map((c) => (
                       <SelectItem key={c} value={c}>{c}</SelectItem>
@@ -884,7 +924,7 @@ function CountriesPanel() {
                   </SelectContent>
                 </Select>
               </div>
-              <Button type="submit" className="w-full" disabled={addCountryMutation.isPending} data-testid="button-submit-add-country">
+              <Button type="submit" className="w-full" disabled={addCountryMutation.isPending || !merchantId || !country} data-testid="button-submit-add-country">
                 {addCountryMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                 Activer le pays
               </Button>
@@ -893,11 +933,25 @@ function CountriesPanel() {
         </Dialog>
       </div>
 
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+        <Input
+          className="pl-9"
+          placeholder="Filtrer par marchand ou pays..."
+          value={filterSearch}
+          onChange={(e) => setFilterSearch(e.target.value)}
+          data-testid="input-filter-countries"
+        />
+      </div>
+
       <div className="space-y-3">
+        {filteredCountries.length === 0 && filterSearch && (
+          <Card><CardContent className="p-6 text-center text-muted-foreground text-sm">Aucun résultat pour « {filterSearch} »</CardContent></Card>
+        )}
         {(countries as any[]).length === 0 ? (
           <Card><CardContent className="p-6 text-center text-muted-foreground text-sm">Aucun pays configure</CardContent></Card>
         ) : (
-          (countries as any[]).map((mc: any) => (
+          filteredCountries.map((mc: any) => (
             <Card key={mc.id}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
