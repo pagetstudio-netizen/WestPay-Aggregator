@@ -743,11 +743,26 @@ export function initTelegramBot(): Telegraf | null {
     }
   });
 
-  bot.launch().catch((err) => {
-    console.error("[TELEGRAM] Erreur demarrage bot:", err.message);
-  });
+  const launchBot = async (attempt = 1): Promise<void> => {
+    try {
+      await bot!.launch({ dropPendingUpdates: true, allowedUpdates: [] });
+      console.log("[TELEGRAM] Bot connecte et actif (polling)");
+    } catch (err: any) {
+      if (err.message?.includes("409") && attempt <= 5) {
+        const delay = attempt * 5000;
+        console.log(`[TELEGRAM] Conflit detecte (autre instance active), retry dans ${delay / 1000}s...`);
+        setTimeout(() => launchBot(attempt + 1), delay);
+      } else if (err.message?.includes("409")) {
+        console.log("[TELEGRAM] Instance de production deja active — polling desactive sur ce serveur.");
+      } else {
+        console.error("[TELEGRAM] Erreur demarrage bot:", err.message);
+      }
+    }
+  };
 
-  console.log("[TELEGRAM] Bot demarre avec succes (polling actif)");
+  launchBot();
+
+  console.log("[TELEGRAM] Bot initialise");
 
   process.once("SIGINT", () => bot?.stop("SIGINT"));
   process.once("SIGTERM", () => bot?.stop("SIGTERM"));
