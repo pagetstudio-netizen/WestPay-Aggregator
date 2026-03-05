@@ -1757,8 +1757,8 @@ export async function registerRoutes(
 
   app.get("/api/merchant/payment-links", authMiddleware("merchant"), async (req, res) => {
     try {
-      const merchant = (req as any).merchant as Merchant;
-      const links = await storage.getPaymentLinks(merchant.id);
+      const merchantId = (req as any).user.id;
+      const links = await storage.getPaymentLinks(merchantId);
       res.json(links);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -1767,13 +1767,13 @@ export async function registerRoutes(
 
   app.post("/api/merchant/payment-links", authMiddleware("merchant"), async (req, res) => {
     try {
-      const merchant = (req as any).merchant as Merchant;
+      const merchantId = (req as any).user.id;
       const { name, amountType, amount, redirectUrl, expiresAt, paymentLimit, active } = req.body;
       if (!name || !amountType) return res.status(400).json({ message: "name et amountType requis" });
       if (amountType === "fixed" && !amount) return res.status(400).json({ message: "amount requis pour un lien fixe" });
       const uniqueId = Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
       const link = await storage.createPaymentLink({
-        merchantId: merchant.id,
+        merchantId: merchantId,
         uniqueId,
         name,
         amountType,
@@ -1791,10 +1791,10 @@ export async function registerRoutes(
 
   app.put("/api/merchant/payment-links/:id", authMiddleware("merchant"), async (req, res) => {
     try {
-      const merchant = (req as any).merchant as Merchant;
+      const merchantId = (req as any).user.id;
       const id = Number(req.params.id);
       const existing = await storage.getPaymentLinkById(id);
-      if (!existing || existing.merchantId !== merchant.id) return res.status(404).json({ message: "Lien introuvable" });
+      if (!existing || existing.merchantId !== merchantId) return res.status(404).json({ message: "Lien introuvable" });
       const { name, amountType, amount, redirectUrl, expiresAt, paymentLimit, active } = req.body;
       const updated = await storage.updatePaymentLink(id, {
         ...(name !== undefined && { name }),
@@ -1813,10 +1813,10 @@ export async function registerRoutes(
 
   app.delete("/api/merchant/payment-links/:id", authMiddleware("merchant"), async (req, res) => {
     try {
-      const merchant = (req as any).merchant as Merchant;
+      const merchantId = (req as any).user.id;
       const id = Number(req.params.id);
       const existing = await storage.getPaymentLinkById(id);
-      if (!existing || existing.merchantId !== merchant.id) return res.status(404).json({ message: "Lien introuvable" });
+      if (!existing || existing.merchantId !== merchantId) return res.status(404).json({ message: "Lien introuvable" });
       await storage.deletePaymentLink(id);
       res.json({ success: true });
     } catch (err: any) {
