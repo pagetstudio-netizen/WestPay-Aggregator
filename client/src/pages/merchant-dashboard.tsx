@@ -29,7 +29,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry, Withdrawal } from "@shared/schema";
 
-type MerchantTab = "overview" | "transactions" | "apikeys" | "webhook" | "transfers" | "reversements" | "settings" | "paymentlinks";
+type MerchantTab = "overview" | "transactions" | "apikeys" | "webhook" | "transfers" | "virements" | "reversements" | "settings" | "paymentlinks";
 
 function useMerchantFetch(url: string, key: string[], token: string | null) {
   return useQuery({
@@ -1514,6 +1514,7 @@ export default function MerchantDashboard() {
     { title: "Vue d'ensemble", icon: Wallet, tab: "overview" },
     { title: "Transactions", icon: ArrowRightLeft, tab: "transactions" },
     ...(hasOmnipay ? [{ title: "Transferts", icon: Send, tab: "transfers" as MerchantTab }] : []),
+    { title: "Virements", icon: ArrowUpRight, tab: "virements" },
     { title: "Reversements", icon: Download, tab: "reversements" },
     { title: "Liens de paiement", icon: Link, tab: "paymentlinks" },
     { title: "Cles API", icon: Key, tab: "apikeys" },
@@ -1579,6 +1580,7 @@ export default function MerchantDashboard() {
             {activeTab === "overview" && <OverviewPanel token={token} />}
             {activeTab === "transactions" && <MerchantTransactionsPanel token={token} />}
             {activeTab === "transfers" && <TransfersPanel token={token} />}
+            {activeTab === "virements" && <WalletTransfersPanel token={token} />}
             {activeTab === "reversements" && <WithdrawalsPanel token={token} />}
             {activeTab === "paymentlinks" && <PaymentLinksPanel token={token} />}
             {activeTab === "apikeys" && <ApiKeysPanel token={token} />}
