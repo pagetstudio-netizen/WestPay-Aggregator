@@ -65,6 +65,7 @@ function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
+  const [mode, setMode] = useState<"choose" | "dm" | "group">("choose");
 
   const isLinked = !!(merchant as any).telegramChatId;
 
@@ -95,84 +96,116 @@ function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
       setGeneratedCode(null);
+      setMode("choose");
       toast({ title: "Accès Telegram révoqué" });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
+  const handleGenerate = (selectedMode: "dm" | "group") => {
+    setMode(selectedMode);
+    generateMutation.mutate();
+  };
+
+  const handleClose = (v: boolean) => {
+    setOpen(v);
+    if (!v) { setGeneratedCode(null); setMode("choose"); }
+  };
+
   return (
-    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setGeneratedCode(null); }}>
+    <Dialog open={open} onOpenChange={handleClose}>
       <DialogTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          title="Gestion Telegram"
-          data-testid={`button-telegram-${merchant.id}`}
-        >
+        <Button variant="ghost" size="icon" title="Notifications Telegram" data-testid={`button-telegram-${merchant.id}`}>
           <MessageSquare className={`w-4 h-4 ${isLinked ? "text-blue-500" : "text-muted-foreground"}`} />
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Accès Telegram — {merchant.name}</DialogTitle>
+          <DialogTitle>Telegram — {merchant.name}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 pt-2">
           <div className="flex items-center gap-2">
             <Badge variant={isLinked ? "secondary" : "outline"}>
-              {isLinked ? "✅ Telegram lié" : "⬜ Non lié"}
+              {isLinked ? "✅ Notifications actives" : "⬜ Non configuré"}
             </Badge>
           </div>
 
           {isLinked ? (
             <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">Ce marchand reçoit déjà ses notifications sur Telegram.</p>
+              <p className="text-sm text-muted-foreground">
+                Ce marchand reçoit ses notifications de paiement sur Telegram (DM ou groupe dédié).
+              </p>
               <Button
                 variant="destructive"
                 className="w-full"
-                onClick={() => { if (confirm("Révoquer l'accès Telegram de ce marchand ?")) revokeMutation.mutate(); }}
+                onClick={() => { if (confirm("Supprimer la configuration Telegram de ce marchand ?")) revokeMutation.mutate(); }}
                 disabled={revokeMutation.isPending}
                 data-testid={`button-revoke-telegram-${merchant.id}`}
               >
                 {revokeMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Trash2 className="w-4 h-4 mr-2" />}
-                Révoquer l'accès
+                Supprimer la configuration
               </Button>
+            </div>
+          ) : generatedCode ? (
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <Label>Code d'activation (valide 24h)</Label>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 bg-primary/10 text-primary font-bold rounded p-3 text-center text-xl tracking-widest" data-testid={`text-telegram-code-${merchant.id}`}>
+                    {generatedCode}
+                  </code>
+                  <Button variant="outline" size="icon" onClick={() => { navigator.clipboard.writeText(generatedCode); toast({ title: "Code copié !" }); }} data-testid={`button-copy-code-${merchant.id}`}>
+                    <Copy className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+              <Separator />
+              {mode === "dm" ? (
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Le marchand doit envoyer au bot :</p>
+                  <code className="block bg-muted rounded p-2 text-sm text-center">/start {generatedCode}</code>
+                  <p className="text-xs text-muted-foreground">Le marchand ouvre une conversation avec le bot et envoie cette commande.</p>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Dans le groupe dédié, envoyer :</p>
+                  <code className="block bg-muted rounded p-2 text-sm text-center">/setmarchand {generatedCode}</code>
+                  <p className="text-xs text-muted-foreground">Ajoutez le bot au groupe du marchand, puis envoyez cette commande dans ce groupe.</p>
+                </div>
+              )}
             </div>
           ) : (
             <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Générez un code d'activation à transmettre au marchand. Il devra l'envoyer au bot Telegram en tapant :
-              </p>
-              <code className="block bg-muted rounded p-2 text-sm">/start CODE_ACTIVATION</code>
-
-              {generatedCode ? (
-                <div className="space-y-2">
-                  <Label>Code d'activation (valide 24h)</Label>
-                  <div className="flex items-center gap-2">
-                    <code className="flex-1 bg-primary/10 text-primary font-bold rounded p-2 text-center text-lg tracking-widest" data-testid={`text-telegram-code-${merchant.id}`}>
-                      {generatedCode}
-                    </code>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => { navigator.clipboard.writeText(generatedCode); toast({ title: "Code copié !" }); }}
-                      data-testid={`button-copy-code-${merchant.id}`}
-                    >
-                      <Copy className="w-4 h-4" />
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">Le marchand doit envoyer ce code au bot. Il expire dans 24h.</p>
-                </div>
-              ) : (
+              <p className="text-sm text-muted-foreground font-medium">Comment le marchand va-t-il recevoir les notifications ?</p>
+              <div className="grid grid-cols-1 gap-2">
                 <Button
-                  className="w-full"
-                  onClick={() => generateMutation.mutate()}
+                  variant="outline"
+                  className="w-full justify-start gap-3 h-auto py-3"
+                  onClick={() => handleGenerate("dm")}
                   disabled={generateMutation.isPending}
-                  data-testid={`button-generate-code-${merchant.id}`}
+                  data-testid={`button-generate-dm-${merchant.id}`}
                 >
-                  {generateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <MessageSquare className="w-4 h-4 mr-2" />}
-                  Générer un code d'activation
+                  <MessageSquare className="w-5 h-5 text-blue-500 shrink-0" />
+                  <div className="text-left">
+                    <div className="font-medium text-sm">Message personnel (DM)</div>
+                    <div className="text-xs text-muted-foreground">Le marchand configure lui-même le bot</div>
+                  </div>
                 </Button>
-              )}
+                <Button
+                  variant="outline"
+                  className="w-full justify-start gap-3 h-auto py-3"
+                  onClick={() => handleGenerate("group")}
+                  disabled={generateMutation.isPending}
+                  data-testid={`button-generate-group-${merchant.id}`}
+                >
+                  <Users className="w-5 h-5 text-green-500 shrink-0" />
+                  <div className="text-left">
+                    <div className="font-medium text-sm">Groupe dédié (configuré par admin)</div>
+                    <div className="text-xs text-muted-foreground">Vous créez un groupe et liez le bot pour lui</div>
+                  </div>
+                </Button>
+              </div>
+              {generateMutation.isPending && <div className="flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>}
             </div>
           )}
         </div>

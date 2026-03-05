@@ -96,15 +96,70 @@ export function initTelegramBot(): Telegraf | null {
   bot.command("setgroup", async (ctx) => {
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
     if (!isGroup) {
-      await ctx.reply("❌ Cette commande doit être utilisée dans un groupe.");
+      await ctx.reply("❌ Cette commande doit être utilisée dans un groupe admin.");
       return;
     }
     const chatId = String(ctx.chat.id);
     await storage.setSetting("telegram_group_id", chatId);
     await ctx.reply(
-      `✅ *Groupe enregistré !*\n\nToutes les notifications WestPay seront envoyées dans ce groupe.\n🆔 Chat ID : \`${chatId}\``,
+      `✅ *Groupe admin enregistré !*\n\nToutes les alertes globales WestPay seront envoyées dans ce groupe.\n🆔 Chat ID : \`${chatId}\``,
       { parse_mode: "Markdown" }
     );
+  });
+
+  bot.command("setmarchand", async (ctx) => {
+    const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
+    if (!isGroup) {
+      await ctx.reply("❌ Cette commande doit être utilisée dans un groupe dédié au marchand.");
+      return;
+    }
+
+    const text = ctx.message.text || "";
+    const parts = text.split(" ");
+    const code = parts[1]?.trim();
+
+    if (!code) {
+      await ctx.reply(
+        "❌ Code manquant. Utilisez : `/setmarchand CODE_ACTIVATION`\n\nLe code est généré depuis le dashboard WestPay.",
+        { parse_mode: "Markdown" }
+      );
+      return;
+    }
+
+    const ac = await storage.getTelegramActivationCode(code);
+    if (!ac) {
+      await ctx.reply("❌ Code d'activation invalide. Générez un nouveau code depuis le dashboard.");
+      return;
+    }
+    if (ac.used) {
+      await ctx.reply("❌ Ce code a déjà été utilisé. Générez un nouveau code depuis le dashboard.");
+      return;
+    }
+    if (new Date() > new Date(ac.expiresAt)) {
+      await ctx.reply("❌ Ce code a expiré. Générez un nouveau code depuis le dashboard.");
+      return;
+    }
+
+    const chatId = String(ctx.chat.id);
+    const groupTitle = (ctx.chat as any).title || "Ce groupe";
+
+    await storage.updateMerchantTelegramChatId(ac.merchantId, chatId);
+    await storage.markTelegramActivationCodeUsed(code);
+
+    const merchant = await storage.getMerchantById(ac.merchantId);
+    await ctx.reply(
+      `✅ *Groupe lié au marchand avec succès !*\n\n🏪 Marchand : *${merchant?.name}*\n📧 ${merchant?.email}\n\nLes notifications de paiement de ce marchand seront envoyées dans *${groupTitle}*.`,
+      { parse_mode: "Markdown" }
+    );
+
+    const adminGroupId = await storage.getSetting("telegram_group_id");
+    if (adminGroupId && adminGroupId !== chatId) {
+      await bot!.telegram.sendMessage(
+        adminGroupId,
+        `🔗 *Groupe marchand configuré*\n\n🏪 Marchand : *${merchant?.name}*\n👥 Groupe : ${groupTitle}\n🆔 ID : #${merchant?.id}`,
+        { parse_mode: "Markdown" }
+      ).catch(() => {});
+    }
   });
 
   bot.command("stats", async (ctx) => {
