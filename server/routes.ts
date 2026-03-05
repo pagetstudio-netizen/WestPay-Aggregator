@@ -1,6 +1,9 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { db } from "./db";
+import { admins } from "@shared/schema";
+import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
@@ -362,6 +365,43 @@ export async function registerRoutes(
     try {
       const logs = await storage.getSmsLogs();
       res.json(logs);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/admins", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const allAdmins = await db.select({ id: admins.id, email: admins.email, createdAt: admins.createdAt }).from(admins).orderBy(admins.createdAt);
+      res.json(allAdmins);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/create-admin", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { email, password } = req.body;
+      if (!email || !password) return res.status(400).json({ message: "Email et mot de passe requis" });
+      if (password.length < 6) return res.status(400).json({ message: "Mot de passe trop court (6 caractères minimum)" });
+      const existing = await storage.getAdminByEmail(email);
+      if (existing) return res.status(400).json({ message: "Un compte admin avec cet email existe déjà" });
+      const passwordHash = await bcrypt.hash(password, 10);
+      const apiKey = "WP-ADMIN-" + crypto.randomBytes(16).toString("hex").toUpperCase();
+      await storage.createAdmin({ email, passwordHash, apiKey });
+      res.json({ success: true, email });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/admin/delete-admin/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      const currentAdmin = (req as any).admin;
+      const id = Number(req.params.id);
+      if (currentAdmin.id === id) return res.status(400).json({ message: "Vous ne pouvez pas supprimer votre propre compte" });
+      await db.delete(admins).where(eq(admins.id, id));
+      res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

@@ -1679,6 +1679,8 @@ function SettingsPanel() {
         </CardContent>
       </Card>
 
+      <AdminAccountsCard token={token} currentUserId={(user as any)?.id} />
+
       <Card>
         <CardContent className="p-4">
           <Button
@@ -1691,6 +1693,109 @@ function SettingsPanel() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function AdminAccountsCard({ token, currentUserId }: { token: string | null; currentUserId: number }) {
+  const { toast } = useToast();
+  const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [showForm, setShowForm] = useState(false);
+
+  const { data: adminList = [], refetch } = useQuery<{ id: number; email: string; createdAt: string }[]>({
+    queryKey: ["/api/admin/admins"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/admins", { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error("Erreur");
+      return res.json();
+    },
+    enabled: !!token,
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/create-admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ email: newEmail, password: newPassword }),
+      });
+      if (!res.ok) throw new Error((await res.json()).message);
+      return res.json();
+    },
+    onSuccess: () => {
+      refetch();
+      setNewEmail(""); setNewPassword(""); setShowForm(false);
+      toast({ title: "Compte administrateur créé" });
+    },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/admin/delete-admin/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error((await res.json()).message);
+    },
+    onSuccess: () => { refetch(); toast({ title: "Compte supprimé" }); },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Shield className="w-4 h-4" />Comptes administrateurs
+          </CardTitle>
+          <Button size="sm" variant="outline" onClick={() => setShowForm(!showForm)} data-testid="button-toggle-create-admin">
+            <Plus className="w-3 h-3 mr-1" />Nouveau admin
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {showForm && (
+          <div className="border rounded-lg p-4 space-y-3 bg-muted/40">
+            <p className="text-sm font-medium">Créer un nouveau compte</p>
+            <div className="space-y-2">
+              <Label>Email</Label>
+              <Input type="email" placeholder="admin@exemple.com" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} data-testid="input-new-admin-email" />
+            </div>
+            <div className="space-y-2">
+              <Label>Mot de passe</Label>
+              <Input type="password" placeholder="Min. 6 caractères" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} data-testid="input-new-admin-password" />
+            </div>
+            <div className="flex gap-2">
+              <Button className="flex-1" onClick={() => createMutation.mutate()} disabled={createMutation.isPending || !newEmail || newPassword.length < 6} data-testid="button-submit-create-admin">
+                {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
+                Créer le compte
+              </Button>
+              <Button variant="outline" onClick={() => setShowForm(false)}>Annuler</Button>
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {adminList.map((admin) => (
+            <div key={admin.id} className="flex items-center justify-between gap-2 p-3 rounded-lg border bg-card" data-testid={`row-admin-${admin.id}`}>
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate" data-testid={`text-admin-email-${admin.id}`}>{admin.email}</p>
+                <p className="text-xs text-muted-foreground">Depuis le {new Date(admin.createdAt).toLocaleDateString("fr-FR")}</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {admin.id === currentUserId ? (
+                  <Badge variant="default" className="text-xs">Vous</Badge>
+                ) : (
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                    onClick={() => { if (confirm(`Supprimer le compte ${admin.email} ?`)) deleteMutation.mutate(admin.id); }}
+                    data-testid={`button-delete-admin-${admin.id}`}>
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
