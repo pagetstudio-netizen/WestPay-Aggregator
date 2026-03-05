@@ -1029,6 +1029,8 @@ function CountriesPanel() {
   const [showAdd, setShowAdd] = useState(false);
   const [openMerchantCombo, setOpenMerchantCombo] = useState(false);
   const [filterSearch, setFilterSearch] = useState("");
+  const [editingBalance, setEditingBalance] = useState<number | null>(null);
+  const [balanceInput, setBalanceInput] = useState("");
 
   const { data: merchants = [] } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
   const { data: countries = [], isLoading } = useAdminFetch("/api/admin/countries", ["/api/admin/countries"]);
@@ -1063,8 +1065,11 @@ function CountriesPanel() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/countries"] });
-      toast({ title: "Solde mis a jour" });
+      setEditingBalance(null);
+      setBalanceInput("");
+      toast({ title: "Solde mis à jour" });
     },
+    onError: () => toast({ title: "Erreur", description: "Impossible de modifier le solde", variant: "destructive" }),
   });
 
   const toggleOmnipayMutation = useMutation({
@@ -1202,9 +1207,51 @@ function CountriesPanel() {
                       </Button>
                     </div>
                   </div>
-                  <div className="text-right shrink-0 space-y-2">
-                    <p className="text-lg font-bold text-foreground">{mc.balance?.toLocaleString("fr-FR")}</p>
-                    <p className="text-xs text-muted-foreground">F CFA</p>
+                  <div className="shrink-0 space-y-2 text-right">
+                    {editingBalance === mc.id ? (
+                      <div className="flex items-center gap-1 justify-end">
+                        <Input
+                          type="number"
+                          value={balanceInput}
+                          onChange={(e) => setBalanceInput(e.target.value)}
+                          className="h-8 w-32 text-sm text-right"
+                          placeholder="Nouveau solde"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") updateBalanceMutation.mutate({ id: mc.id, balance: parseInt(balanceInput) || 0 });
+                            if (e.key === "Escape") { setEditingBalance(null); setBalanceInput(""); }
+                          }}
+                          data-testid={`input-balance-${mc.id}`}
+                        />
+                        <Button
+                          size="sm"
+                          className="h-8 px-2"
+                          disabled={updateBalanceMutation.isPending}
+                          onClick={() => updateBalanceMutation.mutate({ id: mc.id, balance: parseInt(balanceInput) || 0 })}
+                          data-testid={`button-save-balance-inline-${mc.id}`}
+                        >
+                          {updateBalanceMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 px-2"
+                          onClick={() => { setEditingBalance(null); setBalanceInput(""); }}
+                          data-testid={`button-cancel-balance-${mc.id}`}
+                        >
+                          <XCircle className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <button
+                        className="text-lg font-bold text-foreground hover:text-primary hover:underline underline-offset-2 transition-colors cursor-pointer"
+                        onClick={() => { setEditingBalance(mc.id); setBalanceInput(String(mc.balance ?? 0)); }}
+                        title="Cliquer pour modifier"
+                        data-testid={`button-balance-edit-${mc.id}`}
+                      >
+                        {mc.balance?.toLocaleString("fr-FR")} <span className="text-xs font-normal text-muted-foreground">F CFA</span>
+                      </button>
+                    )}
                     <div className="flex items-center gap-1 justify-end flex-wrap">
                       <Button
                         variant={mc.omnipayEnabled ? "default" : "outline"}
@@ -1213,20 +1260,19 @@ function CountriesPanel() {
                         disabled={toggleOmnipayMutation.isPending}
                         data-testid={`button-toggle-omnipay-${mc.id}`}
                       >
-                        {mc.omnipayEnabled ? <Zap className="w-3 h-3 mr-1" /> : <Zap className="w-3 h-3 mr-1" />}
+                        <Zap className="w-3 h-3 mr-1" />
                         {mc.omnipayEnabled ? "Paiement actif" : "Paiement inactif"}
                       </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          const amount = prompt("Nouveau solde :");
-                          if (amount) updateBalanceMutation.mutate({ id: mc.id, balance: parseInt(amount) });
-                        }}
-                        data-testid={`button-update-balance-${mc.id}`}
-                      >
-                        <DollarSign className="w-3 h-3 mr-1" />Modifier
-                      </Button>
+                      {editingBalance !== mc.id && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => { setEditingBalance(mc.id); setBalanceInput(String(mc.balance ?? 0)); }}
+                          data-testid={`button-update-balance-${mc.id}`}
+                        >
+                          <Edit3 className="w-3 h-3 mr-1" />Solde
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>
