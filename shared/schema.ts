@@ -165,11 +165,28 @@ export const withdrawals = pgTable("withdrawals", {
   country: text("country").notNull(),
   amount: integer("amount").notNull(),
   phone: text("phone").notNull(),
+  operator: text("operator"),
   status: text("status").notNull().default("pending"),
   withdrawalMode: text("withdrawal_mode").notNull().default("manual"),
   adminNote: text("admin_note"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   processedAt: timestamp("processed_at"),
+});
+
+export const withdrawalOperators = pgTable("withdrawal_operators", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  type: text("type").notNull().default("Mobile Money"),
+  country: text("country").notNull(),
+  dailyLimit: integer("daily_limit").notNull().default(1000000),
+  gateway: text("gateway").notNull().default("OmniPay"),
+  active: boolean("active").default(true).notNull(),
+  maintenanceAll: boolean("maintenance_all").default(false).notNull(),
+  maintenanceDeposits: boolean("maintenance_deposits").default(false).notNull(),
+  maintenanceWithdrawals: boolean("maintenance_withdrawals").default(false).notNull(),
+  maintenancePaymentLinks: boolean("maintenance_payment_links").default(false).notNull(),
+  maintenanceApiPayment: boolean("maintenance_api_payment").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const walletTransferCountries = pgTable("wallet_transfer_countries", {
@@ -258,3 +275,7 @@ export type InsertWalletTransferCountry = z.infer<typeof insertWalletTransferCou
 export const insertWithdrawalSchema = createInsertSchema(withdrawals).omit({ id: true, createdAt: true, processedAt: true });
 export type Withdrawal = typeof withdrawals.$inferSelect;
 export type InsertWithdrawal = z.infer<typeof insertWithdrawalSchema>;
+
+export const insertWithdrawalOperatorSchema = createInsertSchema(withdrawalOperators).omit({ id: true, createdAt: true });
+export type WithdrawalOperator = typeof withdrawalOperators.$inferSelect;
+export type InsertWithdrawalOperator = z.infer<typeof insertWithdrawalOperatorSchema>;

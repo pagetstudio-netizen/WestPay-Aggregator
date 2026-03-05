@@ -244,6 +244,57 @@ export async function runMigrations() {
       processed_at timestamp
     )`);
 
+    await client.query(`ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS operator text`);
+
+    await client.query(`CREATE TABLE IF NOT EXISTS withdrawal_operators (
+      id serial PRIMARY KEY,
+      name text NOT NULL,
+      type text NOT NULL DEFAULT 'Mobile Money',
+      country text NOT NULL,
+      daily_limit integer NOT NULL DEFAULT 1000000,
+      gateway text NOT NULL DEFAULT 'OmniPay',
+      active boolean NOT NULL DEFAULT true,
+      maintenance_all boolean NOT NULL DEFAULT false,
+      maintenance_deposits boolean NOT NULL DEFAULT false,
+      maintenance_withdrawals boolean NOT NULL DEFAULT false,
+      maintenance_payment_links boolean NOT NULL DEFAULT false,
+      maintenance_api_payment boolean NOT NULL DEFAULT false,
+      created_at timestamp DEFAULT now() NOT NULL
+    )`);
+
+    const defaultOperators = [
+      { name: "Moov Money", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "TMoney", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "MTN Mobile Money", type: "Mobile Money", country: "Benin", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "Moov Money", type: "Mobile Money", country: "Benin", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "Moov Money", type: "Mobile Money", country: "Burkina Faso", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "Orange Money", type: "Mobile Money", country: "Burkina Faso", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "MTN Mobile Money", type: "Mobile Money", country: "Cote d'Ivoire", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "Moov Money", type: "Mobile Money", country: "Cote d'Ivoire", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "Orange Money", type: "Mobile Money", country: "Cote d'Ivoire", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "Wave", type: "Mobile Money", country: "Cote d'Ivoire", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "Mixx by Yas", type: "Mobile Money", country: "Senegal", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "Orange Money", type: "Mobile Money", country: "Senegal", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "Wave", type: "Mobile Money", country: "Senegal", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "Orange Money", type: "Mobile Money", country: "Mali", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "MTN Mobile Money", type: "Mobile Money", country: "Cameroun", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "Orange Money", type: "Mobile Money", country: "Cameroun", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "MTN Mobile Money", type: "Mobile Money", country: "Congo Brazzaville", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "Airtel Money", type: "Mobile Money", country: "Gabon", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "Moov Money", type: "Mobile Money", country: "Gabon", dailyLimit: 1000000, gateway: "OmniPay" },
+    ];
+
+    for (const op of defaultOperators) {
+      await client.query(
+        `INSERT INTO withdrawal_operators (name, type, country, daily_limit, gateway)
+         SELECT $1, $2, $3, $4, $5
+         WHERE NOT EXISTS (
+           SELECT 1 FROM withdrawal_operators WHERE name = $1 AND country = $3
+         )`,
+        [op.name, op.type, op.country, op.dailyLimit, op.gateway]
+      );
+    }
+
     console.log("[DB] Migrations appliquees avec succes");
   } catch (err) {
     console.error("[DB] Erreur migration:", err);

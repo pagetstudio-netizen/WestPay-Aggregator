@@ -29,7 +29,7 @@ import {
   Check, ChevronsUpDown, ArrowUpRight
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
-import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal } from "@shared/schema";
+import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
 
 type AdminTab = "overview" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "virements" | "reversements" | "settings";
 
@@ -2066,11 +2066,202 @@ function AdminWalletTransfersPanel() {
   );
 }
 
+const COUNTRIES_LIST = [
+  "Togo", "Benin", "Burkina Faso", "Cote d'Ivoire", "Senegal", "Mali",
+  "Cameroun", "Congo Brazzaville", "Gabon", "Niger", "Guinee-Bissau",
+  "Tchad", "Centrafrique", "Guinee Equatoriale",
+];
+const OPERATOR_TYPES = ["Mobile Money", "Virement bancaire", "Carte bancaire", "Cryptomonnaie", "Autre"];
+const GATEWAYS = ["OmniPay", "WiniPayer", "MaishaPay", "Manuel"];
+
+function WithdrawalOperatorsPanel() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const { data: opList = [], isLoading: opsLoading } = useAdminFetch("/api/admin/withdrawal-operators", ["/api/admin/withdrawal-operators"]);
+
+  const [opDialogOpen, setOpDialogOpen] = useState(false);
+  const [editingOp, setEditingOp] = useState<WithdrawalOperator | null>(null);
+  const [filterCountry, setFilterCountry] = useState("all");
+
+  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "OmniPay", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false };
+  const [form, setForm] = useState(emptyForm);
+
+  const openCreate = () => { setEditingOp(null); setForm(emptyForm); setOpDialogOpen(true); };
+  const openEdit = (op: WithdrawalOperator) => {
+    setEditingOp(op);
+    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, active: op.active, maintenanceAll: op.maintenanceAll, maintenanceDeposits: op.maintenanceDeposits, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment });
+    setOpDialogOpen(true);
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const url = editingOp ? `/api/admin/withdrawal-operators/${editingOp.id}` : "/api/admin/withdrawal-operators";
+      const method = editingOp ? "PUT" : "POST";
+      const res = await fetch(url, { method, headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(form) });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawal-operators"] });
+      toast({ title: editingOp ? "Opérateur mis à jour" : "Opérateur créé" });
+      setOpDialogOpen(false);
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/admin/withdrawal-operators/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error("Erreur suppression");
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawal-operators"] }); toast({ title: "Opérateur supprimé" }); },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const toggleMaint = async (op: WithdrawalOperator, field: string, value: boolean) => {
+    await fetch(`/api/admin/withdrawal-operators/${op.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ [field]: value }),
+    });
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawal-operators"] });
+  };
+
+  const allOps = opList as WithdrawalOperator[];
+  const filtered = filterCountry === "all" ? allOps : allOps.filter(o => o.country === filterCountry);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h3 className="text-base font-semibold text-foreground">Opérateurs de retrait</h3>
+        <div className="flex items-center gap-2">
+          <Select value={filterCountry} onValueChange={setFilterCountry}>
+            <SelectTrigger className="h-8 text-xs w-40" data-testid="select-filter-country">
+              <SelectValue placeholder="Tous les pays" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Tous les pays</SelectItem>
+              {COUNTRIES_LIST.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Button size="sm" onClick={openCreate} className="gap-1" data-testid="button-add-operator">
+            <Plus className="w-3 h-3" />Ajouter
+          </Button>
+        </div>
+      </div>
+
+      {opsLoading ? (
+        <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-16 w-full" />)}</div>
+      ) : filtered.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-6">Aucun opérateur configuré.</p>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((op) => (
+            <div key={op.id} className="p-3 rounded border bg-muted/20 space-y-3" data-testid={`operator-row-${op.id}`}>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <div className="flex flex-col">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-sm">{op.name}</span>
+                      <Badge variant="outline" className="text-xs py-0">{op.type}</Badge>
+                      <Badge variant="secondary" className="text-xs py-0">{op.country}</Badge>
+                      {!op.active && <Badge variant="destructive" className="text-xs py-0">Inactif</Badge>}
+                    </div>
+                    <span className="text-xs text-muted-foreground">Passerelle : {op.gateway} · Limite : {op.dailyLimit.toLocaleString("fr-FR")} FCFA/j</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch checked={op.active} onCheckedChange={(v) => toggleMaint(op, "active", v)} data-testid={`switch-op-active-${op.id}`} />
+                  <Button size="sm" variant="ghost" onClick={() => openEdit(op)} data-testid={`button-edit-op-${op.id}`}><Eye className="w-3 h-3" /></Button>
+                  <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => deleteMutation.mutate(op.id)} data-testid={`button-delete-op-${op.id}`}><Trash2 className="w-3 h-3" /></Button>
+                </div>
+              </div>
+
+              <div className="border-t pt-2">
+                <p className="text-xs text-muted-foreground mb-2 font-medium">Maintenance (bloquer) :</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5">
+                  {[
+                    { label: "Toutes les pages", field: "maintenanceAll", val: op.maintenanceAll },
+                    { label: "Dépôts", field: "maintenanceDeposits", val: op.maintenanceDeposits },
+                    { label: "Retraits", field: "maintenanceWithdrawals", val: op.maintenanceWithdrawals },
+                    { label: "Liens de paiement", field: "maintenancePaymentLinks", val: op.maintenancePaymentLinks },
+                    { label: "API paiement", field: "maintenanceApiPayment", val: op.maintenanceApiPayment },
+                  ].map(({ label, field, val }) => (
+                    <label key={field} className="flex items-center gap-1.5 cursor-pointer">
+                      <Switch checked={val} onCheckedChange={(v) => toggleMaint(op, field, v)}
+                        className="scale-75 origin-left"
+                        data-testid={`switch-${field}-${op.id}`} />
+                      <span className={`text-xs ${val ? "text-red-500 font-medium" : "text-muted-foreground"}`}>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Dialog open={opDialogOpen} onOpenChange={setOpDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editingOp ? "Modifier l'opérateur" : "Nouvel opérateur"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Nom</Label>
+              <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Ex: Moov Money" data-testid="input-op-name" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Type</Label>
+                <Select value={form.type} onValueChange={v => setForm(f => ({ ...f, type: v }))}>
+                  <SelectTrigger data-testid="select-op-type"><SelectValue /></SelectTrigger>
+                  <SelectContent>{OPERATOR_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Pays</Label>
+                <Select value={form.country} onValueChange={v => setForm(f => ({ ...f, country: v }))}>
+                  <SelectTrigger data-testid="select-op-country"><SelectValue /></SelectTrigger>
+                  <SelectContent>{COUNTRIES_LIST.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Limite journalière (FCFA)</Label>
+              <Input type="number" value={form.dailyLimit} onChange={e => setForm(f => ({ ...f, dailyLimit: Number(e.target.value) }))} data-testid="input-op-limit" />
+            </div>
+            <div className="space-y-2">
+              <Label>Passerelle de paiement</Label>
+              <Select value={form.gateway} onValueChange={v => setForm(f => ({ ...f, gateway: v }))}>
+                <SelectTrigger data-testid="select-op-gateway"><SelectValue /></SelectTrigger>
+                <SelectContent>{GATEWAYS.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-3">
+              <Switch checked={form.active} onCheckedChange={v => setForm(f => ({ ...f, active: v }))} data-testid="switch-op-active-form" />
+              <Label>Actif</Label>
+            </div>
+            <div className="flex gap-2 justify-end pt-2">
+              <Button variant="outline" onClick={() => setOpDialogOpen(false)}>Annuler</Button>
+              <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.name || !form.country} data-testid="button-save-operator">
+                {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                {editingOp ? "Mettre à jour" : "Créer"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 function AdminWithdrawalsPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
   const { data: wdList = [], isLoading } = useAdminFetch("/api/admin/withdrawals", ["/api/admin/withdrawals"]);
 
+  const [activeSubTab, setActiveSubTab] = useState<"requests" | "operators">("requests");
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
   const [selectedWd, setSelectedWd] = useState<(Withdrawal & { merchantName: string }) | null>(null);
   const [wdAction, setWdAction] = useState<"approve" | "reject">("approve");
@@ -2114,88 +2305,112 @@ function AdminWithdrawalsPanel() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-foreground">Reversements (Retraits Marchands)</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold text-foreground">Reversements (Retraits Marchands)</h2>
+        {pending.length > 0 && <Badge className="bg-orange-500">{pending.length} en attente</Badge>}
+      </div>
 
-      {pending.length > 0 && (
-        <Card className="border-orange-200 dark:border-orange-800">
-          <CardHeader>
-            <div className="flex items-center justify-between gap-2">
-              <CardTitle className="text-base text-orange-600 dark:text-orange-400">Demandes en attente</CardTitle>
-              <Badge variant="secondary">{pending.length}</Badge>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {pending.map((wd) => (
-                <div key={wd.id} className="p-3 rounded border bg-muted/30 space-y-2" data-testid={`withdrawal-pending-${wd.id}`}>
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div>
-                      <span className="font-medium text-sm">{wd.merchantName}</span>
-                      <span className="text-muted-foreground text-xs ml-2">#{wd.id}</span>
-                      <Badge variant="outline" className="ml-2 text-xs">{wd.withdrawalMode === "auto" ? "Auto" : "Manuel"}</Badge>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1"
-                        onClick={() => openAction(wd, "approve")} data-testid={`button-approve-wd-${wd.id}`}>
-                        <CheckCircle className="w-3 h-3" />Approuver
-                      </Button>
-                      <Button size="sm" variant="destructive" className="gap-1"
-                        onClick={() => openAction(wd, "reject")} data-testid={`button-reject-wd-${wd.id}`}>
-                        <XCircle className="w-3 h-3" />Rejeter
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground">{wd.amount.toLocaleString("fr-FR")} FCFA</span>
-                    <span>Pays : {wd.country}</span>
-                    <span>Tel : {wd.phone}</span>
-                    <span>{new Date(wd.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                  </div>
+      <div className="flex gap-1 border-b">
+        <button
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeSubTab === "requests" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setActiveSubTab("requests")} data-testid="tab-wd-requests">
+          Demandes{pending.length > 0 && <Badge variant="secondary" className="ml-2 text-xs">{pending.length}</Badge>}
+        </button>
+        <button
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeSubTab === "operators" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setActiveSubTab("operators")} data-testid="tab-wd-operators">
+          Opérateurs
+        </button>
+      </div>
+
+      {activeSubTab === "operators" && <WithdrawalOperatorsPanel />}
+
+      {activeSubTab === "requests" && (
+        <div className="space-y-6">
+          {pending.length > 0 && (
+            <Card className="border-orange-200 dark:border-orange-800">
+              <CardHeader>
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="text-base text-orange-600 dark:text-orange-400">Demandes en attente</CardTitle>
+                  <Badge variant="secondary">{pending.length}</Badge>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-2">
-            <CardTitle className="text-base">Tous les reversements</CardTitle>
-            <Badge variant="secondary">{allWd.length}</Badge>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="space-y-2"><Skeleton className="h-12 w-full" /><Skeleton className="h-12 w-full" /></div>
-          ) : allWd.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">Aucun reversement</p>
-          ) : (
-            <ScrollArea className="max-h-[500px]">
-              <div className="space-y-2">
-                {allWd.map((wd) => (
-                  <div key={wd.id} className="p-3 rounded border bg-muted/20 text-sm" data-testid={`withdrawal-row-${wd.id}`}>
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">{wd.amount.toLocaleString("fr-FR")} FCFA</span>
-                        <span className="text-muted-foreground">— {wd.country}</span>
-                        <span className="text-muted-foreground text-xs">({wd.merchantName})</span>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {pending.map((wd) => (
+                    <div key={wd.id} className="p-3 rounded border bg-muted/30 space-y-2" data-testid={`withdrawal-pending-${wd.id}`}>
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div>
+                          <span className="font-medium text-sm">{wd.merchantName}</span>
+                          <span className="text-muted-foreground text-xs ml-2">#{wd.id}</span>
+                          <Badge variant="outline" className="ml-2 text-xs">{wd.withdrawalMode === "auto" ? "Auto" : "Manuel"}</Badge>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1"
+                            onClick={() => openAction(wd, "approve")} data-testid={`button-approve-wd-${wd.id}`}>
+                            <CheckCircle className="w-3 h-3" />Approuver
+                          </Button>
+                          <Button size="sm" variant="destructive" className="gap-1"
+                            onClick={() => openAction(wd, "reject")} data-testid={`button-reject-wd-${wd.id}`}>
+                            <XCircle className="w-3 h-3" />Rejeter
+                          </Button>
+                        </div>
                       </div>
-                      {statusBadge(wd.status)}
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">{wd.amount.toLocaleString("fr-FR")} FCFA</span>
+                        <span>Pays : {wd.country}</span>
+                        {(wd as any).operator && <span>Opérateur : <span className="font-medium text-foreground">{(wd as any).operator}</span></span>}
+                        <span>Tel : {wd.phone}</span>
+                        <span>{new Date(wd.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-xs text-muted-foreground">
-                      <span>Tel : {wd.phone}</span>
-                      <Badge variant="outline" className="text-xs py-0">{wd.withdrawalMode === "auto" ? "Auto" : "Manuel"}</Badge>
-                      <span>{new Date(wd.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                    </div>
-                    {wd.adminNote && <p className="text-xs italic text-muted-foreground mt-0.5">Note : {wd.adminNote}</p>}
-                  </div>
-                ))}
-              </div>
-            </ScrollArea>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
           )}
-        </CardContent>
-      </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-base">Tous les reversements</CardTitle>
+                <Badge variant="secondary">{allWd.length}</Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <div className="space-y-2"><Skeleton className="h-12 w-full" /><Skeleton className="h-12 w-full" /></div>
+              ) : allWd.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">Aucun reversement</p>
+              ) : (
+                <ScrollArea className="max-h-[500px]">
+                  <div className="space-y-2">
+                    {allWd.map((wd) => (
+                      <div key={wd.id} className="p-3 rounded border bg-muted/20 text-sm" data-testid={`withdrawal-row-${wd.id}`}>
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold">{wd.amount.toLocaleString("fr-FR")} FCFA</span>
+                            <span className="text-muted-foreground">— {wd.country}</span>
+                            <span className="text-muted-foreground text-xs">({wd.merchantName})</span>
+                          </div>
+                          {statusBadge(wd.status)}
+                        </div>
+                        <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-xs text-muted-foreground">
+                          {(wd as any).operator && <span className="font-medium text-foreground">{(wd as any).operator}</span>}
+                          <span>Tel : {wd.phone}</span>
+                          <Badge variant="outline" className="text-xs py-0">{wd.withdrawalMode === "auto" ? "Auto" : "Manuel"}</Badge>
+                          <span>{new Date(wd.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                        </div>
+                        {wd.adminNote && <p className="text-xs italic text-muted-foreground mt-0.5">Note : {wd.adminNote}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       <Dialog open={noteDialogOpen} onOpenChange={setNoteDialogOpen}>
         <DialogContent className="max-w-md">
@@ -2208,6 +2423,7 @@ function AdminWithdrawalsPanel() {
                 <p><span className="text-muted-foreground">Marchand :</span> <span className="font-medium">{selectedWd.merchantName}</span></p>
                 <p><span className="text-muted-foreground">Montant :</span> <span className="font-semibold">{selectedWd.amount.toLocaleString("fr-FR")} FCFA</span></p>
                 <p><span className="text-muted-foreground">Pays :</span> {selectedWd.country}</p>
+                {(selectedWd as any).operator && <p><span className="text-muted-foreground">Opérateur :</span> {(selectedWd as any).operator}</p>}
                 <p><span className="text-muted-foreground">Numéro :</span> {selectedWd.phone}</p>
               </div>
               {wdAction === "reject" && (

@@ -2106,7 +2106,7 @@ export async function registerRoutes(
   app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
-      const { merchantCountryId, amount, phone } = req.body;
+      const { merchantCountryId, amount, phone, operator } = req.body;
       if (!merchantCountryId || !amount || !phone) return res.status(400).json({ message: "Champs requis manquants" });
       const mc = await storage.getMerchantCountryById(Number(merchantCountryId));
       if (!mc || mc.merchantId !== merchantId) return res.status(403).json({ message: "Wallet introuvable" });
@@ -2120,12 +2120,24 @@ export async function registerRoutes(
         country: mc.country,
         amount,
         phone,
+        operator: operator || null,
         status: "pending",
         withdrawalMode: merchant.withdrawalMode || "manual",
         adminNote: null,
       });
       await storage.decrementMerchantCountryBalance(mc.id, amount);
       res.json(w);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/merchant/withdrawal-operators/:country", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const country = req.params.country;
+      const ops = await storage.getWithdrawalOperators(country, true);
+      const available = ops.filter(op => !op.maintenanceAll && !op.maintenanceWithdrawals);
+      res.json(available);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -2175,6 +2187,73 @@ export async function registerRoutes(
       const { mode } = req.body;
       if (!["auto", "manual"].includes(mode)) return res.status(400).json({ message: "Mode invalide" });
       await storage.updateMerchant(id, { withdrawalMode: mode });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── Opérateurs de reversement ──────────────────────────────────────────
+
+  app.get("/api/admin/withdrawal-operators", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const ops = await storage.getWithdrawalOperators();
+      res.json(ops);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/withdrawal-operators", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { name, type, country, dailyLimit, gateway, active } = req.body;
+      if (!name || !country) return res.status(400).json({ message: "Nom et pays requis" });
+      const op = await storage.createWithdrawalOperator({
+        name,
+        type: type || "Mobile Money",
+        country,
+        dailyLimit: dailyLimit ? Number(dailyLimit) : 1000000,
+        gateway: gateway || "OmniPay",
+        active: active !== false,
+        maintenanceAll: false,
+        maintenanceDeposits: false,
+        maintenanceWithdrawals: false,
+        maintenancePaymentLinks: false,
+        maintenanceApiPayment: false,
+      });
+      res.json(op);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/admin/withdrawal-operators/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { name, type, country, dailyLimit, gateway, active, maintenanceAll, maintenanceDeposits, maintenanceWithdrawals, maintenancePaymentLinks, maintenanceApiPayment } = req.body;
+      const updated = await storage.updateWithdrawalOperator(id, {
+        ...(name !== undefined && { name }),
+        ...(type !== undefined && { type }),
+        ...(country !== undefined && { country }),
+        ...(dailyLimit !== undefined && { dailyLimit: Number(dailyLimit) }),
+        ...(gateway !== undefined && { gateway }),
+        ...(active !== undefined && { active }),
+        ...(maintenanceAll !== undefined && { maintenanceAll }),
+        ...(maintenanceDeposits !== undefined && { maintenanceDeposits }),
+        ...(maintenanceWithdrawals !== undefined && { maintenanceWithdrawals }),
+        ...(maintenancePaymentLinks !== undefined && { maintenancePaymentLinks }),
+        ...(maintenanceApiPayment !== undefined && { maintenanceApiPayment }),
+      });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/admin/withdrawal-operators/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      await storage.deleteWithdrawalOperator(id);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });

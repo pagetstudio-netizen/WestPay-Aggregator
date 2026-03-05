@@ -803,20 +803,43 @@ function TransfersPanel({ token }: { token: string | null }) {
   );
 }
 
+type WithdrawalOperatorFE = {
+  id: number; name: string; type: string; country: string;
+  dailyLimit: number; gateway: string; active: boolean;
+  maintenanceAll: boolean; maintenanceWithdrawals: boolean;
+};
+
 function WithdrawalsPanel({ token }: { token: string | null }) {
   const { toast } = useToast();
   const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
   const { data: withdrawalList = [], isLoading: wdLoading } = useMerchantFetch("/api/merchant/withdrawals", ["/api/merchant/withdrawals"], token);
 
   const [selectedWalletId, setSelectedWalletId] = useState("");
+  const [selectedOperator, setSelectedOperator] = useState("");
   const [amount, setAmount] = useState("");
   const [phone, setPhone] = useState("");
 
   const activeWallets = (balance as MerchantCountry[]).filter(w => w.active);
   const selectedWallet = activeWallets.find(w => String(w.id) === selectedWalletId);
 
+  const { data: operatorList = [], isLoading: opsLoading } = useQuery<WithdrawalOperatorFE[]>({
+    queryKey: ["/api/merchant/withdrawal-operators", selectedWallet?.country],
+    queryFn: () =>
+      fetch(`/api/merchant/withdrawal-operators/${encodeURIComponent(selectedWallet!.country)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then(r => r.json()),
+    enabled: !!selectedWallet && !!token,
+  });
+
+  const handleWalletSelect = (walletId: string) => {
+    setSelectedWalletId(walletId);
+    setSelectedOperator("");
+    setPhone("");
+    setAmount("");
+  };
+
   const createMutation = useMutation({
-    mutationFn: async (data: { merchantCountryId: number; amount: number; phone: string }) => {
+    mutationFn: async (data: { merchantCountryId: number; amount: number; phone: string; operator: string }) => {
       const res = await fetch("/api/merchant/withdrawals", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -830,6 +853,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/balance"] });
       setAmount("");
       setPhone("");
+      setSelectedOperator("");
       toast({ title: "Demande de reversement soumise", description: "Votre demande est en cours de traitement." });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
@@ -837,14 +861,14 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
 
   const handleSubmit = (e: { preventDefault: () => void }) => {
     e.preventDefault();
-    if (!selectedWalletId || !amount || !phone) return;
+    if (!selectedWalletId || !selectedOperator || !amount || !phone) return;
     const amountNum = parseInt(amount);
     if (isNaN(amountNum) || amountNum <= 0) return;
     if (selectedWallet && amountNum > selectedWallet.balance) {
       toast({ title: "Solde insuffisant", description: `Solde disponible : ${selectedWallet.balance.toLocaleString("fr-FR")} FCFA`, variant: "destructive" });
       return;
     }
-    createMutation.mutate({ merchantCountryId: Number(selectedWalletId), amount: amountNum, phone });
+    createMutation.mutate({ merchantCountryId: Number(selectedWalletId), amount: amountNum, phone, operator: selectedOperator });
   };
 
   const statusBadge = (status: string) => {
@@ -857,73 +881,112 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-foreground">Reversements (Retraits)</h2>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {balLoading ? (
-          [1,2,3].map(i => <Skeleton key={i} className="h-20 w-full" />)
-        ) : activeWallets.map((w) => (
-          <Card key={w.id} className={`border-2 ${String(w.id) === selectedWalletId ? "border-primary" : "border-border"} cursor-pointer hover:border-primary/60 transition-colors`}
-            onClick={() => setSelectedWalletId(String(w.id))} data-testid={`wallet-card-${w.id}`}>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium text-foreground">{w.country}</span>
-                {String(w.id) === selectedWalletId && <CheckCircle2 className="w-4 h-4 text-primary" />}
-              </div>
-              <p className="text-xl font-bold text-foreground">{w.balance.toLocaleString("fr-FR")} <span className="text-sm font-normal text-muted-foreground">FCFA</span></p>
-              {w.balance === 0 && <p className="text-xs text-muted-foreground mt-0.5">Solde vide</p>}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
       <Card>
         <CardHeader><CardTitle className="text-base flex items-center gap-2"><Download className="w-4 h-4" />Nouvelle demande de reversement</CardTitle></CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label>Wallet (pays)</Label>
-              <Select value={selectedWalletId} onValueChange={setSelectedWalletId}>
-                <SelectTrigger data-testid="select-withdrawal-wallet">
-                  <SelectValue placeholder="Sélectionner un wallet..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {activeWallets.map(w => (
-                    <SelectItem key={w.id} value={String(w.id)}>
-                      {w.country} — {w.balance.toLocaleString("fr-FR")} FCFA
-                    </SelectItem>
+          <div className="space-y-6">
+
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold shrink-0">1</div>
+                <Label className="text-sm font-semibold">Choisir le wallet (pays)</Label>
+              </div>
+              {balLoading ? (
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{[1,2,3].map(i => <Skeleton key={i} className="h-16 w-full" />)}</div>
+              ) : activeWallets.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Aucun wallet actif disponible.</p>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {activeWallets.map((w) => (
+                    <div key={w.id}
+                      className={`p-3 rounded border-2 cursor-pointer transition-colors ${String(w.id) === selectedWalletId ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"}`}
+                      onClick={() => handleWalletSelect(String(w.id))}
+                      data-testid={`wallet-card-${w.id}`}>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className="text-sm font-medium">{w.country}</span>
+                        {String(w.id) === selectedWalletId && <CheckCircle2 className="w-4 h-4 text-primary" />}
+                      </div>
+                      <p className="text-lg font-bold">{w.balance.toLocaleString("fr-FR")} <span className="text-xs font-normal text-muted-foreground">FCFA</span></p>
+                    </div>
                   ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Montant à retirer (FCFA)</Label>
-              <Input
-                type="number"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="Ex: 50000"
-                min="1"
-                max={selectedWallet?.balance}
-                data-testid="input-withdrawal-amount"
-              />
-              {selectedWallet && (
-                <p className="text-xs text-muted-foreground">Solde disponible : <span className="font-semibold text-foreground">{selectedWallet.balance.toLocaleString("fr-FR")} FCFA</span></p>
+                </div>
               )}
             </div>
-            <div className="space-y-2">
-              <Label>Numéro Mobile Money de réception</Label>
-              <Input
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="Ex: +22507XXXXXXXX"
-                data-testid="input-withdrawal-phone"
-              />
-              <p className="text-xs text-muted-foreground">Le retrait doit être effectué via le système de paiement du pays du wallet sélectionné.</p>
-            </div>
-            <Button type="submit" disabled={createMutation.isPending || !selectedWalletId || !amount || !phone} data-testid="button-submit-withdrawal">
-              {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Download className="w-4 h-4 mr-2" />}
-              Soumettre la demande
-            </Button>
-          </form>
+
+            {selectedWallet && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold shrink-0">2</div>
+                  <Label className="text-sm font-semibold">Choisir l'opérateur de paiement</Label>
+                </div>
+                {opsLoading ? (
+                  <div className="grid gap-2 sm:grid-cols-2">{[1,2].map(i => <Skeleton key={i} className="h-14 w-full" />)}</div>
+                ) : operatorList.length === 0 ? (
+                  <div className="p-3 rounded border bg-amber-50 dark:bg-amber-950 text-sm text-amber-700 dark:text-amber-400">
+                    Aucun opérateur disponible pour {selectedWallet.country} pour le moment.
+                  </div>
+                ) : (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {operatorList.map((op) => (
+                      <div key={op.id}
+                        className={`p-3 rounded border-2 cursor-pointer transition-colors flex items-center gap-3 ${selectedOperator === op.name ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"}`}
+                        onClick={() => setSelectedOperator(op.name)}
+                        data-testid={`operator-card-${op.id}`}>
+                        <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center shrink-0">
+                          <Zap className="w-4 h-4 text-primary" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold truncate">{op.name}</p>
+                          <p className="text-xs text-muted-foreground">{op.type}</p>
+                        </div>
+                        {selectedOperator === op.name && <CheckCircle2 className="w-4 h-4 text-primary ml-auto shrink-0" />}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {selectedWallet && selectedOperator && (
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-6 h-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold shrink-0">3</div>
+                  <Label className="text-sm font-semibold">Saisir les informations de retrait</Label>
+                </div>
+                <div className="p-3 rounded bg-muted/40 text-sm flex flex-wrap gap-x-4 gap-y-1">
+                  <span><span className="text-muted-foreground">Wallet :</span> <span className="font-medium">{selectedWallet.country}</span></span>
+                  <span><span className="text-muted-foreground">Opérateur :</span> <span className="font-medium">{selectedOperator}</span></span>
+                  <span><span className="text-muted-foreground">Solde :</span> <span className="font-semibold">{selectedWallet.balance.toLocaleString("fr-FR")} FCFA</span></span>
+                </div>
+                <div className="space-y-2">
+                  <Label>Montant à retirer (FCFA)</Label>
+                  <Input
+                    type="number"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    placeholder="Ex: 50000"
+                    min="1"
+                    max={selectedWallet.balance}
+                    data-testid="input-withdrawal-amount"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Numéro de compte / Mobile Money</Label>
+                  <Input
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="Ex: +22507XXXXXXXX"
+                    data-testid="input-withdrawal-phone"
+                  />
+                  <p className="text-xs text-muted-foreground">Numéro {selectedOperator} sur lequel vous souhaitez recevoir le retrait.</p>
+                </div>
+                <Button type="submit" disabled={createMutation.isPending || !amount || !phone} data-testid="button-submit-withdrawal">
+                  {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Download className="w-4 h-4 mr-2" />}
+                  Soumettre la demande
+                </Button>
+              </form>
+            )}
+          </div>
         </CardContent>
       </Card>
 
@@ -948,6 +1011,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-sm">{w.amount.toLocaleString("fr-FR")} FCFA</span>
                         <span className="text-muted-foreground text-xs">— {w.country}</span>
+                        {(w as any).operator && <Badge variant="outline" className="text-xs py-0">{(w as any).operator}</Badge>}
                       </div>
                       {statusBadge(w.status)}
                     </div>

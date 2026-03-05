@@ -1,7 +1,7 @@
 import {
   admins, merchants, merchantCountries, transactions, smsLogs, numbers, settings, loginLogs,
   merchantPins, apiLogs, pendingPayments, webhookLogs, telegramActivationCodes, paymentLinks,
-  walletTransfers, walletTransferCountries, withdrawals,
+  walletTransfers, walletTransferCountries, withdrawals, withdrawalOperators,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
@@ -13,6 +13,7 @@ import {
   type WalletTransfer, type InsertWalletTransfer,
   type WalletTransferCountry, type InsertWalletTransferCountry,
   type Withdrawal, type InsertWithdrawal,
+  type WithdrawalOperator, type InsertWithdrawalOperator,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and } from "drizzle-orm";
@@ -117,6 +118,12 @@ export interface IStorage {
   getWithdrawalById(id: number): Promise<Withdrawal | undefined>;
   updateWithdrawalStatus(id: number, status: string, adminNote?: string): Promise<void>;
   applyWithdrawal(id: number): Promise<void>;
+
+  getWithdrawalOperators(country?: string, activeOnly?: boolean): Promise<WithdrawalOperator[]>;
+  getWithdrawalOperatorById(id: number): Promise<WithdrawalOperator | undefined>;
+  createWithdrawalOperator(data: InsertWithdrawalOperator): Promise<WithdrawalOperator>;
+  updateWithdrawalOperator(id: number, data: Partial<InsertWithdrawalOperator>): Promise<WithdrawalOperator>;
+  deleteWithdrawalOperator(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -621,6 +628,35 @@ export class DatabaseStorage implements IStorage {
     await db.update(merchantCountries)
       .set({ balance: sql`${merchantCountries.balance} - ${w.amount}` })
       .where(eq(merchantCountries.id, w.merchantCountryId));
+  }
+
+  async getWithdrawalOperators(country?: string, activeOnly?: boolean): Promise<WithdrawalOperator[]> {
+    const conditions = [];
+    if (country) conditions.push(eq(withdrawalOperators.country, country));
+    if (activeOnly) conditions.push(eq(withdrawalOperators.active, true));
+    if (conditions.length > 0) {
+      return db.select().from(withdrawalOperators).where(and(...conditions)).orderBy(withdrawalOperators.name);
+    }
+    return db.select().from(withdrawalOperators).orderBy(withdrawalOperators.country, withdrawalOperators.name);
+  }
+
+  async getWithdrawalOperatorById(id: number): Promise<WithdrawalOperator | undefined> {
+    const [op] = await db.select().from(withdrawalOperators).where(eq(withdrawalOperators.id, id));
+    return op;
+  }
+
+  async createWithdrawalOperator(data: InsertWithdrawalOperator): Promise<WithdrawalOperator> {
+    const [created] = await db.insert(withdrawalOperators).values(data).returning();
+    return created;
+  }
+
+  async updateWithdrawalOperator(id: number, data: Partial<InsertWithdrawalOperator>): Promise<WithdrawalOperator> {
+    const [updated] = await db.update(withdrawalOperators).set(data).where(eq(withdrawalOperators.id, id)).returning();
+    return updated;
+  }
+
+  async deleteWithdrawalOperator(id: number): Promise<void> {
+    await db.delete(withdrawalOperators).where(eq(withdrawalOperators.id, id));
   }
 }
 
