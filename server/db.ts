@@ -33,6 +33,15 @@ export async function runMigrations() {
     await client.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS omnipay_reference text`);
     await client.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS omnipay_tx_id text`);
     await client.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS omnipay_payment_url text`);
+    await client.query(`ALTER TABLE merchants ADD COLUMN IF NOT EXISTS telegram_chat_id text`);
+    await client.query(`CREATE TABLE IF NOT EXISTS telegram_activation_codes (
+      id serial PRIMARY KEY,
+      merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+      code text NOT NULL UNIQUE,
+      used boolean NOT NULL DEFAULT false,
+      expires_at timestamp NOT NULL,
+      created_at timestamp DEFAULT now() NOT NULL
+    )`);
     console.log("[DB] Migrations appliquees avec succes");
   } catch (err) {
     console.error("[DB] Erreur migration:", err);

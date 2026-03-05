@@ -61,6 +61,126 @@ function StatCard({ title, value, icon: Icon, subtitle }: { title: string; value
   );
 }
 
+function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string }) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [generatedCode, setGeneratedCode] = useState<string | null>(null);
+
+  const isLinked = !!(merchant as any).telegramChatId;
+
+  const generateMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/admin/merchant/${merchant.id}/telegram/generate-code`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Erreur");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setGeneratedCode(data.code);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const revokeMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/admin/merchant/${merchant.id}/telegram/revoke`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Erreur");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
+      setGeneratedCode(null);
+      toast({ title: "Accès Telegram révoqué" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setGeneratedCode(null); }}>
+      <DialogTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          title="Gestion Telegram"
+          data-testid={`button-telegram-${merchant.id}`}
+        >
+          <MessageSquare className={`w-4 h-4 ${isLinked ? "text-blue-500" : "text-muted-foreground"}`} />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Accès Telegram — {merchant.name}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 pt-2">
+          <div className="flex items-center gap-2">
+            <Badge variant={isLinked ? "secondary" : "outline"}>
+              {isLinked ? "✅ Telegram lié" : "⬜ Non lié"}
+            </Badge>
+          </div>
+
+          {isLinked ? (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">Ce marchand reçoit déjà ses notifications sur Telegram.</p>
+              <Button
+                variant="destructive"
+                className="w-full"
+                onClick={() => { if (confirm("Révoquer l'accès Telegram de ce marchand ?")) revokeMutation.mutate(); }}
+                disabled={revokeMutation.isPending}
+                data-testid={`button-revoke-telegram-${merchant.id}`}
+              >
+                {revokeMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Trash2 className="w-4 h-4 mr-2" />}
+                Révoquer l'accès
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Générez un code d'activation à transmettre au marchand. Il devra l'envoyer au bot Telegram en tapant :
+              </p>
+              <code className="block bg-muted rounded p-2 text-sm">/start CODE_ACTIVATION</code>
+
+              {generatedCode ? (
+                <div className="space-y-2">
+                  <Label>Code d'activation (valide 24h)</Label>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 bg-primary/10 text-primary font-bold rounded p-2 text-center text-lg tracking-widest" data-testid={`text-telegram-code-${merchant.id}`}>
+                      {generatedCode}
+                    </code>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => { navigator.clipboard.writeText(generatedCode); toast({ title: "Code copié !" }); }}
+                      data-testid={`button-copy-code-${merchant.id}`}
+                    >
+                      <Copy className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Le marchand doit envoyer ce code au bot. Il expire dans 24h.</p>
+                </div>
+              ) : (
+                <Button
+                  className="w-full"
+                  onClick={() => generateMutation.mutate()}
+                  disabled={generateMutation.isPending}
+                  data-testid={`button-generate-code-${merchant.id}`}
+                >
+                  {generateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <MessageSquare className="w-4 h-4 mr-2" />}
+                  Générer un code d'activation
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function MerchantsPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
@@ -215,6 +335,7 @@ function MerchantsPanel() {
                     )}
                   </div>
                   <div className="flex items-center gap-1">
+                    <TelegramDialog merchant={merchant} token={token || ""} />
                     <Button
                       variant="ghost"
                       size="icon"

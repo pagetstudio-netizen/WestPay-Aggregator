@@ -1,6 +1,6 @@
 import {
   admins, merchants, merchantCountries, transactions, smsLogs, numbers, settings, loginLogs,
-  merchantPins, apiLogs, pendingPayments, webhookLogs,
+  merchantPins, apiLogs, pendingPayments, webhookLogs, telegramActivationCodes,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
@@ -8,6 +8,7 @@ import {
   type MerchantPin, type InsertMerchantPin, type ApiLog, type InsertApiLog,
   type PendingPayment, type InsertPendingPayment,
   type WebhookLog, type InsertWebhookLog,
+  type TelegramActivationCode,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and } from "drizzle-orm";
@@ -77,6 +78,13 @@ export interface IStorage {
   updateMerchantCountryOmnipay(id: number, omnipayEnabled: boolean): Promise<void>;
   getPendingPaymentByOmnipayReference(reference: string): Promise<PendingPayment | undefined>;
   decrementMerchantCountryBalance(id: number, amount: number): Promise<void>;
+
+  getMerchantByTelegramChatId(chatId: string): Promise<Merchant | undefined>;
+  updateMerchantTelegramChatId(id: number, chatId: string | null): Promise<void>;
+  createTelegramActivationCode(merchantId: number, code: string, expiresAt: Date): Promise<TelegramActivationCode>;
+  getTelegramActivationCode(code: string): Promise<TelegramActivationCode | undefined>;
+  markTelegramActivationCodeUsed(code: string): Promise<void>;
+  deleteTelegramActivationCodes(merchantId: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -374,6 +382,35 @@ export class DatabaseStorage implements IStorage {
     await db.update(merchantCountries)
       .set({ balance: sql`${merchantCountries.balance} - ${amount}` })
       .where(eq(merchantCountries.id, id));
+  }
+
+  async getMerchantByTelegramChatId(chatId: string): Promise<Merchant | undefined> {
+    const [merchant] = await db.select().from(merchants).where(eq(merchants.telegramChatId, chatId));
+    return merchant;
+  }
+
+  async updateMerchantTelegramChatId(id: number, chatId: string | null): Promise<void> {
+    await db.update(merchants).set({ telegramChatId: chatId }).where(eq(merchants.id, id));
+  }
+
+  async createTelegramActivationCode(merchantId: number, code: string, expiresAt: Date): Promise<TelegramActivationCode> {
+    const [created] = await db.insert(telegramActivationCodes)
+      .values({ merchantId, code, expiresAt, used: false })
+      .returning();
+    return created;
+  }
+
+  async getTelegramActivationCode(code: string): Promise<TelegramActivationCode | undefined> {
+    const [ac] = await db.select().from(telegramActivationCodes).where(eq(telegramActivationCodes.code, code));
+    return ac;
+  }
+
+  async markTelegramActivationCodeUsed(code: string): Promise<void> {
+    await db.update(telegramActivationCodes).set({ used: true }).where(eq(telegramActivationCodes.code, code));
+  }
+
+  async deleteTelegramActivationCodes(merchantId: number): Promise<void> {
+    await db.delete(telegramActivationCodes).where(eq(telegramActivationCodes.merchantId, merchantId));
   }
 }
 

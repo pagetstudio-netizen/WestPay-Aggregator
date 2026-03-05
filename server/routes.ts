@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
+import { notifyMerchantPayment, notifyAdminGroup } from "./telegram-bot";
 import {
   initiatePayment as omnipayInitiatePayment,
   initiateTransfer as omnipayInitiateTransfer,
@@ -411,6 +412,52 @@ export async function registerRoutes(
       await storage.updateMerchantWebhook(merchantId, webhookUrl || null, webhookSecret);
 
       res.json({ success: true, webhookUrl: webhookUrl || "", webhookSecret: webhookSecret || "" });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ==================== ADMIN TELEGRAM ROUTES ====================
+  app.post("/api/admin/merchant/:id/telegram/generate-code", authMiddleware("admin"), async (req, res) => {
+    try {
+      const merchantId = parseInt(String(req.params.id));
+      const merchant = await storage.getMerchantById(merchantId);
+      if (!merchant) return res.status(404).json({ message: "Marchand non trouve" });
+
+      await storage.deleteTelegramActivationCodes(merchantId);
+
+      const code = crypto.randomBytes(4).toString("hex").toUpperCase();
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      await storage.createTelegramActivationCode(merchantId, code, expiresAt);
+
+      res.json({ success: true, code, expiresAt });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/admin/merchant/:id/telegram/revoke", authMiddleware("admin"), async (req, res) => {
+    try {
+      const merchantId = parseInt(String(req.params.id));
+      const merchant = await storage.getMerchantById(merchantId);
+      if (!merchant) return res.status(404).json({ message: "Marchand non trouve" });
+
+      await storage.updateMerchantTelegramChatId(merchantId, null);
+      await storage.deleteTelegramActivationCodes(merchantId);
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/merchant/:id/telegram/status", authMiddleware("admin"), async (req, res) => {
+    try {
+      const merchantId = parseInt(String(req.params.id));
+      const merchant = await storage.getMerchantById(merchantId);
+      if (!merchant) return res.status(404).json({ message: "Marchand non trouve" });
+
+      res.json({ linked: !!merchant.telegramChatId, chatId: merchant.telegramChatId || null });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -1017,6 +1064,18 @@ export async function registerRoutes(
                 timestamp: new Date().toISOString(),
               }).catch(err => console.error("[WEBHOOK] Erreur async:", err));
             }
+
+            notifyMerchantPayment(pending.merchantId, {
+              txId,
+              amount: pending.amount,
+              payerNumber: payload.msisdn || pending.payerPhone,
+              country: pending.country,
+              provider: "omnipay",
+            }).catch(() => {});
+
+            notifyAdminGroup(
+              `✅ *Paiement OmniPay confirmé*\n\n🏪 Marchand : *${merchant?.name || `#${pending.merchantId}`}*\n💰 Montant : *${pending.amount.toLocaleString("fr-FR")} F CFA*\n🌍 Pays : ${pending.country.toUpperCase()}\n🔖 TX : \`${txId}\``
+            ).catch(() => {});
           }
         }
 
@@ -1452,6 +1511,18 @@ export async function registerRoutes(
             timestamp: new Date().toISOString(),
           }).catch(err => console.error("[WEBHOOK] Erreur async:", err));
         }
+
+        notifyMerchantPayment(found.merchantId, {
+          txId,
+          amount,
+          payerNumber,
+          country: found.country,
+          provider: "sms",
+        }).catch(() => {});
+
+        notifyAdminGroup(
+          `✅ *Paiement SMS confirmé*\n\n🏪 Marchand : *${foundMerchant?.name || `#${found.merchantId}`}*\n💰 Montant : *${amount.toLocaleString("fr-FR")} F CFA*\n🌍 Pays : ${found.country.toUpperCase()}${payerNumber ? `\n📞 Payeur : ${payerNumber}` : ""}\n🔖 TX : \`${txId}\``
+        ).catch(() => {});
 
         console.log(`[SMS] Transaction confirmee: TX=${txId}, Montant=${amount}, Marchand=#${found.merchantId}, Pays=${found.country}`);
         return res.json({ status: "processed", txId, amount, country: found.country });
