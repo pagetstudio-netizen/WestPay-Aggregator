@@ -23,15 +23,15 @@ import {
 import {
   Users, ArrowRightLeft, Globe, Phone, Settings, LogOut, Plus,
   Trash2, Ban, CheckCircle, XCircle, Copy, Shield, Loader2, Download,
-  MessageSquare, Key, DollarSign, Hash, Calendar, Search,
+  MessageSquare, Key, DollarSign, Hash, Calendar, Search, Clock,
   RefreshCw, Lock, BookOpen, FileText, Webhook, Zap, ToggleLeft, ToggleRight, Link2,
   Link, BarChart3, TrendingUp, Eye, ToggleLeft as Toggle, ExternalLink, Filter,
-  Check, ChevronsUpDown
+  Check, ChevronsUpDown, ArrowUpRight
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
-import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink } from "@shared/schema";
+import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer } from "@shared/schema";
 
-type AdminTab = "overview" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "settings";
+type AdminTab = "overview" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "virements" | "settings";
 
 function useAdminFetch(url: string, key: string[]) {
   const { token } = useAuth();
@@ -1621,6 +1621,252 @@ function OmniPayPanel() {
   );
 }
 
+function AdminWalletTransfersPanel() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const { data: transfers = [], isLoading } = useAdminFetch("/api/admin/wallet-transfers", ["/api/admin/wallet-transfers"]);
+  const { data: feeConfig, refetch: refetchFee } = useAdminFetch("/api/admin/wallet-transfer-fee", ["/api/admin/wallet-transfer-fee"]);
+
+  const [noteDialogOpen, setNoteDialogOpen] = useState(false);
+  const [selectedTransfer, setSelectedTransfer] = useState<(WalletTransfer & { merchantName: string }) | null>(null);
+  const [noteAction, setNoteAction] = useState<"approve" | "reject">("approve");
+  const [note, setNote] = useState("");
+  const [feeType, setFeeType] = useState("percentage");
+  const [feeValue, setFeeValue] = useState("2");
+  const [savingFee, setSavingFee] = useState(false);
+
+  useEffect(() => {
+    if (feeConfig) {
+      setFeeType((feeConfig as any).feeType || "percentage");
+      setFeeValue((feeConfig as any).feeValue || "2");
+    }
+  }, [feeConfig]);
+
+  const actionMutation = useMutation({
+    mutationFn: async ({ id, action, note: n }: { id: number; action: "approve" | "reject"; note: string }) => {
+      const res = await fetch(`/api/admin/wallet-transfers/${id}/${action}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ note: n }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/wallet-transfers"] });
+      toast({ title: vars.action === "approve" ? "Virement approuve et applique" : "Virement rejete" });
+      setNoteDialogOpen(false);
+      setNote("");
+      setSelectedTransfer(null);
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const openAction = (transfer: WalletTransfer & { merchantName: string }, action: "approve" | "reject") => {
+    setSelectedTransfer(transfer);
+    setNoteAction(action);
+    setNote("");
+    setNoteDialogOpen(true);
+  };
+
+  const saveFee = async () => {
+    setSavingFee(true);
+    try {
+      const res = await fetch("/api/admin/wallet-transfer-fee", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ feeType, feeValue }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      refetchFee();
+      toast({ title: "Frais mis a jour" });
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setSavingFee(false);
+    }
+  };
+
+  const statusBadge = (status: string) => {
+    if (status === "pending") return <Badge variant="secondary" className="gap-1"><Clock className="w-3 h-3" />En attente</Badge>;
+    if (status === "approved") return <Badge className="bg-green-500 gap-1"><CheckCircle className="w-3 h-3" />Approuve</Badge>;
+    return <Badge variant="destructive" className="gap-1"><XCircle className="w-3 h-3" />Rejete</Badge>;
+  };
+
+  const allTransfers = (transfers as (WalletTransfer & { merchantName: string })[]);
+  const pending = allTransfers.filter(t => t.status === "pending");
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold text-foreground">Virements Inter-Wallets</h2>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Configuration des frais</CardTitle></CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-4 items-end">
+            <div className="space-y-2">
+              <Label>Type de frais</Label>
+              <Select value={feeType} onValueChange={setFeeType}>
+                <SelectTrigger className="w-44" data-testid="select-fee-type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="percentage">Pourcentage (%)</SelectItem>
+                  <SelectItem value="fixed">Montant fixe (FCFA)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Valeur</Label>
+              <Input
+                type="number"
+                value={feeValue}
+                onChange={(e) => setFeeValue(e.target.value)}
+                placeholder={feeType === "percentage" ? "Ex: 2" : "Ex: 500"}
+                min="0"
+                step="0.1"
+                className="w-40"
+                data-testid="input-fee-value"
+              />
+            </div>
+            <Button onClick={saveFee} disabled={savingFee} data-testid="button-save-fee">
+              {savingFee ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              Enregistrer
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground mt-3">
+            Frais actuels : {feeType === "percentage" ? `${feeValue}% du montant` : `${parseFloat(feeValue || "0").toLocaleString("fr-FR")} FCFA fixe`}
+          </p>
+        </CardContent>
+      </Card>
+
+      {pending.length > 0 && (
+        <Card className="border-orange-200 dark:border-orange-800">
+          <CardHeader>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-base text-orange-600 dark:text-orange-400">
+                Demandes en attente
+              </CardTitle>
+              <Badge variant="secondary">{pending.length}</Badge>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {pending.map((wt) => (
+                <div key={wt.id} className="p-3 rounded border bg-muted/30 space-y-2" data-testid={`virement-pending-${wt.id}`}>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <span className="font-medium text-sm">{wt.merchantName}</span>
+                      <span className="text-muted-foreground text-xs ml-2">#{wt.id}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1"
+                        onClick={() => openAction(wt, "approve")} data-testid={`button-approve-virement-${wt.id}`}>
+                        <CheckCircle className="w-3 h-3" />Approuver
+                      </Button>
+                      <Button size="sm" variant="destructive" className="gap-1"
+                        onClick={() => openAction(wt, "reject")} data-testid={`button-reject-virement-${wt.id}`}>
+                        <XCircle className="w-3 h-3" />Rejeter
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <span>{wt.fromCountry} → {wt.toCountry}</span>
+                    <span>Montant : <span className="text-foreground font-medium">{wt.amount.toLocaleString("fr-FR")} {wt.currency}</span></span>
+                    <span>Frais : {wt.fee.toLocaleString("fr-FR")} {wt.currency}</span>
+                    <span>Total debite : {(wt.amount + wt.fee).toLocaleString("fr-FR")} {wt.currency}</span>
+                    <span>{new Date(wt.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-base">Tous les virements</CardTitle>
+            <Badge variant="secondary">{allTransfers.length}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="space-y-2"><Skeleton className="h-12 w-full" /><Skeleton className="h-12 w-full" /></div>
+          ) : allTransfers.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">Aucun virement</p>
+          ) : (
+            <ScrollArea className="max-h-[500px]">
+              <div className="space-y-2">
+                {allTransfers.map((wt) => (
+                  <div key={wt.id} className="p-3 rounded border text-sm space-y-1" data-testid={`virement-row-${wt.id}`}>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium">{wt.merchantName}</span>
+                        <span className="text-muted-foreground text-xs">•</span>
+                        <span className="text-muted-foreground text-xs">{wt.fromCountry} → {wt.toCountry}</span>
+                      </div>
+                      {statusBadge(wt.status)}
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <span>Montant : <span className="text-foreground">{wt.amount.toLocaleString("fr-FR")} {wt.currency}</span></span>
+                      <span>Frais : {wt.fee.toLocaleString("fr-FR")}</span>
+                      <span>{new Date(wt.createdAt).toLocaleDateString("fr-FR")}</span>
+                    </div>
+                    {wt.adminNote && <p className="text-xs text-muted-foreground italic">Note : {wt.adminNote}</p>}
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={noteDialogOpen} onOpenChange={setNoteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {noteAction === "approve" ? "Approuver le virement" : "Rejeter le virement"}
+            </DialogTitle>
+          </DialogHeader>
+          {selectedTransfer && (
+            <div className="space-y-4">
+              <div className="p-3 bg-muted rounded text-sm space-y-1">
+                <p className="font-medium">{selectedTransfer.merchantName}</p>
+                <p className="text-muted-foreground">{selectedTransfer.fromCountry} → {selectedTransfer.toCountry}</p>
+                <p>{selectedTransfer.amount.toLocaleString("fr-FR")} {selectedTransfer.currency} + frais {selectedTransfer.fee.toLocaleString("fr-FR")} = <strong>{(selectedTransfer.amount + selectedTransfer.fee).toLocaleString("fr-FR")} {selectedTransfer.currency}</strong> débités</p>
+              </div>
+              <div className="space-y-2">
+                <Label>Note (optionnelle)</Label>
+                <Input
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder={noteAction === "approve" ? "Commentaire d'approbation..." : "Raison du rejet..."}
+                  data-testid="input-action-note"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setNoteDialogOpen(false)}>Annuler</Button>
+                <Button
+                  disabled={actionMutation.isPending}
+                  onClick={() => actionMutation.mutate({ id: selectedTransfer.id, action: noteAction, note })}
+                  className={noteAction === "approve" ? "bg-green-600 hover:bg-green-700 text-white" : ""}
+                  variant={noteAction === "reject" ? "destructive" : "default"}
+                  data-testid="button-confirm-action"
+                >
+                  {actionMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                  {noteAction === "approve" ? "Confirmer l'approbation" : "Confirmer le rejet"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 function SettingsPanel() {
   const { user, logout } = useAuth();
   const [, setLocation] = useLocation();
@@ -1991,6 +2237,7 @@ export default function AdminDashboard() {
     { title: "SMS recus", icon: MessageSquare, tab: "sms" },
     { title: "API & PIN", icon: Key, tab: "apikeys" },
     { title: "Paiement", icon: Zap, tab: "omnipay" },
+    { title: "Virements", icon: ArrowUpRight, tab: "virements" },
     { title: "Parametres", icon: Settings, tab: "settings" },
   ];
 
@@ -2057,6 +2304,7 @@ export default function AdminDashboard() {
             {activeTab === "sms" && <SmsPanel />}
             {activeTab === "apikeys" && <ApiKeysManagementPanel />}
             {activeTab === "omnipay" && <OmniPayPanel />}
+            {activeTab === "virements" && <AdminWalletTransfersPanel />}
             {activeTab === "settings" && <SettingsPanel />}
           </main>
         </div>

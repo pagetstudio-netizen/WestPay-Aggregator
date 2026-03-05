@@ -1,6 +1,7 @@
 import {
   admins, merchants, merchantCountries, transactions, smsLogs, numbers, settings, loginLogs,
   merchantPins, apiLogs, pendingPayments, webhookLogs, telegramActivationCodes, paymentLinks,
+  walletTransfers,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
@@ -9,6 +10,7 @@ import {
   type PendingPayment, type InsertPendingPayment,
   type WebhookLog, type InsertWebhookLog,
   type TelegramActivationCode, type PaymentLink, type InsertPaymentLink,
+  type WalletTransfer, type InsertWalletTransfer,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and } from "drizzle-orm";
@@ -94,6 +96,12 @@ export interface IStorage {
   updatePaymentLink(id: number, data: Partial<InsertPaymentLink>): Promise<PaymentLink>;
   deletePaymentLink(id: number): Promise<void>;
   recordPaymentLinkPayment(id: number, amount: number): Promise<void>;
+
+  createWalletTransfer(data: InsertWalletTransfer): Promise<WalletTransfer>;
+  getWalletTransfers(merchantId?: number): Promise<(WalletTransfer & { merchantName: string })[]>;
+  getWalletTransferById(id: number): Promise<WalletTransfer | undefined>;
+  updateWalletTransferStatus(id: number, status: string, adminNote?: string): Promise<void>;
+  applyWalletTransfer(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -465,6 +473,61 @@ export class DatabaseStorage implements IStorage {
       totalRevenue: sql`${paymentLinks.totalRevenue} + ${amount}`,
       lastPaymentAt: new Date(),
     }).where(eq(paymentLinks.id, id));
+  }
+
+  async createWalletTransfer(data: InsertWalletTransfer): Promise<WalletTransfer> {
+    const [created] = await db.insert(walletTransfers).values(data).returning();
+    return created;
+  }
+
+  async getWalletTransfers(merchantId?: number): Promise<(WalletTransfer & { merchantName: string })[]> {
+    const rows = await db
+      .select({
+        id: walletTransfers.id,
+        merchantId: walletTransfers.merchantId,
+        fromCountryId: walletTransfers.fromCountryId,
+        toCountryId: walletTransfers.toCountryId,
+        fromCountry: walletTransfers.fromCountry,
+        toCountry: walletTransfers.toCountry,
+        currency: walletTransfers.currency,
+        amount: walletTransfers.amount,
+        fee: walletTransfers.fee,
+        netAmount: walletTransfers.netAmount,
+        status: walletTransfers.status,
+        adminNote: walletTransfers.adminNote,
+        createdAt: walletTransfers.createdAt,
+        processedAt: walletTransfers.processedAt,
+        merchantName: merchants.name,
+      })
+      .from(walletTransfers)
+      .leftJoin(merchants, eq(walletTransfers.merchantId, merchants.id))
+      .where(merchantId ? eq(walletTransfers.merchantId, merchantId) : sql`1=1`)
+      .orderBy(desc(walletTransfers.createdAt));
+    return rows.map(r => ({ ...r, merchantName: r.merchantName || "" }));
+  }
+
+  async getWalletTransferById(id: number): Promise<WalletTransfer | undefined> {
+    const [row] = await db.select().from(walletTransfers).where(eq(walletTransfers.id, id));
+    return row;
+  }
+
+  async updateWalletTransferStatus(id: number, status: string, adminNote?: string): Promise<void> {
+    await db.update(walletTransfers).set({
+      status,
+      adminNote: adminNote || null,
+      processedAt: new Date(),
+    }).where(eq(walletTransfers.id, id));
+  }
+
+  async applyWalletTransfer(id: number): Promise<void> {
+    const transfer = await this.getWalletTransferById(id);
+    if (!transfer) throw new Error("Transfert introuvable");
+    await db.update(merchantCountries)
+      .set({ balance: sql`${merchantCountries.balance} - ${transfer.amount + transfer.fee}` })
+      .where(eq(merchantCountries.id, transfer.fromCountryId));
+    await db.update(merchantCountries)
+      .set({ balance: sql`${merchantCountries.balance} + ${transfer.netAmount}` })
+      .where(eq(merchantCountries.id, transfer.toCountryId));
   }
 }
 

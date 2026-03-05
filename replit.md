@@ -1,4 +1,4 @@
-# WestPay - Private Payment Aggregator Platform
+# RobotPay - Private Mobile Money Payment Aggregator Platform
 
 ## Overview
 WestPay is a private Mobile Money payment aggregation platform with admin and merchant dashboards. No public registration - admin creates all merchant accounts. All payments processed exclusively through OmniPay API v2.0.

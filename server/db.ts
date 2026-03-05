@@ -178,6 +178,23 @@ export async function runMigrations() {
       created_at timestamp DEFAULT now() NOT NULL
     )`);
 
+    await client.query(`CREATE TABLE IF NOT EXISTS wallet_transfers (
+      id serial PRIMARY KEY,
+      merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+      from_country_id integer NOT NULL,
+      to_country_id integer NOT NULL,
+      from_country text NOT NULL,
+      to_country text NOT NULL,
+      currency text NOT NULL,
+      amount integer NOT NULL,
+      fee integer NOT NULL DEFAULT 0,
+      net_amount integer NOT NULL,
+      status text NOT NULL DEFAULT 'pending',
+      admin_note text,
+      created_at timestamp DEFAULT now() NOT NULL,
+      processed_at timestamp
+    )`);
+
     console.log("[DB] Migrations appliquees avec succes");
   } catch (err) {
     console.error("[DB] Erreur migration:", err);

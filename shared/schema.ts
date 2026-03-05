@@ -156,6 +156,23 @@ export const paymentLinks = pgTable("payment_links", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const walletTransfers = pgTable("wallet_transfers", {
+  id: serial("id").primaryKey(),
+  merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),
+  fromCountryId: integer("from_country_id").notNull(),
+  toCountryId: integer("to_country_id").notNull(),
+  fromCountry: text("from_country").notNull(),
+  toCountry: text("to_country").notNull(),
+  currency: text("currency").notNull(),
+  amount: integer("amount").notNull(),
+  fee: integer("fee").notNull().default(0),
+  netAmount: integer("net_amount").notNull(),
+  status: text("status").notNull().default("pending"),
+  adminNote: text("admin_note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  processedAt: timestamp("processed_at"),
+});
+
 export const insertTelegramActivationCodeSchema = createInsertSchema(telegramActivationCodes).omit({ id: true, createdAt: true });
 export const insertAdminSchema = createInsertSchema(admins).omit({ id: true, createdAt: true });
 export const insertMerchantSchema = createInsertSchema(merchants).omit({ id: true, createdAt: true });
@@ -205,3 +222,7 @@ export type InsertTelegramActivationCode = z.infer<typeof insertTelegramActivati
 export const insertPaymentLinkSchema = createInsertSchema(paymentLinks).omit({ id: true, createdAt: true, paymentCount: true, totalRevenue: true, lastPaymentAt: true });
 export type PaymentLink = typeof paymentLinks.$inferSelect;
 export type InsertPaymentLink = z.infer<typeof insertPaymentLinkSchema>;
+
+export const insertWalletTransferSchema = createInsertSchema(walletTransfers).omit({ id: true, createdAt: true, processedAt: true });
+export type WalletTransfer = typeof walletTransfers.$inferSelect;
+export type InsertWalletTransfer = z.infer<typeof insertWalletTransferSchema>;

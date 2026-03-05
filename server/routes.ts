@@ -1868,6 +1868,150 @@ export async function registerRoutes(
   });
 
   // ==================== SUPPORT CONTACTS (admin) ====================
+  const XOF_COUNTRIES = ["Benin", "Burkina Faso", "Cote d'Ivoire", "Mali", "Senegal", "Togo"];
+  const XAF_COUNTRIES = ["Cameroun", "Congo Brazzaville", "Gabon"];
+  const getCurrencyZone = (country: string): string | null => {
+    if (XOF_COUNTRIES.includes(country)) return "XOF";
+    if (XAF_COUNTRIES.includes(country)) return "XAF";
+    return null;
+  };
+
+  app.get("/api/merchant/wallet-transfers", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const transfers = await storage.getWalletTransfers(merchantId);
+      res.json(transfers);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/merchant/wallet-transfers", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const { fromCountryId, toCountryId, amount } = req.body;
+      if (!fromCountryId || !toCountryId || !amount) {
+        return res.status(400).json({ message: "Champs manquants" });
+      }
+      const parsedAmount = parseInt(amount);
+      if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        return res.status(400).json({ message: "Montant invalide" });
+      }
+      const fromMC = await storage.getMerchantCountryById(parseInt(fromCountryId));
+      const toMC = await storage.getMerchantCountryById(parseInt(toCountryId));
+      if (!fromMC || fromMC.merchantId !== merchantId) {
+        return res.status(400).json({ message: "Pays source invalide" });
+      }
+      if (!toMC || toMC.merchantId !== merchantId) {
+        return res.status(400).json({ message: "Pays destination invalide" });
+      }
+      if (fromMC.id === toMC.id) {
+        return res.status(400).json({ message: "Pays source et destination identiques" });
+      }
+      const fromZone = getCurrencyZone(fromMC.country);
+      const toZone = getCurrencyZone(toMC.country);
+      if (!fromZone || !toZone || fromZone !== toZone) {
+        return res.status(400).json({ message: "Les deux pays doivent etre dans la meme zone monetaire (XOF ou XAF)" });
+      }
+      const feeTypeSetting = await storage.getSetting("wallet_transfer_fee_type");
+      const feeValueSetting = await storage.getSetting("wallet_transfer_fee_value");
+      const feeType = feeTypeSetting?.value || "percentage";
+      const feeValue = parseFloat(feeValueSetting?.value || "2");
+      let fee = 0;
+      if (feeType === "percentage") {
+        fee = Math.round((parsedAmount * feeValue) / 100);
+      } else {
+        fee = Math.round(feeValue);
+      }
+      const totalNeeded = parsedAmount + fee;
+      if (fromMC.balance < totalNeeded) {
+        return res.status(400).json({ message: `Solde insuffisant. Vous avez ${fromMC.balance.toLocaleString("fr-FR")} ${fromZone}, vous avez besoin de ${totalNeeded.toLocaleString("fr-FR")} ${fromZone} (montant + frais)` });
+      }
+      const transfer = await storage.createWalletTransfer({
+        merchantId,
+        fromCountryId: fromMC.id,
+        toCountryId: toMC.id,
+        fromCountry: fromMC.country,
+        toCountry: toMC.country,
+        currency: fromZone,
+        amount: parsedAmount,
+        fee,
+        netAmount: parsedAmount,
+        status: "pending",
+      });
+      res.json(transfer);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/wallet-transfers", authMiddleware("admin"), async (req, res) => {
+    try {
+      const transfers = await storage.getWalletTransfers();
+      res.json(transfers);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/admin/wallet-transfers/:id/approve", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const transfer = await storage.getWalletTransferById(id);
+      if (!transfer) return res.status(404).json({ message: "Transfert introuvable" });
+      if (transfer.status !== "pending") return res.status(400).json({ message: "Ce transfert n'est plus en attente" });
+      const fromMC = await storage.getMerchantCountryById(transfer.fromCountryId);
+      if (!fromMC || fromMC.balance < (transfer.amount + transfer.fee)) {
+        return res.status(400).json({ message: "Solde insuffisant pour appliquer le transfert" });
+      }
+      await storage.applyWalletTransfer(id);
+      await storage.updateWalletTransferStatus(id, "approved", req.body.note || null);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/admin/wallet-transfers/:id/reject", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const transfer = await storage.getWalletTransferById(id);
+      if (!transfer) return res.status(404).json({ message: "Transfert introuvable" });
+      if (transfer.status !== "pending") return res.status(400).json({ message: "Ce transfert n'est plus en attente" });
+      await storage.updateWalletTransferStatus(id, "rejected", req.body.note || null);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/wallet-transfer-fee", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const feeType = await storage.getSetting("wallet_transfer_fee_type");
+      const feeValue = await storage.getSetting("wallet_transfer_fee_value");
+      res.json({
+        feeType: feeType?.value || "percentage",
+        feeValue: feeValue?.value || "2",
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/wallet-transfer-fee", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { feeType, feeValue } = req.body;
+      if (!["percentage", "fixed"].includes(feeType)) return res.status(400).json({ message: "Type de frais invalide" });
+      const v = parseFloat(feeValue);
+      if (isNaN(v) || v < 0) return res.status(400).json({ message: "Valeur de frais invalide" });
+      await storage.setSetting("wallet_transfer_fee_type", feeType);
+      await storage.setSetting("wallet_transfer_fee_value", String(v));
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.post("/api/admin/support-contacts", authMiddleware("admin"), async (req, res) => {
     try {
       const { telegram1, telegram2, whatsapp1, whatsapp2, hours, hours2 } = req.body;

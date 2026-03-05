@@ -27,9 +27,9 @@ import {
   Trash2, Plus, ToggleLeft, ToggleRight, Edit3, BarChart3, MessageCircle, Phone
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
-import type { MerchantCountry, Transaction, WebhookLog, PaymentLink } from "@shared/schema";
+import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer } from "@shared/schema";
 
-type MerchantTab = "overview" | "transactions" | "apikeys" | "webhook" | "transfers" | "settings" | "paymentlinks";
+type MerchantTab = "overview" | "transactions" | "apikeys" | "webhook" | "transfers" | "virements" | "settings" | "paymentlinks";
 
 function useMerchantFetch(url: string, key: string[], token: string | null) {
   return useQuery({
@@ -803,6 +803,198 @@ function TransfersPanel({ token }: { token: string | null }) {
   );
 }
 
+function WalletTransfersPanel({ token }: { token: string | null }) {
+  const { toast } = useToast();
+  const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
+  const { data: walletTransfers = [], isLoading: wtLoading } = useMerchantFetch("/api/merchant/wallet-transfers", ["/api/merchant/wallet-transfers"], token);
+
+  const [fromCountryId, setFromCountryId] = useState("");
+  const [toCountryId, setToCountryId] = useState("");
+  const [amount, setAmount] = useState("");
+
+  const XOF_COUNTRIES = ["Benin", "Burkina Faso", "Cote d'Ivoire", "Mali", "Senegal", "Togo"];
+  const XAF_COUNTRIES = ["Cameroun", "Congo Brazzaville", "Gabon"];
+
+  const allCountries = (balance as MerchantCountry[]).filter(c => c.active);
+  const fromMC = allCountries.find(c => String(c.id) === fromCountryId);
+  const fromZone = fromMC ? (XOF_COUNTRIES.includes(fromMC.country) ? "XOF" : XAF_COUNTRIES.includes(fromMC.country) ? "XAF" : null) : null;
+  const toCountries = fromZone
+    ? allCountries.filter(c =>
+        String(c.id) !== fromCountryId &&
+        (fromZone === "XOF" ? XOF_COUNTRIES.includes(c.country) : XAF_COUNTRIES.includes(c.country))
+      )
+    : [];
+
+  const createMutation = useMutation({
+    mutationFn: async (data: { fromCountryId: string; toCountryId: string; amount: string }) => {
+      const res = await fetch("/api/merchant/wallet-transfers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: (data: WalletTransfer) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/wallet-transfers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/balance"] });
+      toast({
+        title: "Demande de virement soumise",
+        description: `${data.amount.toLocaleString("fr-FR")} ${data.currency} de ${data.fromCountry} vers ${data.toCountry}. Frais: ${data.fee.toLocaleString("fr-FR")} ${data.currency}. En attente d'approbation admin.`,
+      });
+      setFromCountryId("");
+      setToCountryId("");
+      setAmount("");
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!fromCountryId || !toCountryId || !amount) {
+      toast({ title: "Erreur", description: "Tous les champs sont requis", variant: "destructive" });
+      return;
+    }
+    const parsed = parseInt(amount);
+    if (isNaN(parsed) || parsed <= 0) {
+      toast({ title: "Erreur", description: "Montant invalide", variant: "destructive" });
+      return;
+    }
+    createMutation.mutate({ fromCountryId, toCountryId, amount });
+  };
+
+  const statusBadge = (status: string) => {
+    if (status === "pending") return <Badge variant="secondary" className="gap-1"><Clock className="w-3 h-3" />En attente</Badge>;
+    if (status === "approved") return <Badge className="bg-green-500 gap-1"><CheckCircle2 className="w-3 h-3" />Approuve</Badge>;
+    return <Badge variant="destructive" className="gap-1"><XCircle className="w-3 h-3" />Rejete</Badge>;
+  };
+
+  if (balLoading) return <MerchantLoadingSkeleton />;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold text-foreground">Virements Inter-Wallets</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Transférez des fonds entre vos wallets dans la même zone monétaire (XOF ou XAF). Soumis à l'approbation de l'administrateur.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-muted/50 rounded-lg border">
+        <div className="text-sm">
+          <span className="font-medium">Zone XOF :</span>
+          <span className="text-muted-foreground ml-2">Bénin, Burkina Faso, Côte d'Ivoire, Mali, Sénégal, Togo</span>
+        </div>
+        <div className="text-sm">
+          <span className="font-medium">Zone XAF :</span>
+          <span className="text-muted-foreground ml-2">Cameroun, Congo Brazzaville, Gabon</span>
+        </div>
+      </div>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Nouvelle demande de virement</CardTitle></CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Wallet source</Label>
+                <Select value={fromCountryId} onValueChange={(v) => { setFromCountryId(v); setToCountryId(""); }} data-testid="select-virement-from">
+                  <SelectTrigger data-testid="select-virement-from">
+                    <SelectValue placeholder="Pays source" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allCountries.map(c => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.country} — {c.balance.toLocaleString("fr-FR")} FCFA
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Wallet destination</Label>
+                <Select value={toCountryId} onValueChange={setToCountryId} disabled={!fromCountryId || toCountries.length === 0}>
+                  <SelectTrigger data-testid="select-virement-to">
+                    <SelectValue placeholder={fromCountryId && toCountries.length === 0 ? "Aucun wallet compatible" : "Pays destination"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {toCountries.map(c => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.country} — {c.balance.toLocaleString("fr-FR")} FCFA
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {fromCountryId && toCountries.length === 0 && (
+                  <p className="text-xs text-destructive">Aucun autre wallet dans la même zone monétaire ({fromZone})</p>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Montant ({fromZone || "FCFA"})</Label>
+              <Input
+                type="number"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="Ex: 50000"
+                min="1"
+                required
+                data-testid="input-virement-amount"
+              />
+              {fromMC && amount && !isNaN(parseInt(amount)) && (
+                <p className="text-xs text-muted-foreground">
+                  Solde disponible : {fromMC.balance.toLocaleString("fr-FR")} {fromZone} — Des frais s'appliquent sur le montant.
+                </p>
+              )}
+            </div>
+            <Button type="submit" disabled={createMutation.isPending || !fromCountryId || !toCountryId} data-testid="button-submit-virement">
+              {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ArrowRightLeft className="w-4 h-4 mr-2" />}
+              Soumettre la demande
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <CardTitle className="text-base">Historique des virements</CardTitle>
+            <Badge variant="secondary">{(walletTransfers as WalletTransfer[]).length} virement(s)</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {wtLoading ? (
+            <div className="space-y-2"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>
+          ) : (walletTransfers as WalletTransfer[]).length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">Aucun virement pour le moment</p>
+          ) : (
+            <ScrollArea className="max-h-[400px]">
+              <div className="space-y-2">
+                {(walletTransfers as WalletTransfer[]).map((wt) => (
+                  <div key={wt.id} className="p-3 rounded border text-sm space-y-1" data-testid={`virement-row-${wt.id}`}>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="font-medium">{wt.fromCountry} → {wt.toCountry}</span>
+                      {statusBadge(wt.status)}
+                    </div>
+                    <div className="flex items-center gap-4 text-muted-foreground text-xs flex-wrap">
+                      <span>Montant : <span className="text-foreground font-medium">{wt.amount.toLocaleString("fr-FR")} {wt.currency}</span></span>
+                      <span>Frais : <span className="text-foreground">{wt.fee.toLocaleString("fr-FR")} {wt.currency}</span></span>
+                      <span>{new Date(wt.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" })}</span>
+                    </div>
+                    {wt.adminNote && (
+                      <p className="text-xs text-muted-foreground italic">Note admin : {wt.adminNote}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function MerchantSettingsPanel({ token }: { token: string | null }) {
   const { user, logout } = useAuth();
   const [, setLocation] = useLocation();
@@ -1145,6 +1337,7 @@ export default function MerchantDashboard() {
     { title: "Vue d'ensemble", icon: Wallet, tab: "overview" },
     { title: "Transactions", icon: ArrowRightLeft, tab: "transactions" },
     ...(hasOmnipay ? [{ title: "Transferts", icon: Send, tab: "transfers" as MerchantTab }] : []),
+    { title: "Virements", icon: ArrowUpRight, tab: "virements" },
     { title: "Liens de paiement", icon: Link, tab: "paymentlinks" },
     { title: "Cles API", icon: Key, tab: "apikeys" },
     { title: "Webhook", icon: Webhook, tab: "webhook" },
@@ -1209,6 +1402,7 @@ export default function MerchantDashboard() {
             {activeTab === "overview" && <OverviewPanel token={token} />}
             {activeTab === "transactions" && <MerchantTransactionsPanel token={token} />}
             {activeTab === "transfers" && <TransfersPanel token={token} />}
+            {activeTab === "virements" && <WalletTransfersPanel token={token} />}
             {activeTab === "paymentlinks" && <PaymentLinksPanel token={token} />}
             {activeTab === "apikeys" && <ApiKeysPanel token={token} />}
             {activeTab === "webhook" && <WebhookPanel token={token} />}

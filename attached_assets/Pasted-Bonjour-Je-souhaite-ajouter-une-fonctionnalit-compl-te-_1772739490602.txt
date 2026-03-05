@@ -1,0 +1,92 @@
+Bonjour,
+
+Je souhaite ajouter une fonctionnalité complète concernant le transfert d’argent entre soldes (wallets) dans la section Marchands. Merci de bien suivre les instructions ci-dessous afin que le système fonctionne correctement.
+
+1. Fonction de transfert entre soldes pour les marchands
+   Les marchands doivent pouvoir effectuer une demande de transfert d’argent entre leurs différents soldes disponibles sur la plateforme. Cependant, ces transferts doivent respecter certaines règles liées aux devises utilisées par les pays.
+
+2. Différence entre les zones monétaires (XOF et XAF)
+   La plateforme utilise deux principales zones monétaires :
+
+- Zone XOF (Franc CFA de l’Afrique de l’Ouest)
+  Cette zone comprend par exemple :
+  Côte d’Ivoire, Burkina Faso, Mali, Sénégal, Bénin, Niger, Togo, Guinée-Bissau.
+
+- Zone XAF (Franc CFA de l’Afrique Centrale)
+  Cette zone comprend par exemple :
+  Cameroun, Gabon, Congo, Tchad, République Centrafricaine, Guinée Équatoriale.
+
+Les transferts doivent respecter les règles suivantes :
+
+- Les transferts entre wallets utilisant la même devise sont autorisés.
+  Exemple :
+  
+  - Côte d’Ivoire → Burkina Faso (XOF vers XOF)
+  - Cameroun → Gabon (XAF vers XAF)
+
+- Les transferts entre zones monétaires différentes sont interdits.
+  Exemple :
+  
+  - Cameroun (XAF) → Côte d’Ivoire (XOF) ❌
+  - Sénégal (XOF) → Cameroun (XAF) ❌
+
+Le système doit donc vérifier automatiquement la devise avant d’autoriser la demande de transfert.
+
+3. Validation obligatoire par l’administrateur
+   Lorsqu’un marchand effectue une demande de transfert entre soldes, le transfert ne doit pas être exécuté immédiatement.
+
+La demande doit apparaître dans le panel administrateur avec les informations suivantes :
+
+- nom ou identifiant du marchand,
+- wallet de départ,
+- wallet de destination,
+- devise utilisée (XOF ou XAF),
+- montant demandé,
+- frais appliqués,
+- date et heure de la demande,
+- statut (en attente, validé ou refusé).
+
+Le transfert ne doit être effectué qu’après validation manuelle par l’administrateur.
+
+4. Frais de transfert
+   Chaque transfert entre soldes doit inclure des frais de transaction.
+
+Ces frais doivent être :
+
+- configurables dans le panel administratif,
+- modifiables à tout moment par l’administrateur (pourcentage ou montant fixe).
+
+Le système doit automatiquement calculer les frais avant l’envoi de la demande.
+
+5. Message d’information pour les marchands
+   Lorsqu’un marchand effectue une demande de transfert, un message d’information doit apparaître pour lui indiquer le délai de traitement.
+
+Exemple de message :
+
+« Votre demande de transfert a été enregistrée. Le traitement peut prendre entre 1 heure et 4 heures, le temps que l’administration vérifie et valide la transaction. Merci de patienter. »
+
+6. Interface utilisateur (UI)
+   La section de transfert doit être :
+
+- claire et intuitive,
+- bien intégrée au design général du site,
+- adaptée au style visuel de la plateforme (couleurs, icônes, robots/technologie, etc.).
+
+Les champs doivent inclure :
+
+- sélection du wallet de départ,
+- sélection du wallet de destination,
+- montant à transférer,
+- affichage automatique des frais,
+- bouton pour envoyer la demande.
+
+7. Gestion dans le panel administrateur
+   Le panel administrateur doit comporter une section dédiée aux transferts entre soldes, permettant de :
+
+- voir toutes les demandes de transfert,
+- consulter les détails de chaque transaction,
+- valider ou refuser une demande,
+- appliquer les frais automatiquement,
+- garder un historique des transferts.
+
+Merci de mettre en place cette fonctionnalité complète conformément à ces instructions afin d’assurer une gestion sécurisée et efficace des transferts entre soldes.
