@@ -51,6 +51,23 @@ function resetAttempts(userId: string): void {
   failedAttempts.delete(userId);
 }
 
+function resetAllAttempts(): number {
+  const count = failedAttempts.size;
+  failedAttempts.clear();
+  return count;
+}
+
+function getBlockedUsers(): { userId: string; count: number; lockedUntil: Date | null }[] {
+  const result: { userId: string; count: number; lockedUntil: Date | null }[] = [];
+  const now = new Date();
+  for (const [userId, r] of failedAttempts.entries()) {
+    if (r.count > 0 || (r.lockedUntil && now < r.lockedUntil)) {
+      result.push({ userId, count: r.count, lockedUntil: r.lockedUntil });
+    }
+  }
+  return result;
+}
+
 // ─── Known Groups Registry ───────────────────────────────────────────────────
 async function getKnownGroups(): Promise<string[]> {
   const raw = await storage.getSetting("telegram_known_groups");
@@ -530,6 +547,58 @@ export function initTelegramBot(): Telegraf | null {
     );
   });
 
+  // ─── /restreint (groupe admin uniquement) ─────────────────────────────────
+  bot.command("restreint", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
+    if (!isGroup || !await isAdminGroup(chatId)) return;
+
+    const text = ctx.message.text || "";
+    const arg = text.split(" ")[1]?.trim();
+
+    if (!arg) {
+      const blocked = getBlockedUsers();
+      if (blocked.length === 0) {
+        await ctx.reply("✅ Aucun utilisateur bloqué en ce moment.", { parse_mode: "Markdown" });
+        return;
+      }
+      const now = new Date();
+      const lines = blocked.map(b => {
+        const isLocked = b.lockedUntil && now < b.lockedUntil;
+        const remaining = b.lockedUntil
+          ? Math.max(0, Math.ceil((b.lockedUntil.getTime() - now.getTime()) / 60000))
+          : 0;
+        return `• ID \`${b.userId}\` — ${isLocked ? `🔴 Bloqué encore ${remaining} min` : `⚠️ ${b.count} tentative(s)`}`;
+      });
+      await ctx.reply(
+        `🚫 *Utilisateurs bloqués (${blocked.length})*\n\n${lines.join("\n")}\n\n` +
+        `Pour débloquer :\n\`/restreint ID_UTILISATEUR\`\nPour tout débloquer : \`/restreint tous\``,
+        { parse_mode: "Markdown" }
+      );
+      return;
+    }
+
+    if (arg === "tous") {
+      const count = resetAllAttempts();
+      await ctx.reply(
+        `✅ *Tous les compteurs réinitialisés*\n\n🔓 ${count} utilisateur(s) débloqué(s)\nChacun dispose à nouveau de *${MAX_FAILED} tentatives*.`,
+        { parse_mode: "Markdown" }
+      );
+      return;
+    }
+
+    const existed = failedAttempts.has(arg);
+    resetAttempts(arg);
+    if (existed) {
+      await ctx.reply(
+        `✅ *Utilisateur débloqué*\n\n🆔 ID : \`${arg}\`\n🔓 Compteur remis à zéro\n⚡ Dispose à nouveau de *${MAX_FAILED} tentatives*.`,
+        { parse_mode: "Markdown" }
+      );
+    } else {
+      await ctx.reply(`ℹ️ Aucun blocage trouvé pour l'ID \`${arg}\`.`, { parse_mode: "Markdown" });
+    }
+  });
+
   // ─── /connexionid (groupe admin uniquement) ───────────────────────────────
   bot.command("connexionid", async (ctx) => {
     const chatId = String(ctx.chat.id);
@@ -600,7 +669,10 @@ export function initTelegramBot(): Telegraf | null {
           `/broadcast MESSAGE — Envoyer un message dans tous les groupes\n\n` +
           `🔐 *Utilitaires*\n` +
           `/connexionid — Rappel des URLs et identifiants admin\n` +
-          `/seturl URL — Définir l'URL de la plateforme\n\n` +
+          `/seturl URL — Définir l'URL de la plateforme\n` +
+          `/restreint — Voir les utilisateurs bloqués\n` +
+          `/restreint ID — Débloquer un utilisateur spécifique\n` +
+          `/restreint tous — Débloquer tout le monde\n\n` +
           `━━━━━━━━━━━━━━━━\n` +
           `💡 *Configurer un groupe marchand :*\n` +
           `1️⃣ Générer un code dans le dashboard WestPay\n` +
