@@ -1,4 +1,5 @@
 import { Telegraf } from "telegraf";
+import type { Express, Request, Response } from "express";
 import { storage } from "./storage";
 
 let bot: Telegraf | null = null;
@@ -744,31 +745,41 @@ export function initTelegramBot(): Telegraf | null {
     }
   });
 
-  const launchBot = async (attempt = 1): Promise<void> => {
-    try {
-      await bot!.launch({ dropPendingUpdates: true, allowedUpdates: [] });
-      console.log("[TELEGRAM] Bot connecte et actif (polling)");
-    } catch (err: any) {
-      if (err.message?.includes("409") && attempt <= 5) {
-        const delay = attempt * 5000;
-        console.log(`[TELEGRAM] Conflit detecte (autre instance active), retry dans ${delay / 1000}s...`);
-        setTimeout(() => launchBot(attempt + 1), delay);
-      } else if (err.message?.includes("409")) {
-        console.log("[TELEGRAM] Instance de production deja active — polling desactive sur ce serveur.");
-      } else {
-        console.error("[TELEGRAM] Erreur demarrage bot:", err.message);
-      }
-    }
-  };
-
-  launchBot();
-
-  console.log("[TELEGRAM] Bot initialise");
-
-  process.once("SIGINT", () => bot?.stop("SIGINT"));
-  process.once("SIGTERM", () => bot?.stop("SIGTERM"));
+  console.log("[TELEGRAM] Bot initialise (mode webhook)");
 
   return bot;
+}
+
+export function setupWebhook(app: Express, secret: string): void {
+  if (!bot) return;
+  const path = `/api/telegram/webhook/${secret}`;
+  app.post(path, async (req: Request, res: Response) => {
+    res.sendStatus(200);
+    try {
+      await bot!.handleUpdate(req.body);
+    } catch (err: any) {
+      console.error("[TELEGRAM] Erreur traitement update webhook:", err.message);
+    }
+  });
+  console.log(`[TELEGRAM] Route webhook enregistree : POST ${path}`);
+}
+
+export async function registerWebhookUrl(webhookUrl: string): Promise<void> {
+  if (!bot) return;
+  try {
+    await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+    await bot.telegram.setWebhook(webhookUrl, {
+      allowed_updates: ["message", "callback_query", "my_chat_member", "chat_member"],
+    });
+    const info = await bot.telegram.getWebhookInfo();
+    if (info.url === webhookUrl) {
+      console.log(`[TELEGRAM] Webhook actif : ${webhookUrl}`);
+    } else {
+      console.warn(`[TELEGRAM] Webhook enregistre mais URL inattendue : ${info.url}`);
+    }
+  } catch (err: any) {
+    console.error("[TELEGRAM] Erreur enregistrement webhook:", err.message);
+  }
 }
 
 const NOTIFY_TRANSLATIONS: Record<string, {
