@@ -215,17 +215,27 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="secondary" data-testid="text-docs-merchant">{merchantName}</Badge>
-            <button className="sm:hidden p-1.5 rounded border" onClick={() => setNavOpen(!navOpen)}>
-              {navOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+            <button
+              className="sm:hidden flex items-center justify-center w-9 h-9 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-700 active:scale-95"
+              onClick={() => setNavOpen(!navOpen)}
+              data-testid="button-mobile-nav"
+              aria-label="Menu de navigation"
+            >
+              <div className={`transition-all duration-200 ${navOpen ? "rotate-90 opacity-80" : "rotate-0 opacity-100"}`}>
+                {navOpen
+                  ? <X className="w-5 h-5 text-gray-800 dark:text-gray-100" />
+                  : <Menu className="w-5 h-5 text-gray-800 dark:text-gray-100" />
+                }
+              </div>
             </button>
           </div>
         </div>
         {navOpen && (
-          <div className="sm:hidden border-t bg-background px-3 py-2 space-y-1">
+          <div className="sm:hidden border-t bg-background px-3 py-2 space-y-0.5 shadow-md">
             {SECTIONS.map(s => (
               <button key={s.id} onClick={() => scrollTo(s.id)}
-                className={`w-full text-left px-3 py-2 rounded text-sm flex items-center gap-2 transition-colors ${activeSection === s.id ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-muted"}`}>
-                <s.icon className="w-3.5 h-3.5 shrink-0" />{s.label}
+                className={`w-full text-left px-3 py-2.5 rounded-lg text-sm flex items-center gap-2.5 transition-colors ${activeSection === s.id ? "bg-primary/10 text-primary font-semibold" : "text-foreground hover:bg-muted"}`}>
+                <s.icon className="w-4 h-4 shrink-0" />{s.label}
               </button>
             ))}
           </div>

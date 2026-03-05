@@ -29,7 +29,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry, Withdrawal } from "@shared/schema";
 
-type MerchantTab = "overview" | "apikeys" | "webhook" | "transfers" | "virements" | "reversements" | "settings" | "paymentlinks";
+type MerchantTab = "overview" | "apikeys" | "webhook" | "virements" | "reversements" | "settings" | "paymentlinks";
 
 function useMerchantFetch(url: string, key: string[], token: string | null) {
   return useQuery({
@@ -1498,9 +1498,6 @@ export default function MerchantDashboard() {
   const { user, token, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState<MerchantTab>("overview");
-  const { data: balanceData = [] } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
-  const hasOmnipay = (balanceData as MerchantCountry[]).some(c => c.omnipayEnabled && c.active);
-
   useEffect(() => {
     if (!authLoading && (!user || user.role !== "merchant")) {
       setLocation("/merchant-login");
@@ -1512,7 +1509,6 @@ export default function MerchantDashboard() {
 
   const menuItems: { title: string; icon: any; tab: MerchantTab }[] = [
     { title: "Vue d'ensemble", icon: Wallet, tab: "overview" },
-    ...(hasOmnipay ? [{ title: "Transferts", icon: Send, tab: "transfers" as MerchantTab }] : []),
     { title: "Virements", icon: ArrowUpRight, tab: "virements" },
     { title: "Reversements", icon: Download, tab: "reversements" },
     { title: "Liens de paiement", icon: Link, tab: "paymentlinks" },
@@ -1577,7 +1573,6 @@ export default function MerchantDashboard() {
           <main className="flex-1 overflow-auto p-4 md:p-6 space-y-4">
             <SupportBanner />
             {activeTab === "overview" && <OverviewPanel token={token} />}
-            {activeTab === "transfers" && <TransfersPanel token={token} />}
             {activeTab === "virements" && <WalletTransfersPanel token={token} />}
             {activeTab === "reversements" && <WithdrawalsPanel token={token} />}
             {activeTab === "paymentlinks" && <PaymentLinksPanel token={token} />}

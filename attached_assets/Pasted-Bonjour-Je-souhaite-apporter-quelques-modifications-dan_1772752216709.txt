@@ -1,0 +1,55 @@
+Bonjour,
+
+Je souhaite apporter quelques modifications dans la section Marchand du dashboard. Je joins également une image pour vous montrer précisément l’élément concerné.
+
+1. Suppression du bouton “Transferts”
+
+Dans le menu de navigation du dashboard marchand, il y a actuellement une section appelée “Transferts” (comme indiqué sur l’image jointe).
+Je souhaite supprimer complètement cette section du menu marchand afin qu’elle ne soit plus visible ni accessible.
+
+Merci donc de retirer :
+
+- le bouton Transferts dans le menu,
+- la page associée si elle existe,
+- ainsi que toute navigation liée à cette section.
+
+2. Correction et amélioration de la section “Reversements” (Retraits)
+
+La section Reversements doit être améliorée afin que le marchand puisse effectuer ses retraits de manière plus claire.
+
+Lorsque le marchand souhaite effectuer un reversement, il doit suivre ces étapes :
+
+- Sélectionner le wallet / portefeuille du pays à partir duquel il veut retirer (par exemple : Côte d’Ivoire, Burkina Faso, Togo, etc.).
+- Ensuite, il doit pouvoir choisir le moyen de paiement ou l’opérateur qu’il souhaite utiliser pour recevoir son retrait.
+
+Par exemple :
+
+- Mobile Money
+- Opérateurs locaux
+- Autres méthodes de paiement disponibles
+
+3. Gestion des opérateurs dans le panel administrateur
+
+Les opérateurs disponibles pour les retraits ne doivent pas être fixes dans le système.
+
+Ils doivent être entièrement configurables depuis le panel administrateur.
+
+L’administrateur doit pouvoir :
+
+- ajouter un nouvel opérateur de retrait,
+- modifier un opérateur existant,
+- activer ou désactiver un opérateur,
+- associer un opérateur à un pays spécifique.
+
+Ainsi, lorsque le marchand sélectionne un wallet de pays, seuls les opérateurs disponibles pour ce pays doivent apparaître.
+
+4. Flux du reversement
+
+Le processus doit être le suivant :
+
+1. Le marchand choisit le wallet du pays.
+2. Il choisit l’opérateur de paiement disponible pour ce pays.
+3. Il saisit les informations nécessaires (numéro, compte, etc.).
+4. Il soumet la demande de reversement.
+
+Merci d’effectuer ces modifications afin d’améliorer la gestion des retraits pour les marchands.
