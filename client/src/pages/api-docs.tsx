@@ -456,13 +456,12 @@ Content-Type: application/json`} />
               <Globe className="w-5 h-5 text-primary shrink-0" />Paiements (Depot)
             </h2>
             <p className="text-sm text-muted-foreground">
-              WestPay propose deux modes de collecte de paiement : la <strong>page de paiement hebergee</strong>
-              (la plus simple) et l'<strong>API directe</strong> pour les integrateurs avances.
+              WestPay fourni une page de paiement hebergee et securisee. Redirigez simplement vos utilisateurs vers cette URL — ils entrent leur numero Mobile Money et valident le paiement directement sur leur telephone via USSD.
             </p>
 
             <Card className="bg-muted/30">
               <CardContent className="p-4">
-                <p className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2"><Zap className="w-4 h-4 text-primary" />Option 1 — Page de paiement hebergee (recommande)</p>
+                <p className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2"><Zap className="w-4 h-4 text-primary" />Page de paiement hebergee RobotPay</p>
                 <ol className="text-sm text-muted-foreground space-y-2 list-decimal pl-4">
                   <li>Redirigez votre utilisateur vers l'URL de paiement :</li>
                 </ol>
@@ -494,48 +493,6 @@ Content-Type: application/json`} />
                 </div>
               </CardContent>
             </Card>
-
-            <p className="text-sm font-semibold text-foreground">Option 2 — API directe</p>
-            <div className="space-y-2">
-              <EndpointCard method="GET" path="/api/payment/:slug/info" description="Recupere les informations publiques d'un marchand (pays disponibles, nom). Utilise avant d'initier un paiement."
-                responseBody={`{
-  "merchant": {
-    "name": "EcoMat Togo",
-    "slug": "ecomat",
-    "countries": ["Togo", "Benin"]
-  }
-}`} />
-
-              <EndpointCard method="POST" path="/api/payment/initiate" description="Initie un paiement Mobile Money. Envoie une demande USSD push sur le telephone du client."
-                notes="Pour Wave, un paymentUrl est retourne — redirigez le client vers cette URL au lieu de l'USSD."
-                requestBody={`{
-  "merchantSlug": "ecomat",
-  "country": "Togo",
-  "amount": 5000,
-  "payerPhone": "90123456",
-  "payerName": "Jean Dupont",
-  "firstName": "Jean",
-  "lastName": "Dupont",
-  "paymentMethod": "TMoney",
-  "redirectUrl": "https://votresite.com/merci"
-}`}
-                responseBody={`{
-  "success": true,
-  "paymentId": 42,
-  "reference": "WP-abc123def456",
-  "paymentUrl": null,
-  "fees": 75
-}`} />
-
-              <EndpointCard method="GET" path="/api/omnipay/payment/:paymentId/status" description="Verifie le statut d'un paiement en cours. Utilisez ce endpoint en polling (toutes les 3-5 secondes)."
-                notes="Statuts possibles : pending, submitted, confirmed, failed, expired"
-                responseBody={`{
-  "status": "confirmed",
-  "paymentId": 42,
-  "reference": "WP-abc123def456",
-  "amount": 5000
-}`} />
-            </div>
 
             <Card>
               <CardContent className="p-4">
@@ -777,126 +734,69 @@ print("Soldes:", soldes)`
             </div>
 
             <div className="space-y-2">
-              <p className="text-sm font-semibold text-foreground flex items-center gap-2"><Hash className="w-4 h-4 text-muted-foreground" />2. Initier un paiement (depot)</p>
+              <p className="text-sm font-semibold text-foreground flex items-center gap-2"><Hash className="w-4 h-4 text-muted-foreground" />2. Rediriger vers la page de paiement</p>
               <LangTabs tabs={[
                 {
                   lang: "JavaScript",
-                  label: "Initier un paiement",
+                  label: "Redirection page de paiement",
                   code: `// ── JavaScript ──────────────────────────────────────────────
 const BASE = "${BASE_URL}";
 
-// Option A : Redirection vers page hebergee (recommande)
+// Construire l'URL de paiement et rediriger le client
 const url = new URL(\`\${BASE}/pay\`);
 url.searchParams.set("merchant", "votre-slug");
-url.searchParams.set("amount", "5000");
-url.searchParams.set("country", "Togo");
-url.searchParams.set("redirect", "https://votresite.com/merci");
+url.searchParams.set("amount", "5000");        // Montant en F CFA
+url.searchParams.set("country", "Togo");       // Pays (optionnel)
+url.searchParams.set("redirect", "https://votresite.com/merci"); // URL de retour
+
 window.location.href = url.toString();
 
-// Option B : API directe
-const res = await fetch(\`\${BASE}/api/payment/initiate\`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    merchantSlug: "votre-slug",
-    country: "Togo",
-    amount: 5000,
-    payerPhone: "90123456",
-    payerName: "Jean Dupont",
-    firstName: "Jean",
-    lastName: "Dupont",
-    paymentMethod: "TMoney"
-  })
-});
-const paiement = await res.json();
-console.log("ID paiement:", paiement.paymentId);
-
-// Verifier le statut (polling)
-const statusRes = await fetch(
-  \`\${BASE}/api/omnipay/payment/\${paiement.paymentId}/status\`
-);
-const statut = await statusRes.json();
-console.log("Statut:", statut.status); // pending | confirmed | failed`
+// Apres paiement, le client est redirige vers :
+// https://votresite.com/merci?status=success&amount=5000&ref=OP-abc123`
                 },
                 {
                   lang: "PHP",
-                  label: "Initier un paiement",
+                  label: "Redirection page de paiement",
                   code: `<?php
 // ── PHP ─────────────────────────────────────────────────────
 $BASE = "${BASE_URL}";
 
-// Option A : Redirection vers page hebergee
+// Construire l'URL et rediriger le client
 $params = http_build_query([
   "merchant" => "votre-slug",
-  "amount" => 5000,
-  "country" => "Togo",
-  "redirect" => "https://votresite.com/merci"
+  "amount"   => 5000,            // Montant en F CFA
+  "country"  => "Togo",         // Pays (optionnel)
+  "redirect" => "https://votresite.com/merci" // URL de retour
 ]);
+
 header("Location: $BASE/pay?$params");
 exit;
 
-// Option B : API directe
-$ch = curl_init("$BASE/api/payment/initiate");
-curl_setopt_array($ch, [
-  CURLOPT_POST => true,
-  CURLOPT_RETURNTRANSFER => true,
-  CURLOPT_HTTPHEADER => ["Content-Type: application/json"],
-  CURLOPT_POSTFIELDS => json_encode([
-    "merchantSlug" => "votre-slug",
-    "country" => "Togo",
-    "amount" => 5000,
-    "payerPhone" => "90123456",
-    "payerName" => "Jean Dupont",
-    "firstName" => "Jean",
-    "lastName" => "Dupont",
-    "paymentMethod" => "TMoney"
-  ])
-]);
-$paiement = json_decode(curl_exec($ch), true);
-curl_close($ch);
-$paymentId = $paiement["paymentId"];
-
-// Verifier le statut
-$ch = curl_init("$BASE/api/omnipay/payment/$paymentId/status");
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-$statut = json_decode(curl_exec($ch), true);
-curl_close($ch);
-echo "Statut: " . $statut["status"];
+// Apres paiement, le client est redirige vers :
+// https://votresite.com/merci?status=success&amount=5000&ref=OP-abc123
 ?>`
                 },
                 {
                   lang: "Python",
-                  label: "Initier un paiement",
-                  code: `# ── Python ──────────────────────────────────────────────────
-import requests
-import time
+                  label: "Redirection page de paiement",
+                  code: `# ── Python (Flask) ──────────────────────────────────────────
+from flask import redirect
+from urllib.parse import urlencode
 
 BASE = "${BASE_URL}"
 
-# Initier le paiement
-res = requests.post(f"{BASE}/api/payment/initiate", json={
-    "merchantSlug": "votre-slug",
-    "country": "Togo",
-    "amount": 5000,
-    "payerPhone": "90123456",
-    "payerName": "Jean Dupont",
-    "firstName": "Jean",
-    "lastName": "Dupont",
-    "paymentMethod": "TMoney"
-})
-paiement = res.json()
-payment_id = paiement["paymentId"]
-print(f"Paiement initie, ID: {payment_id}")
+@app.route("/payer")
+def payer():
+    params = urlencode({
+        "merchant": "votre-slug",
+        "amount": 5000,           # Montant en F CFA
+        "country": "Togo",        # Pays (optionnel)
+        "redirect": "https://votresite.com/merci"  # URL de retour
+    })
+    return redirect(f"{BASE}/pay?{params}")
 
-# Polling du statut (max 2 minutes)
-for _ in range(24):  # 24 x 5s = 120s
-    time.sleep(5)
-    statut = requests.get(
-        f"{BASE}/api/omnipay/payment/{payment_id}/status"
-    ).json()
-    print(f"Statut: {statut['status']}")
-    if statut["status"] in ["confirmed", "failed", "expired"]:
-        break`
+# Apres paiement, le client est redirige vers :
+# https://votresite.com/merci?status=success&amount=5000&ref=OP-abc123`
                 }
               ]} />
             </div>
