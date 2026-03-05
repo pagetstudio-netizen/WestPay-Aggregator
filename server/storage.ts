@@ -73,6 +73,10 @@ export interface IStorage {
   updateMerchantWebhook(id: number, webhookUrl: string | null, webhookSecret: string | null): Promise<void>;
   createWebhookLog(log: InsertWebhookLog): Promise<WebhookLog>;
   getWebhookLogs(merchantId?: number): Promise<WebhookLog[]>;
+
+  updateMerchantCountryOmnipay(id: number, omnipayEnabled: boolean): Promise<void>;
+  getPendingPaymentByOmnipayReference(reference: string): Promise<PendingPayment | undefined>;
+  decrementMerchantCountryBalance(id: number, amount: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -354,6 +358,22 @@ export class DatabaseStorage implements IStorage {
       return db.select().from(webhookLogs).where(eq(webhookLogs.merchantId, merchantId)).orderBy(desc(webhookLogs.createdAt));
     }
     return db.select().from(webhookLogs).orderBy(desc(webhookLogs.createdAt));
+  }
+
+  async updateMerchantCountryOmnipay(id: number, omnipayEnabled: boolean): Promise<void> {
+    await db.update(merchantCountries).set({ omnipayEnabled }).where(eq(merchantCountries.id, id));
+  }
+
+  async getPendingPaymentByOmnipayReference(reference: string): Promise<PendingPayment | undefined> {
+    const [pp] = await db.select().from(pendingPayments)
+      .where(eq(pendingPayments.omnipayReference, reference));
+    return pp;
+  }
+
+  async decrementMerchantCountryBalance(id: number, amount: number): Promise<void> {
+    await db.update(merchantCountries)
+      .set({ balance: sql`${merchantCountries.balance} - ${amount}` })
+      .where(eq(merchantCountries.id, id));
   }
 }
 

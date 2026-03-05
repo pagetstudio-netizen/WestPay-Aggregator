@@ -27,6 +27,12 @@ export async function runMigrations() {
       success boolean NOT NULL DEFAULT false,
       created_at timestamp DEFAULT now() NOT NULL
     )`);
+    await client.query(`ALTER TABLE merchant_countries ADD COLUMN IF NOT EXISTS omnipay_enabled boolean NOT NULL DEFAULT false`);
+    await client.query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS provider text NOT NULL DEFAULT 'sms'`);
+    await client.query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS omnipay_tx_id text`);
+    await client.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS omnipay_reference text`);
+    await client.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS omnipay_tx_id text`);
+    await client.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS omnipay_payment_url text`);
     console.log("[DB] Migrations appliquees avec succes");
   } catch (err) {
     console.error("[DB] Erreur migration:", err);

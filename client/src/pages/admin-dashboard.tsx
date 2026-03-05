@@ -22,11 +22,11 @@ import {
   Users, ArrowRightLeft, Globe, Phone, Settings, LogOut, Plus,
   Trash2, Ban, CheckCircle, XCircle, Copy, Shield, Loader2, Download,
   MessageSquare, Key, DollarSign, Hash, Calendar, Search,
-  RefreshCw, Lock, BookOpen, FileText, Webhook
+  RefreshCw, Lock, BookOpen, FileText, Webhook, Zap, ToggleLeft, ToggleRight, Link2
 } from "lucide-react";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog } from "@shared/schema";
 
-type AdminTab = "merchants" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "settings";
+type AdminTab = "merchants" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "settings";
 
 function useAdminFetch(url: string, key: string[]) {
   const { token } = useAuth();
@@ -358,6 +358,23 @@ function CountriesPanel() {
     },
   });
 
+  const toggleOmnipayMutation = useMutation({
+    mutationFn: async ({ merchantId, countryId, omnipayEnabled }: { merchantId: number; countryId: number; omnipayEnabled: boolean }) => {
+      const res = await fetch(`/api/admin/merchant/${merchantId}/country/${countryId}/omnipay`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ omnipayEnabled }),
+      });
+      if (!res.ok) throw new Error("Erreur");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/countries"] });
+      toast({ title: "OmniPay mis a jour" });
+    },
+    onError: () => toast({ title: "Erreur", description: "Impossible de modifier OmniPay", variant: "destructive" }),
+  });
+
   if (isLoading) return <LoadingSkeleton />;
 
   const availableCountries = ["Togo", "Benin", "Cote d'Ivoire", "Guinee", "Senegal", "Mali", "Burkina Faso", "Niger", "Ghana", "Nigeria"];
@@ -417,6 +434,7 @@ function CountriesPanel() {
                       <span className="font-semibold text-foreground">{mc.country}</span>
                       <Badge variant="secondary">{mc.merchantName || `Marchand #${mc.merchantId}`}</Badge>
                       <Badge variant={mc.active ? "default" : "destructive"}>{mc.active ? "Actif" : "Inactif"}</Badge>
+                      {mc.omnipayEnabled && <Badge variant="secondary"><Zap className="w-3 h-3 mr-1" />OmniPay</Badge>}
                     </div>
                     <div className="flex items-center gap-2 mt-2 flex-wrap">
                       <Key className="w-3 h-3 text-muted-foreground" />
@@ -426,21 +444,32 @@ function CountriesPanel() {
                       </Button>
                     </div>
                   </div>
-                  <div className="text-right shrink-0">
+                  <div className="text-right shrink-0 space-y-2">
                     <p className="text-lg font-bold text-foreground">{mc.balance?.toLocaleString("fr-FR")}</p>
                     <p className="text-xs text-muted-foreground">F CFA</p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mt-2"
-                      onClick={() => {
-                        const amount = prompt("Nouveau solde :");
-                        if (amount) updateBalanceMutation.mutate({ id: mc.id, balance: parseInt(amount) });
-                      }}
-                      data-testid={`button-update-balance-${mc.id}`}
-                    >
-                      <DollarSign className="w-3 h-3 mr-1" />Modifier
-                    </Button>
+                    <div className="flex items-center gap-1 justify-end flex-wrap">
+                      <Button
+                        variant={mc.omnipayEnabled ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => toggleOmnipayMutation.mutate({ merchantId: mc.merchantId, countryId: mc.id, omnipayEnabled: !mc.omnipayEnabled })}
+                        disabled={toggleOmnipayMutation.isPending}
+                        data-testid={`button-toggle-omnipay-${mc.id}`}
+                      >
+                        {mc.omnipayEnabled ? <Zap className="w-3 h-3 mr-1" /> : <Zap className="w-3 h-3 mr-1" />}
+                        {mc.omnipayEnabled ? "OmniPay" : "OmniPay"}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const amount = prompt("Nouveau solde :");
+                          if (amount) updateBalanceMutation.mutate({ id: mc.id, balance: parseInt(amount) });
+                        }}
+                        data-testid={`button-update-balance-${mc.id}`}
+                      >
+                        <DollarSign className="w-3 h-3 mr-1" />Modifier
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </CardContent>
@@ -909,6 +938,163 @@ function ApiKeysManagementPanel() {
   );
 }
 
+function OmniPayPanel() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const [apiKey, setApiKey] = useState("");
+  const [callbackKey, setCallbackKey] = useState("");
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  const { data: omnipaySettings, isLoading: settingsLoading } = useAdminFetch("/api/admin/omnipay/settings", ["/api/admin/omnipay/settings"]);
+
+  useEffect(() => {
+    if (omnipaySettings && !isInitialized) {
+      setApiKey(omnipaySettings.apiKey || "");
+      setCallbackKey(omnipaySettings.callbackKey || "");
+      setIsInitialized(true);
+    }
+  }, [omnipaySettings, isInitialized]);
+
+  const { data: omnipayBalance, isLoading: balanceLoading, refetch: refetchBalance } = useQuery({
+    queryKey: ["/api/admin/omnipay/balance"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/omnipay/balance", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!omnipaySettings?.configured,
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/omnipay/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ apiKey, callbackKey }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/omnipay/settings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/omnipay/balance"] });
+      toast({ title: "Configuration OmniPay sauvegardee" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const callbackUrl = typeof window !== "undefined" ? `${window.location.origin}/api/omnipay/callback` : "";
+
+  if (settingsLoading) return <LoadingSkeleton />;
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold text-foreground">Configuration OmniPay</h2>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Zap className="w-4 h-4" />Statut OmniPay
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-sm text-muted-foreground">Configuration</span>
+              <Badge variant={omnipaySettings?.configured ? "default" : "destructive"} data-testid="badge-omnipay-status">
+                {omnipaySettings?.configured ? "Configure" : "Non configure"}
+              </Badge>
+            </div>
+            {omnipaySettings?.configured && (
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-sm text-muted-foreground">Solde OmniPay</span>
+                <div className="flex items-center gap-2">
+                  {balanceLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : omnipayBalance?.balance !== undefined ? (
+                    <span className="text-sm font-bold text-foreground" data-testid="text-omnipay-balance">
+                      {Number(omnipayBalance.balance).toLocaleString("fr-FR")} F CFA
+                    </span>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">Indisponible</span>
+                  )}
+                  <Button variant="ghost" size="icon" onClick={() => refetchBalance()} data-testid="button-refresh-omnipay-balance">
+                    <RefreshCw className="w-3 h-3" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Link2 className="w-4 h-4" />URL de callback
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Configurez cette URL dans votre tableau de bord OmniPay comme URL de callback pour recevoir les notifications de paiement.
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="text-xs bg-muted px-3 py-2 rounded-md font-mono flex-1 break-all text-foreground" data-testid="text-callback-url">
+                {callbackUrl}
+              </code>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => { navigator.clipboard.writeText(callbackUrl); toast({ title: "URL copiee" }); }}
+                data-testid="button-copy-callback-url"
+              >
+                <Copy className="w-3 h-3" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Key className="w-4 h-4" />Cles API OmniPay
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={(e) => { e.preventDefault(); saveMutation.mutate(); }} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Cle API (apikey)</Label>
+              <Input
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="Votre cle API OmniPay"
+                data-testid="input-omnipay-apikey"
+              />
+              <p className="text-xs text-muted-foreground">Cle API fournie par OmniPay pour authentifier les requetes.</p>
+            </div>
+            <div className="space-y-2">
+              <Label>Cle de callback (callback_key)</Label>
+              <Input
+                value={callbackKey}
+                onChange={(e) => setCallbackKey(e.target.value)}
+                placeholder="Votre cle de callback OmniPay"
+                data-testid="input-omnipay-callbackkey"
+              />
+              <p className="text-xs text-muted-foreground">Cle utilisee pour verifier la signature HMAC-SHA3-512 des callbacks OmniPay.</p>
+            </div>
+            <Button type="submit" disabled={saveMutation.isPending} data-testid="button-save-omnipay">
+              {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
+              Sauvegarder la configuration
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function SettingsPanel() {
   const { user, logout } = useAuth();
   const [, setLocation] = useLocation();
@@ -1018,6 +1204,7 @@ export default function AdminDashboard() {
     { title: "Numeros SIM", icon: Phone, tab: "numbers" },
     { title: "SMS recus", icon: MessageSquare, tab: "sms" },
     { title: "API & PIN", icon: Key, tab: "apikeys" },
+    { title: "OmniPay", icon: Zap, tab: "omnipay" },
     { title: "Parametres", icon: Settings, tab: "settings" },
   ];
 
@@ -1075,7 +1262,7 @@ export default function AdminDashboard() {
           </header>
 
           <main className="flex-1 overflow-auto p-4 md:p-6">
-            {activeTab !== "settings" && activeTab !== "sms" && activeTab !== "apikeys" && (
+            {activeTab !== "settings" && activeTab !== "sms" && activeTab !== "apikeys" && activeTab !== "omnipay" && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                 <StatCard title="Marchands" value={stats?.merchantCount || 0} icon={Users} />
                 <StatCard title="Transactions" value={stats?.transactionCount || 0} icon={Hash} />
@@ -1090,6 +1277,7 @@ export default function AdminDashboard() {
             {activeTab === "numbers" && <NumbersPanel />}
             {activeTab === "sms" && <SmsPanel />}
             {activeTab === "apikeys" && <ApiKeysManagementPanel />}
+            {activeTab === "omnipay" && <OmniPayPanel />}
             {activeTab === "settings" && <SettingsPanel />}
           </main>
         </div>

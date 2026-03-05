@@ -8,6 +8,7 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 - **Backend**: Express.js with JWT authentication
 - **Database**: PostgreSQL with Drizzle ORM
 - **Auth**: JWT tokens stored in localStorage
+- **Payment Processing**: OmniPay API v2.0 integration for automated Mobile Money payments
 
 ## Key URLs
 - `/` - Restricted access page (public)
@@ -30,14 +31,32 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 - `/api/admin/*` - Admin endpoints (JWT required)
 - `/api/merchant/*` - Merchant endpoints (JWT required)
 - `/api/docs/access` - PIN-protected docs access
-- `/api/payment/initiate` - Create pending payment (Step 1)
-- `/api/payment/validate` - Validate TX ID (Step 2)
+- `/api/payment/initiate` - Create pending payment (supports OmniPay auto-flow)
+- `/api/payment/validate` - Validate TX ID (manual flow only)
 - `/api/merchant/webhook` - GET/PUT merchant webhook config
 - `/api/merchant/webhook/test` - POST test webhook notification
 - `/api/merchant/webhook/logs` - GET webhook send logs
+- `/api/merchant/transfer` - POST merchant transfer via OmniPay
 - `/api/admin/webhook-logs` - GET all webhook logs (admin)
 - `/api/admin/merchant/:id/webhook` - PUT merchant webhook (admin)
+- `/api/admin/omnipay/settings` - GET/POST OmniPay API key config
+- `/api/admin/omnipay/balance` - GET OmniPay account balance
+- `/api/admin/merchant/:id/country/:countryId/omnipay` - PUT toggle OmniPay per country
+- `/api/omnipay/callback` - POST OmniPay callback (public, signature-verified)
+- `/api/omnipay/payment/:paymentId/status` - GET poll OmniPay payment status
 - `/sms/receive` - SMS webhook for Android SMS Forwarder
+
+## OmniPay Integration
+- Admin configures OmniPay API key and callback key in "OmniPay" tab
+- OmniPay is enabled per merchant per country via admin "Countries & API" panel
+- Payment flow: when OmniPay enabled, USSD push sent to customer phone automatically
+- Customer validates on phone, OmniPay sends callback to `/api/omnipay/callback`
+- System verifies HMAC-SHA3-512 signature, credits merchant balance, creates transaction
+- Wave operator: redirects customer to payment_url for validation
+- Merchants can transfer money to customers via OmniPay ("Transfers" tab)
+- Transactions tagged with provider field: "sms" or "omnipay"
+- OmniPay references prefixed: OP- (payments), TR- (transfers), WP (internal refs)
+- Service module: `server/omnipay.ts`
 
 ## API Management System
 - Each merchant has unique API keys per country (format: PREFIX-[40char hex])
@@ -49,8 +68,8 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 ## Webhook Notification System
 - Merchants configure a webhook URL in their dashboard ("Webhook" tab)
 - Each merchant gets a unique webhook secret (HMAC-SHA256 signing key)
-- On payment confirmation via SMS, WestPay sends POST to merchant's webhook URL
-- Payload includes: event, txId, amount, currency, payer, country, merchantSlug, timestamp
+- On payment confirmation (SMS or OmniPay), WestPay sends POST to merchant's webhook URL
+- Payload includes: event, txId, amount, currency, payer, country, merchantSlug, provider, timestamp
 - Signature sent in `X-WestPay-Signature` header for verification
 - Event type sent in `X-WestPay-Event` header
 - Webhook logs stored in webhook_logs table for auditing
@@ -59,12 +78,27 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 ## Database Tables
 admins, merchants, merchant_countries, transactions, sms_logs, numbers, settings, login_logs, merchant_pins, api_logs, pending_payments, webhook_logs
 
+### Key Column Additions (OmniPay)
+- `merchant_countries.omnipay_enabled` - boolean, enables OmniPay per country
+- `transactions.provider` - "sms" or "omnipay"
+- `transactions.omnipay_tx_id` - OmniPay transaction ID
+- `pending_payments.omnipay_reference` - WestPay-generated reference for OmniPay
+- `pending_payments.omnipay_tx_id` - OmniPay transaction ID
+- `pending_payments.omnipay_payment_url` - Wave payment URL
+
 ## SMS Payment Flow
 1. Android phone receives Mobile Money SMS
 2. SMS Forwarder app sends to `/sms/receive`
 3. System parses TX ID, amount, payer number
 4. Matches SIM to merchant via `numbers` table
 5. Credits merchant balance and records transaction
+
+## OmniPay Payment Flow
+1. Customer enters phone number on payment page
+2. WestPay calls OmniPay API to send USSD push to customer
+3. Customer validates payment on their phone
+4. OmniPay sends callback to `/api/omnipay/callback`
+5. WestPay verifies signature, credits merchant, triggers webhook
 
 ## Phone Numbers (Togo)
 - Moov Money: +22899935673

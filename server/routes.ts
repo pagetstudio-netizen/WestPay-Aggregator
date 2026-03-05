@@ -4,6 +4,17 @@ import { storage } from "./storage";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
+import {
+  initiatePayment as omnipayInitiatePayment,
+  initiateTransfer as omnipayInitiateTransfer,
+  getTransactionStatus as omnipayGetStatus,
+  getBalance as omnipayGetBalance,
+  verifyCallbackSignature as omnipayVerifySignature,
+  generateReference as omnipayGenerateRef,
+  OMNIPAY_STATUS,
+  OMNIPAY_ERRORS,
+  type OmniPayCallbackPayload,
+} from "./omnipay";
 
 const JWT_SECRET = process.env.SESSION_SECRET || "westpay-secret-key-change-me";
 
@@ -664,18 +675,22 @@ export async function registerRoutes(
       }
 
       const countries = await storage.getMerchantCountries(merchant.id);
-      const activeCountries = countries.filter(c => c.active).map(c => c.country);
+      const activeCountries = countries.filter(c => c.active);
 
       const allNumbers = await storage.getNumbers();
       const merchantNumbers = allNumbers.filter(
         n => n.merchantId === merchant.id && n.status === "active"
       );
 
+      const omnipayCountries = activeCountries
+        .filter(c => c.omnipayEnabled)
+        .map(c => c.country);
+
       res.json({
         merchant: {
           name: merchant.name,
           slug: merchant.slug,
-          countries: activeCountries,
+          countries: activeCountries.map(c => c.country),
         },
         numbers: merchantNumbers.map(n => ({
           id: n.id,
@@ -683,6 +698,7 @@ export async function registerRoutes(
           country: n.country,
           operator: n.operator,
         })),
+        omnipayCountries,
       });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -692,7 +708,7 @@ export async function registerRoutes(
   // ==================== PAYMENT WIZARD (public) ====================
   app.post("/api/payment/initiate", async (req, res) => {
     try {
-      const { merchantSlug, country, amount, payerPhone, payerName, paymentMethod, redirectUrl } = req.body;
+      const { merchantSlug, country, amount, payerPhone, payerName, paymentMethod, redirectUrl, firstName, lastName, otp, operator } = req.body;
       if (!merchantSlug || !country || !amount || !paymentMethod) {
         return res.status(400).json({ message: "Marchand, pays, montant et methode de paiement requis" });
       }
@@ -708,27 +724,114 @@ export async function registerRoutes(
       }
 
       const countries = await storage.getMerchantCountries(merchant.id);
-      const hasCountry = countries.some(c => c.country === country && c.active);
-      if (!hasCountry) {
+      const merchantCountry = countries.find(c => c.country === country && c.active);
+      if (!merchantCountry) {
         return res.status(400).json({ message: "Pays non disponible pour ce marchand" });
       }
 
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
-      const pending = await storage.createPendingPayment({
-        merchantId: merchant.id,
-        country,
-        amount: parsedAmount,
-        payerPhone: payerPhone || null,
-        payerName: payerName || null,
-        paymentMethod,
-        txId: null,
-        status: "pending",
-        redirectUrl: redirectUrl || null,
-        expiresAt,
-      });
+      if (merchantCountry.omnipayEnabled) {
+        const omnipayApiKey = await storage.getSetting("omnipay_api_key");
+        if (!omnipayApiKey) {
+          return res.status(500).json({ message: "OmniPay non configure. Contactez l'administrateur." });
+        }
 
-      res.json({ success: true, paymentId: pending.id });
+        if (!payerPhone) {
+          return res.status(400).json({ message: "Numero de telephone requis pour le paiement OmniPay" });
+        }
+
+        const reference = omnipayGenerateRef();
+        const nameParts = (payerName || "Client WestPay").split(" ");
+        const fName = firstName || nameParts[0] || "Client";
+        const lName = lastName || nameParts.slice(1).join(" ") || "WestPay";
+
+        const dialCodes: Record<string, string> = {
+          "Togo": "228", "Benin": "229", "Cote d'Ivoire": "225", "Guinee": "224",
+          "Senegal": "221", "Mali": "223", "Burkina Faso": "226", "Niger": "227",
+          "Ghana": "233", "Nigeria": "234",
+        };
+        const dialCode = dialCodes[country] || "";
+        const cleanPhone = payerPhone.replace(/[\s\-\(\)\+]/g, "");
+        const msisdn = cleanPhone.startsWith(dialCode) ? cleanPhone : `${dialCode}${cleanPhone}`;
+
+        const omnipayOperator = operator || (paymentMethod.toLowerCase().includes("wave") ? "wave" : undefined);
+
+        const callbackBaseUrl = `${req.protocol}://${req.get("host")}`;
+        const returnUrl = redirectUrl || `${callbackBaseUrl}/pay?merchant=${merchantSlug}&amount=${parsedAmount}&country=${country}&omnipay_status=complete`;
+
+        try {
+          const omnipayResult = await omnipayInitiatePayment({
+            apikey: omnipayApiKey,
+            msisdn,
+            amount: parsedAmount,
+            reference,
+            first_name: fName,
+            last_name: lName,
+            otp: otp || undefined,
+            operator: omnipayOperator,
+            return_url: omnipayOperator === "wave" ? returnUrl : undefined,
+          });
+
+          if (omnipayResult.success !== 1) {
+            const errorMsg = OMNIPAY_ERRORS[omnipayResult.code || 0] || omnipayResult.message || "Erreur OmniPay";
+            return res.status(400).json({ message: errorMsg, omnipayError: true, code: omnipayResult.code });
+          }
+
+          const pending = await storage.createPendingPayment({
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerPhone: payerPhone || null,
+            payerName: payerName || null,
+            paymentMethod,
+            txId: null,
+            status: "omnipay_pending",
+            redirectUrl: redirectUrl || null,
+            omnipayReference: reference,
+            omnipayTxId: omnipayResult.id ? String(omnipayResult.id) : null,
+            omnipayPaymentUrl: omnipayResult.payment_url || null,
+            expiresAt,
+          });
+
+          await storage.createApiLog({
+            merchantId: merchant.id,
+            action: "omnipay_payment_initiated",
+            ip: req.ip || "",
+            description: `Paiement OmniPay initie - Ref: ${reference} - Montant: ${parsedAmount} - Tel: ${msisdn}`,
+          });
+
+          res.json({
+            success: true,
+            paymentId: pending.id,
+            omnipay: true,
+            omnipayReference: reference,
+            paymentUrl: omnipayResult.payment_url || null,
+            fees: omnipayResult.fees || 0,
+          });
+        } catch (omnipayErr: any) {
+          console.error("[OMNIPAY] Erreur initiation:", omnipayErr.message);
+          return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
+        }
+      } else {
+        const pending = await storage.createPendingPayment({
+          merchantId: merchant.id,
+          country,
+          amount: parsedAmount,
+          payerPhone: payerPhone || null,
+          payerName: payerName || null,
+          paymentMethod,
+          txId: null,
+          status: "pending",
+          redirectUrl: redirectUrl || null,
+          omnipayReference: null,
+          omnipayTxId: null,
+          omnipayPaymentUrl: null,
+          expiresAt,
+        });
+
+        res.json({ success: true, paymentId: pending.id, omnipay: false });
+      }
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -849,6 +952,284 @@ export async function registerRoutes(
       if (cleaned > 0) console.log(`[Cleanup] ${cleaned} paiement(s) expire(s) supprime(s)`);
     } catch (err) {}
   }, 60 * 1000);
+
+  // ==================== OMNIPAY ROUTES ====================
+
+  app.post("/api/omnipay/callback", async (req, res) => {
+    try {
+      const payload = req.body as OmniPayCallbackPayload;
+      console.log(`[OMNIPAY CALLBACK] Recu: action=${payload.action} ref=${payload.reference} status=${payload.status}`);
+
+      if (!payload.reference) {
+        return res.status(400).json({ message: "Reference manquante" });
+      }
+
+      const callbackKey = await storage.getSetting("omnipay_callback_key");
+      if (callbackKey) {
+        if (!payload.signature) {
+          console.error("[OMNIPAY CALLBACK] Signature manquante");
+          return res.status(401).json({ message: "Signature manquante" });
+        }
+        const isValid = omnipayVerifySignature(callbackKey, payload);
+        if (!isValid) {
+          console.error("[OMNIPAY CALLBACK] Signature invalide");
+          return res.status(401).json({ message: "Signature invalide" });
+        }
+      }
+
+      const pending = await storage.getPendingPaymentByOmnipayReference(payload.reference);
+      if (!pending) {
+        console.log(`[OMNIPAY CALLBACK] Paiement en attente non trouve pour ref: ${payload.reference}`);
+        return res.status(404).json({ message: "Paiement non trouve" });
+      }
+
+      if (pending.status === "confirmed" || pending.status === "omnipay_confirmed") {
+        return res.json({ status: "already_processed" });
+      }
+
+      const statusNum = parseInt(payload.status);
+
+      if (statusNum === OMNIPAY_STATUS.SUCCESS) {
+        const merchant = await storage.getMerchantById(pending.merchantId);
+        const merchantCountry = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
+
+        if (!merchantCountry) {
+          console.error(`[OMNIPAY CALLBACK] Pays ${pending.country} introuvable pour marchand #${pending.merchantId}`);
+          await storage.updatePendingPaymentStatus(pending.id, "omnipay_error");
+          return res.status(500).json({ message: "Configuration marchand/pays introuvable" });
+        }
+
+        await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
+
+        {
+          const txId = `OP-${payload.id || payload.reference}`;
+
+          const existingTx = await storage.getTransactionByTxId(txId);
+          if (!existingTx) {
+            await storage.createTransaction({
+              merchantId: pending.merchantId,
+              country: pending.country,
+              txId,
+              amount: pending.amount,
+              payerNumber: payload.msisdn || pending.payerPhone || null,
+              status: "confirmed",
+              provider: "omnipay",
+              omnipayTxId: payload.id || null,
+            });
+
+            await storage.incrementMerchantCountryBalance(merchantCountry.id, pending.amount);
+
+            console.log(`[OMNIPAY CALLBACK] Paiement confirme: ${txId} - ${pending.amount} - Marchand #${pending.merchantId}`);
+
+            await storage.createApiLog({
+              merchantId: pending.merchantId,
+              action: "omnipay_payment_confirmed",
+              ip: req.ip || "",
+              description: `Paiement OmniPay confirme - Ref: ${payload.reference} - TX: ${txId} - Montant: ${pending.amount} - Frais: ${payload.fees || 0}`,
+            });
+
+            if (merchant?.webhookUrl) {
+              sendWebhookNotification(pending.merchantId, {
+                event: "payment.confirmed",
+                txId,
+                amount: pending.amount,
+                currency: payload.currency || "XOF",
+                payer: payload.msisdn || pending.payerPhone || "",
+                country: pending.country,
+                merchantSlug: merchant.slug,
+                provider: "omnipay",
+                omnipayReference: payload.reference,
+                timestamp: new Date().toISOString(),
+              }).catch(err => console.error("[WEBHOOK] Erreur async:", err));
+            }
+          }
+        }
+
+        res.json({ status: "confirmed" });
+      } else if (statusNum === OMNIPAY_STATUS.FAILED) {
+        await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+
+        await storage.createApiLog({
+          merchantId: pending.merchantId,
+          action: "omnipay_payment_failed",
+          ip: req.ip || "",
+          description: `Paiement OmniPay echoue - Ref: ${payload.reference} - Message: ${payload.message}`,
+        });
+
+        console.log(`[OMNIPAY CALLBACK] Paiement echoue: ${payload.reference} - ${payload.message}`);
+        res.json({ status: "failed" });
+      } else {
+        await storage.updatePendingPaymentStatus(pending.id, `omnipay_status_${statusNum}`);
+        res.json({ status: "pending", omnipayStatus: statusNum });
+      }
+    } catch (err: any) {
+      console.error("[OMNIPAY CALLBACK] Erreur:", err.message);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/omnipay/payment/:paymentId/status", async (req, res) => {
+    try {
+      const pending = await storage.getPendingPaymentById(parseInt(req.params.paymentId));
+      if (!pending) return res.status(404).json({ message: "Paiement non trouve" });
+
+      if (pending.status === "omnipay_confirmed") {
+        return res.json({ status: "confirmed", paymentId: pending.id });
+      }
+      if (pending.status === "omnipay_failed" || pending.status === "omnipay_error") {
+        return res.json({ status: "failed", paymentId: pending.id });
+      }
+
+      if (pending.omnipayReference) {
+        const omnipayApiKey = await storage.getSetting("omnipay_api_key");
+        if (omnipayApiKey) {
+          try {
+            const statusResult = await omnipayGetStatus(omnipayApiKey, pending.omnipayReference);
+            if (statusResult.success === 1) {
+              return res.json({ status: "pending", paymentId: pending.id, omnipayStatus: statusResult.status });
+            }
+          } catch {
+          }
+        }
+      }
+
+      res.json({ status: "pending", paymentId: pending.id });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/omnipay/settings", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const apiKey = await storage.getSetting("omnipay_api_key");
+      const callbackKey = await storage.getSetting("omnipay_callback_key");
+      res.json({
+        apiKey: apiKey || "",
+        callbackKey: callbackKey || "",
+        configured: !!apiKey,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/omnipay/settings", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { apiKey, callbackKey } = req.body;
+      if (apiKey !== undefined) await storage.setSetting("omnipay_api_key", apiKey);
+      if (callbackKey !== undefined) await storage.setSetting("omnipay_callback_key", callbackKey);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/omnipay/balance", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const apiKey = await storage.getSetting("omnipay_api_key");
+      if (!apiKey) return res.status(400).json({ message: "Cle API OmniPay non configuree" });
+      const result = await omnipayGetBalance(apiKey);
+      if (result.success !== 1) {
+        return res.status(400).json({ message: OMNIPAY_ERRORS[result.code || 0] || result.message || "Erreur" });
+      }
+      res.json({ balance: result.balance });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/admin/merchant/:id/country/:countryId/omnipay", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { omnipayEnabled } = req.body;
+      const countryId = parseInt(req.params.countryId);
+      await storage.updateMerchantCountryOmnipay(countryId, !!omnipayEnabled);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/merchant/transfer", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const { country, msisdn, amount, firstName, lastName, operator } = req.body;
+
+      if (!country || !msisdn || !amount || !firstName || !lastName) {
+        return res.status(400).json({ message: "Pays, numero, montant, prenom et nom requis" });
+      }
+
+      const parsedAmount = parseInt(amount);
+      if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        return res.status(400).json({ message: "Le montant doit etre un nombre positif" });
+      }
+
+      const merchantCountry = await storage.findMerchantCountryBySimAndCountry(merchantId, country);
+      if (!merchantCountry || !merchantCountry.active) {
+        return res.status(400).json({ message: "Pays non disponible" });
+      }
+
+      if (!merchantCountry.omnipayEnabled) {
+        return res.status(400).json({ message: "OmniPay n'est pas active pour ce pays" });
+      }
+
+      if (merchantCountry.balance < parsedAmount) {
+        return res.status(400).json({ message: "Solde insuffisant" });
+      }
+
+      const omnipayApiKey = await storage.getSetting("omnipay_api_key");
+      if (!omnipayApiKey) {
+        return res.status(500).json({ message: "OmniPay non configure" });
+      }
+
+      const reference = omnipayGenerateRef();
+
+      const result = await omnipayInitiateTransfer({
+        apikey: omnipayApiKey,
+        msisdn,
+        amount: parsedAmount,
+        reference,
+        first_name: firstName,
+        last_name: lastName,
+        operator: operator || undefined,
+      });
+
+      if (result.success !== 1) {
+        const errorMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Erreur OmniPay";
+        return res.status(400).json({ message: errorMsg });
+      }
+
+      await storage.decrementMerchantCountryBalance(merchantCountry.id, parsedAmount);
+
+      const txId = `TR-${result.id || reference}`;
+      await storage.createTransaction({
+        merchantId,
+        country,
+        txId,
+        amount: -parsedAmount,
+        payerNumber: msisdn,
+        status: "confirmed",
+        provider: "omnipay",
+        omnipayTxId: result.id ? String(result.id) : null,
+      });
+
+      await storage.createApiLog({
+        merchantId,
+        action: "omnipay_transfer",
+        ip: req.ip || "",
+        description: `Transfert OmniPay: ${parsedAmount} vers ${msisdn} - Ref: ${reference} - Frais: ${result.fees || 0}`,
+      });
+
+      res.json({
+        success: true,
+        reference,
+        omnipayId: result.id,
+        fees: result.fees || 0,
+        amount: parsedAmount,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
 
   // ==================== SMS RECEIVE (for Android SMS Forwarder) ====================
 

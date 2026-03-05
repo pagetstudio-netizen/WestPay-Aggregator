@@ -18,13 +18,16 @@ import {
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger
 } from "@/components/ui/sidebar";
 import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue
+} from "@/components/ui/select";
+import {
   Wallet, ArrowRightLeft, Key, Settings, LogOut, Loader2, Download,
   Copy, Globe, DollarSign, Hash, TrendingUp, Search, RefreshCw, BookOpen, Lock, ExternalLink,
-  Webhook, Send, CheckCircle2, XCircle, Clock
+  Webhook, Send, CheckCircle2, XCircle, Clock, ArrowUpRight, Zap
 } from "lucide-react";
 import type { MerchantCountry, Transaction, WebhookLog } from "@shared/schema";
 
-type MerchantTab = "overview" | "transactions" | "apikeys" | "webhook" | "settings";
+type MerchantTab = "overview" | "transactions" | "apikeys" | "webhook" | "transfers" | "settings";
 
 function useMerchantFetch(url: string, key: string[], token: string | null) {
   return useQuery({
@@ -46,7 +49,9 @@ function OverviewPanel({ token }: { token: string | null }) {
 
   if (balLoading) return <MerchantLoadingSkeleton />;
 
-  const totalBalance = (balance as MerchantCountry[]).reduce((sum, c) => sum + (c.balance || 0), 0);
+  const countries = balance as MerchantCountry[];
+  const totalBalance = countries.reduce((sum, c) => sum + (c.balance || 0), 0);
+  const omnipayCountries = countries.filter(c => c.omnipayEnabled && c.active);
 
   const countryFlags: Record<string, string> = {
     "Togo": "TG", "Benin": "BJ", "Cote d'Ivoire": "CI", "Guinee": "GN",
@@ -55,6 +60,25 @@ function OverviewPanel({ token }: { token: string | null }) {
 
   return (
     <div className="space-y-6">
+      {omnipayCountries.length > 0 && (
+        <Card className="border-green-500/30 bg-green-500/5">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="w-10 h-10 rounded-md bg-green-500/10 flex items-center justify-center shrink-0">
+                <Zap className="w-5 h-5 text-green-500" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-foreground" data-testid="text-omnipay-status">OmniPay actif</p>
+                <p className="text-xs text-muted-foreground">
+                  Paiements automatiques via {omnipayCountries.map(c => c.country).join(", ")}
+                </p>
+              </div>
+              <Badge variant="default" data-testid="badge-omnipay-count">{omnipayCountries.length} pays</Badge>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card className="bg-primary/5 border-primary/20">
         <CardContent className="p-6">
           <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -201,6 +225,12 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono text-sm font-semibold text-foreground" data-testid={`text-mtx-${tx.id}`}>{tx.txId}</span>
                         <Badge variant="secondary">{tx.country}</Badge>
+                        {tx.provider === "omnipay" && (
+                          <Badge variant="outline"><Zap className="w-3 h-3 mr-1" />OmniPay</Badge>
+                        )}
+                        {(tx.amount < 0 || tx.txId.startsWith("TR-")) && (
+                          <Badge variant="secondary"><ArrowUpRight className="w-3 h-3 mr-1" />Transfert</Badge>
+                        )}
                         <Badge variant={tx.status === "confirmed" ? "default" : "destructive"}>
                           {tx.status === "confirmed" ? "Confirme" : tx.status}
                         </Badge>
@@ -212,7 +242,9 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
                       <p className="text-xs text-muted-foreground mt-1">{new Date(tx.createdAt).toLocaleString("fr-FR")}</p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-lg font-bold text-foreground">+{tx.amount.toLocaleString("fr-FR")}</p>
+                      <p className={`text-lg font-bold ${tx.amount < 0 || tx.txId.startsWith("TR-") ? "text-destructive" : "text-foreground"}`}>
+                        {tx.amount < 0 ? "" : "+"}{tx.amount.toLocaleString("fr-FR")}
+                      </p>
                       <p className="text-xs text-muted-foreground">F CFA</p>
                     </div>
                   </div>
@@ -544,6 +576,230 @@ function WebhookPanel({ token }: { token: string | null }) {
   );
 }
 
+function TransfersPanel({ token }: { token: string | null }) {
+  const { toast } = useToast();
+  const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
+  const { data: transactions = [], isLoading: txLoading } = useMerchantFetch("/api/merchant/transactions", ["/api/merchant/transactions"], token);
+
+  const [selectedCountry, setSelectedCountry] = useState("");
+  const [recipientPhone, setRecipientPhone] = useState("");
+  const [amount, setAmount] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [operator, setOperator] = useState("");
+
+  const omnipayCountries = (balance as MerchantCountry[]).filter(c => c.omnipayEnabled && c.active);
+  const selectedMC = omnipayCountries.find(c => c.country === selectedCountry);
+
+  const transferMutation = useMutation({
+    mutationFn: async (data: { country: string; msisdn: string; amount: number; firstName: string; lastName: string; operator?: string }) => {
+      const res = await fetch("/api/merchant/transfer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/balance"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
+      toast({
+        title: "Transfert initie",
+        description: `${data.amount?.toLocaleString("fr-FR")} F CFA envoye. Ref: ${data.reference}`,
+      });
+      setRecipientPhone("");
+      setAmount("");
+      setFirstName("");
+      setLastName("");
+      setOperator("");
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const handleTransfer = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCountry || !recipientPhone || !amount || !firstName || !lastName) {
+      toast({ title: "Erreur", description: "Tous les champs sont requis", variant: "destructive" });
+      return;
+    }
+    const parsedAmount = parseInt(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      toast({ title: "Erreur", description: "Le montant doit etre un nombre positif", variant: "destructive" });
+      return;
+    }
+    if (selectedMC && parsedAmount > selectedMC.balance) {
+      toast({ title: "Erreur", description: "Solde insuffisant pour ce pays", variant: "destructive" });
+      return;
+    }
+    transferMutation.mutate({
+      country: selectedCountry,
+      msisdn: recipientPhone,
+      amount: parsedAmount,
+      firstName,
+      lastName,
+      operator: operator && operator !== "auto" ? operator : undefined,
+    });
+  };
+
+  const transferTxs = (transactions as Transaction[]).filter(t => t.amount < 0 || t.txId.startsWith("TR-"));
+
+  if (balLoading) return <MerchantLoadingSkeleton />;
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold text-foreground">Transferts OmniPay</h2>
+      <p className="text-sm text-muted-foreground">
+        Envoyez de l'argent directement vers un portefeuille Mobile Money via OmniPay.
+      </p>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Nouveau transfert</CardTitle></CardHeader>
+        <CardContent>
+          <form onSubmit={handleTransfer} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Pays</Label>
+              <Select value={selectedCountry} onValueChange={setSelectedCountry}>
+                <SelectTrigger data-testid="select-transfer-country">
+                  <SelectValue placeholder="Selectionner un pays" />
+                </SelectTrigger>
+                <SelectContent>
+                  {omnipayCountries.map(c => (
+                    <SelectItem key={c.id} value={c.country}>
+                      {c.country} - Solde: {c.balance.toLocaleString("fr-FR")} F CFA
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Prenom du destinataire</Label>
+                <Input
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  placeholder="Prenom"
+                  required
+                  data-testid="input-transfer-firstname"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Nom du destinataire</Label>
+                <Input
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  placeholder="Nom"
+                  required
+                  data-testid="input-transfer-lastname"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Numero de telephone</Label>
+              <Input
+                value={recipientPhone}
+                onChange={(e) => setRecipientPhone(e.target.value)}
+                placeholder="Ex: 90001234"
+                required
+                data-testid="input-transfer-phone"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Montant (F CFA)</Label>
+              <Input
+                type="number"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="Ex: 5000"
+                min="1"
+                required
+                data-testid="input-transfer-amount"
+              />
+              {selectedMC && (
+                <p className="text-xs text-muted-foreground">
+                  Solde disponible: {selectedMC.balance.toLocaleString("fr-FR")} F CFA
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Operateur (optionnel)</Label>
+              <Select value={operator} onValueChange={setOperator}>
+                <SelectTrigger data-testid="select-transfer-operator">
+                  <SelectValue placeholder="Auto-detection" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Auto-detection</SelectItem>
+                  <SelectItem value="moov">Moov Money</SelectItem>
+                  <SelectItem value="tmoney">T-Money</SelectItem>
+                  <SelectItem value="wave">Wave</SelectItem>
+                  <SelectItem value="mtn">MTN Mobile Money</SelectItem>
+                  <SelectItem value="orange">Orange Money</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Button
+              type="submit"
+              disabled={transferMutation.isPending || !selectedCountry}
+              data-testid="button-submit-transfer"
+            >
+              {transferMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Send className="w-4 h-4 mr-2" />}
+              Envoyer le transfert
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <CardTitle className="text-base">Historique des transferts</CardTitle>
+            <Badge variant="secondary">{transferTxs.length} transfert(s)</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {txLoading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : transferTxs.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">Aucun transfert pour le moment</p>
+          ) : (
+            <ScrollArea className="max-h-[400px]">
+              <div className="space-y-2">
+                {transferTxs.slice(0, 50).map((tx) => (
+                  <div key={tx.id} className="flex items-center justify-between gap-2 p-3 rounded border text-sm" data-testid={`transfer-row-${tx.id}`}>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <ArrowUpRight className="w-4 h-4 text-destructive shrink-0" />
+                        <span className="font-mono text-xs font-semibold text-foreground">{tx.txId}</span>
+                        <Badge variant="secondary">{tx.country}</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {tx.payerNumber ? `Vers ${tx.payerNumber}` : ""}
+                        {" "}{new Date(tx.createdAt).toLocaleString("fr-FR")}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-bold text-destructive">{tx.amount.toLocaleString("fr-FR")} F</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function MerchantSettingsPanel({ token }: { token: string | null }) {
   const { user, logout } = useAuth();
   const [, setLocation] = useLocation();
@@ -634,6 +890,8 @@ export default function MerchantDashboard() {
   const { user, token, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState<MerchantTab>("overview");
+  const { data: balanceData = [] } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
+  const hasOmnipay = (balanceData as MerchantCountry[]).some(c => c.omnipayEnabled && c.active);
 
   useEffect(() => {
     if (!authLoading && (!user || user.role !== "merchant")) {
@@ -647,6 +905,7 @@ export default function MerchantDashboard() {
   const menuItems: { title: string; icon: any; tab: MerchantTab }[] = [
     { title: "Vue d'ensemble", icon: Wallet, tab: "overview" },
     { title: "Transactions", icon: ArrowRightLeft, tab: "transactions" },
+    ...(hasOmnipay ? [{ title: "Transferts", icon: Send, tab: "transfers" as MerchantTab }] : []),
     { title: "Cles API", icon: Key, tab: "apikeys" },
     { title: "Webhook", icon: Webhook, tab: "webhook" },
     { title: "Parametres", icon: Settings, tab: "settings" },
@@ -708,6 +967,7 @@ export default function MerchantDashboard() {
           <main className="flex-1 overflow-auto p-4 md:p-6">
             {activeTab === "overview" && <OverviewPanel token={token} />}
             {activeTab === "transactions" && <MerchantTransactionsPanel token={token} />}
+            {activeTab === "transfers" && <TransfersPanel token={token} />}
             {activeTab === "apikeys" && <ApiKeysPanel token={token} />}
             {activeTab === "webhook" && <WebhookPanel token={token} />}
             {activeTab === "settings" && <MerchantSettingsPanel token={token} />}
