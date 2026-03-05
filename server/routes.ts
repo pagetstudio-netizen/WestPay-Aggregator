@@ -1881,12 +1881,63 @@ export async function registerRoutes(
   });
 
   // ==================== SUPPORT CONTACTS (admin) ====================
-  const XOF_COUNTRIES = ["Benin", "Burkina Faso", "Cote d'Ivoire", "Mali", "Senegal", "Togo"];
-  const XAF_COUNTRIES = ["Cameroun", "Congo Brazzaville", "Gabon"];
-  const getCurrencyZone = (country: string): string | null => {
-    if (XOF_COUNTRIES.includes(country)) return "XOF";
-    if (XAF_COUNTRIES.includes(country)) return "XAF";
-    return null;
+  app.get("/api/wallet-transfer-countries", async (_req, res) => {
+    try {
+      const countries = await storage.getWalletTransferCountries(true);
+      res.json(countries);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/wallet-transfer-countries", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const countries = await storage.getWalletTransferCountries(false);
+      res.json(countries);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/wallet-transfer-countries", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { country, currencyZone } = req.body;
+      if (!country?.trim() || !["XOF", "XAF"].includes(currencyZone)) {
+        return res.status(400).json({ message: "Pays et zone monetaire requis (XOF ou XAF)" });
+      }
+      const existing = await storage.getWalletTransferCountryByName(country.trim());
+      if (existing) return res.status(409).json({ message: "Ce pays existe deja" });
+      const created = await storage.createWalletTransferCountry({ country: country.trim(), currencyZone, active: true });
+      res.json(created);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.patch("/api/admin/wallet-transfer-countries/:id/toggle", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { active } = req.body;
+      await storage.toggleWalletTransferCountry(id, !!active);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/admin/wallet-transfer-countries/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteWalletTransferCountry(id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  const getCurrencyZone = async (country: string): Promise<string | null> => {
+    const wtc = await storage.getWalletTransferCountryByName(country);
+    return wtc?.active ? wtc.currencyZone : null;
   };
 
   app.get("/api/merchant/wallet-transfers", authMiddleware("merchant"), async (req, res) => {
@@ -1921,8 +1972,8 @@ export async function registerRoutes(
       if (fromMC.id === toMC.id) {
         return res.status(400).json({ message: "Pays source et destination identiques" });
       }
-      const fromZone = getCurrencyZone(fromMC.country);
-      const toZone = getCurrencyZone(toMC.country);
+      const fromZone = await getCurrencyZone(fromMC.country);
+      const toZone = await getCurrencyZone(toMC.country);
       if (!fromZone || !toZone || fromZone !== toZone) {
         return res.status(400).json({ message: "Les deux pays doivent etre dans la meme zone monetaire (XOF ou XAF)" });
       }

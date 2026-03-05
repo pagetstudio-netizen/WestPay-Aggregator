@@ -157,6 +157,14 @@ export const paymentLinks = pgTable("payment_links", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const walletTransferCountries = pgTable("wallet_transfer_countries", {
+  id: serial("id").primaryKey(),
+  country: text("country").notNull().unique(),
+  currencyZone: text("currency_zone").notNull(),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const walletTransfers = pgTable("wallet_transfers", {
   id: serial("id").primaryKey(),
   merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),
@@ -227,3 +235,7 @@ export type InsertPaymentLink = z.infer<typeof insertPaymentLinkSchema>;
 export const insertWalletTransferSchema = createInsertSchema(walletTransfers).omit({ id: true, createdAt: true, processedAt: true });
 export type WalletTransfer = typeof walletTransfers.$inferSelect;
 export type InsertWalletTransfer = z.infer<typeof insertWalletTransferSchema>;
+
+export const insertWalletTransferCountrySchema = createInsertSchema(walletTransferCountries).omit({ id: true, createdAt: true });
+export type WalletTransferCountry = typeof walletTransferCountries.$inferSelect;
+export type InsertWalletTransferCountry = z.infer<typeof insertWalletTransferCountrySchema>;

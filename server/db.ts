@@ -180,6 +180,37 @@ export async function runMigrations() {
 
     await client.query(`ALTER TABLE merchants ADD COLUMN IF NOT EXISTS telegram_bot_language text NOT NULL DEFAULT 'fr'`);
 
+    await client.query(`CREATE TABLE IF NOT EXISTS wallet_transfer_countries (
+      id serial PRIMARY KEY,
+      country text NOT NULL UNIQUE,
+      currency_zone text NOT NULL,
+      active boolean NOT NULL DEFAULT true,
+      created_at timestamp DEFAULT now() NOT NULL
+    )`);
+
+    const defaultWtcCountries = [
+      { country: "Benin", zone: "XOF" },
+      { country: "Burkina Faso", zone: "XOF" },
+      { country: "Cote d'Ivoire", zone: "XOF" },
+      { country: "Mali", zone: "XOF" },
+      { country: "Senegal", zone: "XOF" },
+      { country: "Togo", zone: "XOF" },
+      { country: "Niger", zone: "XOF" },
+      { country: "Guinee-Bissau", zone: "XOF" },
+      { country: "Cameroun", zone: "XAF" },
+      { country: "Congo Brazzaville", zone: "XAF" },
+      { country: "Gabon", zone: "XAF" },
+      { country: "Tchad", zone: "XAF" },
+      { country: "Centrafrique", zone: "XAF" },
+      { country: "Guinee Equatoriale", zone: "XAF" },
+    ];
+    for (const c of defaultWtcCountries) {
+      await client.query(
+        `INSERT INTO wallet_transfer_countries (country, currency_zone) VALUES ($1, $2) ON CONFLICT (country) DO NOTHING`,
+        [c.country, c.zone]
+      );
+    }
+
     await client.query(`CREATE TABLE IF NOT EXISTS wallet_transfers (
       id serial PRIMARY KEY,
       merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,

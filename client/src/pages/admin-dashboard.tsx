@@ -1684,6 +1684,7 @@ function AdminWalletTransfersPanel() {
   const { toast } = useToast();
   const { data: transfers = [], isLoading } = useAdminFetch("/api/admin/wallet-transfers", ["/api/admin/wallet-transfers"]);
   const { data: feeConfig, refetch: refetchFee } = useAdminFetch("/api/admin/wallet-transfer-fee", ["/api/admin/wallet-transfer-fee"]);
+  const { data: wtcList = [], refetch: refetchWtc } = useAdminFetch("/api/admin/wallet-transfer-countries", ["/api/admin/wallet-transfer-countries"]);
 
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
   const [selectedTransfer, setSelectedTransfer] = useState<(WalletTransfer & { merchantName: string }) | null>(null);
@@ -1692,6 +1693,9 @@ function AdminWalletTransfersPanel() {
   const [feeType, setFeeType] = useState("percentage");
   const [feeValue, setFeeValue] = useState("2");
   const [savingFee, setSavingFee] = useState(false);
+  const [newCountry, setNewCountry] = useState("");
+  const [newZone, setNewZone] = useState("XOF");
+  const [addingCountry, setAddingCountry] = useState(false);
 
   useEffect(() => {
     if (feeConfig) {
@@ -1795,6 +1799,123 @@ function AdminWalletTransfersPanel() {
           <p className="text-xs text-muted-foreground mt-3">
             Frais actuels : {feeType === "percentage" ? `${feeValue}% du montant` : `${parseFloat(feeValue || "0").toLocaleString("fr-FR")} FCFA fixe`}
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-base">Pays autorisés pour les virements</CardTitle>
+            <Badge variant="secondary">{(wtcList as any[]).length} pays</Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!newCountry.trim()) return;
+              setAddingCountry(true);
+              try {
+                const res = await fetch("/api/admin/wallet-transfer-countries", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                  body: JSON.stringify({ country: newCountry.trim(), currencyZone: newZone }),
+                });
+                if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+                refetchWtc();
+                setNewCountry("");
+                toast({ title: "Pays ajouté" });
+              } catch (err: any) {
+                toast({ title: "Erreur", description: err.message, variant: "destructive" });
+              } finally {
+                setAddingCountry(false);
+              }
+            }}
+            className="flex flex-wrap gap-3 items-end"
+          >
+            <div className="space-y-1 flex-1 min-w-40">
+              <Label className="text-xs">Nom du pays</Label>
+              <Input
+                value={newCountry}
+                onChange={(e) => setNewCountry(e.target.value)}
+                placeholder="Ex: Nigeria"
+                data-testid="input-new-wtc-country"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Zone monétaire</Label>
+              <Select value={newZone} onValueChange={setNewZone}>
+                <SelectTrigger className="w-28" data-testid="select-new-wtc-zone">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="XOF">XOF</SelectItem>
+                  <SelectItem value="XAF">XAF</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Button type="submit" disabled={addingCountry || !newCountry.trim()} size="sm" data-testid="button-add-wtc-country">
+              {addingCountry ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Plus className="w-4 h-4 mr-1" />}
+              Ajouter
+            </Button>
+          </form>
+
+          <div className="space-y-2">
+            {["XOF", "XAF"].map(zone => {
+              const zoneCountries = (wtcList as any[]).filter((c: any) => c.currencyZone === zone);
+              if (zoneCountries.length === 0) return null;
+              return (
+                <div key={zone}>
+                  <p className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wide">Zone {zone}</p>
+                  <div className="space-y-1">
+                    {zoneCountries.map((c: any) => (
+                      <div key={c.id} className="flex items-center justify-between gap-2 p-2 rounded border text-sm" data-testid={`wtc-row-${c.id}`}>
+                        <div className="flex items-center gap-2">
+                          <span className={c.active ? "text-foreground font-medium" : "text-muted-foreground line-through"}>{c.country}</span>
+                          <Badge variant={c.active ? "secondary" : "outline"} className="text-xs">
+                            {c.active ? "Actif" : "Désactivé"}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Switch
+                            checked={c.active}
+                            onCheckedChange={async (v) => {
+                              await fetch(`/api/admin/wallet-transfer-countries/${c.id}/toggle`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                                body: JSON.stringify({ active: v }),
+                              });
+                              refetchWtc();
+                              toast({ title: v ? `${c.country} activé` : `${c.country} désactivé` });
+                            }}
+                            data-testid={`switch-wtc-${c.id}`}
+                          />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-destructive hover:text-destructive h-7 w-7"
+                            onClick={async () => {
+                              if (!confirm(`Supprimer ${c.country} ?`)) return;
+                              await fetch(`/api/admin/wallet-transfer-countries/${c.id}`, {
+                                method: "DELETE",
+                                headers: { Authorization: `Bearer ${token}` },
+                              });
+                              refetchWtc();
+                              toast({ title: `${c.country} supprimé` });
+                            }}
+                            data-testid={`button-delete-wtc-${c.id}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-xs text-muted-foreground">Les virements sont uniquement possibles entre deux pays actifs dans la même zone monétaire.</p>
         </CardContent>
       </Card>
 

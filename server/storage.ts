@@ -1,7 +1,7 @@
 import {
   admins, merchants, merchantCountries, transactions, smsLogs, numbers, settings, loginLogs,
   merchantPins, apiLogs, pendingPayments, webhookLogs, telegramActivationCodes, paymentLinks,
-  walletTransfers,
+  walletTransfers, walletTransferCountries,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
@@ -11,6 +11,7 @@ import {
   type WebhookLog, type InsertWebhookLog,
   type TelegramActivationCode, type PaymentLink, type InsertPaymentLink,
   type WalletTransfer, type InsertWalletTransfer,
+  type WalletTransferCountry, type InsertWalletTransferCountry,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and } from "drizzle-orm";
@@ -103,6 +104,12 @@ export interface IStorage {
   getWalletTransferById(id: number): Promise<WalletTransfer | undefined>;
   updateWalletTransferStatus(id: number, status: string, adminNote?: string): Promise<void>;
   applyWalletTransfer(id: number): Promise<void>;
+
+  getWalletTransferCountries(activeOnly?: boolean): Promise<WalletTransferCountry[]>;
+  getWalletTransferCountryByName(country: string): Promise<WalletTransferCountry | undefined>;
+  createWalletTransferCountry(data: InsertWalletTransferCountry): Promise<WalletTransferCountry>;
+  toggleWalletTransferCountry(id: number, active: boolean): Promise<void>;
+  deleteWalletTransferCountry(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -533,6 +540,31 @@ export class DatabaseStorage implements IStorage {
     await db.update(merchantCountries)
       .set({ balance: sql`${merchantCountries.balance} + ${transfer.netAmount}` })
       .where(eq(merchantCountries.id, transfer.toCountryId));
+  }
+
+  async getWalletTransferCountries(activeOnly = false): Promise<WalletTransferCountry[]> {
+    const rows = activeOnly
+      ? await db.select().from(walletTransferCountries).where(eq(walletTransferCountries.active, true)).orderBy(walletTransferCountries.currencyZone, walletTransferCountries.country)
+      : await db.select().from(walletTransferCountries).orderBy(walletTransferCountries.currencyZone, walletTransferCountries.country);
+    return rows;
+  }
+
+  async getWalletTransferCountryByName(country: string): Promise<WalletTransferCountry | undefined> {
+    const [row] = await db.select().from(walletTransferCountries).where(eq(walletTransferCountries.country, country));
+    return row;
+  }
+
+  async createWalletTransferCountry(data: InsertWalletTransferCountry): Promise<WalletTransferCountry> {
+    const [created] = await db.insert(walletTransferCountries).values(data).returning();
+    return created;
+  }
+
+  async toggleWalletTransferCountry(id: number, active: boolean): Promise<void> {
+    await db.update(walletTransferCountries).set({ active }).where(eq(walletTransferCountries.id, id));
+  }
+
+  async deleteWalletTransferCountry(id: number): Promise<void> {
+    await db.delete(walletTransferCountries).where(eq(walletTransferCountries.id, id));
   }
 }
 

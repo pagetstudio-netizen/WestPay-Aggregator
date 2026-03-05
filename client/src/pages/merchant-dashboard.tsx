@@ -27,7 +27,7 @@ import {
   Trash2, Plus, ToggleLeft, ToggleRight, Edit3, BarChart3, MessageCircle, Phone
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
-import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer } from "@shared/schema";
+import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry } from "@shared/schema";
 
 type MerchantTab = "overview" | "transactions" | "apikeys" | "webhook" | "transfers" | "virements" | "settings" | "paymentlinks";
 
@@ -807,21 +807,24 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
   const { toast } = useToast();
   const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
   const { data: walletTransfers = [], isLoading: wtLoading } = useMerchantFetch("/api/merchant/wallet-transfers", ["/api/merchant/wallet-transfers"], token);
+  const { data: wtcList = [] } = useQuery<WalletTransferCountry[]>({
+    queryKey: ["/api/wallet-transfer-countries"],
+    queryFn: () => fetch("/api/wallet-transfer-countries").then(r => r.json()),
+  });
 
   const [fromCountryId, setFromCountryId] = useState("");
   const [toCountryId, setToCountryId] = useState("");
   const [amount, setAmount] = useState("");
 
-  const XOF_COUNTRIES = ["Benin", "Burkina Faso", "Cote d'Ivoire", "Mali", "Senegal", "Togo"];
-  const XAF_COUNTRIES = ["Cameroun", "Congo Brazzaville", "Gabon"];
-
-  const allCountries = (balance as MerchantCountry[]).filter(c => c.active);
-  const fromMC = allCountries.find(c => String(c.id) === fromCountryId);
-  const fromZone = fromMC ? (XOF_COUNTRIES.includes(fromMC.country) ? "XOF" : XAF_COUNTRIES.includes(fromMC.country) ? "XAF" : null) : null;
+  const wtcMap = new Map<string, WalletTransferCountry>(wtcList.map((c: WalletTransferCountry) => [c.country, c]));
+  const allMerchantCountries = (balance as MerchantCountry[]).filter(c => c.active);
+  const eligibleCountries = allMerchantCountries.filter(c => wtcMap.has(c.country));
+  const fromMC = eligibleCountries.find(c => String(c.id) === fromCountryId);
+  const fromZone = fromMC ? wtcMap.get(fromMC.country)?.currencyZone || null : null;
   const toCountries = fromZone
-    ? allCountries.filter(c =>
+    ? eligibleCountries.filter(c =>
         String(c.id) !== fromCountryId &&
-        (fromZone === "XOF" ? XOF_COUNTRIES.includes(c.country) : XAF_COUNTRIES.includes(c.country))
+        wtcMap.get(c.country)?.currencyZone === fromZone
       )
     : [];
 
@@ -871,25 +874,34 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
 
   if (balLoading) return <MerchantLoadingSkeleton />;
 
+  const xofCountries = wtcList.filter((c: WalletTransferCountry) => c.currencyZone === "XOF").map((c: WalletTransferCountry) => c.country).join(", ");
+  const xafCountries = wtcList.filter((c: WalletTransferCountry) => c.currencyZone === "XAF").map((c: WalletTransferCountry) => c.country).join(", ");
+
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold text-foreground">Virements Inter-Wallets</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Transférez des fonds entre vos wallets dans la même zone monétaire (XOF ou XAF). Soumis à l'approbation de l'administrateur.
+          Transférez des fonds entre vos wallets dans la même zone monétaire. Soumis à l'approbation de l'administrateur.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-muted/50 rounded-lg border">
-        <div className="text-sm">
-          <span className="font-medium">Zone XOF :</span>
-          <span className="text-muted-foreground ml-2">Bénin, Burkina Faso, Côte d'Ivoire, Mali, Sénégal, Togo</span>
+      {wtcList.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 bg-muted/50 rounded-lg border text-xs">
+          {xofCountries && (
+            <div><span className="font-medium">Zone XOF : </span><span className="text-muted-foreground">{xofCountries}</span></div>
+          )}
+          {xafCountries && (
+            <div><span className="font-medium">Zone XAF : </span><span className="text-muted-foreground">{xafCountries}</span></div>
+          )}
         </div>
-        <div className="text-sm">
-          <span className="font-medium">Zone XAF :</span>
-          <span className="text-muted-foreground ml-2">Cameroun, Congo Brazzaville, Gabon</span>
+      )}
+
+      {eligibleCountries.length < 2 && (
+        <div className="p-4 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 text-sm text-amber-800 dark:text-amber-200">
+          Vous avez besoin d'au moins 2 wallets actifs dans la même zone monétaire pour effectuer un virement inter-wallets.
         </div>
-      </div>
+      )}
 
       <Card>
         <CardHeader><CardTitle className="text-base">Nouvelle demande de virement</CardTitle></CardHeader>
@@ -898,12 +910,12 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Wallet source</Label>
-                <Select value={fromCountryId} onValueChange={(v) => { setFromCountryId(v); setToCountryId(""); }} data-testid="select-virement-from">
+                <Select value={fromCountryId} onValueChange={(v) => { setFromCountryId(v); setToCountryId(""); }}>
                   <SelectTrigger data-testid="select-virement-from">
-                    <SelectValue placeholder="Pays source" />
+                    <SelectValue placeholder={eligibleCountries.length === 0 ? "Aucun wallet éligible" : "Sélectionner"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {allCountries.map(c => (
+                    {eligibleCountries.map(c => (
                       <SelectItem key={c.id} value={String(c.id)}>
                         {c.country} — {c.balance.toLocaleString("fr-FR")} FCFA
                       </SelectItem>
@@ -915,7 +927,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
                 <Label>Wallet destination</Label>
                 <Select value={toCountryId} onValueChange={setToCountryId} disabled={!fromCountryId || toCountries.length === 0}>
                   <SelectTrigger data-testid="select-virement-to">
-                    <SelectValue placeholder={fromCountryId && toCountries.length === 0 ? "Aucun wallet compatible" : "Pays destination"} />
+                    <SelectValue placeholder={fromCountryId && toCountries.length === 0 ? "Aucun wallet compatible" : "Sélectionner"} />
                   </SelectTrigger>
                   <SelectContent>
                     {toCountries.map(c => (
@@ -926,7 +938,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
                   </SelectContent>
                 </Select>
                 {fromCountryId && toCountries.length === 0 && (
-                  <p className="text-xs text-destructive">Aucun autre wallet dans la même zone monétaire ({fromZone})</p>
+                  <p className="text-xs text-destructive">Aucun autre wallet dans la même zone ({fromZone})</p>
                 )}
               </div>
             </div>
@@ -943,7 +955,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
               />
               {fromMC && amount && !isNaN(parseInt(amount)) && (
                 <p className="text-xs text-muted-foreground">
-                  Solde disponible : {fromMC.balance.toLocaleString("fr-FR")} {fromZone} — Des frais s'appliquent sur le montant.
+                  Solde disponible : {fromMC.balance.toLocaleString("fr-FR")} {fromZone} — Des frais s'appliquent.
                 </p>
               )}
             </div>
