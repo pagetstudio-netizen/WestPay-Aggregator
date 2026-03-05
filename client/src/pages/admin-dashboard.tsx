@@ -394,6 +394,7 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
   const [profileName, setProfileName] = useState("");
   const [profileEmail, setProfileEmail] = useState("");
   const [profilePassword, setProfilePassword] = useState("");
+  const [profileWebsite, setProfileWebsite] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
   const [balanceEdits, setBalanceEdits] = useState<Record<number, string>>({});
 
@@ -401,6 +402,7 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
     if (merchant) {
       setProfileName(merchant.name || "");
       setProfileEmail(merchant.email || "");
+      setProfileWebsite(merchant.website || "");
       setWebhookUrl(merchant.webhookUrl || "");
     }
   }, [merchant]);
@@ -418,7 +420,7 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
       const res = await fetch(`/api/admin/merchant/${merchantId}/profile`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: profileName, email: profileEmail, password: profilePassword || undefined }),
+        body: JSON.stringify({ name: profileName, email: profileEmail, password: profilePassword || undefined, website: profileWebsite }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
       return res.json();
@@ -506,6 +508,10 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
                 <div className="space-y-2">
                   <Label>Email</Label>
                   <Input type="email" value={profileEmail} onChange={e => setProfileEmail(e.target.value)} placeholder="Email" data-testid="input-edit-merchant-email" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Site web <span className="text-muted-foreground text-xs font-normal">(optionnel)</span></Label>
+                  <Input type="url" value={profileWebsite} onChange={e => setProfileWebsite(e.target.value)} placeholder="https://example.com" data-testid="input-edit-merchant-website" />
                 </div>
                 <div className="space-y-2">
                   <Label>Nouveau mot de passe <span className="text-muted-foreground text-xs font-normal">(laisser vide pour ne pas changer)</span></Label>
@@ -746,7 +752,9 @@ function MerchantsPanel() {
   const [slug, setSlug] = useState("");
   const [password, setPassword] = useState("");
   const [pin, setPin] = useState("");
+  const [website, setWebsite] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
+  const [websiteFilter, setWebsiteFilter] = useState("");
   const [selectedMerchantId, setSelectedMerchantId] = useState<number | null>(null);
 
   const { data: merchants = [], isLoading } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
@@ -756,7 +764,7 @@ function MerchantsPanel() {
       const res = await fetch("/api/admin/create-merchant", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name, email, slug, password, pin: pin || undefined }),
+        body: JSON.stringify({ name, email, slug, password, pin: pin || undefined, website: website || undefined }),
       });
       if (!res.ok) {
         const data = await res.json();
@@ -767,7 +775,7 @@ function MerchantsPanel() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
       setShowCreate(false);
-      setName(""); setEmail(""); setSlug(""); setPassword(""); setPin("");
+      setName(""); setEmail(""); setSlug(""); setPassword(""); setPin(""); setWebsite("");
       toast({ title: "Marchand cree avec succes" });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
@@ -803,9 +811,12 @@ function MerchantsPanel() {
     },
   });
 
-  const filtered = (merchants as any[]).filter(
-    (m) => m.name.toLowerCase().includes(searchTerm.toLowerCase()) || m.email.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filtered = (merchants as any[]).filter((m) => {
+    const term = searchTerm.toLowerCase();
+    const matchesSearch = !term || m.name.toLowerCase().includes(term) || m.email.toLowerCase().includes(term) || (m.website || "").toLowerCase().includes(term) || m.slug.toLowerCase().includes(term);
+    const matchesWebsite = !websiteFilter || (m.website || "").toLowerCase().includes(websiteFilter.toLowerCase());
+    return matchesSearch && matchesWebsite;
+  });
 
   if (isLoading) return <LoadingSkeleton />;
 
@@ -838,6 +849,10 @@ function MerchantsPanel() {
                 <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mot de passe" required data-testid="input-merchant-create-password" />
               </div>
               <div className="space-y-2">
+                <Label>Site web <span className="text-muted-foreground text-xs font-normal">(optionnel)</span></Label>
+                <Input value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://example.com" type="url" data-testid="input-merchant-website" />
+              </div>
+              <div className="space-y-2">
                 <Label>Code PIN (6 chiffres, optionnel)</Label>
                 <Input
                   value={pin}
@@ -857,16 +872,31 @@ function MerchantsPanel() {
         </Dialog>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input
-          className="pl-10"
-          placeholder="Rechercher un marchand..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          data-testid="input-search-merchants"
-        />
+      <div className="flex gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-40">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            className="pl-10"
+            placeholder="Rechercher par nom, email, slug..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            data-testid="input-search-merchants"
+          />
+        </div>
+        <div className="relative flex-1 min-w-40">
+          <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            className="pl-10"
+            placeholder="Filtrer par site web..."
+            value={websiteFilter}
+            onChange={(e) => setWebsiteFilter(e.target.value)}
+            data-testid="input-filter-website"
+          />
+        </div>
       </div>
+      {(searchTerm || websiteFilter) && (
+        <p className="text-xs text-muted-foreground">{filtered.length} marchand{filtered.length !== 1 ? "s" : ""} trouvé{filtered.length !== 1 ? "s" : ""}</p>
+      )}
 
       <div className="space-y-3">
         {filtered.length === 0 ? (
@@ -890,6 +920,12 @@ function MerchantsPanel() {
                       <span><ArrowRightLeft className="w-3 h-3 inline mr-1" />{merchant.txCount || 0} transactions</span>
                       <span><DollarSign className="w-3 h-3 inline mr-1" />{(merchant.totalRevenue || 0).toLocaleString()} F</span>
                     </div>
+                    {merchant.website && (
+                      <div className="flex items-center gap-1 mt-1">
+                        <Globe className="w-3 h-3 text-blue-500" />
+                        <a href={merchant.website.startsWith("http") ? merchant.website : `https://${merchant.website}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline truncate max-w-xs" data-testid={`text-merchant-website-${merchant.id}`}>{merchant.website}</a>
+                      </div>
+                    )}
                     {merchant.webhookUrl && (
                       <div className="flex items-center gap-1 mt-1">
                         <Webhook className="w-3 h-3 text-green-500" />

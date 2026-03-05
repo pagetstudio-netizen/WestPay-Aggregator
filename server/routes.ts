@@ -208,7 +208,7 @@ export async function registerRoutes(
 
   app.post("/api/admin/create-merchant", authMiddleware("admin"), async (req, res) => {
     try {
-      const { name, email, slug, password, pin } = req.body;
+      const { name, email, slug, password, pin, website } = req.body;
       if (!name || !email || !slug || !password) return res.status(400).json({ message: "Tous les champs sont requis" });
 
       const existing = await storage.getMerchantByEmail(email);
@@ -218,7 +218,7 @@ export async function registerRoutes(
       if (slugExists) return res.status(400).json({ message: "Slug deja utilise" });
 
       const passwordHash = await bcrypt.hash(password, 10);
-      const merchant = await storage.createMerchant({ name, email, slug, passwordHash, suspended: false });
+      const merchant = await storage.createMerchant({ name, email, slug, passwordHash, suspended: false, website: website?.trim() || null });
 
       if (pin && pin.length === 6) {
         const pinHash = await bcrypt.hash(pin, 10);
@@ -252,7 +252,7 @@ export async function registerRoutes(
   app.put("/api/admin/merchant/:id/profile", authMiddleware("admin"), async (req, res) => {
     try {
       const merchantId = parseInt(req.params.id);
-      const { name, email, password } = req.body;
+      const { name, email, password, website } = req.body;
       const merchant = await storage.getMerchantById(merchantId);
       if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
       const updateData: any = {};
@@ -265,6 +265,7 @@ export async function registerRoutes(
       if (password && password.length >= 6) {
         updateData.passwordHash = await bcrypt.hash(password, 10);
       }
+      if (website !== undefined) updateData.website = website?.trim() || null;
       if (Object.keys(updateData).length === 0) return res.status(400).json({ message: "Aucune donnee a mettre a jour" });
       await storage.updateMerchant(merchantId, updateData);
       res.json({ success: true });

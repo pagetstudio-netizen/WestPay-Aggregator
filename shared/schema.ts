@@ -23,6 +23,7 @@ export const merchants = pgTable("merchants", {
   telegramChatId: text("telegram_chat_id"),
   telegramBotLanguage: text("telegram_bot_language").default("fr").notNull(),
   withdrawalMode: text("withdrawal_mode").default("manual").notNull(),
+  website: text("website"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
