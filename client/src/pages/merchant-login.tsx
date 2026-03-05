@@ -57,7 +57,7 @@ export default function MerchantLogin() {
           <h1 className="text-xl font-bold text-foreground" data-testid="text-merchant-login-title">
             Espace Marchand
           </h1>
-          <p className="text-xs text-muted-foreground">Connexion a votre tableau de bord WestPay</p>
+          <p className="text-xs text-muted-foreground">Connexion a votre tableau de bord RobotPay</p>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">

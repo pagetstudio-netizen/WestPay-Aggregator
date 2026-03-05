@@ -154,11 +154,11 @@ export default function PaymentLinkPage() {
           country: selectedCountry,
           amount,
           payerPhone: payerPhone.trim(),
-          payerName: "Client WestPay",
+          payerName: "Client RobotPay",
           paymentMethod: selectedMethod,
           redirectUrl: data!.link.redirectUrl || null,
           firstName: "Client",
-          lastName: "WestPay",
+          lastName: "RobotPay",
           operator: selectedMethod.toLowerCase().includes("wave") ? "wave" : undefined,
         }),
       });
@@ -406,7 +406,7 @@ export default function PaymentLinkPage() {
           )}
         </div>
 
-        <p className="text-center text-white/60 text-xs mt-3">Paiement sécurisé via WestPay</p>
+        <p className="text-center text-white/60 text-xs mt-3">Paiement sécurisé via RobotPay</p>
       </div>
     </div>
   );

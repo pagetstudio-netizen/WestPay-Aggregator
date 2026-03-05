@@ -149,7 +149,7 @@ export default function PaymentPage() {
     setIsSubmitting(true);
     try {
       const firstName = "Client";
-      const lastName = "WestPay";
+      const lastName = "RobotPay";
 
       const res = await fetch("/api/payment/initiate", {
         method: "POST",
@@ -334,7 +334,7 @@ export default function PaymentPage() {
       `}</style>
       <div className="w-full max-w-[420px] px-4 py-3">
         <div className="mb-2">
-          <h1 className="text-white font-bold text-lg" data-testid="text-brand">WestPay</h1>
+          <h1 className="text-white font-bold text-lg" data-testid="text-brand">RobotPay</h1>
           <p className="text-white/80 text-sm">Paiement securise</p>
         </div>
 
@@ -645,7 +645,7 @@ export default function PaymentPage() {
         </div>
 
         <p className="text-center text-white/60 text-xs mt-3">
-          Paiement securise via WestPay
+          Paiement securise via RobotPay
         </p>
       </div>
     </div>

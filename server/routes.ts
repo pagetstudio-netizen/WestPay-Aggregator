@@ -665,8 +665,8 @@ export async function registerRoutes(
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-WestPay-Signature": signature,
-            "X-WestPay-Event": payload.event || "payment.confirmed",
+            "X-RobotPay-Signature": signature,
+            "X-RobotPay-Event": payload.event || "payment.confirmed",
           },
           body: payloadStr,
           signal: controller.signal,
