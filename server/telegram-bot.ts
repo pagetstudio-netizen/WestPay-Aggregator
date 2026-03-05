@@ -22,6 +22,10 @@ function formatAmount(n: number): string {
   return n.toLocaleString("fr-FR") + " F CFA";
 }
 
+function formatAmountPlain(n: number): string {
+  return n.toFixed(2);
+}
+
 // ─── Rate Limiter ────────────────────────────────────────────────────────────
 const MAX_FAILED = 5;
 const LOCK_DURATION_MS = 60 * 60 * 1000;
@@ -31,10 +35,7 @@ function isRateLimited(userId: string): boolean {
   const r = failedAttempts.get(userId);
   if (!r) return false;
   if (r.lockedUntil && new Date() < r.lockedUntil) return true;
-  if (r.lockedUntil && new Date() >= r.lockedUntil) {
-    failedAttempts.delete(userId);
-    return false;
-  }
+  if (r.lockedUntil && new Date() >= r.lockedUntil) { failedAttempts.delete(userId); return false; }
   return false;
 }
 
@@ -48,6 +49,21 @@ function recordFailed(userId: string): number {
 
 function resetAttempts(userId: string): void {
   failedAttempts.delete(userId);
+}
+
+// ─── Known Groups Registry ───────────────────────────────────────────────────
+async function getKnownGroups(): Promise<string[]> {
+  const raw = await storage.getSetting("telegram_known_groups");
+  if (!raw) return [];
+  try { return JSON.parse(raw); } catch { return []; }
+}
+
+async function registerKnownGroup(chatId: string): Promise<void> {
+  const groups = await getKnownGroups();
+  if (!groups.includes(chatId)) {
+    groups.push(chatId);
+    await storage.setSetting("telegram_known_groups", JSON.stringify(groups));
+  }
 }
 
 // ─── Security helpers ─────────────────────────────────────────────────────────
@@ -72,6 +88,48 @@ function formatUser(ctx: any): string {
   if (!u) return "Inconnu";
   const name = [u.first_name, u.last_name].filter(Boolean).join(" ");
   return u.username ? `${name} (@${u.username})` : name;
+}
+
+// ─── Today's transaction stats helpers ───────────────────────────────────────
+function isToday(date: Date): boolean {
+  const now = new Date();
+  return date.getFullYear() === now.getFullYear()
+    && date.getMonth() === now.getMonth()
+    && date.getDate() === now.getDate();
+}
+
+async function getTodayStatsByCountry(merchantId: number, country: string): Promise<{ success: number; total: number; amount: number }> {
+  const txs = await storage.getTransactions(merchantId);
+  const todayTxs = txs.filter(t => t.country === country && isToday(new Date(t.createdAt)));
+  const success = todayTxs.filter(t => t.status === "confirmed").length;
+  const amount = todayTxs.filter(t => t.status === "confirmed").reduce((s, t) => s + t.amount, 0);
+  return { success, total: todayTxs.length, amount };
+}
+
+function successRate(success: number, total: number): string {
+  if (total === 0) return "100%";
+  return ((success / total) * 100).toFixed(2) + "%";
+}
+
+// ─── Solde par pays (format enrichi) ─────────────────────────────────────────
+async function buildMerchantSoldeMessage(merchantId: number, merchantName: string): Promise<string> {
+  const countries = await storage.getMerchantCountries(merchantId);
+  const active = countries.filter(mc => mc.active);
+  if (active.length === 0) return `_Aucun pays actif pour ${merchantName}_`;
+
+  const parts: string[] = [];
+  for (const mc of active) {
+    const stats = await getTodayStatsByCountry(merchantId, mc.country);
+    parts.push(
+      `🌍 *Pays :* ${countryLabel(mc.country)}\n` +
+      `📌 *Clé :* \`${mc.apiKey.slice(-12)}\`\n` +
+      `💰 *Solde compte :* ${formatAmountPlain(mc.balance)} F CFA\n` +
+      `💳 *Solde reversement :* ${formatAmountPlain(mc.balance)} F CFA\n` +
+      `📊 *Dépôts réussis aujourd'hui :* ${stats.success}\n` +
+      `📈 *Taux de réussite aujourd'hui :* ${successRate(stats.success, stats.total)}`
+    );
+  }
+  return parts.join("\n\n─────────────────\n\n");
 }
 
 export function initTelegramBot(): Telegraf | null {
@@ -110,7 +168,6 @@ export function initTelegramBot(): Telegraf | null {
     }
 
     const ac = await storage.getTelegramActivationCode(code);
-
     if (!ac || ac.used || new Date() > new Date(ac.expiresAt)) {
       const remaining = recordFailed(userId);
       if (remaining <= 0) {
@@ -118,9 +175,7 @@ export function initTelegramBot(): Telegraf | null {
         await alertAdminGroup(`🚨 *Compte bloqué (trop de tentatives)*\n\n👤 Utilisateur : ${formatUser(ctx)}\n🆔 ID : \`${userId}\``);
       } else {
         await ctx.reply(`❌ Code invalide ou expiré.\n\n⚠️ Tentatives restantes : *${remaining}*`, { parse_mode: "Markdown" });
-        if (remaining <= 2) {
-          await alertAdminGroup(`⚠️ *Tentatives suspectes de liaison bot*\n\n👤 Utilisateur : ${formatUser(ctx)}\n🆔 ID : \`${userId}\`\n⚠️ Tentatives restantes : ${remaining}`);
-        }
+        if (remaining <= 2) await alertAdminGroup(`⚠️ *Tentatives suspectes de liaison bot*\n\n👤 Utilisateur : ${formatUser(ctx)}\n🆔 ID : \`${userId}\`\n⚠️ Tentatives restantes : ${remaining}`);
       }
       return;
     }
@@ -143,28 +198,23 @@ export function initTelegramBot(): Telegraf | null {
 
     const groupId = await getAdminGroupId();
     if (groupId) {
-      await bot!.telegram.sendMessage(
-        groupId,
+      await bot!.telegram.sendMessage(groupId,
         `🔗 *Nouveau marchand lié à Telegram*\n\n🏪 Marchand : *${merchant?.name}*\n📧 ${merchant?.email}\n👤 Telegram : ${formatUser(ctx)}`,
         { parse_mode: "Markdown" }
       ).catch(() => {});
     }
   });
 
-  // ─── /setgroup (groupe admin uniquement, protégé par clé API admin) ──────
+  // ─── /setgroup (groupe admin, protégé par clé API) ────────────────────────
   bot.command("setgroup", async (ctx) => {
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
-    if (!isGroup) {
-      await ctx.reply("❌ Cette commande doit être utilisée dans un groupe.");
-      return;
-    }
+    if (!isGroup) { await ctx.reply("❌ Cette commande doit être utilisée dans un groupe."); return; }
 
     const text = ctx.message.text || "";
     const apiKey = text.split(" ")[1]?.trim();
     const chatId = String(ctx.chat.id);
 
     const existingGroupId = await getAdminGroupId();
-
     if (existingGroupId && chatId === existingGroupId && !apiKey) {
       await ctx.reply(`✅ Ce groupe est déjà enregistré comme groupe admin.\n🆔 Chat ID : \`${chatId}\``, { parse_mode: "Markdown" });
       return;
@@ -175,13 +225,6 @@ export function initTelegramBot(): Telegraf | null {
       await alertAdminGroup(`⚠️ *Tentative /setgroup sans clé*\n\n👥 Groupe : ${(ctx.chat as any).title || chatId}\n👤 Par : ${formatUser(ctx)}`);
       return;
     }
-
-    const admins = await storage.getMerchants();
-    const allAdmins = await (storage as any).getAdminByEmail?.("admin@westpay.com");
-    const validAdmin = await storage.getSetting("admin_api_key").then(async (key) => {
-      if (key && key === apiKey) return true;
-      return false;
-    }).catch(() => false);
 
     const adminRecord = await (async () => {
       try {
@@ -200,19 +243,17 @@ export function initTelegramBot(): Telegraf | null {
     }
 
     await storage.setSetting("telegram_group_id", chatId);
+    await registerKnownGroup(chatId);
     await ctx.reply(
       `✅ *Groupe admin enregistré !*\n\n🔐 Authentifié : *${adminRecord.email}*\n📢 Toutes les alertes WestPay arriveront dans ce groupe.\n🆔 Chat ID : \`${chatId}\``,
       { parse_mode: "Markdown" }
     );
   });
 
-  // ─── /setmarchand (liaison groupe → marchand, code d'activation requis) ──
+  // ─── /setmarchand (liaison groupe → marchand) ─────────────────────────────
   bot.command("setmarchand", async (ctx) => {
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
-    if (!isGroup) {
-      await ctx.reply("❌ Cette commande doit être utilisée dans un groupe dédié au marchand.");
-      return;
-    }
+    if (!isGroup) { await ctx.reply("❌ Cette commande doit être utilisée dans un groupe dédié au marchand."); return; }
 
     const userId = String(ctx.from?.id || "");
     const chatId = String(ctx.chat.id);
@@ -245,6 +286,7 @@ export function initTelegramBot(): Telegraf | null {
     const groupTitle = (ctx.chat as any).title || "Ce groupe";
     await storage.updateMerchantTelegramChatId(ac.merchantId, chatId);
     await storage.markTelegramActivationCodeUsed(code);
+    await registerKnownGroup(chatId);
     resetAttempts(userId);
 
     const merchant = await storage.getMerchantById(ac.merchantId);
@@ -255,8 +297,7 @@ export function initTelegramBot(): Telegraf | null {
 
     const adminGroupId = await getAdminGroupId();
     if (adminGroupId && adminGroupId !== chatId) {
-      await bot!.telegram.sendMessage(
-        adminGroupId,
+      await bot!.telegram.sendMessage(adminGroupId,
         `🔗 *Groupe marchand configuré*\n\n🏪 Marchand : *${merchant?.name}*\n👥 Groupe : ${groupTitle}\n👤 Configuré par : ${formatUser(ctx)}`,
         { parse_mode: "Markdown" }
       ).catch(() => {});
@@ -277,9 +318,7 @@ export function initTelegramBot(): Telegraf | null {
           `📊 *Statistiques WestPay*\n\n🏪 Marchands : *${stats.merchantCount}*\n💳 Transactions : *${stats.transactionCount}*\n💰 Volume total : *${formatAmount(stats.totalVolume)}*\n📱 Numéros actifs : *${stats.activeNumbers}*`,
           { parse_mode: "Markdown" }
         );
-      } catch {
-        await ctx.reply("❌ Erreur lors de la récupération des statistiques.");
-      }
+      } catch { await ctx.reply("❌ Erreur lors de la récupération des statistiques."); }
       return;
     }
 
@@ -292,9 +331,7 @@ export function initTelegramBot(): Telegraf | null {
         `📊 *Vos statistiques — ${merchant.name}*\n\n💳 Transactions : *${stats.transactionCount}*\n💰 Volume total : *${formatAmount(stats.totalVolume)}*`,
         { parse_mode: "Markdown" }
       );
-    } catch {
-      await ctx.reply("❌ Erreur.");
-    }
+    } catch { await ctx.reply("❌ Erreur."); }
   });
 
   // ─── /marchands (groupe admin uniquement) ─────────────────────────────────
@@ -315,9 +352,7 @@ export function initTelegramBot(): Telegraf | null {
         `🏪 *Marchands WestPay* (${merchants.length})\n\n${lines.join("\n")}\n\n📱 = Telegram lié`,
         { parse_mode: "Markdown" }
       );
-    } catch {
-      await ctx.reply("❌ Erreur.");
-    }
+    } catch { await ctx.reply("❌ Erreur."); }
   });
 
   // ─── /solde ────────────────────────────────────────────────────────────────
@@ -329,35 +364,26 @@ export function initTelegramBot(): Telegraf | null {
       const authorized = await isAdminGroup(chatId);
       if (!authorized) return;
       try {
-        const allCountries = await storage.getMerchantCountries();
         const merchants = await storage.getMerchants();
-        const lines: string[] = [];
-        for (const m of merchants.slice(0, 10)) {
-          const mcs = allCountries.filter(mc => mc.merchantId === m.id && mc.active);
-          if (mcs.length === 0) continue;
-          lines.push(`\n*${m.name}*`);
-          for (const mc of mcs) lines.push(`  ${countryLabel(mc.country)}: *${formatAmount(mc.balance)}*`);
+        if (merchants.length === 0) { await ctx.reply("Aucun marchand enregistré."); return; }
+        const active = merchants.filter(m => !m.suspended);
+
+        for (const m of active.slice(0, 10)) {
+          const msg = await buildMerchantSoldeMessage(m.id, m.name);
+          await ctx.reply(`🏪 *${m.name}*\n\n${msg}`, { parse_mode: "Markdown" });
         }
-        if (lines.length === 0) { await ctx.reply("Aucun solde à afficher."); return; }
-        await ctx.reply(`💰 *Soldes des marchands*\n${lines.join("\n")}`, { parse_mode: "Markdown" });
-      } catch {
-        await ctx.reply("❌ Erreur.");
-      }
+      } catch { await ctx.reply("❌ Erreur."); }
       return;
     }
 
     const merchant = await storage.getMerchantByTelegramChatId(chatId);
     if (!merchant) return;
     if (merchant.suspended) { await ctx.reply("⚠️ Compte suspendu. Contactez votre administrateur."); return; }
+
     try {
-      const countries = await storage.getMerchantCountries(merchant.id);
-      const active = countries.filter(mc => mc.active);
-      if (active.length === 0) { await ctx.reply("Aucun pays actif."); return; }
-      const lines = active.map(mc => `${countryLabel(mc.country)}: *${formatAmount(mc.balance)}*`);
-      await ctx.reply(`💰 *Votre solde — ${merchant.name}*\n\n${lines.join("\n")}`, { parse_mode: "Markdown" });
-    } catch {
-      await ctx.reply("❌ Erreur.");
-    }
+      const msg = await buildMerchantSoldeMessage(merchant.id, merchant.name);
+      await ctx.reply(`💰 *Soldes — ${merchant.name}*\n\n${msg}`, { parse_mode: "Markdown" });
+    } catch { await ctx.reply("❌ Erreur."); }
   });
 
   // ─── /transactions (DM marchand uniquement) ────────────────────────────────
@@ -367,18 +393,68 @@ export function initTelegramBot(): Telegraf | null {
     const chatId = String(ctx.chat.id);
     const merchant = await storage.getMerchantByTelegramChatId(chatId);
     if (!merchant) return;
+
     try {
       const txs = await storage.getTransactions(merchant.id);
       const recent = txs.slice(0, 5);
       if (recent.length === 0) { await ctx.reply("Aucune transaction enregistrée."); return; }
       const lines = recent.map((t, i) => {
         const date = new Date(t.createdAt).toLocaleDateString("fr-FR");
-        return `${i + 1}. *${formatAmount(t.amount)}* — ${countryLabel(t.country)} — ${date}${t.payerNumber ? `\n   📞 ${t.payerNumber}` : ""}`;
+        const statusIcon = t.status === "confirmed" ? "✅" : "⏳";
+        return `${i + 1}. ${statusIcon} *${formatAmount(t.amount)}*\n   ${countryLabel(t.country)} — ${date}${t.payerNumber ? `\n   📞 ${t.payerNumber}` : ""}\n   🔖 \`${t.txId}\``;
       });
       await ctx.reply(`📋 *Vos 5 dernières transactions*\n\n${lines.join("\n\n")}`, { parse_mode: "Markdown" });
-    } catch {
-      await ctx.reply("❌ Erreur.");
+    } catch { await ctx.reply("❌ Erreur."); }
+  });
+
+  // ─── /broadcast (groupe admin uniquement) ─────────────────────────────────
+  bot.command("broadcast", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
+    if (!isGroup) {
+      await ctx.reply("❌ Cette commande est réservée au groupe admin.");
+      return;
     }
+    const authorized = await isAdminGroup(chatId);
+    if (!authorized) return;
+
+    const text = ctx.message.text || "";
+    const parts = text.split(" ");
+    parts.shift();
+    const message = parts.join(" ").trim();
+
+    if (!message) {
+      await ctx.reply(
+        "📢 *Diffusion de message*\n\nUsage :\n`/broadcast Votre message ici`\n\nLe message sera envoyé à tous les groupes connectés.",
+        { parse_mode: "Markdown" }
+      );
+      return;
+    }
+
+    const knownGroups = await getKnownGroups();
+    if (knownGroups.length === 0) {
+      await ctx.reply("⚠️ Aucun groupe enregistré. Configurez d'abord des groupes marchands via `/setmarchand`.", { parse_mode: "Markdown" });
+      return;
+    }
+
+    const sender = formatUser(ctx);
+    const broadcastMsg = `📢 *Message de WestPay*\n\n${message}\n\n_— ${sender}_`;
+
+    let sent = 0;
+    let failed = 0;
+    for (const groupId of knownGroups) {
+      try {
+        await bot!.telegram.sendMessage(groupId, broadcastMsg, { parse_mode: "Markdown" });
+        sent++;
+      } catch {
+        failed++;
+      }
+    }
+
+    await ctx.reply(
+      `✅ *Diffusion terminée*\n\n📤 Envoyé : *${sent}* groupe(s)\n❌ Échec : *${failed}* groupe(s)`,
+      { parse_mode: "Markdown" }
+    );
   });
 
   // ─── /aide ─────────────────────────────────────────────────────────────────
@@ -393,13 +469,15 @@ export function initTelegramBot(): Telegraf | null {
         `📖 *Commandes Admin — WestPay Bot*\n\n` +
         `━━━━━━━━━━━━━━━━\n` +
         `⚙️ *Configuration*\n` +
-        `/setgroup CLE\\_API — Enregistrer ce groupe admin (clé API depuis le dashboard)\n\n` +
+        `/setgroup CLE\\_API — Enregistrer ce groupe admin\n\n` +
         `👥 *Marchands*\n` +
         `/marchands — Liste de tous les marchands\n` +
-        `/setmarchand CODE — Lier un groupe au compte d'un marchand\n\n` +
+        `/setmarchand CODE — Lier un groupe à un marchand\n\n` +
         `📊 *Statistiques & Soldes*\n` +
         `/stats — Statistiques globales\n` +
-        `/solde — Soldes de tous les marchands\n\n` +
+        `/solde — Soldes détaillés de tous les marchands\n\n` +
+        `📢 *Diffusion*\n` +
+        `/broadcast MESSAGE — Envoyer un message dans tous les groupes\n\n` +
         `━━━━━━━━━━━━━━━━\n` +
         `💡 *Configurer un groupe marchand :*\n` +
         `1️⃣ Générer un code dans le dashboard WestPay\n` +
@@ -416,7 +494,7 @@ export function initTelegramBot(): Telegraf | null {
     const merchant = await storage.getMerchantByTelegramChatId(chatId);
     if (merchant) {
       await ctx.reply(
-        `📖 *Commandes — ${merchant.name}*\n\n/solde — Votre solde par pays\n/transactions — Vos 5 dernières transactions\n/stats — Vos statistiques\n/aide — Cette aide`,
+        `📖 *Commandes — ${merchant.name}*\n\n/solde — Votre solde détaillé par pays\n/transactions — Vos 5 dernières transactions\n/stats — Vos statistiques\n/aide — Cette aide`,
         { parse_mode: "Markdown" }
       );
     }
@@ -431,6 +509,8 @@ export function initTelegramBot(): Telegraf | null {
 
     const chatId = String(ctx.chat.id);
     const groupTitle = (ctx.chat as any).title || "ce groupe";
+
+    await registerKnownGroup(chatId);
 
     const existingGroupId = await getAdminGroupId();
     if (existingGroupId && chatId === existingGroupId) {
@@ -483,16 +563,39 @@ export async function notifyMerchantPayment(merchantId: number, data: {
   try {
     const merchant = await storage.getMerchantById(merchantId);
     if (!merchant?.telegramChatId) return;
+
+    const countries = await storage.getMerchantCountries(merchantId);
+    const mc = countries.find(c => c.country === data.country);
+    const newBalance = mc ? mc.balance : 0;
+
+    const todayStats = await (async () => {
+      const txs = await storage.getTransactions(merchantId);
+      const todayTxs = txs.filter(t => t.country === data.country && isToday(new Date(t.createdAt)));
+      const success = todayTxs.filter(t => t.status === "confirmed").length;
+      const total = todayTxs.length;
+      const amount = todayTxs.filter(t => t.status === "confirmed").reduce((s, t) => s + t.amount, 0);
+      return { success, total, amount };
+    })();
+
     const msg = [
+      `🧡🧡 *Dépôt ${countryLabel(data.country)}* 🧡🧡`,
+      ``,
       `✅ *Nouveau paiement reçu !*`,
       ``,
-      `🏪 *${merchant.name}*`,
-      `💰 Montant : *${formatAmount(data.amount)}*`,
-      `${countryLabel(data.country)}`,
-      `🔖 TX : \`${data.txId}\``,
-      data.payerNumber ? `📞 Payeur : ${data.payerNumber}` : null,
-      `📡 Via : ${data.provider === "omnipay" ? "OmniPay" : "SMS"}`,
-    ].filter(Boolean).join("\n");
+      `💰 *Montant :* ${formatAmount(data.amount)}`,
+      `📞 *Payeur :* ${data.payerNumber || "N/A"}`,
+      `🌍 *Pays :* ${countryLabel(data.country)}`,
+      `🔖 *TX :* \`${data.txId}\``,
+      `📡 *Via :* ${data.provider === "omnipay" ? "OmniPay" : "SMS"}`,
+      ``,
+      `🧡🧡 *Solde compte* 🧡🧡`,
+      ``,
+      `💰 Solde total : ${formatAmountPlain(newBalance)} F CFA`,
+      `💳 Solde reversement : ${formatAmountPlain(newBalance)} F CFA`,
+      `📊 Dépôts réussis aujourd'hui : ${todayStats.success} ; Montant : ${formatAmountPlain(todayStats.amount)} F CFA`,
+      `📈 Taux de réussite : ${successRate(todayStats.success, todayStats.total)}`,
+    ].join("\n");
+
     await bot.telegram.sendMessage(merchant.telegramChatId, msg, { parse_mode: "Markdown" });
   } catch (err) {
     console.error("[TELEGRAM] Erreur notification marchand:", (err as any).message);
