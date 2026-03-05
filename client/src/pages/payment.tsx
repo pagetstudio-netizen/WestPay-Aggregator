@@ -257,7 +257,7 @@ export default function PaymentPage() {
   const stepLabels = ["Informations", "Validation", "Confirmation"];
 
   return (
-    <div className="min-h-screen payment-page-root" style={{ background: "#00b050" }}>
+    <div className="min-h-screen payment-page-root flex flex-col items-center" style={{ background: "#00b050" }}>
       <style>{`
         .payment-page-root,
         .payment-page-root * {
@@ -340,7 +340,7 @@ export default function PaymentPage() {
           animation: pulse-ring 2s ease-in-out infinite;
         }
       `}</style>
-      <div className="max-w-lg mx-auto px-4 py-6">
+      <div className="w-full max-w-[420px] px-4 py-6">
         <div className="mb-4">
           <h1 className="text-white font-bold text-lg" data-testid="text-brand">WestPay</h1>
           <p className="text-white/80 text-sm">Paiement securise</p>
