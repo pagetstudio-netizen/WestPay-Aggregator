@@ -39,6 +39,7 @@ export interface IStorage {
   incrementMerchantCountryBalance(id: number, amount: number): Promise<void>;
   findMerchantCountryBySimAndCountry(merchantId: number, country: string): Promise<MerchantCountry | undefined>;
   updateMerchantCountryApiKey(id: number, apiKey: string): Promise<void>;
+  updateMerchantCountryActive(id: number, active: boolean): Promise<void>;
 
   getTransactions(merchantId?: number): Promise<Transaction[]>;
   getTransactionByTxId(txId: string): Promise<Transaction | undefined>;
@@ -213,6 +214,10 @@ export class DatabaseStorage implements IStorage {
 
   async updateMerchantCountryApiKey(id: number, apiKey: string): Promise<void> {
     await db.update(merchantCountries).set({ apiKey }).where(eq(merchantCountries.id, id));
+  }
+
+  async updateMerchantCountryActive(id: number, active: boolean): Promise<void> {
+    await db.update(merchantCountries).set({ active }).where(eq(merchantCountries.id, id));
   }
 
   async getTransactions(merchantId?: number): Promise<Transaction[]> {

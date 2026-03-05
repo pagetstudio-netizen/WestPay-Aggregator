@@ -249,6 +249,51 @@ export async function registerRoutes(
     }
   });
 
+  app.put("/api/admin/merchant/:id/profile", authMiddleware("admin"), async (req, res) => {
+    try {
+      const merchantId = parseInt(req.params.id);
+      const { name, email, password } = req.body;
+      const merchant = await storage.getMerchantById(merchantId);
+      if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
+      const updateData: any = {};
+      if (name && name.trim()) updateData.name = name.trim();
+      if (email && email.trim()) {
+        const existing = await storage.getMerchantByEmail(email.trim());
+        if (existing && existing.id !== merchantId) return res.status(400).json({ message: "Cet email est deja utilise" });
+        updateData.email = email.trim();
+      }
+      if (password && password.length >= 6) {
+        updateData.passwordHash = await bcrypt.hash(password, 10);
+      }
+      if (Object.keys(updateData).length === 0) return res.status(400).json({ message: "Aucune donnee a mettre a jour" });
+      await storage.updateMerchant(merchantId, updateData);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/merchant/:id/wallets", authMiddleware("admin"), async (req, res) => {
+    try {
+      const merchantId = parseInt(req.params.id);
+      const wallets = await storage.getMerchantCountries(merchantId);
+      res.json(wallets);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/admin/merchant/:id/country/:countryId/active", authMiddleware("admin"), async (req, res) => {
+    try {
+      const countryId = parseInt(req.params.countryId);
+      const { active } = req.body;
+      await storage.updateMerchantCountryActive(countryId, !!active);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.delete("/api/admin/delete-merchant/:id", authMiddleware("admin"), async (req, res) => {
     try {
       await storage.deleteMerchant(parseInt(req.params.id as string));

@@ -26,7 +26,7 @@ import {
   MessageSquare, Key, DollarSign, Hash, Calendar, Search, Clock,
   RefreshCw, Lock, BookOpen, FileText, Webhook, Zap, ToggleLeft, ToggleRight, Link2,
   Link, BarChart3, TrendingUp, Eye, ToggleLeft as Toggle, ExternalLink, Filter,
-  Check, ChevronsUpDown, ArrowUpRight
+  Check, ChevronsUpDown, ArrowUpRight, Edit3
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
@@ -366,9 +366,10 @@ function OverviewPanel() {
 function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; onClose: () => void }) {
   const { token } = useAuth();
   const { toast } = useToast();
-  const baseUrl = window.location.origin;
 
-  const { data, isLoading } = useQuery({
+  const [subTab, setSubTab] = useState<"profile" | "wallets" | "webhook">("profile");
+
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ["/api/admin/merchant", merchantId, "details"],
     queryFn: async () => {
       const res = await fetch(`/api/admin/merchant/${merchantId}/details`, { headers: { Authorization: `Bearer ${token}` } });
@@ -378,65 +379,218 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
     enabled: !!merchantId,
   });
 
-  const copyLink = (uniqueId: string) => {
-    navigator.clipboard.writeText(`${baseUrl}/link/${uniqueId}`);
-    toast({ title: "Lien copié !" });
+  const { data: wallets = [], refetch: refetchWallets } = useQuery<MerchantCountry[]>({
+    queryKey: ["/api/admin/merchant", merchantId, "wallets"],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/merchant/${merchantId}/wallets`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error();
+      return res.json();
+    },
+    enabled: !!merchantId,
+  });
+
+  const merchant = data?.merchant;
+
+  const [profileName, setProfileName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profilePassword, setProfilePassword] = useState("");
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [balanceEdits, setBalanceEdits] = useState<Record<number, string>>({});
+
+  useEffect(() => {
+    if (merchant) {
+      setProfileName(merchant.name || "");
+      setProfileEmail(merchant.email || "");
+      setWebhookUrl(merchant.webhookUrl || "");
+    }
+  }, [merchant]);
+
+  useEffect(() => {
+    if (wallets.length) {
+      const m: Record<number, string> = {};
+      wallets.forEach((w: MerchantCountry) => { m[w.id] = String(w.balance); });
+      setBalanceEdits(m);
+    }
+  }, [wallets]);
+
+  const profileMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/admin/merchant/${merchantId}/profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: profileName, email: profileEmail, password: profilePassword || undefined }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
+      refetch();
+      setProfilePassword("");
+      toast({ title: "Profil mis à jour" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const webhookMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/admin/merchant/${merchantId}/webhook`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ webhookUrl }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
+      refetch();
+      toast({ title: "Webhook mis à jour" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const saveBalance = async (walletId: number) => {
+    const balance = parseInt(balanceEdits[walletId] || "0");
+    if (isNaN(balance) || balance < 0) { toast({ title: "Solde invalide", variant: "destructive" }); return; }
+    const res = await fetch("/api/admin/update-balance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id: walletId, balance }),
+    });
+    if (res.ok) { refetchWallets(); toast({ title: "Solde mis à jour" }); }
+    else { const d = await res.json(); toast({ title: "Erreur", description: d.message, variant: "destructive" }); }
+  };
+
+  const toggleWalletActive = async (walletId: number, merchantId: number, active: boolean) => {
+    const res = await fetch(`/api/admin/merchant/${merchantId}/country/${walletId}/active`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ active }),
+    });
+    if (res.ok) { refetchWallets(); toast({ title: active ? "Wallet activé" : "Wallet désactivé" }); }
+    else toast({ title: "Erreur", variant: "destructive" });
   };
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isLoading ? "Chargement..." : data?.merchant?.name}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            {isLoading ? "Chargement..." : merchant?.name}
+            {merchant && <Badge variant={merchant.suspended ? "destructive" : "secondary"} className="text-xs">{merchant.suspended ? "Suspendu" : "Actif"}</Badge>}
+          </DialogTitle>
         </DialogHeader>
-        {isLoading ? <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div> : data && (
-          <div className="space-y-5 mt-2">
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div className="bg-muted rounded-lg px-3 py-2"><p className="text-xs text-muted-foreground">Email</p><p className="font-medium">{data.merchant.email}</p></div>
-              <div className="bg-muted rounded-lg px-3 py-2"><p className="text-xs text-muted-foreground">Slug</p><p className="font-medium">/{data.merchant.slug}</p></div>
-              <div className="bg-muted rounded-lg px-3 py-2"><p className="text-xs text-muted-foreground">Statut</p><Badge variant={data.merchant.suspended ? "destructive" : "default"}>{data.merchant.suspended ? "Suspendu" : "Actif"}</Badge></div>
-              <div className="bg-muted rounded-lg px-3 py-2"><p className="text-xs text-muted-foreground">Volume total</p><p className="font-medium">{(data.totalRevenue || 0).toLocaleString()} F CFA</p></div>
+
+        {isLoading ? <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div> : (
+          <div className="space-y-4">
+            <div className="flex gap-1 border-b">
+              {(["profile", "wallets", "webhook"] as const).map((tab) => (
+                <button key={tab} onClick={() => setSubTab(tab)}
+                  className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors capitalize ${subTab === tab ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+                  {tab === "profile" ? "Profil" : tab === "wallets" ? "Wallets" : "Webhook"}
+                </button>
+              ))}
             </div>
 
-            <div>
-              <h3 className="text-sm font-semibold mb-2 flex items-center gap-2"><Link className="w-4 h-4" />Liens de paiement ({data.links.length})</h3>
-              {data.links.length === 0 ? <p className="text-xs text-muted-foreground">Aucun lien créé</p> : (
+            {subTab === "profile" && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="bg-muted rounded px-3 py-2"><p className="text-muted-foreground">Slug</p><p className="font-mono font-medium">/{merchant?.slug}</p></div>
+                  <div className="bg-muted rounded px-3 py-2"><p className="text-muted-foreground">Volume total</p><p className="font-semibold">{(data?.totalRevenue || 0).toLocaleString()} F CFA</p></div>
+                </div>
                 <div className="space-y-2">
-                  {data.links.map((link: PaymentLink) => (
-                    <div key={link.id} className="flex items-center justify-between gap-2 bg-muted rounded-lg px-3 py-2">
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium truncate">{link.name}</p>
-                        <p className="text-xs text-muted-foreground">{link.amountType === "fixed" ? `${link.amount?.toLocaleString()} F` : "Libre"} • {link.paymentCount} paiements</p>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <Badge variant={link.active ? "default" : "secondary"} className="text-xs px-1">{link.active ? "Actif" : "Inactif"}</Badge>
-                        <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => copyLink(link.uniqueId)}><Copy className="w-3 h-3" /></Button>
-                      </div>
-                    </div>
-                  ))}
+                  <Label>Nom du marchand</Label>
+                  <Input value={profileName} onChange={e => setProfileName(e.target.value)} placeholder="Nom" data-testid="input-edit-merchant-name" />
                 </div>
-              )}
-            </div>
+                <div className="space-y-2">
+                  <Label>Email</Label>
+                  <Input type="email" value={profileEmail} onChange={e => setProfileEmail(e.target.value)} placeholder="Email" data-testid="input-edit-merchant-email" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Nouveau mot de passe <span className="text-muted-foreground text-xs font-normal">(laisser vide pour ne pas changer)</span></Label>
+                  <Input type="password" value={profilePassword} onChange={e => setProfilePassword(e.target.value)} placeholder="Nouveau mot de passe" data-testid="input-edit-merchant-password" />
+                </div>
+                <Button onClick={() => profileMutation.mutate()} disabled={profileMutation.isPending} data-testid="button-save-merchant-profile">
+                  {profileMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                  Enregistrer les modifications
+                </Button>
+              </div>
+            )}
 
-            <div>
-              <h3 className="text-sm font-semibold mb-2 flex items-center gap-2"><ArrowRightLeft className="w-4 h-4" />Dernières transactions ({data.transactions.length})</h3>
-              {data.transactions.length === 0 ? <p className="text-xs text-muted-foreground">Aucune transaction</p> : (
-                <div className="space-y-1.5">
-                  {data.transactions.slice(0, 10).map((tx: Transaction) => (
-                    <div key={tx.id} className="flex items-center justify-between gap-2 bg-muted rounded-lg px-3 py-2">
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium truncate">{tx.txId}</p>
-                        <p className="text-xs text-muted-foreground">{tx.country} • {tx.payerNumber || "Inconnu"}</p>
+            {subTab === "wallets" && (
+              <div className="space-y-3">
+                <p className="text-xs text-muted-foreground">Modifier le solde ou activer/désactiver les wallets par pays. Les changements sont immédiats.</p>
+                {wallets.length === 0 ? (
+                  <p className="text-sm text-center text-muted-foreground py-4">Aucun wallet configuré</p>
+                ) : wallets.map((w: MerchantCountry) => (
+                  <div key={w.id} className="p-3 rounded border bg-muted/20 space-y-2" data-testid={`wallet-admin-row-${w.id}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Globe className="w-4 h-4 text-muted-foreground" />
+                        <span className="font-medium text-sm">{w.country}</span>
+                        <Badge variant={w.active ? "default" : "secondary"} className="text-xs">{w.active ? "Actif" : "Inactif"}</Badge>
                       </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-xs font-semibold">{tx.amount.toLocaleString()} F</p>
-                        <Badge variant={tx.status === "confirmed" ? "default" : "secondary"} className="text-xs px-1">{tx.status}</Badge>
-                      </div>
+                      <Switch checked={w.active} onCheckedChange={(v) => toggleWalletActive(w.id, merchantId, v)} data-testid={`switch-wallet-active-${w.id}`} />
                     </div>
-                  ))}
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 relative">
+                        <Input
+                          type="number"
+                          value={balanceEdits[w.id] ?? String(w.balance)}
+                          onChange={e => setBalanceEdits(prev => ({ ...prev, [w.id]: e.target.value }))}
+                          className="pr-12 text-sm"
+                          min="0"
+                          data-testid={`input-wallet-balance-${w.id}`}
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">FCFA</span>
+                      </div>
+                      <Button size="sm" variant="outline" onClick={() => saveBalance(w.id)} data-testid={`button-save-balance-${w.id}`}>
+                        Enregistrer
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {subTab === "webhook" && (
+              <div className="space-y-4">
+                <p className="text-xs text-muted-foreground">L'URL de webhook sera mise à jour pour ce marchand. Il recevra des notifications POST à chaque paiement confirmé.</p>
+                <div className="space-y-2">
+                  <Label>URL de webhook / callback</Label>
+                  <Input
+                    value={webhookUrl}
+                    onChange={e => setWebhookUrl(e.target.value)}
+                    placeholder="https://votresite.com/webhook"
+                    data-testid="input-admin-webhook-url"
+                  />
+                  <p className="text-xs text-muted-foreground">Laisser vide pour désactiver le webhook.</p>
                 </div>
-              )}
-            </div>
+                {merchant?.webhookUrl && (
+                  <div className="p-3 rounded bg-muted text-xs space-y-1">
+                    <p className="text-muted-foreground font-medium">URL actuelle :</p>
+                    <p className="font-mono break-all">{merchant.webhookUrl}</p>
+                    {merchant.webhookSecret && (
+                      <>
+                        <p className="text-muted-foreground font-medium mt-2">Secret de signature :</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-mono break-all">{merchant.webhookSecret}</p>
+                          <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0"
+                            onClick={() => { navigator.clipboard.writeText(merchant.webhookSecret); toast({ title: "Secret copié" }); }}>
+                            <Copy className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+                <Button onClick={() => webhookMutation.mutate()} disabled={webhookMutation.isPending} data-testid="button-save-admin-webhook">
+                  {webhookMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                  Mettre à jour le webhook
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </DialogContent>
@@ -745,7 +899,7 @@ function MerchantsPanel() {
                   </div>
                   <div className="flex items-center gap-1 flex-wrap justify-end">
                     <Button variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={() => setSelectedMerchantId(merchant.id)} data-testid={`button-details-${merchant.id}`}>
-                      <Eye className="w-3 h-3" />Détails
+                      <Edit3 className="w-3 h-3" />Modifier
                     </Button>
                     <TelegramDialog merchant={merchant} token={token || ""} />
                     <Select
