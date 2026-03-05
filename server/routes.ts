@@ -556,13 +556,26 @@ export async function registerRoutes(
     }
   });
 
+  app.put("/api/admin/merchant/:id/telegram/language", authMiddleware("admin"), async (req, res) => {
+    try {
+      const merchantId = parseInt(req.params.id);
+      const { language } = req.body;
+      const allowed = ["fr", "en", "zh", "de"];
+      if (!allowed.includes(language)) return res.status(400).json({ message: "Langue non supportee" });
+      await storage.updateMerchantTelegramBotLanguage(merchantId, language);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/admin/merchant/:id/telegram/status", authMiddleware("admin"), async (req, res) => {
     try {
       const merchantId = parseInt(String(req.params.id));
       const merchant = await storage.getMerchantById(merchantId);
       if (!merchant) return res.status(404).json({ message: "Marchand non trouve" });
 
-      res.json({ linked: !!merchant.telegramChatId, chatId: merchant.telegramChatId || null });
+      res.json({ linked: !!merchant.telegramChatId, chatId: merchant.telegramChatId || null, language: merchant.telegramBotLanguage || "fr" });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

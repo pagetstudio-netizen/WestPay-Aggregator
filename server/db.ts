@@ -178,6 +178,8 @@ export async function runMigrations() {
       created_at timestamp DEFAULT now() NOT NULL
     )`);
 
+    await client.query(`ALTER TABLE merchants ADD COLUMN IF NOT EXISTS telegram_bot_language text NOT NULL DEFAULT 'fr'`);
+
     await client.query(`CREATE TABLE IF NOT EXISTS wallet_transfers (
       id serial PRIMARY KEY,
       merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,

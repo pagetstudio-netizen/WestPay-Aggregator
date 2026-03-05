@@ -66,11 +66,20 @@ function StatCard({ title, value, icon: Icon, subtitle }: { title: string; value
   );
 }
 
+const BOT_LANGUAGES = [
+  { value: "fr", label: "🇫🇷 Français" },
+  { value: "en", label: "🇬🇧 English" },
+  { value: "zh", label: "🇨🇳 中文 (Chinois)" },
+  { value: "de", label: "🇩🇪 Deutsch (Allemand)" },
+];
+
 function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string }) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
   const [mode, setMode] = useState<"choose" | "dm" | "group">("choose");
+  const [selectedLang, setSelectedLang] = useState<string>((merchant as any).telegramBotLanguage || "fr");
+  const [savingLang, setSavingLang] = useState(false);
 
   const isLinked = !!(merchant as any).telegramChatId;
 
@@ -107,6 +116,25 @@ function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
+  const saveLang = async (lang: string) => {
+    setSavingLang(true);
+    try {
+      const res = await fetch(`/api/admin/merchant/${merchant.id}/telegram/language`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ language: lang }),
+      });
+      if (!res.ok) throw new Error("Erreur");
+      setSelectedLang(lang);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
+      toast({ title: "Langue du bot mise à jour", description: BOT_LANGUAGES.find(l => l.value === lang)?.label });
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setSavingLang(false);
+    }
+  };
+
   const handleGenerate = (selectedMode: "dm" | "group") => {
     setMode(selectedMode);
     generateMutation.mutate();
@@ -133,6 +161,36 @@ function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string
             <Badge variant={isLinked ? "secondary" : "outline"}>
               {isLinked ? "✅ Notifications actives" : "⬜ Non configuré"}
             </Badge>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Langue des notifications bot</Label>
+            <div className="flex gap-2">
+              <Select
+                value={selectedLang}
+                onValueChange={(v) => setSelectedLang(v)}
+              >
+                <SelectTrigger className="flex-1" data-testid={`select-bot-lang-${merchant.id}`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BOT_LANGUAGES.map(l => (
+                    <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                onClick={() => saveLang(selectedLang)}
+                disabled={savingLang || selectedLang === ((merchant as any).telegramBotLanguage || "fr")}
+                data-testid={`button-save-bot-lang-${merchant.id}`}
+              >
+                {savingLang ? <Loader2 className="w-4 h-4 animate-spin" /> : "Sauvegarder"}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Le bot enverra toutes ses notifications dans cette langue.
+            </p>
           </div>
 
           {isLinked ? (

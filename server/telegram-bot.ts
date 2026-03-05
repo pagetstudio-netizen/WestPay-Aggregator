@@ -771,6 +771,83 @@ export function initTelegramBot(): Telegraf | null {
   return bot;
 }
 
+const NOTIFY_TRANSLATIONS: Record<string, {
+  header: (country: string) => string;
+  newPayment: string;
+  amount: string;
+  payer: string;
+  country: string;
+  via: string;
+  mobileMoney: string;
+  balanceHeader: string;
+  totalBalance: string;
+  payoutBalance: string;
+  successfulDeposits: (count: number, amount: string, currency: string) => string;
+  successRate: string;
+  currency: string;
+}> = {
+  fr: {
+    header: (c) => `🧡🧡 *Dépôt ${c}* 🧡🧡`,
+    newPayment: `✅ *Nouveau paiement reçu !*`,
+    amount: "💰 *Montant :*",
+    payer: "📞 *Payeur :*",
+    country: "🌍 *Pays :*",
+    via: "📡 *Via :*",
+    mobileMoney: "Mobile Money",
+    balanceHeader: `🧡🧡 *Solde compte* 🧡🧡`,
+    totalBalance: "💰 Solde total :",
+    payoutBalance: "💳 Solde reversement :",
+    successfulDeposits: (n, amt, cur) => `📊 Dépôts réussis aujourd'hui : ${n} ; Montant : ${amt} ${cur}`,
+    successRate: "📈 Taux de réussite :",
+    currency: "F CFA",
+  },
+  en: {
+    header: (c) => `🧡🧡 *${c} Deposit* 🧡🧡`,
+    newPayment: `✅ *New payment received!*`,
+    amount: "💰 *Amount:*",
+    payer: "📞 *Payer:*",
+    country: "🌍 *Country:*",
+    via: "📡 *Via:*",
+    mobileMoney: "Mobile Money",
+    balanceHeader: `🧡🧡 *Account Balance* 🧡🧡`,
+    totalBalance: "💰 Total balance:",
+    payoutBalance: "💳 Payout balance:",
+    successfulDeposits: (n, amt, cur) => `📊 Successful deposits today: ${n} ; Amount: ${amt} ${cur}`,
+    successRate: "📈 Success rate:",
+    currency: "FCFA",
+  },
+  zh: {
+    header: (c) => `🧡🧡 *${c} 存款* 🧡🧡`,
+    newPayment: `✅ *收到新付款！*`,
+    amount: "💰 *金额：*",
+    payer: "📞 *付款人：*",
+    country: "🌍 *国家：*",
+    via: "📡 *通过：*",
+    mobileMoney: "手机支付",
+    balanceHeader: `🧡🧡 *账户余额* 🧡🧡`,
+    totalBalance: "💰 总余额：",
+    payoutBalance: "💳 付款余额：",
+    successfulDeposits: (n, amt, cur) => `📊 今日成功存款：${n} ；金额：${amt} ${cur}`,
+    successRate: "📈 成功率：",
+    currency: "FCFA",
+  },
+  de: {
+    header: (c) => `🧡🧡 *Einzahlung ${c}* 🧡🧡`,
+    newPayment: `✅ *Neue Zahlung erhalten!*`,
+    amount: "💰 *Betrag:*",
+    payer: "📞 *Zahler:*",
+    country: "🌍 *Land:*",
+    via: "📡 *Über:*",
+    mobileMoney: "Mobile Money",
+    balanceHeader: `🧡🧡 *Kontostand* 🧡🧡`,
+    totalBalance: "💰 Gesamtguthaben:",
+    payoutBalance: "💳 Auszahlungssaldo:",
+    successfulDeposits: (n, amt, cur) => `📊 Erfolgreiche Einzahlungen heute: ${n} ; Betrag: ${amt} ${cur}`,
+    successRate: "📈 Erfolgsquote:",
+    currency: "FCFA",
+  },
+};
+
 export async function notifyMerchantPayment(merchantId: number, data: {
   txId: string;
   amount: number;
@@ -783,36 +860,39 @@ export async function notifyMerchantPayment(merchantId: number, data: {
     const merchant = await storage.getMerchantById(merchantId);
     if (!merchant?.telegramChatId) return;
 
+    const lang = merchant.telegramBotLanguage || "fr";
+    const t = NOTIFY_TRANSLATIONS[lang] || NOTIFY_TRANSLATIONS["fr"];
+
     const countries = await storage.getMerchantCountries(merchantId);
     const mc = countries.find(c => c.country === data.country);
     const newBalance = mc ? mc.balance : 0;
 
     const todayStats = await (async () => {
       const txs = await storage.getTransactions(merchantId);
-      const todayTxs = txs.filter(t => t.country === data.country && isToday(new Date(t.createdAt)));
-      const success = todayTxs.filter(t => t.status === "confirmed").length;
+      const todayTxs = txs.filter(tx => tx.country === data.country && isToday(new Date(tx.createdAt)));
+      const success = todayTxs.filter(tx => tx.status === "confirmed").length;
       const total = todayTxs.length;
-      const amount = todayTxs.filter(t => t.status === "confirmed").reduce((s, t) => s + t.amount, 0);
+      const amount = todayTxs.filter(tx => tx.status === "confirmed").reduce((s, tx) => s + tx.amount, 0);
       return { success, total, amount };
     })();
 
     const msg = [
-      `🧡🧡 *Dépôt ${countryLabel(data.country)}* 🧡🧡`,
+      t.header(countryLabel(data.country)),
       ``,
-      `✅ *Nouveau paiement reçu !*`,
+      t.newPayment,
       ``,
-      `💰 *Montant :* ${formatAmount(data.amount)}`,
-      `📞 *Payeur :* ${data.payerNumber || "N/A"}`,
-      `🌍 *Pays :* ${countryLabel(data.country)}`,
+      `${t.amount} ${formatAmount(data.amount)}`,
+      `${t.payer} ${data.payerNumber || "N/A"}`,
+      `${t.country} ${countryLabel(data.country)}`,
       `🔖 *TX :* \`${data.txId}\``,
-      `📡 *Via :* ${data.provider === "omnipay" ? "Mobile Money" : "SMS"}`,
+      `${t.via} ${data.provider === "omnipay" ? t.mobileMoney : "SMS"}`,
       ``,
-      `🧡🧡 *Solde compte* 🧡🧡`,
+      t.balanceHeader,
       ``,
-      `💰 Solde total : ${formatAmountPlain(newBalance)} F CFA`,
-      `💳 Solde reversement : ${formatAmountPlain(newBalance)} F CFA`,
-      `📊 Dépôts réussis aujourd'hui : ${todayStats.success} ; Montant : ${formatAmountPlain(todayStats.amount)} F CFA`,
-      `📈 Taux de réussite : ${successRate(todayStats.success, todayStats.total)}`,
+      `${t.totalBalance} ${formatAmountPlain(newBalance)} ${t.currency}`,
+      `${t.payoutBalance} ${formatAmountPlain(newBalance)} ${t.currency}`,
+      t.successfulDeposits(todayStats.success, formatAmountPlain(todayStats.amount), t.currency),
+      `${t.successRate} ${successRate(todayStats.success, todayStats.total)}`,
     ].join("\n");
 
     await bot.telegram.sendMessage(merchant.telegramChatId, msg, { parse_mode: "Markdown" });

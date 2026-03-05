@@ -83,6 +83,7 @@ export interface IStorage {
 
   getMerchantByTelegramChatId(chatId: string): Promise<Merchant | undefined>;
   updateMerchantTelegramChatId(id: number, chatId: string | null): Promise<void>;
+  updateMerchantTelegramBotLanguage(id: number, language: string): Promise<void>;
   createTelegramActivationCode(merchantId: number, code: string, expiresAt: Date): Promise<TelegramActivationCode>;
   getTelegramActivationCode(code: string): Promise<TelegramActivationCode | undefined>;
   markTelegramActivationCodeUsed(code: string): Promise<void>;
@@ -408,6 +409,10 @@ export class DatabaseStorage implements IStorage {
 
   async updateMerchantTelegramChatId(id: number, chatId: string | null): Promise<void> {
     await db.update(merchants).set({ telegramChatId: chatId }).where(eq(merchants.id, id));
+  }
+
+  async updateMerchantTelegramBotLanguage(id: number, language: string): Promise<void> {
+    await db.update(merchants).set({ telegramBotLanguage: language }).where(eq(merchants.id, id));
   }
 
   async createTelegramActivationCode(merchantId: number, code: string, expiresAt: Date): Promise<TelegramActivationCode> {

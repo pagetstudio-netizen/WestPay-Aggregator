@@ -21,6 +21,7 @@ export const merchants = pgTable("merchants", {
   webhookUrl: text("webhook_url"),
   webhookSecret: text("webhook_secret"),
   telegramChatId: text("telegram_chat_id"),
+  telegramBotLanguage: text("telegram_bot_language").default("fr").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
