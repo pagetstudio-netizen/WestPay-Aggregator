@@ -4,14 +4,15 @@ import { storage } from "./storage";
 let bot: Telegraf | null = null;
 
 const COUNTRIES_FR: Record<string, string> = {
-  tg: "🇹🇬 Togo",
-  bj: "🇧🇯 Bénin",
-  ci: "🇨🇮 Côte d'Ivoire",
-  sn: "🇸🇳 Sénégal",
-  ml: "🇲🇱 Mali",
-  bf: "🇧🇫 Burkina Faso",
-  gn: "🇬🇳 Guinée",
-  gh: "🇬🇭 Ghana",
+  "togo": "🇹🇬 Togo",
+  "benin": "🇧🇯 Bénin",
+  "burkina faso": "🇧🇫 Burkina Faso",
+  "cameroun": "🇨🇲 Cameroun",
+  "congo brazzaville": "🇨🇬 Congo Brazzaville",
+  "gabon": "🇬🇦 Gabon",
+  "cote d'ivoire": "🇨🇮 Côte d'Ivoire",
+  "mali": "🇲🇱 Mali",
+  "senegal": "🇸🇳 Sénégal",
 };
 
 function countryLabel(code: string): string {

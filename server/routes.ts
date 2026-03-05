@@ -32,8 +32,9 @@ async function getOmnipayCallbackKey(): Promise<string | undefined> {
 
 function generateSecureApiKey(country: string): string {
   const prefixes: Record<string, string> = {
-    "Togo": "TGO", "Benin": "BEN", "Cote d'Ivoire": "CIV", "Guinee": "GIN",
-    "Senegal": "SEN", "Mali": "MLI", "Burkina Faso": "BFA", "Niger": "NER", "Ghana": "GHA", "Nigeria": "NGA",
+    "Togo": "TGO", "Benin": "BEN", "Cote d'Ivoire": "CIV",
+    "Senegal": "SEN", "Mali": "MLI", "Burkina Faso": "BFA",
+    "Cameroun": "CMR", "Congo Brazzaville": "COG", "Gabon": "GAB",
   };
   const prefix = prefixes[country] || country.substring(0, 3).toUpperCase();
   const randomPart = crypto.randomBytes(20).toString("hex").toUpperCase();
@@ -891,9 +892,9 @@ export async function registerRoutes(
         const lName = lastName || nameParts.slice(1).join(" ") || "WestPay";
 
         const dialCodes: Record<string, string> = {
-          "Togo": "228", "Benin": "229", "Cote d'Ivoire": "225", "Guinee": "224",
-          "Senegal": "221", "Mali": "223", "Burkina Faso": "226", "Niger": "227",
-          "Ghana": "233", "Nigeria": "234",
+          "Togo": "228", "Benin": "229", "Cote d'Ivoire": "225",
+          "Senegal": "221", "Mali": "223", "Burkina Faso": "226",
+          "Cameroun": "237", "Congo Brazzaville": "242", "Gabon": "241",
         };
         const dialCode = dialCodes[country] || "";
         const cleanPhone = payerPhone.replace(/[\s\-\(\)\+]/g, "");

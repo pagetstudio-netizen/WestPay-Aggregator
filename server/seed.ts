@@ -4,8 +4,9 @@ import crypto from "crypto";
 
 function generateSecureApiKey(country: string): string {
   const prefixes: Record<string, string> = {
-    "Togo": "TGO", "Benin": "BEN", "Cote d'Ivoire": "CIV", "Guinee": "GIN",
-    "Senegal": "SEN", "Mali": "MLI", "Burkina Faso": "BFA", "Niger": "NER", "Ghana": "GHA", "Nigeria": "NGA",
+    "Togo": "TGO", "Benin": "BEN", "Cote d'Ivoire": "CIV",
+    "Senegal": "SEN", "Mali": "MLI", "Burkina Faso": "BFA",
+    "Cameroun": "CMR", "Congo Brazzaville": "COG", "Gabon": "GAB",
   };
   const prefix = prefixes[country] || country.substring(0, 3).toUpperCase();
   const randomPart = crypto.randomBytes(20).toString("hex").toUpperCase();

@@ -494,14 +494,15 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
                     </tr>
                   </thead>
                   <tbody className="text-muted-foreground">
-                    <tr className="border-b"><td className="p-2">Togo</td><td className="p-2">+228</td><td className="p-2">TMoney, Moov Money</td></tr>
-                    <tr className="border-b"><td className="p-2">Benin</td><td className="p-2">+229</td><td className="p-2">MTN Mobile Money, Moov Money</td></tr>
-                    <tr className="border-b"><td className="p-2">Cote d'Ivoire</td><td className="p-2">+225</td><td className="p-2">Orange Money, MTN, Moov Money, Wave</td></tr>
-                    <tr className="border-b"><td className="p-2">Senegal</td><td className="p-2">+221</td><td className="p-2">Orange Money, Wave</td></tr>
-                    <tr className="border-b"><td className="p-2">Mali</td><td className="p-2">+223</td><td className="p-2">Orange Money, Moov Money</td></tr>
-                    <tr className="border-b"><td className="p-2">Burkina Faso</td><td className="p-2">+226</td><td className="p-2">Orange Money, Moov Money</td></tr>
-                    <tr className="border-b"><td className="p-2">Guinee</td><td className="p-2">+224</td><td className="p-2">Orange Money, MTN Mobile Money</td></tr>
-                    <tr><td className="p-2">Ghana</td><td className="p-2">+233</td><td className="p-2">MTN Mobile Money, Vodafone Cash</td></tr>
+                    <tr className="border-b"><td className="p-2">Togo</td><td className="p-2">+228</td><td className="p-2">Moov Money, TMoney</td></tr>
+                    <tr className="border-b"><td className="p-2">Benin</td><td className="p-2">+229</td><td className="p-2">MTN Mobile Money</td></tr>
+                    <tr className="border-b"><td className="p-2">Burkina Faso</td><td className="p-2">+226</td><td className="p-2">Moov Money, Orange Money</td></tr>
+                    <tr className="border-b"><td className="p-2">Cameroun</td><td className="p-2">+237</td><td className="p-2">MTN Mobile Money, Orange Money</td></tr>
+                    <tr className="border-b"><td className="p-2">Congo Brazzaville</td><td className="p-2">+242</td><td className="p-2">MTN Mobile Money</td></tr>
+                    <tr className="border-b"><td className="p-2">Gabon</td><td className="p-2">+241</td><td className="p-2">Airtel Money, Moov Money</td></tr>
+                    <tr className="border-b"><td className="p-2">Cote d'Ivoire</td><td className="p-2">+225</td><td className="p-2">Moov Money, MTN Mobile Money, Orange Money, Wave</td></tr>
+                    <tr className="border-b"><td className="p-2">Mali</td><td className="p-2">+223</td><td className="p-2">Orange Money</td></tr>
+                    <tr><td className="p-2">Senegal</td><td className="p-2">+221</td><td className="p-2">Mixx by Yas, Orange Money, Wave</td></tr>
                   </tbody>
                 </table>
               </div>

@@ -5,29 +5,27 @@ import { Loader2, AlertCircle, ChevronRight, Check, Phone, ExternalLink } from "
 import { useToast } from "@/hooks/use-toast";
 
 const PAYMENT_METHODS: Record<string, string[]> = {
-  "Togo": ["TMoney", "Moov Money"],
-  "Benin": ["MTN Mobile Money", "Moov Money"],
-  "Cote d'Ivoire": ["Orange Money", "MTN Mobile Money", "Moov Money", "Wave"],
-  "Guinee": ["Orange Money", "MTN Mobile Money"],
-  "Senegal": ["Orange Money", "Wave"],
-  "Mali": ["Orange Money", "Moov Money"],
-  "Burkina Faso": ["Orange Money", "Moov Money"],
-  "Niger": ["Airtel Money", "Moov Money"],
-  "Ghana": ["MTN Mobile Money", "Vodafone Cash"],
-  "Nigeria": ["MTN Mobile Money", "Airtel Money"],
+  "Togo": ["Moov Money", "TMoney"],
+  "Benin": ["MTN Mobile Money"],
+  "Burkina Faso": ["Moov Money", "Orange Money"],
+  "Cameroun": ["MTN Mobile Money", "Orange Money"],
+  "Congo Brazzaville": ["MTN Mobile Money"],
+  "Gabon": ["Airtel Money", "Moov Money"],
+  "Cote d'Ivoire": ["Moov Money", "MTN Mobile Money", "Orange Money", "Wave"],
+  "Mali": ["Orange Money"],
+  "Senegal": ["Mixx by Yas", "Orange Money", "Wave"],
 };
 
 const DIAL_CODES: Record<string, string> = {
   "Togo": "+228",
   "Benin": "+229",
-  "Cote d'Ivoire": "+225",
-  "Guinee": "+224",
-  "Senegal": "+221",
-  "Mali": "+223",
   "Burkina Faso": "+226",
-  "Niger": "+227",
-  "Ghana": "+233",
-  "Nigeria": "+234",
+  "Cameroun": "+237",
+  "Congo Brazzaville": "+242",
+  "Gabon": "+241",
+  "Cote d'Ivoire": "+225",
+  "Mali": "+223",
+  "Senegal": "+221",
 };
 
 type LinkInfo = {

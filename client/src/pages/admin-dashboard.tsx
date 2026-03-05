@@ -849,7 +849,7 @@ function CountriesPanel() {
 
   if (isLoading) return <LoadingSkeleton />;
 
-  const availableCountries = ["Togo", "Benin", "Cote d'Ivoire", "Guinee", "Senegal", "Mali", "Burkina Faso", "Niger", "Ghana", "Nigeria"];
+  const availableCountries = ["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Gabon"];
 
   return (
     <div className="space-y-4">
@@ -1038,7 +1038,7 @@ function NumbersPanel() {
                 <Select value={country} onValueChange={setCountry}>
                   <SelectTrigger data-testid="select-number-country"><SelectValue placeholder="Selectionner" /></SelectTrigger>
                   <SelectContent>
-                    {["Togo", "Benin", "Cote d'Ivoire", "Guinee", "Senegal"].map((c) => (
+                    {["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Gabon"].map((c) => (
                       <SelectItem key={c} value={c}>{c}</SelectItem>
                     ))}
                   </SelectContent>

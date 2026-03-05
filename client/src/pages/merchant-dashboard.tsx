@@ -56,8 +56,9 @@ function OverviewPanel({ token }: { token: string | null }) {
   const omnipayCountries = countries.filter(c => c.omnipayEnabled && c.active);
 
   const countryFlags: Record<string, string> = {
-    "Togo": "TG", "Benin": "BJ", "Cote d'Ivoire": "CI", "Guinee": "GN",
-    "Senegal": "SN", "Mali": "ML", "Burkina Faso": "BF", "Niger": "NE", "Ghana": "GH", "Nigeria": "NG",
+    "Togo": "TG", "Benin": "BJ", "Cote d'Ivoire": "CI",
+    "Senegal": "SN", "Mali": "ML", "Burkina Faso": "BF",
+    "Cameroun": "CM", "Congo Brazzaville": "CG", "Gabon": "GA",
   };
 
   return (
