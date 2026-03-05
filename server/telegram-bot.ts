@@ -276,6 +276,18 @@ export function initTelegramBot(): Telegraf | null {
     }
   });
 
+  bot.on("new_chat_members", async (ctx) => {
+    const newMembers = ctx.message.new_chat_members;
+    const botInfo = await ctx.telegram.getMe();
+    const botWasAdded = newMembers.some((m: any) => m.id === botInfo.id);
+    if (!botWasAdded) return;
+
+    await ctx.reply(
+      "👋 *Bot WestPay activé dans ce groupe !*\n\nPour recevoir les notifications de paiement ici, envoyez :\n\n`/setgroup`\n\nCommandes disponibles : /aide",
+      { parse_mode: "Markdown" }
+    );
+  });
+
   bot.on("message", async (ctx) => {
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
     if (isGroup) return;
@@ -286,9 +298,7 @@ export function initTelegramBot(): Telegraf | null {
     }
   });
 
-  bot.launch({
-    allowedUpdates: ["message", "callback_query"],
-  }).catch((err) => {
+  bot.launch().catch((err) => {
     console.error("[TELEGRAM] Erreur demarrage bot:", err.message);
   });
 
