@@ -18,6 +18,14 @@ import {
 
 const JWT_SECRET = process.env.SESSION_SECRET || "westpay-secret-key-change-me";
 
+async function getOmnipayApiKey(): Promise<string | undefined> {
+  return process.env.OMNIPAY_API_KEY || await storage.getSetting("omnipay_api_key");
+}
+
+async function getOmnipayCallbackKey(): Promise<string | undefined> {
+  return process.env.OMNIPAY_CALLBACK_KEY || await storage.getSetting("omnipay_callback_key");
+}
+
 function generateSecureApiKey(country: string): string {
   const prefixes: Record<string, string> = {
     "Togo": "TGO", "Benin": "BEN", "Cote d'Ivoire": "CIV", "Guinee": "GIN",
@@ -732,7 +740,7 @@ export async function registerRoutes(
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
       if (merchantCountry.omnipayEnabled) {
-        const omnipayApiKey = await storage.getSetting("omnipay_api_key");
+        const omnipayApiKey = await getOmnipayApiKey();
         if (!omnipayApiKey) {
           return res.status(500).json({ message: "OmniPay non configure. Contactez l'administrateur." });
         }
@@ -964,7 +972,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Reference manquante" });
       }
 
-      const callbackKey = await storage.getSetting("omnipay_callback_key");
+      const callbackKey = await getOmnipayCallbackKey();
       if (callbackKey) {
         if (!payload.signature) {
           console.error("[OMNIPAY CALLBACK] Signature manquante");
@@ -1081,7 +1089,7 @@ export async function registerRoutes(
       }
 
       if (pending.omnipayReference) {
-        const omnipayApiKey = await storage.getSetting("omnipay_api_key");
+        const omnipayApiKey = await getOmnipayApiKey();
         if (omnipayApiKey) {
           try {
             const statusResult = await omnipayGetStatus(omnipayApiKey, pending.omnipayReference);
@@ -1101,8 +1109,8 @@ export async function registerRoutes(
 
   app.get("/api/admin/omnipay/settings", authMiddleware("admin"), async (_req, res) => {
     try {
-      const apiKey = await storage.getSetting("omnipay_api_key");
-      const callbackKey = await storage.getSetting("omnipay_callback_key");
+      const apiKey = await getOmnipayApiKey();
+      const callbackKey = await getOmnipayCallbackKey();
       res.json({
         apiKey: apiKey || "",
         callbackKey: callbackKey || "",
@@ -1126,7 +1134,7 @@ export async function registerRoutes(
 
   app.get("/api/admin/omnipay/balance", authMiddleware("admin"), async (_req, res) => {
     try {
-      const apiKey = await storage.getSetting("omnipay_api_key");
+      const apiKey = await getOmnipayApiKey();
       if (!apiKey) return res.status(400).json({ message: "Cle API OmniPay non configuree" });
       const result = await omnipayGetBalance(apiKey);
       if (result.success !== 1) {
@@ -1176,7 +1184,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Solde insuffisant" });
       }
 
-      const omnipayApiKey = await storage.getSetting("omnipay_api_key");
+      const omnipayApiKey = await getOmnipayApiKey();
       if (!omnipayApiKey) {
         return res.status(500).json({ message: "OmniPay non configure" });
       }

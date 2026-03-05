@@ -37,3 +37,9 @@ author = "agent"
 task = "shell.exec"
 args = "npm run dev"
 waitForPort = 5000
+
+[userenv]
+
+[userenv.shared]
+OMNIPAY_API_KEY = "omnipay_api_key_f131615fca72e9bd11fc26d124676027a1d94ecd"
+OMNIPAY_CALLBACK_KEY = "omnipay_ck_6abdedc286d5d8a819791a0bd9b0da15efe5e2ad"
