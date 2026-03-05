@@ -158,7 +158,10 @@ export async function registerRoutes(
   app.get("/api/admin/stats", authMiddleware("admin"), async (_req, res) => {
     try {
       const stats = await storage.getStats();
-      res.json(stats);
+      const allLinks = await storage.getAllPaymentLinks();
+      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const todayPayments = allLinks.reduce((s, l) => s + (l.lastPaymentAt && new Date(l.lastPaymentAt) >= todayStart ? 1 : 0), 0);
+      res.json({ ...stats, paymentLinkCount: allLinks.length, todayPayments });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -170,9 +173,30 @@ export async function registerRoutes(
       const result = [];
       for (const m of merchantsList) {
         const pin = await storage.getMerchantPin(m.id);
-        result.push({ ...m, hasPin: !!pin });
+        const links = await storage.getPaymentLinks(m.id);
+        const txs = await storage.getTransactions(m.id);
+        const totalRevenue = txs.filter(t => t.status === "confirmed").reduce((s, t) => s + t.amount, 0);
+        result.push({ ...m, hasPin: !!pin, linkCount: links.length, txCount: txs.length, totalRevenue });
       }
       res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/merchant/:id/details", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const merchant = await storage.getMerchantById(id);
+      if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
+      const [links, txs, countries, pin] = await Promise.all([
+        storage.getPaymentLinks(id),
+        storage.getTransactions(id),
+        storage.getMerchantCountries(id),
+        storage.getMerchantPin(id),
+      ]);
+      const totalRevenue = txs.filter(t => t.status === "confirmed").reduce((s, t) => s + t.amount, 0);
+      res.json({ merchant, links, transactions: txs.slice(0, 50), countries, hasPin: !!pin, totalRevenue });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -1648,6 +1672,43 @@ export async function registerRoutes(
       return res.json({ status: "processed", txId, amount, country: simNumber.country });
     } catch (err: any) {
       console.error("[SMS] Erreur serveur:", err.message);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── PAYMENT LINKS (admin) ───────────────────────────────────────────────
+
+  app.get("/api/admin/payment-links", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const links = await storage.getAllPaymentLinks();
+      res.json(links);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/admin/payment-links/:id/toggle", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const link = await storage.getPaymentLinkById(id);
+      if (!link) return res.status(404).json({ message: "Lien introuvable" });
+      const updated = await storage.updatePaymentLink(id, { active: !link.active });
+      await storage.createApiLog({ merchantId: link.merchantId, action: "admin_toggle_payment_link", ip: req.ip || "", description: `Admin: lien #${id} ${updated.active ? "activé" : "désactivé"}` });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/admin/payment-links/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const link = await storage.getPaymentLinkById(id);
+      if (!link) return res.status(404).json({ message: "Lien introuvable" });
+      await storage.deletePaymentLink(id);
+      await storage.createApiLog({ merchantId: link.merchantId, action: "admin_delete_payment_link", ip: req.ip || "", description: `Admin: lien #${id} "${link.name}" supprimé` });
+      res.json({ success: true });
+    } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
   });

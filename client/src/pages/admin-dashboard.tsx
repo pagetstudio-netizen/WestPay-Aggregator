@@ -22,11 +22,13 @@ import {
   Users, ArrowRightLeft, Globe, Phone, Settings, LogOut, Plus,
   Trash2, Ban, CheckCircle, XCircle, Copy, Shield, Loader2, Download,
   MessageSquare, Key, DollarSign, Hash, Calendar, Search,
-  RefreshCw, Lock, BookOpen, FileText, Webhook, Zap, ToggleLeft, ToggleRight, Link2
+  RefreshCw, Lock, BookOpen, FileText, Webhook, Zap, ToggleLeft, ToggleRight, Link2,
+  Link, BarChart3, TrendingUp, Eye, ToggleLeft as Toggle, ExternalLink, Filter
 } from "lucide-react";
-import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog } from "@shared/schema";
+import { Switch } from "@/components/ui/switch";
+import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink } from "@shared/schema";
 
-type AdminTab = "merchants" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "settings";
+type AdminTab = "overview" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "settings";
 
 function useAdminFetch(url: string, key: string[]) {
   const { token } = useAuth();
@@ -214,6 +216,312 @@ function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string
   );
 }
 
+function OverviewPanel() {
+  const { data: stats } = useAdminFetch("/api/admin/stats", ["/api/admin/stats"]);
+  const { data: transactions = [] } = useAdminFetch("/api/admin/transactions", ["/api/admin/transactions"]);
+  const { data: merchants = [] } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
+  const { data: links = [] } = useAdminFetch("/api/admin/payment-links", ["/api/admin/payment-links"]);
+
+  const recentTx = (transactions as Transaction[]).slice(0, 5);
+  const recentLinks = (links as any[]).slice(0, 5);
+  const recentMerchants = (merchants as any[]).slice(0, 5);
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <StatCard title="Marchands" value={stats?.merchantCount || 0} icon={Users} />
+        <StatCard title="Liens de paiement" value={stats?.paymentLinkCount || 0} icon={Link} />
+        <StatCard title="Transactions" value={stats?.transactionCount || 0} icon={Hash} />
+        <StatCard title="Volume total" value={`${(stats?.totalVolume || 0).toLocaleString("fr-FR")} F`} icon={DollarSign} />
+        <StatCard title="Paiements auj." value={stats?.todayPayments || 0} icon={TrendingUp} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Card className="lg:col-span-1">
+          <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold flex items-center gap-2"><ArrowRightLeft className="w-4 h-4" />Transactions récentes</CardTitle></CardHeader>
+          <CardContent className="p-0">
+            {recentTx.length === 0 ? <p className="text-sm text-muted-foreground text-center py-4">Aucune transaction</p> : (
+              <div className="divide-y">
+                {recentTx.map((tx: Transaction) => (
+                  <div key={tx.id} className="px-4 py-2.5 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium truncate">{tx.txId}</p>
+                      <p className="text-xs text-muted-foreground">{tx.country} • {tx.payerNumber || "?"}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-xs font-semibold">{tx.amount.toLocaleString()} F</p>
+                      <Badge variant={tx.status === "confirmed" ? "default" : "secondary"} className="text-xs px-1">{tx.status}</Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-1">
+          <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold flex items-center gap-2"><Link className="w-4 h-4" />Derniers liens</CardTitle></CardHeader>
+          <CardContent className="p-0">
+            {recentLinks.length === 0 ? <p className="text-sm text-muted-foreground text-center py-4">Aucun lien</p> : (
+              <div className="divide-y">
+                {recentLinks.map((link: any) => (
+                  <div key={link.id} className="px-4 py-2.5">
+                    <p className="text-xs font-medium truncate">{link.name}</p>
+                    <p className="text-xs text-muted-foreground">{link.merchantName} • {link.amountType === "fixed" ? `${link.amount?.toLocaleString()} F` : "Libre"}</p>
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-xs text-muted-foreground">{link.paymentCount} paiements</span>
+                      <Badge variant={link.active ? "default" : "secondary"} className="text-xs px-1">{link.active ? "Actif" : "Inactif"}</Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-1">
+          <CardHeader className="pb-3"><CardTitle className="text-sm font-semibold flex items-center gap-2"><Users className="w-4 h-4" />Marchands récents</CardTitle></CardHeader>
+          <CardContent className="p-0">
+            {recentMerchants.length === 0 ? <p className="text-sm text-muted-foreground text-center py-4">Aucun marchand</p> : (
+              <div className="divide-y">
+                {recentMerchants.map((m: any) => (
+                  <div key={m.id} className="px-4 py-2.5 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium truncate">{m.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">{m.email}</p>
+                    </div>
+                    <Badge variant={m.suspended ? "destructive" : "secondary"} className="text-xs px-1">{m.suspended ? "Suspendu" : "Actif"}</Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; onClose: () => void }) {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const baseUrl = window.location.origin;
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["/api/admin/merchant", merchantId, "details"],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/merchant/${merchantId}/details`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error("Erreur chargement");
+      return res.json();
+    },
+    enabled: !!merchantId,
+  });
+
+  const copyLink = (uniqueId: string) => {
+    navigator.clipboard.writeText(`${baseUrl}/link/${uniqueId}`);
+    toast({ title: "Lien copié !" });
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{isLoading ? "Chargement..." : data?.merchant?.name}</DialogTitle>
+        </DialogHeader>
+        {isLoading ? <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div> : data && (
+          <div className="space-y-5 mt-2">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="bg-muted rounded-lg px-3 py-2"><p className="text-xs text-muted-foreground">Email</p><p className="font-medium">{data.merchant.email}</p></div>
+              <div className="bg-muted rounded-lg px-3 py-2"><p className="text-xs text-muted-foreground">Slug</p><p className="font-medium">/{data.merchant.slug}</p></div>
+              <div className="bg-muted rounded-lg px-3 py-2"><p className="text-xs text-muted-foreground">Statut</p><Badge variant={data.merchant.suspended ? "destructive" : "default"}>{data.merchant.suspended ? "Suspendu" : "Actif"}</Badge></div>
+              <div className="bg-muted rounded-lg px-3 py-2"><p className="text-xs text-muted-foreground">Volume total</p><p className="font-medium">{(data.totalRevenue || 0).toLocaleString()} F CFA</p></div>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-semibold mb-2 flex items-center gap-2"><Link className="w-4 h-4" />Liens de paiement ({data.links.length})</h3>
+              {data.links.length === 0 ? <p className="text-xs text-muted-foreground">Aucun lien créé</p> : (
+                <div className="space-y-2">
+                  {data.links.map((link: PaymentLink) => (
+                    <div key={link.id} className="flex items-center justify-between gap-2 bg-muted rounded-lg px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium truncate">{link.name}</p>
+                        <p className="text-xs text-muted-foreground">{link.amountType === "fixed" ? `${link.amount?.toLocaleString()} F` : "Libre"} • {link.paymentCount} paiements</p>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Badge variant={link.active ? "default" : "secondary"} className="text-xs px-1">{link.active ? "Actif" : "Inactif"}</Badge>
+                        <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => copyLink(link.uniqueId)}><Copy className="w-3 h-3" /></Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <h3 className="text-sm font-semibold mb-2 flex items-center gap-2"><ArrowRightLeft className="w-4 h-4" />Dernières transactions ({data.transactions.length})</h3>
+              {data.transactions.length === 0 ? <p className="text-xs text-muted-foreground">Aucune transaction</p> : (
+                <div className="space-y-1.5">
+                  {data.transactions.slice(0, 10).map((tx: Transaction) => (
+                    <div key={tx.id} className="flex items-center justify-between gap-2 bg-muted rounded-lg px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium truncate">{tx.txId}</p>
+                        <p className="text-xs text-muted-foreground">{tx.country} • {tx.payerNumber || "Inconnu"}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-xs font-semibold">{tx.amount.toLocaleString()} F</p>
+                        <Badge variant={tx.status === "confirmed" ? "default" : "secondary"} className="text-xs px-1">{tx.status}</Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AdminPaymentLinksPanel() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const baseUrl = window.location.origin;
+  const [search, setSearch] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterType, setFilterType] = useState("all");
+  const [filterMerchant, setFilterMerchant] = useState("");
+
+  const { data: links = [], isLoading } = useAdminFetch("/api/admin/payment-links", ["/api/admin/payment-links"]);
+
+  const toggleMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/admin/payment-links/${id}/toggle`, { method: "PUT", headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error("Erreur");
+      return res.json();
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/payment-links"] }); toast({ title: "Lien mis à jour" }); },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/admin/payment-links/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error("Erreur");
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/payment-links"] }); queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] }); toast({ title: "Lien supprimé" }); },
+  });
+
+  const copyLink = (uniqueId: string) => {
+    navigator.clipboard.writeText(`${baseUrl}/link/${uniqueId}`);
+    toast({ title: "Lien copié !" });
+  };
+
+  const getLinkStatus = (link: any) => {
+    if (!link.active) return "disabled";
+    if (link.expiresAt && new Date() > new Date(link.expiresAt)) return "expired";
+    if (link.paymentLimit && link.paymentCount >= link.paymentLimit) return "expired";
+    return "active";
+  };
+
+  const filtered = (links as any[]).filter((link) => {
+    const status = getLinkStatus(link);
+    const matchSearch = link.name.toLowerCase().includes(search.toLowerCase()) || link.merchantName.toLowerCase().includes(search.toLowerCase());
+    const matchStatus = filterStatus === "all" || status === filterStatus;
+    const matchType = filterType === "all" || link.amountType === filterType;
+    const matchMerchant = !filterMerchant || link.merchantName.toLowerCase().includes(filterMerchant.toLowerCase());
+    return matchSearch && matchStatus && matchType && matchMerchant;
+  });
+
+  const totalPayments = (links as any[]).reduce((s: number, l: any) => s + l.paymentCount, 0);
+  const totalRevenue = (links as any[]).reduce((s: number, l: any) => s + l.totalRevenue, 0);
+
+  if (isLoading) return <LoadingSkeleton />;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="text-lg font-semibold">Liens de Paiement</h2>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span>{(links as any[]).length} liens</span>
+          <span>•</span>
+          <span>{totalPayments} paiements</span>
+          <span>•</span>
+          <span>{totalRevenue.toLocaleString()} F générés</span>
+        </div>
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input className="pl-10" placeholder="Rechercher par nom ou marchand..." value={search} onChange={(e) => setSearch(e.target.value)} data-testid="input-search-links" />
+        </div>
+        <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <SelectTrigger className="w-full sm:w-36" data-testid="select-filter-status"><SelectValue placeholder="Statut" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tous statuts</SelectItem>
+            <SelectItem value="active">Actif</SelectItem>
+            <SelectItem value="disabled">Désactivé</SelectItem>
+            <SelectItem value="expired">Expiré</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={filterType} onValueChange={setFilterType}>
+          <SelectTrigger className="w-full sm:w-36" data-testid="select-filter-type"><SelectValue placeholder="Type" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tous types</SelectItem>
+            <SelectItem value="fixed">Fixe</SelectItem>
+            <SelectItem value="flexible">Libre</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {filtered.length === 0 ? (
+        <Card><CardContent className="p-8 text-center text-muted-foreground text-sm"><Link className="w-8 h-8 mx-auto mb-2 opacity-30" /><p>Aucun lien trouvé</p></CardContent></Card>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((link: any) => {
+            const status = getLinkStatus(link);
+            return (
+              <Card key={link.id} data-testid={`card-admin-link-${link.id}`} className={status !== "active" ? "opacity-70" : ""}>
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-sm" data-testid={`text-admin-link-name-${link.id}`}>{link.name}</span>
+                        <Badge variant="outline" className="text-xs">{link.merchantName}</Badge>
+                        {status === "active" && <Badge variant="default" className="text-xs">Actif</Badge>}
+                        {status === "disabled" && <Badge variant="secondary" className="text-xs">Désactivé</Badge>}
+                        {status === "expired" && <Badge variant="destructive" className="text-xs">Expiré</Badge>}
+                      </div>
+                      <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground flex-wrap">
+                        <span>{link.amountType === "fixed" ? `${link.amount?.toLocaleString()} F CFA (fixe)` : "Montant libre"}</span>
+                        <span><BarChart3 className="w-3 h-3 inline mr-0.5" />{link.paymentCount} paiements</span>
+                        <span>{link.totalRevenue.toLocaleString()} F générés</span>
+                        {link.expiresAt && <span>Expire: {new Date(link.expiresAt).toLocaleDateString("fr-FR")}</span>}
+                        {link.paymentLimit && <span>Limite: {link.paymentCount}/{link.paymentLimit}</span>}
+                      </div>
+                      <div className="flex items-center gap-1 mt-2 bg-muted rounded px-2 py-1 max-w-sm">
+                        <span className="text-xs truncate text-muted-foreground flex-1">{baseUrl}/link/{link.uniqueId}</span>
+                        <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0" onClick={() => copyLink(link.uniqueId)} data-testid={`button-admin-copy-link-${link.id}`}><Copy className="w-3 h-3" /></Button>
+                        <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0" onClick={() => window.open(`${baseUrl}/link/${link.uniqueId}`, "_blank")}><ExternalLink className="w-3 h-3" /></Button>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Switch checked={link.active} onCheckedChange={() => toggleMutation.mutate(link.id)} data-testid={`switch-admin-link-${link.id}`} />
+                      <Button variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10 h-8 w-8" onClick={() => { if (confirm("Supprimer ce lien ?")) deleteMutation.mutate(link.id); }} data-testid={`button-admin-delete-link-${link.id}`}>
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MerchantsPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
@@ -224,6 +532,7 @@ function MerchantsPanel() {
   const [password, setPassword] = useState("");
   const [pin, setPin] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedMerchantId, setSelectedMerchantId] = useState<number | null>(null);
 
   const { data: merchants = [], isLoading } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
 
@@ -279,7 +588,7 @@ function MerchantsPanel() {
     },
   });
 
-  const filtered = (merchants as Merchant[]).filter(
+  const filtered = (merchants as any[]).filter(
     (m) => m.name.toLowerCase().includes(searchTerm.toLowerCase()) || m.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -287,6 +596,7 @@ function MerchantsPanel() {
 
   return (
     <div className="space-y-4">
+      {selectedMerchantId && <MerchantDetailsDialog merchantId={selectedMerchantId} onClose={() => setSelectedMerchantId(null)} />}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-lg font-semibold text-foreground">Marchands</h2>
         <Dialog open={showCreate} onOpenChange={setShowCreate}>
@@ -347,11 +657,11 @@ function MerchantsPanel() {
         {filtered.length === 0 ? (
           <Card><CardContent className="p-6 text-center text-muted-foreground text-sm">Aucun marchand trouve</CardContent></Card>
         ) : (
-          filtered.map((merchant: Merchant) => (
-            <Card key={merchant.id}>
+          filtered.map((merchant: any) => (
+            <Card key={merchant.id} data-testid={`card-merchant-${merchant.id}`}>
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-2 flex-wrap">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-semibold text-foreground" data-testid={`text-merchant-name-${merchant.id}`}>{merchant.name}</h3>
                       <Badge variant={merchant.suspended ? "destructive" : "secondary"}>
@@ -359,7 +669,12 @@ function MerchantsPanel() {
                       </Badge>
                     </div>
                     <p className="text-sm text-muted-foreground mt-1">{merchant.email}</p>
-                    <p className="text-xs text-muted-foreground mt-1">Slug: /{merchant.slug}</p>
+                    <p className="text-xs text-muted-foreground">Slug: /{merchant.slug}</p>
+                    <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                      <span><Link className="w-3 h-3 inline mr-1" />{merchant.linkCount || 0} liens</span>
+                      <span><ArrowRightLeft className="w-3 h-3 inline mr-1" />{merchant.txCount || 0} transactions</span>
+                      <span><DollarSign className="w-3 h-3 inline mr-1" />{(merchant.totalRevenue || 0).toLocaleString()} F</span>
+                    </div>
                     {merchant.webhookUrl && (
                       <div className="flex items-center gap-1 mt-1">
                         <Webhook className="w-3 h-3 text-green-500" />
@@ -367,7 +682,10 @@ function MerchantsPanel() {
                       </div>
                     )}
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 flex-wrap justify-end">
+                    <Button variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={() => setSelectedMerchantId(merchant.id)} data-testid={`button-details-${merchant.id}`}>
+                      <Eye className="w-3 h-3" />Détails
+                    </Button>
                     <TelegramDialog merchant={merchant} token={token || ""} />
                     <Button
                       variant="ghost"
@@ -1390,7 +1708,7 @@ function LoadingSkeleton() {
 export default function AdminDashboard() {
   const { user, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
-  const [activeTab, setActiveTab] = useState<AdminTab>("merchants");
+  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
 
   useEffect(() => {
     if (!authLoading && (!user || user.role !== "admin")) {
@@ -1401,10 +1719,10 @@ export default function AdminDashboard() {
   if (authLoading) return <div className="min-h-screen bg-background flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
   if (!user || user.role !== "admin") return <div className="min-h-screen bg-background flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
 
-  const { data: stats } = useAdminFetch("/api/admin/stats", ["/api/admin/stats"]);
-
   const menuItems: { title: string; icon: any; tab: AdminTab }[] = [
+    { title: "Vue d'ensemble", icon: BarChart3, tab: "overview" },
     { title: "Marchands", icon: Users, tab: "merchants" },
+    { title: "Liens de paiement", icon: Link, tab: "paymentlinks" },
     { title: "Transactions", icon: ArrowRightLeft, tab: "transactions" },
     { title: "Pays & API", icon: Globe, tab: "countries" },
     { title: "Numeros SIM", icon: Phone, tab: "numbers" },
@@ -1468,16 +1786,9 @@ export default function AdminDashboard() {
           </header>
 
           <main className="flex-1 overflow-auto p-4 md:p-6">
-            {activeTab !== "settings" && activeTab !== "sms" && activeTab !== "apikeys" && activeTab !== "omnipay" && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                <StatCard title="Marchands" value={stats?.merchantCount || 0} icon={Users} />
-                <StatCard title="Transactions" value={stats?.transactionCount || 0} icon={Hash} />
-                <StatCard title="Volume total" value={`${(stats?.totalVolume || 0).toLocaleString("fr-FR")} F`} icon={DollarSign} />
-                <StatCard title="Numeros actifs" value={stats?.activeNumbers || 0} icon={Phone} />
-              </div>
-            )}
-
+            {activeTab === "overview" && <OverviewPanel />}
             {activeTab === "merchants" && <MerchantsPanel />}
+            {activeTab === "paymentlinks" && <AdminPaymentLinksPanel />}
             {activeTab === "transactions" && <TransactionsPanel />}
             {activeTab === "countries" && <CountriesPanel />}
             {activeTab === "numbers" && <NumbersPanel />}

@@ -87,6 +87,7 @@ export interface IStorage {
   deleteTelegramActivationCodes(merchantId: number): Promise<void>;
 
   getPaymentLinks(merchantId: number): Promise<PaymentLink[]>;
+  getAllPaymentLinks(): Promise<(PaymentLink & { merchantName: string })[]>;
   getPaymentLinkById(id: number): Promise<PaymentLink | undefined>;
   getPaymentLinkByUniqueId(uniqueId: string): Promise<PaymentLink | undefined>;
   createPaymentLink(data: InsertPaymentLink): Promise<PaymentLink>;
@@ -423,6 +424,15 @@ export class DatabaseStorage implements IStorage {
 
   async getPaymentLinks(merchantId: number): Promise<PaymentLink[]> {
     return db.select().from(paymentLinks).where(eq(paymentLinks.merchantId, merchantId)).orderBy(desc(paymentLinks.createdAt));
+  }
+
+  async getAllPaymentLinks(): Promise<(PaymentLink & { merchantName: string })[]> {
+    const rows = await db
+      .select({ link: paymentLinks, merchantName: merchants.name })
+      .from(paymentLinks)
+      .innerJoin(merchants, eq(paymentLinks.merchantId, merchants.id))
+      .orderBy(desc(paymentLinks.createdAt));
+    return rows.map(r => ({ ...r.link, merchantName: r.merchantName }));
   }
 
   async getPaymentLinkById(id: number): Promise<PaymentLink | undefined> {

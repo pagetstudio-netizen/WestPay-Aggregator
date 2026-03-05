@@ -1,0 +1,130 @@
+Étendre la plateforme en ajoutant une gestion administrative des liens de paiement et améliorer l’interface du dashboard administrateur.
+
+Ne pas modifier la structure actuelle du système. Ajouter uniquement les nouvelles fonctionnalités dans le panneau d’administration existant.
+
+---
+
+1. ACCÈS ADMINISTRATEUR À TOUS LES LIENS DE PAIEMENT
+
+Ajouter une nouvelle section dans le menu du dashboard administrateur appelée Liens de paiement.
+
+Dans cette section, l’administrateur doit pouvoir :
+
+• Voir tous les liens de paiement créés par les marchands
+• Voir quel marchand a créé chaque lien
+• Copier les liens de paiement
+• Désactiver ou supprimer un lien si nécessaire
+
+Afficher les liens sous forme de tableau avec les colonnes suivantes :
+
+- Nom du paiement
+- Nom du marchand
+- Type de montant (Fixe / Flottant)
+- Montant
+- Nombre total de paiements
+- Revenus générés
+- Date de création
+- Date d’expiration
+- Statut (Actif / Expiré / Désactivé)
+- Actions (Copier le lien, Désactiver, Supprimer, Voir détails)
+
+---
+
+2. SYSTÈME DE FILTRE POUR L’ADMINISTRATEUR
+
+Ajouter un système de filtres permettant à l’administrateur de rechercher facilement les liens.
+
+Filtres nécessaires :
+
+• Rechercher par nom du marchand
+• Rechercher par nom du paiement
+• Filtrer par statut du lien
+• Filtrer par date de création
+• Filtrer par type de montant (fixe ou flottant)
+
+Ajouter également une barre de recherche rapide en haut de la page.
+
+---
+
+3. COPIE DES LIENS DE PAIEMENT
+
+Chaque lien de paiement doit inclure un bouton Copier permettant à l’administrateur de copier facilement l’URL.
+
+Exemple de format :
+
+https://votredomaine.com/pay/payment-id
+
+---
+
+4. SIMPLIFICATION DU DASHBOARD ADMINISTRATEUR
+
+Améliorer et simplifier la page principale du dashboard administrateur.
+
+Afficher en haut des cartes de statistiques claires :
+
+• Nombre total de marchands
+• Nombre total de liens de paiement
+• Nombre total de transactions
+• Revenus totaux
+• Paiements effectués aujourd’hui
+
+En dessous afficher :
+
+• Les transactions récentes
+• Les derniers liens de paiement créés
+• Les nouveaux marchands inscrits
+
+L’interface doit être simple, claire et professionnelle.
+
+---
+
+5. PAGE DE GESTION DES MARCHANDS
+
+Créer une section appelée Marchands dans le panneau administrateur.
+
+Cette page doit permettre à l’administrateur de :
+
+• Voir tous les marchands inscrits
+• Voir les statistiques de chaque marchand
+• Voir les liens de paiement créés par chaque marchand
+• Voir les transactions de chaque marchand
+• Activer ou désactiver un marchand
+
+Colonnes du tableau :
+
+- Nom du marchand
+- Email
+- Nombre de liens de paiement
+- Nombre total de transactions
+- Revenus générés
+- Statut
+- Date d’inscription
+- Actions (Voir détails, Désactiver, Activer)
+
+---
+
+6. PAGE DÉTAILS DU MARCHAND
+
+Quand l’administrateur clique sur Voir détails, afficher une page complète contenant :
+
+• Informations du marchand
+• Tous les liens de paiement créés par ce marchand
+• L’historique des transactions
+• Les statistiques de revenus
+
+---
+
+7. INTERFACE UTILISATEUR
+
+• Conserver le design actuel du dashboard
+• Interface moderne et facile à utiliser
+• Design responsive (mobile et ordinateur)
+• Chargement rapide même avec beaucoup de marchands et de liens
+
+---
+
+8. SÉCURITÉ
+
+• Seuls les administrateurs peuvent accéder à cette section
+• Protéger les données sensibles des marchands
+• Enregistrer toutes les actions administrateur (suppression, désactivation, etc.)
