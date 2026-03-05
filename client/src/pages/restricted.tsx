@@ -13,7 +13,7 @@ export default function RestrictedPage() {
           className="text-2xl font-bold text-foreground mb-2"
           data-testid="text-restricted-title"
         >
-          RobotPay
+          WestPay
         </h1>
         <p
           className="text-muted-foreground text-sm"

@@ -290,7 +290,7 @@ function ApiKeysPanel({ token }: { token: string | null }) {
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <h2 className="text-lg font-semibold text-foreground">Cles API & Integration</h2>
-          <p className="text-sm text-muted-foreground">Utilisez ces cles pour integrer RobotPay dans vos applications.</p>
+          <p className="text-sm text-muted-foreground">Utilisez ces cles pour integrer WestPay dans vos applications.</p>
         </div>
         <Button variant="outline" onClick={() => window.open("/api-docs", "_blank")} data-testid="button-open-api-docs">
           <BookOpen className="w-4 h-4 mr-2" />Documentation API
@@ -356,7 +356,7 @@ function ApiKeysPanel({ token }: { token: string | null }) {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-foreground">Documentation d'integration</p>
-              <p className="text-xs text-muted-foreground">Accedez a la documentation complete de l'API RobotPay. Un code PIN est requis.</p>
+              <p className="text-xs text-muted-foreground">Accedez a la documentation complete de l'API WestPay. Un code PIN est requis.</p>
             </div>
             <Button variant="outline" size="sm" onClick={() => window.open("/api-docs", "_blank")} data-testid="button-docs-link">
               <ExternalLink className="w-3 h-3 mr-1" />Ouvrir
@@ -466,7 +466,7 @@ function WebhookPanel({ token }: { token: string | null }) {
               data-testid="input-webhook-url"
             />
             <p className="text-xs text-muted-foreground">
-              RobotPay enverra une requete POST a cette URL pour chaque paiement confirme.
+              WestPay enverra une requete POST a cette URL pour chaque paiement confirme.
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -1372,7 +1372,7 @@ export default function MerchantDashboard() {
                   <Wallet className="w-4 h-4 text-primary-foreground" />
                 </div>
                 <div>
-                  <p className="text-sm font-bold text-sidebar-foreground">RobotPay</p>
+                  <p className="text-sm font-bold text-sidebar-foreground">WestPay</p>
                   <p className="text-xs text-muted-foreground truncate">{user.name}</p>
                 </div>
               </div>

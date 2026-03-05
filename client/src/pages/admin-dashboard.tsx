@@ -2436,7 +2436,7 @@ export default function AdminDashboard() {
                   <Shield className="w-4 h-4 text-primary-foreground" />
                 </div>
                 <div>
-                  <p className="text-sm font-bold text-sidebar-foreground">RobotPay</p>
+                  <p className="text-sm font-bold text-sidebar-foreground">WestPay</p>
                   <p className="text-xs text-muted-foreground">Administration</p>
                 </div>
               </div>

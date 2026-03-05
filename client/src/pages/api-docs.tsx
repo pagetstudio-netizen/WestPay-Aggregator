@@ -102,7 +102,7 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
             </div>
           </div>
           <h1 className="text-xl font-bold text-foreground" data-testid="text-docs-title">
-            Documentation API RobotPay
+            Documentation API WestPay
           </h1>
           <p className="text-xs text-muted-foreground">Entrez vos identifiants pour acceder a la documentation</p>
         </CardHeader>
@@ -211,7 +211,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
               <BookOpen className="w-4 h-4 text-primary-foreground" />
             </div>
             <div className="min-w-0">
-              <h1 className="text-xs sm:text-sm font-bold text-foreground truncate">RobotPay API Documentation</h1>
+              <h1 className="text-xs sm:text-sm font-bold text-foreground truncate">WestPay API Documentation</h1>
               <p className="text-xs text-muted-foreground">v2.0</p>
             </div>
           </div>
@@ -227,7 +227,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
             Introduction
           </h2>
           <p className="text-sm sm:text-base text-muted-foreground leading-relaxed">
-            RobotPay est une plateforme d'aggregation de paiements Mobile Money. Tous les paiements sont traites
+            WestPay est une plateforme d'aggregation de paiements Mobile Money. Tous les paiements sont traites
             automatiquement via paiement mobile : une requete USSD est envoyee directement sur le telephone du client,
             qui n'a plus qu'a valider. L'API vous permet egalement d'effectuer des <strong>retraits automatiques</strong> (transferts)
             vers n'importe quel portefeuille Mobile Money.
@@ -448,7 +448,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
                   <p className="text-sm font-semibold text-foreground">Flux de retrait</p>
                   <ol className="text-xs sm:text-sm text-muted-foreground mt-2 space-y-1 list-decimal pl-4">
                     <li>Vous appelez l'endpoint de transfert avec le numero, le montant et le nom du destinataire</li>
-                    <li>RobotPay verifie votre solde et initie le transfert</li>
+                    <li>WestPay verifie votre solde et initie le transfert</li>
                     <li>Le montant est transfere sur le portefeuille Mobile Money du destinataire</li>
                     <li>Votre solde est debite du montant + frais eventuels</li>
                     <li>La transaction est enregistree avec un txId prefixe par <code className="bg-muted px-1 rounded">TR-</code></li>
@@ -518,7 +518,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
             Page de paiement hebergee
           </h2>
           <p className="text-sm text-muted-foreground">
-            RobotPay fournit une page de paiement securisee et hebergee. Redirigez simplement vos utilisateurs vers cette page.
+            WestPay fournit une page de paiement securisee et hebergee. Redirigez simplement vos utilisateurs vers cette page.
             Le paiement est traite automatiquement : une notification USSD est envoyee sur le telephone du client,
             et il n'a qu'a valider. Apres confirmation, l'utilisateur est redirige vers votre site.
           </p>
@@ -537,7 +537,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
                     <li>L'utilisateur entre son numero de telephone et son nom, puis choisit son operateur</li>
                     <li>Une demande USSD est envoyee automatiquement sur son telephone</li>
                     <li>L'utilisateur valide le paiement en composant son code secret</li>
-                    <li>RobotPay confirme le paiement et redirige l'utilisateur vers votre site avec :
+                    <li>WestPay confirme le paiement et redirige l'utilisateur vers votre site avec :
                       <code className="bg-muted px-1 rounded text-xs block mt-1 break-all">?status=success&amount=5000&ref=WP-abc123</code>
                     </li>
                   </ol>
@@ -633,7 +633,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
           </h2>
           <p className="text-sm text-muted-foreground">
             Configurez un webhook dans votre tableau de bord pour recevoir des notifications en temps reel
-            lorsqu'un paiement est confirme. RobotPay envoie un POST a votre URL avec les details de la transaction,
+            lorsqu'un paiement est confirme. WestPay envoie un POST a votre URL avec les details de la transaction,
             signe avec votre secret webhook via HMAC-SHA256.
           </p>
 
@@ -939,7 +939,7 @@ console.log("Test:", testResult.success ? "OK" : "Echec");`}
         </section>
 
         <div className="py-8 text-center">
-          <p className="text-xs text-muted-foreground">RobotPay API Documentation v2.0 - Usage interne uniquement</p>
+          <p className="text-xs text-muted-foreground">WestPay API Documentation v2.0 - Usage interne uniquement</p>
         </div>
       </div>
     </div>

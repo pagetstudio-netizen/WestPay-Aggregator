@@ -48,7 +48,7 @@ export default function AdminLogin() {
             </div>
           </div>
           <h1 className="text-xl font-bold text-foreground" data-testid="text-admin-login-title">
-            Administration RobotPay
+            Administration WestPay
           </h1>
           <p className="text-xs text-muted-foreground">Connexion reservee aux administrateurs</p>
         </CardHeader>
