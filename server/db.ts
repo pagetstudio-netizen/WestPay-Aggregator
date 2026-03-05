@@ -161,6 +161,23 @@ export async function runMigrations() {
     await client.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS omnipay_tx_id text`);
     await client.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS omnipay_payment_url text`);
 
+    await client.query(`CREATE TABLE IF NOT EXISTS payment_links (
+      id serial PRIMARY KEY,
+      merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+      unique_id text NOT NULL UNIQUE,
+      name text NOT NULL,
+      amount_type text NOT NULL DEFAULT 'fixed',
+      amount integer,
+      redirect_url text,
+      expires_at timestamp,
+      payment_limit integer,
+      payment_count integer NOT NULL DEFAULT 0,
+      total_revenue integer NOT NULL DEFAULT 0,
+      last_payment_at timestamp,
+      active boolean NOT NULL DEFAULT true,
+      created_at timestamp DEFAULT now() NOT NULL
+    )`);
+
     console.log("[DB] Migrations appliquees avec succes");
   } catch (err) {
     console.error("[DB] Erreur migration:", err);

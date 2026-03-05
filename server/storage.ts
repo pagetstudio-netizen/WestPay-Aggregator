@@ -1,6 +1,6 @@
 import {
   admins, merchants, merchantCountries, transactions, smsLogs, numbers, settings, loginLogs,
-  merchantPins, apiLogs, pendingPayments, webhookLogs, telegramActivationCodes,
+  merchantPins, apiLogs, pendingPayments, webhookLogs, telegramActivationCodes, paymentLinks,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
@@ -8,7 +8,7 @@ import {
   type MerchantPin, type InsertMerchantPin, type ApiLog, type InsertApiLog,
   type PendingPayment, type InsertPendingPayment,
   type WebhookLog, type InsertWebhookLog,
-  type TelegramActivationCode,
+  type TelegramActivationCode, type PaymentLink, type InsertPaymentLink,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and } from "drizzle-orm";
@@ -85,6 +85,14 @@ export interface IStorage {
   getTelegramActivationCode(code: string): Promise<TelegramActivationCode | undefined>;
   markTelegramActivationCodeUsed(code: string): Promise<void>;
   deleteTelegramActivationCodes(merchantId: number): Promise<void>;
+
+  getPaymentLinks(merchantId: number): Promise<PaymentLink[]>;
+  getPaymentLinkById(id: number): Promise<PaymentLink | undefined>;
+  getPaymentLinkByUniqueId(uniqueId: string): Promise<PaymentLink | undefined>;
+  createPaymentLink(data: InsertPaymentLink): Promise<PaymentLink>;
+  updatePaymentLink(id: number, data: Partial<InsertPaymentLink>): Promise<PaymentLink>;
+  deletePaymentLink(id: number): Promise<void>;
+  recordPaymentLinkPayment(id: number, amount: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -411,6 +419,42 @@ export class DatabaseStorage implements IStorage {
 
   async deleteTelegramActivationCodes(merchantId: number): Promise<void> {
     await db.delete(telegramActivationCodes).where(eq(telegramActivationCodes.merchantId, merchantId));
+  }
+
+  async getPaymentLinks(merchantId: number): Promise<PaymentLink[]> {
+    return db.select().from(paymentLinks).where(eq(paymentLinks.merchantId, merchantId)).orderBy(desc(paymentLinks.createdAt));
+  }
+
+  async getPaymentLinkById(id: number): Promise<PaymentLink | undefined> {
+    const [link] = await db.select().from(paymentLinks).where(eq(paymentLinks.id, id));
+    return link;
+  }
+
+  async getPaymentLinkByUniqueId(uniqueId: string): Promise<PaymentLink | undefined> {
+    const [link] = await db.select().from(paymentLinks).where(eq(paymentLinks.uniqueId, uniqueId));
+    return link;
+  }
+
+  async createPaymentLink(data: InsertPaymentLink): Promise<PaymentLink> {
+    const [link] = await db.insert(paymentLinks).values(data).returning();
+    return link;
+  }
+
+  async updatePaymentLink(id: number, data: Partial<InsertPaymentLink>): Promise<PaymentLink> {
+    const [link] = await db.update(paymentLinks).set(data).where(eq(paymentLinks.id, id)).returning();
+    return link;
+  }
+
+  async deletePaymentLink(id: number): Promise<void> {
+    await db.delete(paymentLinks).where(eq(paymentLinks.id, id));
+  }
+
+  async recordPaymentLinkPayment(id: number, amount: number): Promise<void> {
+    await db.update(paymentLinks).set({
+      paymentCount: sql`${paymentLinks.paymentCount} + 1`,
+      totalRevenue: sql`${paymentLinks.totalRevenue} + ${amount}`,
+      lastPaymentAt: new Date(),
+    }).where(eq(paymentLinks.id, id));
   }
 }
 

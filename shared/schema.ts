@@ -139,6 +139,23 @@ export const webhookLogs = pgTable("webhook_logs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const paymentLinks = pgTable("payment_links", {
+  id: serial("id").primaryKey(),
+  merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),
+  uniqueId: text("unique_id").notNull().unique(),
+  name: text("name").notNull(),
+  amountType: text("amount_type").notNull().default("fixed"),
+  amount: integer("amount"),
+  redirectUrl: text("redirect_url"),
+  expiresAt: timestamp("expires_at"),
+  paymentLimit: integer("payment_limit"),
+  paymentCount: integer("payment_count").default(0).notNull(),
+  totalRevenue: integer("total_revenue").default(0).notNull(),
+  lastPaymentAt: timestamp("last_payment_at"),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const insertTelegramActivationCodeSchema = createInsertSchema(telegramActivationCodes).omit({ id: true, createdAt: true });
 export const insertAdminSchema = createInsertSchema(admins).omit({ id: true, createdAt: true });
 export const insertMerchantSchema = createInsertSchema(merchants).omit({ id: true, createdAt: true });
@@ -184,3 +201,7 @@ export type WebhookLog = typeof webhookLogs.$inferSelect;
 export type InsertWebhookLog = z.infer<typeof insertWebhookLogSchema>;
 export type TelegramActivationCode = typeof telegramActivationCodes.$inferSelect;
 export type InsertTelegramActivationCode = z.infer<typeof insertTelegramActivationCodeSchema>;
+
+export const insertPaymentLinkSchema = createInsertSchema(paymentLinks).omit({ id: true, createdAt: true, paymentCount: true, totalRevenue: true, lastPaymentAt: true });
+export type PaymentLink = typeof paymentLinks.$inferSelect;
+export type InsertPaymentLink = z.infer<typeof insertPaymentLinkSchema>;

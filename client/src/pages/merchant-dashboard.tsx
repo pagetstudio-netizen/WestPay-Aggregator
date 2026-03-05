@@ -23,11 +23,13 @@ import {
 import {
   Wallet, ArrowRightLeft, Key, Settings, LogOut, Loader2, Download,
   Copy, Globe, DollarSign, Hash, TrendingUp, Search, RefreshCw, BookOpen, Lock, ExternalLink,
-  Webhook, Send, CheckCircle2, XCircle, Clock, ArrowUpRight, Zap
+  Webhook, Send, CheckCircle2, XCircle, Clock, ArrowUpRight, Zap, Link, QrCode,
+  Trash2, Plus, ToggleLeft, ToggleRight, Edit3, BarChart3
 } from "lucide-react";
-import type { MerchantCountry, Transaction, WebhookLog } from "@shared/schema";
+import { Switch } from "@/components/ui/switch";
+import type { MerchantCountry, Transaction, WebhookLog, PaymentLink } from "@shared/schema";
 
-type MerchantTab = "overview" | "transactions" | "apikeys" | "webhook" | "transfers" | "settings";
+type MerchantTab = "overview" | "transactions" | "apikeys" | "webhook" | "transfers" | "settings" | "paymentlinks";
 
 function useMerchantFetch(url: string, key: string[], token: string | null) {
   return useQuery({
@@ -875,6 +877,199 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
   );
 }
 
+function PaymentLinksPanel({ token }: { token: string | null }) {
+  const { toast } = useToast();
+  const [showCreate, setShowCreate] = useState(false);
+  const [editLink, setEditLink] = useState<PaymentLink | null>(null);
+  const [form, setForm] = useState({ name: "", amountType: "fixed", amount: "", redirectUrl: "", paymentLimit: "" });
+  const baseUrl = window.location.origin;
+
+  const { data: links = [], isLoading } = useQuery<PaymentLink[]>({
+    queryKey: ["/api/merchant/payment-links"],
+    queryFn: async () => {
+      const res = await fetch("/api/merchant/payment-links", { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error("Erreur chargement");
+      return res.json();
+    },
+    enabled: !!token,
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (data: typeof form) => {
+      const res = await fetch("/api/merchant/payment-links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          name: data.name, amountType: data.amountType,
+          amount: data.amount ? Number(data.amount) : undefined,
+          redirectUrl: data.redirectUrl || undefined,
+          paymentLimit: data.paymentLimit ? Number(data.paymentLimit) : undefined,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).message);
+      return res.json();
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] }); setShowCreate(false); setForm({ name: "", amountType: "fixed", amount: "", redirectUrl: "", paymentLimit: "" }); toast({ title: "Lien créé avec succès" }); },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: Partial<typeof form & { active: boolean }> }) => {
+      const res = await fetch(`/api/merchant/payment-links/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error((await res.json()).message);
+      return res.json();
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] }); setEditLink(null); toast({ title: "Lien mis à jour" }); },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/merchant/payment-links/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error("Erreur suppression");
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] }); toast({ title: "Lien supprimé" }); },
+  });
+
+  const copyLink = (uniqueId: string) => {
+    navigator.clipboard.writeText(`${baseUrl}/link/${uniqueId}`);
+    toast({ title: "Lien copié !" });
+  };
+
+  const totalRevenue = links.reduce((s, l) => s + l.totalRevenue, 0);
+  const totalPayments = links.reduce((s, l) => s + l.paymentCount, 0);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold">Liens de Paiement</h2>
+          <p className="text-sm text-muted-foreground">Créez des liens partageables pour recevoir des paiements</p>
+        </div>
+        <Button onClick={() => setShowCreate(true)} data-testid="button-create-payment-link">
+          <Plus className="w-4 h-4 mr-2" />Nouveau lien
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Card><CardContent className="pt-4"><div className="text-2xl font-bold">{links.length}</div><p className="text-xs text-muted-foreground">Liens créés</p></CardContent></Card>
+        <Card><CardContent className="pt-4"><div className="text-2xl font-bold">{totalPayments}</div><p className="text-xs text-muted-foreground">Paiements reçus</p></CardContent></Card>
+        <Card><CardContent className="pt-4"><div className="text-2xl font-bold">{totalRevenue.toLocaleString()} F</div><p className="text-xs text-muted-foreground">Volume total</p></CardContent></Card>
+      </div>
+
+      {isLoading ? <MerchantLoadingSkeleton /> : links.length === 0 ? (
+        <div className="text-center py-16 text-muted-foreground">
+          <Link className="w-10 h-10 mx-auto mb-3 opacity-30" />
+          <p className="font-medium">Aucun lien de paiement</p>
+          <p className="text-sm mt-1">Créez votre premier lien pour commencer à recevoir des paiements</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {links.map((link) => {
+            const url = `${baseUrl}/link/${link.uniqueId}`;
+            const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(url)}`;
+            const isExpired = link.expiresAt && new Date() > new Date(link.expiresAt);
+            const isLimited = link.paymentLimit && link.paymentCount >= link.paymentLimit;
+            return (
+              <Card key={link.id} data-testid={`card-payment-link-${link.id}`} className={!link.active || isExpired || isLimited ? "opacity-60" : ""}>
+                <CardContent className="pt-4">
+                  <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+                    <img src={qrUrl} alt="QR" className="w-20 h-20 rounded border shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="font-semibold text-sm" data-testid={`text-link-name-${link.id}`}>{link.name}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {link.amountType === "fixed" ? `${link.amount?.toLocaleString()} F CFA` : "Montant libre"}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {isExpired ? <Badge variant="destructive" className="text-xs">Expiré</Badge>
+                            : isLimited ? <Badge variant="destructive" className="text-xs">Limite atteinte</Badge>
+                            : link.active ? <Badge variant="default" className="text-xs">Actif</Badge>
+                            : <Badge variant="secondary" className="text-xs">Inactif</Badge>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 mt-2 bg-muted rounded px-2 py-1">
+                        <span className="text-xs truncate text-muted-foreground flex-1">{url}</span>
+                        <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0" onClick={() => copyLink(link.uniqueId)} data-testid={`button-copy-link-${link.id}`}>
+                          <Copy className="w-3 h-3" />
+                        </Button>
+                        <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0" onClick={() => window.open(url, "_blank")} data-testid={`button-open-link-${link.id}`}>
+                          <ExternalLink className="w-3 h-3" />
+                        </Button>
+                      </div>
+                      <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                        <span><BarChart3 className="w-3 h-3 inline mr-1" />{link.paymentCount} paiements</span>
+                        <span>{link.totalRevenue.toLocaleString()} F reçus</span>
+                        {link.paymentLimit && <span>Limite: {link.paymentCount}/{link.paymentLimit}</span>}
+                      </div>
+                    </div>
+                    <div className="flex sm:flex-col items-center gap-2 shrink-0">
+                      <Switch checked={link.active} onCheckedChange={(checked) => updateMutation.mutate({ id: link.id, data: { active: checked } })} data-testid={`switch-link-active-${link.id}`} />
+                      <Button size="icon" variant="outline" className="h-7 w-7" onClick={() => { setEditLink(link); setForm({ name: link.name, amountType: link.amountType, amount: link.amount?.toString() || "", redirectUrl: link.redirectUrl || "", paymentLimit: link.paymentLimit?.toString() || "" }); }} data-testid={`button-edit-link-${link.id}`}>
+                        <Edit3 className="w-3 h-3" />
+                      </Button>
+                      <Button size="icon" variant="outline" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => deleteMutation.mutate(link.id)} data-testid={`button-delete-link-${link.id}`}>
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      <Dialog open={showCreate || !!editLink} onOpenChange={(o) => { if (!o) { setShowCreate(false); setEditLink(null); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editLink ? "Modifier le lien" : "Créer un lien de paiement"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="space-y-1">
+              <Label>Nom du lien</Label>
+              <Input placeholder="Ex: Paiement commande #42" value={form.name} onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))} data-testid="input-link-name" />
+            </div>
+            <div className="space-y-1">
+              <Label>Type de montant</Label>
+              <Select value={form.amountType} onValueChange={(v) => setForm(f => ({ ...f, amountType: v }))}>
+                <SelectTrigger data-testid="select-link-amount-type"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fixed">Montant fixe</SelectItem>
+                  <SelectItem value="flexible">Montant libre</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {form.amountType === "fixed" && (
+              <div className="space-y-1">
+                <Label>Montant (F CFA)</Label>
+                <Input type="number" placeholder="5000" value={form.amount} onChange={(e) => setForm(f => ({ ...f, amount: e.target.value }))} data-testid="input-link-amount" />
+              </div>
+            )}
+            <div className="space-y-1">
+              <Label>URL de redirection <span className="text-muted-foreground text-xs">(optionnel)</span></Label>
+              <Input placeholder="https://votresite.com/merci" value={form.redirectUrl} onChange={(e) => setForm(f => ({ ...f, redirectUrl: e.target.value }))} data-testid="input-link-redirect" />
+            </div>
+            <div className="space-y-1">
+              <Label>Limite de paiements <span className="text-muted-foreground text-xs">(optionnel)</span></Label>
+              <Input type="number" placeholder="Illimité" value={form.paymentLimit} onChange={(e) => setForm(f => ({ ...f, paymentLimit: e.target.value }))} data-testid="input-link-limit" />
+            </div>
+            <Button className="w-full" onClick={() => { if (editLink) { updateMutation.mutate({ id: editLink.id, data: { name: form.name, amountType: form.amountType, amount: form.amount ? Number(form.amount) : undefined, redirectUrl: form.redirectUrl || undefined, paymentLimit: form.paymentLimit ? Number(form.paymentLimit) : undefined } }); } else { createMutation.mutate(form); } }} disabled={createMutation.isPending || updateMutation.isPending} data-testid="button-submit-link-form">
+              {createMutation.isPending || updateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : editLink ? "Enregistrer" : "Créer le lien"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 function MerchantLoadingSkeleton() {
   return (
     <div className="space-y-4">
@@ -906,6 +1101,7 @@ export default function MerchantDashboard() {
     { title: "Vue d'ensemble", icon: Wallet, tab: "overview" },
     { title: "Transactions", icon: ArrowRightLeft, tab: "transactions" },
     ...(hasOmnipay ? [{ title: "Transferts", icon: Send, tab: "transfers" as MerchantTab }] : []),
+    { title: "Liens de paiement", icon: Link, tab: "paymentlinks" },
     { title: "Cles API", icon: Key, tab: "apikeys" },
     { title: "Webhook", icon: Webhook, tab: "webhook" },
     { title: "Parametres", icon: Settings, tab: "settings" },
@@ -968,6 +1164,7 @@ export default function MerchantDashboard() {
             {activeTab === "overview" && <OverviewPanel token={token} />}
             {activeTab === "transactions" && <MerchantTransactionsPanel token={token} />}
             {activeTab === "transfers" && <TransfersPanel token={token} />}
+            {activeTab === "paymentlinks" && <PaymentLinksPanel token={token} />}
             {activeTab === "apikeys" && <ApiKeysPanel token={token} />}
             {activeTab === "webhook" && <WebhookPanel token={token} />}
             {activeTab === "settings" && <MerchantSettingsPanel token={token} />}

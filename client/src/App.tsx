@@ -12,6 +12,7 @@ import MerchantLogin from "@/pages/merchant-login";
 import MerchantDashboard from "@/pages/merchant-dashboard";
 import ApiDocsPage from "@/pages/api-docs";
 import PaymentPage from "@/pages/payment";
+import PaymentLinkPage from "@/pages/payment-link-page";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -25,6 +26,7 @@ function Router() {
       <Route path="/api-docs" component={ApiDocsPage} />
       <Route path="/pay" component={PaymentPage} />
       <Route path="/pay/:slug" component={PaymentPage} />
+      <Route path="/link/:uniqueId" component={PaymentLinkPage} />
       <Route component={NotFound} />
     </Switch>
   );
