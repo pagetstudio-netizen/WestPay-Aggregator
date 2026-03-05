@@ -71,7 +71,7 @@ function OverviewPanel({ token }: { token: string | null }) {
                 <Zap className="w-5 h-5 text-green-500" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-foreground" data-testid="text-omnipay-status">OmniPay actif</p>
+                <p className="text-sm font-semibold text-foreground" data-testid="text-omnipay-status">Paiement mobile actif</p>
                 <p className="text-xs text-muted-foreground">
                   Paiements automatiques via {omnipayCountries.map(c => c.country).join(", ")}
                 </p>
@@ -229,7 +229,7 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
                         <span className="font-mono text-sm font-semibold text-foreground" data-testid={`text-mtx-${tx.id}`}>{tx.txId}</span>
                         <Badge variant="secondary">{tx.country}</Badge>
                         {tx.provider === "omnipay" && (
-                          <Badge variant="outline"><Zap className="w-3 h-3 mr-1" />OmniPay</Badge>
+                          <Badge variant="outline"><Zap className="w-3 h-3 mr-1" />Mobile Money</Badge>
                         )}
                         {(tx.amount < 0 || tx.txId.startsWith("TR-")) && (
                           <Badge variant="secondary"><ArrowUpRight className="w-3 h-3 mr-1" />Transfert</Badge>
@@ -652,9 +652,9 @@ function TransfersPanel({ token }: { token: string | null }) {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-foreground">Transferts OmniPay</h2>
+      <h2 className="text-lg font-semibold text-foreground">Transferts Mobile Money</h2>
       <p className="text-sm text-muted-foreground">
-        Envoyez de l'argent directement vers un portefeuille Mobile Money via OmniPay.
+        Envoyez de l'argent directement vers un portefeuille Mobile Money.
       </p>
 
       <Card>

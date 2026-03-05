@@ -877,7 +877,7 @@ export async function registerRoutes(
 
       const omnipayApiKey = await getOmnipayApiKey();
       if (!omnipayApiKey) {
-        return res.status(500).json({ message: "OmniPay non configure. Contactez l'administrateur." });
+        return res.status(500).json({ message: "Systeme de paiement non configure. Contactez l'administrateur." });
       }
 
       if (!payerPhone) {
@@ -919,7 +919,7 @@ export async function registerRoutes(
           });
 
           if (omnipayResult.success !== 1) {
-            const errorMsg = OMNIPAY_ERRORS[omnipayResult.code || 0] || omnipayResult.message || "Erreur OmniPay";
+            const errorMsg = OMNIPAY_ERRORS[omnipayResult.code || 0] || omnipayResult.message || "Erreur de paiement";
             return res.status(400).json({ message: errorMsg, omnipayError: true, code: omnipayResult.code });
           }
 
@@ -1179,7 +1179,7 @@ export async function registerRoutes(
             }).catch(() => {});
 
             notifyAdminGroup(
-              `✅ *Paiement OmniPay confirmé*\n\n🏪 Marchand : *${merchant?.name || `#${pending.merchantId}`}*\n💰 Montant : *${pending.amount.toLocaleString("fr-FR")} F CFA*\n🌍 Pays : ${pending.country.toUpperCase()}\n🔖 TX : \`${txId}\``
+              `✅ *Paiement confirmé*\n\n🏪 Marchand : *${merchant?.name || `#${pending.merchantId}`}*\n💰 Montant : *${pending.amount.toLocaleString("fr-FR")} F CFA*\n🌍 Pays : ${pending.country.toUpperCase()}\n🔖 TX : \`${txId}\``
             ).catch(() => {});
           }
         }
@@ -1266,7 +1266,7 @@ export async function registerRoutes(
   app.get("/api/admin/omnipay/balance", authMiddleware("admin"), async (_req, res) => {
     try {
       const apiKey = await getOmnipayApiKey();
-      if (!apiKey) return res.status(400).json({ message: "Cle API OmniPay non configuree" });
+      if (!apiKey) return res.status(400).json({ message: "Cle API non configuree" });
       const result = await omnipayGetBalance(apiKey);
       if (result.success !== 1) {
         return res.status(400).json({ message: OMNIPAY_ERRORS[result.code || 0] || result.message || "Erreur" });
@@ -1308,7 +1308,7 @@ export async function registerRoutes(
       }
 
       if (!merchantCountry.omnipayEnabled) {
-        return res.status(400).json({ message: "OmniPay n'est pas active pour ce pays" });
+        return res.status(400).json({ message: "Paiement non active pour ce pays" });
       }
 
       if (merchantCountry.balance < parsedAmount) {
@@ -1317,7 +1317,7 @@ export async function registerRoutes(
 
       const omnipayApiKey = await getOmnipayApiKey();
       if (!omnipayApiKey) {
-        return res.status(500).json({ message: "OmniPay non configure" });
+        return res.status(500).json({ message: "Systeme de paiement non configure" });
       }
 
       const reference = omnipayGenerateRef();
@@ -1333,7 +1333,7 @@ export async function registerRoutes(
       });
 
       if (result.success !== 1) {
-        const errorMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Erreur OmniPay";
+        const errorMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Erreur de paiement";
         return res.status(400).json({ message: errorMsg });
       }
 

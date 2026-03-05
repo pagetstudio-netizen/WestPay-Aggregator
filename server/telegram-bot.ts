@@ -805,7 +805,7 @@ export async function notifyMerchantPayment(merchantId: number, data: {
       `📞 *Payeur :* ${data.payerNumber || "N/A"}`,
       `🌍 *Pays :* ${countryLabel(data.country)}`,
       `🔖 *TX :* \`${data.txId}\``,
-      `📡 *Via :* ${data.provider === "omnipay" ? "OmniPay" : "SMS"}`,
+      `📡 *Via :* ${data.provider === "omnipay" ? "Mobile Money" : "SMS"}`,
       ``,
       `🧡🧡 *Solde compte* 🧡🧡`,
       ``,

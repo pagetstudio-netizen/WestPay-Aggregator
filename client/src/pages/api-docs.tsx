@@ -212,7 +212,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
             </div>
             <div className="min-w-0">
               <h1 className="text-xs sm:text-sm font-bold text-foreground truncate">WestPay API Documentation</h1>
-              <p className="text-xs text-muted-foreground">v2.0 - OmniPay</p>
+              <p className="text-xs text-muted-foreground">v2.0</p>
             </div>
           </div>
           <Badge variant="secondary" className="shrink-0" data-testid="text-docs-merchant">{merchantName}</Badge>
@@ -228,7 +228,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
           </h2>
           <p className="text-sm sm:text-base text-muted-foreground leading-relaxed">
             WestPay est une plateforme d'aggregation de paiements Mobile Money. Tous les paiements sont traites
-            automatiquement via OmniPay : une requete USSD est envoyee directement sur le telephone du client,
+            automatiquement via paiement mobile : une requete USSD est envoyee directement sur le telephone du client,
             qui n'a plus qu'a valider. L'API vous permet egalement d'effectuer des <strong>retraits automatiques</strong> (transferts)
             vers n'importe quel portefeuille Mobile Money.
           </p>
@@ -345,7 +345,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
     "apiKey": "TGO-...",
     "balance": 12500,
     "active": true,
-    "omnipayEnabled": true
+    "enabled": true
   }
 ]`}
             auth={true}
@@ -364,8 +364,8 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
     "amount": 5000,
     "payerNumber": "+22898123456",
     "status": "confirmed",
-    "provider": "omnipay",
-    "omnipayTxId": "12345",
+    "provider": "mobile",
+    "txId_provider": "12345",
     "createdAt": "2026-01-15T10:30:00Z"
   },
   {
@@ -376,7 +376,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
     "amount": -3000,
     "payerNumber": "+22890654321",
     "status": "confirmed",
-    "provider": "omnipay",
+    "provider": "mobile",
     "createdAt": "2026-01-16T14:00:00Z"
   }
 ]`}
@@ -437,7 +437,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
           </h2>
           <p className="text-sm text-muted-foreground">
             Envoyez de l'argent directement vers n'importe quel portefeuille Mobile Money. Le montant est debite
-            de votre solde marchand et envoye instantanement au destinataire via OmniPay.
+            de votre solde marchand et envoye instantanement au destinataire via Mobile Money.
           </p>
 
           <Card>
@@ -448,8 +448,8 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
                   <p className="text-sm font-semibold text-foreground">Flux de retrait</p>
                   <ol className="text-xs sm:text-sm text-muted-foreground mt-2 space-y-1 list-decimal pl-4">
                     <li>Vous appelez l'endpoint de transfert avec le numero, le montant et le nom du destinataire</li>
-                    <li>WestPay verifie votre solde et envoie la demande a OmniPay</li>
-                    <li>OmniPay transfere l'argent sur le portefeuille Mobile Money du destinataire</li>
+                    <li>WestPay verifie votre solde et initie le transfert</li>
+                    <li>Le montant est transfere sur le portefeuille Mobile Money du destinataire</li>
                     <li>Votre solde est debite du montant + frais eventuels</li>
                     <li>La transaction est enregistree avec un txId prefixe par <code className="bg-muted px-1 rounded">TR-</code></li>
                   </ol>
@@ -473,7 +473,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
             responseBody={`{
   "success": true,
   "reference": "WP-abc123def456",
-  "omnipayId": 78901,
+  "transactionId": 78901,
   "fees": 50,
   "amount": 3000
 }`}
@@ -519,7 +519,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
           </h2>
           <p className="text-sm text-muted-foreground">
             WestPay fournit une page de paiement securisee et hebergee. Redirigez simplement vos utilisateurs vers cette page.
-            Le paiement est traite automatiquement via OmniPay : une notification USSD est envoyee sur le telephone du client,
+            Le paiement est traite automatiquement : une notification USSD est envoyee sur le telephone du client,
             et il n'a qu'a valider. Apres confirmation, l'utilisateur est redirige vers votre site.
           </p>
 
@@ -586,7 +586,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
           <EndpointDoc
             method="POST"
             path="/api/payment/initiate"
-            description="Initie un paiement OmniPay. Envoie une demande USSD push sur le telephone du client. Pour l'operateur Wave, retourne un lien de paiement."
+            description="Initie un paiement Mobile Money. Envoie une demande USSD push sur le telephone du client. Pour l'operateur Wave, retourne un lien de paiement."
             requestBody={`{
   "merchantSlug": "ecomat",
   "country": "Togo",
@@ -602,8 +602,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
             responseBody={`{
   "success": true,
   "paymentId": 42,
-  "omnipay": true,
-  "omnipayReference": "WP-abc123def456",
+  "reference": "WP-abc123def456",
   "paymentUrl": null,
   "fees": 75
 }`}
@@ -614,14 +613,14 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
           <EndpointDoc
             method="GET"
             path="/api/omnipay/payment/:paymentId/status"
-            description="Verifie le statut d'un paiement OmniPay en cours. Utilisez ce endpoint pour le polling cote client."
+            description="Verifie le statut d'un paiement en cours. Utilisez ce endpoint pour le polling cote client."
             responseBody={`{
   "status": "confirmed",
   "paymentId": 42,
-  "omnipayReference": "WP-abc123def456"
+  "reference": "WP-abc123def456"
 }`}
             auth={false}
-            notes="Statuts possibles : pending, omnipay_pending, confirmed, failed, expired"
+            notes="Statuts possibles : pending, pending, confirmed, failed, expired"
           />
         </section>
 
@@ -674,7 +673,7 @@ Content-Type: application/json
   "payer": "+22890123456",
   "country": "Togo",
   "merchantSlug": "ecomat",
-  "provider": "omnipay",
+  "provider": "mobile",
   "timestamp": "2026-01-15T10:30:00.000Z"
 }`}
               />
@@ -815,7 +814,7 @@ app.post("/api/westpay-webhook", (req, res) => {
                     </tr>
                     <tr>
                       <td className="p-3"><Badge variant="secondary">500</Badge></td>
-                      <td className="p-3 text-muted-foreground text-xs sm:text-sm">Erreur interne du serveur ou erreur OmniPay</td>
+                      <td className="p-3 text-muted-foreground text-xs sm:text-sm">Erreur interne du serveur ou erreur de paiement</td>
                     </tr>
                   </tbody>
                 </table>
@@ -909,7 +908,7 @@ window.location.href = \`https://westpay.replit.app/pay?merchant=ecomat&amount=\
 // Parametres retournes :
 // - status : "success" (paiement confirme)
 // - amount : le montant paye
-// - ref    : la reference OmniPay de la transaction`}
+// - ref    : la reference de la transaction`}
           />
 
           <p className="text-sm font-semibold text-foreground mt-4">4. Configurer et verifier les webhooks</p>
@@ -940,7 +939,7 @@ console.log("Test:", testResult.success ? "OK" : "Echec");`}
         </section>
 
         <div className="py-8 text-center">
-          <p className="text-xs text-muted-foreground">WestPay API Documentation v2.0 - Propulse par OmniPay - Usage interne uniquement</p>
+          <p className="text-xs text-muted-foreground">WestPay API Documentation v2.0 - Usage interne uniquement</p>
         </div>
       </div>
     </div>

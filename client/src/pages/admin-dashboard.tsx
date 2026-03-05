@@ -847,9 +847,9 @@ function CountriesPanel() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/countries"] });
-      toast({ title: "OmniPay mis a jour" });
+      toast({ title: "Mis à jour" });
     },
-    onError: () => toast({ title: "Erreur", description: "Impossible de modifier OmniPay", variant: "destructive" }),
+    onError: () => toast({ title: "Erreur", description: "Impossible de modifier", variant: "destructive" }),
   });
 
   if (isLoading) return <LoadingSkeleton />;
@@ -960,7 +960,7 @@ function CountriesPanel() {
                       <span className="font-semibold text-foreground">{mc.country}</span>
                       <Badge variant="secondary">{mc.merchantName || `Marchand #${mc.merchantId}`}</Badge>
                       <Badge variant={mc.active ? "default" : "destructive"}>{mc.active ? "Actif" : "Inactif"}</Badge>
-                      {mc.omnipayEnabled && <Badge variant="secondary"><Zap className="w-3 h-3 mr-1" />OmniPay</Badge>}
+                      {mc.omnipayEnabled && <Badge variant="secondary"><Zap className="w-3 h-3 mr-1" />Paiement actif</Badge>}
                     </div>
                     <div className="flex items-center gap-2 mt-2 flex-wrap">
                       <Key className="w-3 h-3 text-muted-foreground" />
@@ -982,7 +982,7 @@ function CountriesPanel() {
                         data-testid={`button-toggle-omnipay-${mc.id}`}
                       >
                         {mc.omnipayEnabled ? <Zap className="w-3 h-3 mr-1" /> : <Zap className="w-3 h-3 mr-1" />}
-                        {mc.omnipayEnabled ? "OmniPay" : "OmniPay"}
+                        {mc.omnipayEnabled ? "Paiement actif" : "Paiement inactif"}
                       </Button>
                       <Button
                         variant="outline"
@@ -1506,7 +1506,7 @@ function OmniPayPanel() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/omnipay/settings"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/omnipay/balance"] });
-      toast({ title: "Configuration OmniPay sauvegardee" });
+      toast({ title: "Configuration sauvegardee" });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
@@ -1517,13 +1517,13 @@ function OmniPayPanel() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-foreground">Configuration OmniPay</h2>
+      <h2 className="text-lg font-semibold text-foreground">Configuration Paiement</h2>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <Zap className="w-4 h-4" />Statut OmniPay
+              <Zap className="w-4 h-4" />Statut
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -1535,7 +1535,7 @@ function OmniPayPanel() {
             </div>
             {omnipaySettings?.configured && (
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <span className="text-sm text-muted-foreground">Solde OmniPay</span>
+                <span className="text-sm text-muted-foreground">Solde</span>
                 <div className="flex items-center gap-2">
                   {balanceLoading ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -1563,7 +1563,7 @@ function OmniPayPanel() {
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Configurez cette URL dans votre tableau de bord OmniPay comme URL de callback pour recevoir les notifications de paiement.
+              Configurez cette URL comme URL de callback pour recevoir les notifications de paiement.
             </p>
             <div className="flex items-center gap-2">
               <code className="text-xs bg-muted px-3 py-2 rounded-md font-mono flex-1 break-all text-foreground" data-testid="text-callback-url">
@@ -1585,7 +1585,7 @@ function OmniPayPanel() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
-            <Key className="w-4 h-4" />Cles API OmniPay
+            <Key className="w-4 h-4" />Cles API
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -1595,20 +1595,20 @@ function OmniPayPanel() {
               <Input
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Votre cle API OmniPay"
+                placeholder="Votre cle API"
                 data-testid="input-omnipay-apikey"
               />
-              <p className="text-xs text-muted-foreground">Cle API fournie par OmniPay pour authentifier les requetes.</p>
+              <p className="text-xs text-muted-foreground">Cle API pour authentifier les requetes de paiement.</p>
             </div>
             <div className="space-y-2">
               <Label>Cle de callback (callback_key)</Label>
               <Input
                 value={callbackKey}
                 onChange={(e) => setCallbackKey(e.target.value)}
-                placeholder="Votre cle de callback OmniPay"
+                placeholder="Votre cle de callback"
                 data-testid="input-omnipay-callbackkey"
               />
-              <p className="text-xs text-muted-foreground">Cle utilisee pour verifier la signature HMAC-SHA3-512 des callbacks OmniPay.</p>
+              <p className="text-xs text-muted-foreground">Cle utilisee pour verifier la signature HMAC-SHA3-512 des callbacks.</p>
             </div>
             <Button type="submit" disabled={saveMutation.isPending} data-testid="button-save-omnipay">
               {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
@@ -1990,7 +1990,7 @@ export default function AdminDashboard() {
     { title: "Numeros SIM", icon: Phone, tab: "numbers" },
     { title: "SMS recus", icon: MessageSquare, tab: "sms" },
     { title: "API & PIN", icon: Key, tab: "apikeys" },
-    { title: "OmniPay", icon: Zap, tab: "omnipay" },
+    { title: "Paiement", icon: Zap, tab: "omnipay" },
     { title: "Parametres", icon: Settings, tab: "settings" },
   ];
 
