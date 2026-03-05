@@ -257,7 +257,7 @@ export default function PaymentPage() {
   const stepLabels = ["Informations", "Validation", "Confirmation"];
 
   return (
-    <div className="min-h-screen payment-page-root flex flex-col items-center" style={{ background: "#00b050" }}>
+    <div className="min-h-screen payment-page-root flex flex-col items-center justify-center" style={{ background: "#00b050" }}>
       <style>{`
         .payment-page-root,
         .payment-page-root * {
@@ -340,20 +340,20 @@ export default function PaymentPage() {
           animation: pulse-ring 2s ease-in-out infinite;
         }
       `}</style>
-      <div className="w-full max-w-[420px] px-4 py-6">
-        <div className="mb-4">
+      <div className="w-full max-w-[420px] px-4 py-3">
+        <div className="mb-2">
           <h1 className="text-white font-bold text-lg" data-testid="text-brand">WestPay</h1>
           <p className="text-white/80 text-sm">Paiement securise</p>
         </div>
 
-        <div className="mb-4">
-          <p className="text-white/80 text-sm">Montant:</p>
-          <p className="text-white font-bold text-4xl" data-testid="text-pay-amount">
-            {formatAmount(amount)}<span className="text-lg ml-2">XOF</span>
+        <div className="mb-3">
+          <p className="text-white/80 text-xs">Montant:</p>
+          <p className="text-white font-bold text-3xl" data-testid="text-pay-amount">
+            {formatAmount(amount)}<span className="text-base ml-2">XOF</span>
           </p>
         </div>
 
-        <div className="bg-white rounded-md p-6 payment-card">
+        <div className="bg-white rounded-lg p-4 payment-card">
           <div className="mb-2">
             <div className="w-full h-2 rounded-full overflow-hidden" style={{ backgroundColor: "#e5e7eb" }}>
               <div
@@ -371,7 +371,7 @@ export default function PaymentPage() {
             </p>
           </div>
 
-          <div className="flex items-center justify-between mb-6 px-2">
+          <div className="flex items-center justify-between mb-4 px-2">
             {stepLabels.map((label, i) => {
               const stepNum = i + 1;
               const isActive = step === stepNum;
@@ -412,7 +412,7 @@ export default function PaymentPage() {
           </div>
 
           {step === 1 && (
-            <div className="space-y-4" data-testid="step-1-content">
+            <div className="space-y-3" data-testid="step-1-content">
               <div>
                 <label className="block text-sm font-medium mb-1" style={{ color: "#374151" }}>
                   Numero de telephone mobile:
@@ -505,13 +505,13 @@ export default function PaymentPage() {
               </div>
 
               <div
-                className="p-3 rounded-md text-sm"
+                className="p-2.5 rounded-md text-xs"
                 style={{ backgroundColor: "#dbeafe", color: "#1e40af" }}
               >
                 Vous recevrez une demande de validation sur votre telephone. Assurez-vous que votre numero est correct.
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-2">
+              <div className="flex items-center justify-end gap-3 pt-1">
                 <button
                   type="button"
                   onClick={handleStep1Next}
@@ -527,7 +527,7 @@ export default function PaymentPage() {
           )}
 
           {step === 2 && (
-            <div className="space-y-4" data-testid="step-2-omnipay-content">
+            <div className="space-y-3" data-testid="step-2-omnipay-content">
               {omnipayPaymentUrl ? (
                 <>
                   <div
@@ -570,7 +570,7 @@ export default function PaymentPage() {
                     Une demande de paiement a ete envoyee sur votre telephone
                   </div>
 
-                  <div className="text-center py-6">
+                  <div className="text-center py-3">
                     <div className="omnipay-pulse inline-block">
                       <div
                         className="w-20 h-20 rounded-full flex items-center justify-center mx-auto"
@@ -619,7 +619,7 @@ export default function PaymentPage() {
           )}
 
           {step === 3 && (
-            <div className="space-y-4 text-center py-6" data-testid="step-3-content">
+            <div className="space-y-3 text-center py-4" data-testid="step-3-content">
               <div
                 className="w-16 h-16 rounded-full flex items-center justify-center mx-auto"
                 style={{ backgroundColor: "#dcfce7" }}
@@ -673,7 +673,7 @@ export default function PaymentPage() {
           )}
         </div>
 
-        <p className="text-center text-white/60 text-xs mt-6">
+        <p className="text-center text-white/60 text-xs mt-3">
           Paiement securise via WestPay
         </p>
       </div>
