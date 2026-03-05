@@ -286,11 +286,13 @@ export function initTelegramBot(): Telegraf | null {
     }
   });
 
-  bot.launch().then(() => {
-    console.log("[TELEGRAM] Bot demarre avec succes");
+  bot.launch({
+    allowedUpdates: ["message", "callback_query"],
   }).catch((err) => {
     console.error("[TELEGRAM] Erreur demarrage bot:", err.message);
   });
+
+  console.log("[TELEGRAM] Bot demarre avec succes (polling actif)");
 
   process.once("SIGINT", () => bot?.stop("SIGINT"));
   process.once("SIGTERM", () => bot?.stop("SIGTERM"));
