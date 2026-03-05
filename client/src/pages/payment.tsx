@@ -148,16 +148,10 @@ export default function PaymentPage() {
       toast({ title: "Veuillez choisir une methode de paiement", variant: "destructive" });
       return;
     }
-    if (!payerName.trim()) {
-      toast({ title: "Veuillez entrer votre nom complet", variant: "destructive" });
-      return;
-    }
-
     setIsSubmitting(true);
     try {
-      const nameParts = payerName.trim().split(" ");
-      const firstName = nameParts[0] || "Client";
-      const lastName = nameParts.slice(1).join(" ") || "WestPay";
+      const firstName = "Client";
+      const lastName = "WestPay";
 
       const res = await fetch("/api/payment/initiate", {
         method: "POST",
@@ -433,20 +427,6 @@ export default function PaymentPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium mb-1" style={{ color: "#374151" }}>
-                  Nom complet:
-                </label>
-                <input
-                  type="text"
-                  value={payerName}
-                  onChange={(e) => setPayerName(e.target.value)}
-                  placeholder="Ex: Jean Dupont"
-                  className="w-full py-2 px-3 text-sm border rounded-md outline-none"
-                  data-testid="input-payer-name"
-                />
-              </div>
-
               {merchantInfo.countries.length > 1 && (
                 <div>
                   <label className="block text-sm font-medium mb-1" style={{ color: "#374151" }}>Pays:</label>
@@ -504,18 +484,11 @@ export default function PaymentPage() {
                 )}
               </div>
 
-              <div
-                className="p-2.5 rounded-md text-xs"
-                style={{ backgroundColor: "#dbeafe", color: "#1e40af" }}
-              >
-                Vous recevrez une demande de validation sur votre telephone. Assurez-vous que votre numero est correct.
-              </div>
-
               <div className="flex items-center justify-end gap-3 pt-1">
                 <button
                   type="button"
                   onClick={handleStep1Next}
-                  disabled={isSubmitting || !payerPhone.trim() || !selectedMethod || !payerName.trim()}
+                  disabled={isSubmitting || !payerPhone.trim() || !selectedMethod}
                   className="pay-btn pay-btn-green"
                   data-testid="button-step1-next"
                 >
