@@ -1258,8 +1258,11 @@ function SettingsPanel() {
   const [newPassword, setNewPassword] = useState("");
   const [isChanging, setIsChanging] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
+  const [groupIdInput, setGroupIdInput] = useState("");
+  const [isSavingGroup, setIsSavingGroup] = useState(false);
 
   const { data: profile } = useAdminFetch("/api/admin/profile", ["/api/admin/profile"]);
+  const { data: tgSettings, refetch: refetchTg } = useAdminFetch("/api/admin/telegram/settings", ["/api/admin/telegram/settings"]);
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();

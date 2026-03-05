@@ -125,6 +125,36 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/telegram/settings", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const groupId = await storage.getSetting("telegram_group_id");
+      const knownGroupsRaw = await storage.getSetting("telegram_known_groups");
+      const knownGroups: string[] = knownGroupsRaw ? JSON.parse(knownGroupsRaw) : [];
+      res.json({ groupId: groupId || null, knownGroupsCount: knownGroups.length });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/telegram/settings", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { groupId } = req.body;
+      if (!groupId || typeof groupId !== "string") return res.status(400).json({ message: "groupId requis" });
+      const trimmed = groupId.trim();
+      await storage.setSetting("telegram_group_id", trimmed);
+      const knownGroupsRaw = await storage.getSetting("telegram_known_groups");
+      const knownGroups: string[] = knownGroupsRaw ? JSON.parse(knownGroupsRaw) : [];
+      if (!knownGroups.includes(trimmed)) {
+        knownGroups.push(trimmed);
+        await storage.setSetting("telegram_known_groups", JSON.stringify(knownGroups));
+      }
+      await storage.createAuditLog({ adminId: (req as any).user.id, action: "telegram_group_updated", details: `Groupe admin Telegram mis a jour : ${trimmed}`, ip: req.ip || "" });
+      res.json({ success: true, groupId: trimmed });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/admin/stats", authMiddleware("admin"), async (_req, res) => {
     try {
       const stats = await storage.getStats();
