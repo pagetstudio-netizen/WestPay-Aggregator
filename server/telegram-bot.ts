@@ -311,7 +311,24 @@ export function initTelegramBot(): Telegraf | null {
 
     if (isGroup) {
       await ctx.reply(
-        `📖 *Commandes Admin — WestPay Bot*\n\n/setgroup — Enregistrer ce groupe pour les notifications\n/stats — Statistiques globales\n/marchands — Liste des marchands\n/solde — Soldes de tous les marchands`,
+        `📖 *Commandes Admin — WestPay Bot*\n\n` +
+        `━━━━━━━━━━━━━━━━\n` +
+        `⚙️ *Configuration du groupe*\n` +
+        `/setgroup — Enregistrer ce groupe comme groupe admin (reçoit toutes les alertes globales)\n\n` +
+        `👥 *Gestion des marchands*\n` +
+        `/marchands — Liste de tous les marchands avec leur statut\n` +
+        `/setmarchand CODE — Lier ce groupe au compte d'un marchand spécifique (remplacer CODE par le code généré depuis le dashboard)\n\n` +
+        `📊 *Statistiques & Soldes*\n` +
+        `/stats — Statistiques globales (marchands, transactions, volume total)\n` +
+        `/solde — Soldes de tous les marchands actifs par pays\n\n` +
+        `━━━━━━━━━━━━━━━━\n` +
+        `💡 *Comment configurer un groupe pour un marchand :*\n` +
+        `1️⃣ Générer un code depuis le dashboard WestPay\n` +
+        `2️⃣ Ajouter le bot au groupe du marchand\n` +
+        `3️⃣ Envoyer \`/setmarchand CODE\` dans ce groupe\n\n` +
+        `💡 *Comment configurer le groupe admin :*\n` +
+        `1️⃣ Ajouter le bot à votre groupe admin\n` +
+        `2️⃣ Envoyer \`/setgroup\` dans ce groupe`,
         { parse_mode: "Markdown" }
       );
       return;
