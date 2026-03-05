@@ -1832,9 +1832,11 @@ export async function registerRoutes(
       if (!link || !link.active) return res.status(404).json({ message: "Lien de paiement introuvable ou inactif" });
       if (link.expiresAt && new Date() > link.expiresAt) return res.status(410).json({ message: "Ce lien de paiement a expiré" });
       if (link.paymentLimit && link.paymentCount >= link.paymentLimit) return res.status(410).json({ message: "Ce lien a atteint sa limite de paiements" });
-      const merchant = await storage.getMerchant(link.merchantId);
+      const merchant = await storage.getMerchantById(link.merchantId);
       if (!merchant || merchant.suspended) return res.status(404).json({ message: "Marchand introuvable" });
-      res.json({ link, merchantName: merchant.name, merchantSlug: merchant.slug });
+      const countries = await storage.getMerchantCountries(merchant.id);
+      const activeCountries = countries.filter(c => c.active).map(c => c.country);
+      res.json({ link, merchantName: merchant.name, merchantSlug: merchant.slug, countries: activeCountries });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
