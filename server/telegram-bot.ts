@@ -745,7 +745,7 @@ export function initTelegramBot(): Telegraf | null {
     }
   });
 
-  console.log("[TELEGRAM] Bot initialise (mode webhook)");
+  console.log("[TELEGRAM] Bot initialise");
 
   return bot;
 }
@@ -779,6 +779,19 @@ export async function registerWebhookUrl(webhookUrl: string): Promise<void> {
     }
   } catch (err: any) {
     console.error("[TELEGRAM] Erreur enregistrement webhook:", err.message);
+  }
+}
+
+export async function startPolling(): Promise<void> {
+  if (!bot) return;
+  try {
+    await bot.telegram.deleteWebhook({ drop_pending_updates: false });
+    bot.launch({ dropPendingUpdates: false });
+    console.log("[TELEGRAM] Bot demarre en mode polling (developpement)");
+    process.once("SIGINT", () => bot?.stop("SIGINT"));
+    process.once("SIGTERM", () => bot?.stop("SIGTERM"));
+  } catch (err: any) {
+    console.error("[TELEGRAM] Erreur demarrage polling:", err.message);
   }
 }
 

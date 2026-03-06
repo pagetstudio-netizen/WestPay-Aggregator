@@ -77,20 +77,24 @@ app.use((req, res, next) => {
 
   await registerRoutes(httpServer, app);
 
-  const { initTelegramBot, setupWebhook, registerWebhookUrl } = await import("./telegram-bot");
+  const { initTelegramBot, setupWebhook, registerWebhookUrl, startPolling } = await import("./telegram-bot");
   const { storage } = await import("./storage");
 
   const telegramBot = initTelegramBot();
   if (telegramBot) {
-    let webhookSecret = await storage.getSetting("telegram_webhook_secret");
-    if (!webhookSecret) {
-      const { randomBytes } = await import("crypto");
-      webhookSecret = randomBytes(24).toString("hex");
-      await storage.setSetting("telegram_webhook_secret", webhookSecret);
+    if (process.env.NODE_ENV === "production") {
+      let webhookSecret = await storage.getSetting("telegram_webhook_secret");
+      if (!webhookSecret) {
+        const { randomBytes } = await import("crypto");
+        webhookSecret = randomBytes(24).toString("hex");
+        await storage.setSetting("telegram_webhook_secret", webhookSecret);
+      }
+      const webhookUrl = `https://west-pay-aggregator.replit.app/api/telegram/webhook/${webhookSecret}`;
+      setupWebhook(app, webhookSecret);
+      await registerWebhookUrl(webhookUrl);
+    } else {
+      await startPolling();
     }
-    const webhookUrl = `https://west-pay-aggregator.replit.app/api/telegram/webhook/${webhookSecret}`;
-    setupWebhook(app, webhookSecret);
-    await registerWebhookUrl(webhookUrl);
   }
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
