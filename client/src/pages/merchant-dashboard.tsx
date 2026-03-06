@@ -45,6 +45,32 @@ function useMerchantFetch(url: string, key: string[], token: string | null) {
   });
 }
 
+const COUNTRY_COLORS = [
+  "#1976d2", "#26a69a", "#e57373", "#7e57c2",
+  "#00897b", "#fb8c00", "#43a047", "#d81b60",
+  "#039be5", "#6d4c41",
+];
+
+function BigStatCard({
+  color, label, value, currency, sub, testId
+}: {
+  color: string; label: string; value: string; currency?: string; sub?: string; testId?: string;
+}) {
+  return (
+    <div
+      className="rounded-xl p-5 w-full"
+      style={{ background: color }}
+      data-testid={testId}
+    >
+      <p className="text-xs font-bold text-white/80 uppercase tracking-widest mb-2">{label}</p>
+      <p className="text-3xl font-bold text-white leading-none">
+        {value}{currency && <span className="text-xl font-semibold ml-2 text-white/90">{currency}</span>}
+      </p>
+      {sub && <p className="text-xs text-white/70 mt-2 font-medium">{sub}</p>}
+    </div>
+  );
+}
+
 function OverviewPanel({ token }: { token: string | null }) {
   const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
   const { data: stats } = useMerchantFetch("/api/merchant/stats", ["/api/merchant/stats"], token);
@@ -53,134 +79,79 @@ function OverviewPanel({ token }: { token: string | null }) {
 
   const countries = balance as MerchantCountry[];
   const totalBalance = countries.reduce((sum, c) => sum + (c.balance || 0), 0);
-  const omnipayCountries = countries.filter(c => c.omnipayEnabled && c.active);
-
-  const countryFlags: Record<string, string> = {
-    "Togo": "TG", "Benin": "BJ", "Cote d'Ivoire": "CI",
-    "Senegal": "SN", "Mali": "ML", "Burkina Faso": "BF",
-    "Cameroun": "CM", "Congo Brazzaville": "CG", "Gabon": "GA",
-  };
+  const activeCount = countries.filter(c => c.active).length;
 
   return (
-    <div className="space-y-6">
-      {omnipayCountries.length > 0 && (
-        <Card className="border-green-500/30 bg-green-500/5">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="w-10 h-10 rounded-md bg-green-500/10 flex items-center justify-center shrink-0">
-                <Zap className="w-5 h-5 text-green-500" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-foreground" data-testid="text-omnipay-status">Paiement mobile actif</p>
-                <p className="text-xs text-muted-foreground">
-                  Paiements automatiques via {omnipayCountries.map(c => c.country).join(", ")}
+    <div
+      className="-m-4 md:-m-6 p-4 md:p-6 min-h-full"
+      style={{ background: "#e8eaed" }}
+    >
+      <h2 className="text-xl font-bold mb-5" style={{ color: "#333" }}>Tableau de bord</h2>
+
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
+        Solde / Reversements
+      </p>
+      <div className="flex flex-col gap-4 mb-6">
+        <BigStatCard
+          color="#1e88e5"
+          label="Solde"
+          value={totalBalance.toLocaleString("fr-FR")}
+          currency="FCFA"
+          sub={`${activeCount} pays actif${activeCount > 1 ? "s" : ""} — ${stats?.transactionCount || 0} transaction${(stats?.transactionCount || 0) > 1 ? "s" : ""}`}
+          testId="text-total-balance"
+        />
+        <BigStatCard
+          color="#26a69a"
+          label="Reversements"
+          value={(stats?.totalWithdrawn || 0).toLocaleString("fr-FR")}
+          currency="FCFA"
+          testId="text-total-withdrawn"
+        />
+      </div>
+
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
+        Statistique journalier
+      </p>
+      <div className="flex flex-col gap-4 mb-6">
+        <BigStatCard
+          color="#ef5350"
+          label="Aujourd'hui"
+          value={(stats?.todayVolume || 0).toLocaleString("fr-FR")}
+          currency="FCFA"
+          testId="text-today-volume"
+        />
+        <BigStatCard
+          color="#7e57c2"
+          label="Hier"
+          value={(stats?.yesterdayVolume || 0).toLocaleString("fr-FR")}
+          currency="FCFA"
+          testId="text-yesterday-volume"
+        />
+      </div>
+
+      {countries.length > 0 && (
+        <>
+          <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
+            Solde par pays
+          </p>
+          <div className="flex flex-col gap-4">
+            {countries.map((c, idx) => (
+              <div
+                key={c.id}
+                className="rounded-xl p-5"
+                style={{ background: COUNTRY_COLORS[idx % COUNTRY_COLORS.length] }}
+                data-testid={`text-balance-${c.country}`}
+              >
+                <p className="text-xs font-bold text-white/80 uppercase tracking-widest mb-2">{c.country}</p>
+                <p className="text-3xl font-bold text-white leading-none">
+                  {c.balance.toLocaleString("fr-FR")}<span className="text-xl font-semibold ml-2 text-white/90">FCFA</span>
                 </p>
+                {!c.active && <p className="text-xs text-white/60 mt-1">Inactif</p>}
               </div>
-              <Badge variant="default" data-testid="badge-omnipay-count">{omnipayCountries.length} pays</Badge>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <Card className="relative overflow-hidden shadow-md" style={{ background: "linear-gradient(135deg, #00b050 0%, #009a45 60%, #007a38 100%)" }}>
-        <div className="absolute right-0 top-0 w-32 h-32 rounded-full opacity-10" style={{ background: "#ffffff", transform: "translate(30%, -30%)" }} />
-        <div className="absolute right-8 bottom-0 w-20 h-20 rounded-full opacity-10" style={{ background: "#ffffff", transform: "translateY(40%)" }} />
-        <CardContent className="p-6 relative">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div>
-              <p className="text-sm text-white/80 font-medium">Solde total disponible</p>
-              <p className="text-3xl font-bold text-white mt-1 tracking-tight" data-testid="text-total-balance">
-                {totalBalance.toLocaleString("fr-FR")} <span className="text-xl font-semibold text-white/80">F CFA</span>
-              </p>
-            </div>
-            <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center">
-              <DollarSign className="w-7 h-7 text-white" />
-            </div>
+            ))}
           </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card className="shadow-card hover:shadow-card-hover transition-shadow duration-200 overflow-hidden relative">
-          <div className="absolute inset-y-0 left-0 w-1 bg-primary" />
-          <CardContent className="p-4 pl-5">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Transactions</p>
-                <p className="text-2xl font-bold text-foreground mt-1">{stats?.transactionCount || 0}</p>
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                <Hash className="w-5 h-5 text-primary" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="shadow-card hover:shadow-card-hover transition-shadow duration-200 overflow-hidden relative">
-          <div className="absolute inset-y-0 left-0 w-1 bg-blue-500" />
-          <CardContent className="p-4 pl-5">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Pays actifs</p>
-                <p className="text-2xl font-bold text-foreground mt-1">{(balance as MerchantCountry[]).filter(c => c.active).length}</p>
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
-                <Globe className="w-5 h-5 text-blue-500" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="shadow-card hover:shadow-card-hover transition-shadow duration-200 overflow-hidden relative">
-          <div className="absolute inset-y-0 left-0 w-1 bg-orange-500" />
-          <CardContent className="p-4 pl-5">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Volume total</p>
-                <p className="text-2xl font-bold text-foreground mt-1">{(stats?.totalVolume || 0).toLocaleString("fr-FR")} F</p>
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-orange-500/10 flex items-center justify-center">
-                <TrendingUp className="w-5 h-5 text-orange-500" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div>
-        <h3 className="text-base font-semibold text-foreground mb-3">Solde par pays</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {(balance as MerchantCountry[]).length === 0 ? (
-            <Card className="col-span-full">
-              <CardContent className="p-6 text-center text-muted-foreground text-sm">Aucun pays active</CardContent>
-            </Card>
-          ) : (
-            (balance as MerchantCountry[]).map((c) => (
-              <Card key={c.id}>
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-md bg-accent flex items-center justify-center text-sm font-bold text-accent-foreground">
-                        {countryFlags[c.country] || c.country.substring(0, 2).toUpperCase()}
-                      </div>
-                      <div>
-                        <p className="font-semibold text-foreground text-sm">{c.country}</p>
-                        <Badge variant={c.active ? "default" : "destructive"} className="mt-1">
-                          {c.active ? "Actif" : "Inactif"}
-                        </Badge>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-lg font-bold text-foreground" data-testid={`text-balance-${c.country}`}>
-                        {c.balance.toLocaleString("fr-FR")}
-                      </p>
-                      <p className="text-xs text-muted-foreground">F CFA</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 }

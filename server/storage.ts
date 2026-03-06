@@ -16,7 +16,7 @@ import {
   type WithdrawalOperator, type InsertWithdrawalOperator,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, sql, and } from "drizzle-orm";
+import { eq, desc, sql, and, gte, lt } from "drizzle-orm";
 
 export interface IStorage {
   getAdminByEmail(email: string): Promise<Admin | undefined>;
@@ -61,7 +61,7 @@ export interface IStorage {
   getFailedLoginCount(userId: number, role: string): Promise<number>;
 
   getStats(): Promise<{ merchantCount: number; transactionCount: number; totalVolume: number; activeNumbers: number }>;
-  getMerchantStats(merchantId: number): Promise<{ transactionCount: number; totalVolume: number }>;
+  getMerchantStats(merchantId: number): Promise<{ transactionCount: number; totalVolume: number; todayVolume: number; yesterdayVolume: number; totalWithdrawn: number }>;
 
   getMerchantPin(merchantId: number): Promise<MerchantPin | undefined>;
   upsertMerchantPin(merchantId: number, pinHash: string): Promise<MerchantPin>;
@@ -316,11 +316,21 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getMerchantStats(merchantId: number) {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterdayStart = new Date(todayStart.getTime() - 86400000);
+
     const [tc] = await db.select({ count: sql<number>`count(*)` }).from(transactions).where(eq(transactions.merchantId, merchantId));
-    const [tv] = await db.select({ total: sql<number>`coalesce(sum(amount), 0)` }).from(transactions).where(eq(transactions.merchantId, merchantId));
+    const [tv] = await db.select({ total: sql<number>`coalesce(sum(amount), 0)` }).from(transactions).where(and(eq(transactions.merchantId, merchantId), eq(transactions.status, "confirmed")));
+    const [todayRow] = await db.select({ total: sql<number>`coalesce(sum(amount), 0)` }).from(transactions).where(and(eq(transactions.merchantId, merchantId), eq(transactions.status, "confirmed"), gte(transactions.createdAt, todayStart)));
+    const [yesterdayRow] = await db.select({ total: sql<number>`coalesce(sum(amount), 0)` }).from(transactions).where(and(eq(transactions.merchantId, merchantId), eq(transactions.status, "confirmed"), gte(transactions.createdAt, yesterdayStart), lt(transactions.createdAt, todayStart)));
+    const [wRow] = await db.select({ total: sql<number>`coalesce(sum(amount), 0)` }).from(withdrawals).where(and(eq(withdrawals.merchantId, merchantId), eq(withdrawals.status, "approved")));
     return {
       transactionCount: Number(tc?.count || 0),
       totalVolume: Number(tv?.total || 0),
+      todayVolume: Number(todayRow?.total || 0),
+      yesterdayVolume: Number(yesterdayRow?.total || 0),
+      totalWithdrawn: Number(wRow?.total || 0),
     };
   }
 
