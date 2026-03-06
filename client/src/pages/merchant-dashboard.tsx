@@ -74,6 +74,7 @@ function BigStatCard({
 }
 
 function OverviewPanel({ token }: { token: string | null }) {
+  const { t } = useLanguage();
   const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
   const { data: stats } = useMerchantFetch("/api/merchant/stats", ["/api/merchant/stats"], token);
 
@@ -88,15 +89,15 @@ function OverviewPanel({ token }: { token: string | null }) {
       className="-m-4 md:-m-6 p-4 md:p-6 min-h-full"
       style={{ background: "#e8eaed" }}
     >
-      <h2 className="text-xl font-bold mb-5" style={{ color: "#333" }}>Tableau de bord</h2>
+      <h2 className="text-xl font-bold mb-5" style={{ color: "#333" }}>{t("dashboard")}</h2>
 
       <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-        Solde / Reversements
+        {t("balance")} / {t("reversements")}
       </p>
       <div className="flex flex-col gap-4 mb-6">
         <BigStatCard
           color="#1e88e5"
-          label="Solde"
+          label={t("balance")}
           value={totalBalance.toLocaleString("fr-FR")}
           currency="FCFA"
           sub={`${activeCount} pays actif${activeCount > 1 ? "s" : ""} — ${stats?.transactionCount || 0} transaction${(stats?.transactionCount || 0) > 1 ? "s" : ""}`}
@@ -104,7 +105,7 @@ function OverviewPanel({ token }: { token: string | null }) {
         />
         <BigStatCard
           color="#26a69a"
-          label="Reversements"
+          label={t("reversements")}
           value={(stats?.totalWithdrawn || 0).toLocaleString("fr-FR")}
           currency="FCFA"
           testId="text-total-withdrawn"
@@ -112,19 +113,19 @@ function OverviewPanel({ token }: { token: string | null }) {
       </div>
 
       <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-        Statistique journalier
+        {t("todayStats")}
       </p>
       <div className="flex flex-col gap-4 mb-6">
         <BigStatCard
           color="#ef5350"
-          label="Aujourd'hui"
+          label={t("today")}
           value={(stats?.todayVolume || 0).toLocaleString("fr-FR")}
           currency="FCFA"
           testId="text-today-volume"
         />
         <BigStatCard
           color="#7e57c2"
-          label="Hier"
+          label={t("yesterday")}
           value={(stats?.yesterdayVolume || 0).toLocaleString("fr-FR")}
           currency="FCFA"
           testId="text-yesterday-volume"
@@ -134,7 +135,7 @@ function OverviewPanel({ token }: { token: string | null }) {
       {countries.length > 0 && (
         <>
           <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-            Solde par pays
+            {t("balanceByCountry")}
           </p>
           <div className="flex flex-col gap-4">
             {countries.map((c, idx) => (
@@ -148,7 +149,7 @@ function OverviewPanel({ token }: { token: string | null }) {
                 <p className="text-3xl font-bold text-white leading-none">
                   {c.balance.toLocaleString("fr-FR")}<span className="text-xl font-semibold ml-2 text-white/90">FCFA</span>
                 </p>
-                {!c.active && <p className="text-xs text-white/60 mt-1">Inactif</p>}
+                {!c.active && <p className="text-xs text-white/60 mt-1">{t("inactive")}</p>}
               </div>
             ))}
           </div>
@@ -159,6 +160,7 @@ function OverviewPanel({ token }: { token: string | null }) {
 }
 
 function MerchantTransactionsPanel({ token }: { token: string | null }) {
+  const { t } = useLanguage();
   const { data: transactions = [], isLoading } = useMerchantFetch("/api/merchant/transactions", ["/api/merchant/transactions"], token);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -200,41 +202,41 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
   return (
     <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
       <div className="flex items-center justify-between gap-2 mb-5">
-        <h2 className="text-xl font-bold" style={{ color: "#333" }}>Mes transactions</h2>
+        <h2 className="text-xl font-bold" style={{ color: "#333" }}>{t("transactionHistory")}</h2>
         <button
           onClick={downloadCSV}
           className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all"
           style={{ background: "#fff", border: "1.5px solid #e8ecf0", color: "#333" }}
           data-testid="button-merchant-export-csv"
         >
-          <Download className="w-4 h-4" /> Export CSV
+          <Download className="w-4 h-4" /> {t("exportCsv")}
         </button>
       </div>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Aperçu</p>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("summary")}</p>
       <div className="grid grid-cols-3 gap-3 mb-6">
         <div className="rounded-xl p-4" style={{ background: "#1976d2" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Volume</p>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("totalVolume")}</p>
           <p className="text-xl font-bold text-white">{confirmedTotal.toLocaleString("fr-FR")}<span className="text-xs ml-1 text-white/70">FCFA</span></p>
         </div>
         <div className="rounded-xl p-4" style={{ background: "#00b050" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Confirmées</p>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("confirmed")}</p>
           <p className="text-xl font-bold text-white">{confirmedCount}</p>
         </div>
         <div className="rounded-xl p-4" style={{ background: pendingCount > 0 ? "#fb8c00" : "#78909c" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">En attente</p>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("pending")}</p>
           <p className="text-xl font-bold text-white">{pendingCount}</p>
         </div>
       </div>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Filtres</p>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("filter")}</p>
       <div className="bg-white rounded-2xl p-3 mb-4 shadow-sm flex gap-2 flex-wrap" style={{ border: "1.5px solid #e8ecf0" }}>
         <div className="relative flex-1 min-w-40">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: "#aaa" }} />
           <input
             className="w-full rounded-xl pl-9 pr-3 py-2 text-sm outline-none"
             style={{ border: "1.5px solid #e2e8f0", background: "#f9fafb", color: "#1a1a1a" }}
-            placeholder="ID, nom, numéro, pays..."
+            placeholder={t("searchTransactions")}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             data-testid="input-merchant-search-tx"
@@ -247,10 +249,10 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
           style={{ border: "1.5px solid #e2e8f0", background: "#f9fafb", color: "#333" }}
           data-testid="select-filter-status"
         >
-          <option value="all">Tous statuts</option>
-          <option value="confirmed">Confirmé</option>
-          <option value="pending">En attente</option>
-          <option value="failed">Échoué</option>
+          <option value="all">{t("allStatuses")}</option>
+          <option value="confirmed">{t("confirmed")}</option>
+          <option value="pending">{t("pending")}</option>
+          <option value="failed">{t("failed")}</option>
         </select>
         <select
           value={filterProvider}
@@ -259,7 +261,7 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
           style={{ border: "1.5px solid #e2e8f0", background: "#f9fafb", color: "#333" }}
           data-testid="select-filter-provider"
         >
-          <option value="all">Tous modes</option>
+          <option value="all">{t("all")}</option>
           <option value="omnipay">Mobile Money</option>
           <option value="sms">SMS</option>
         </select>
@@ -270,13 +272,13 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
       )}
 
       <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-        Historique — {allTx.length} transaction{allTx.length !== 1 ? "s" : ""}
+        {t("recentTransactions")} — {allTx.length}
       </p>
       <div className="space-y-3">
         {filtered.length === 0 ? (
           <div className="bg-white rounded-2xl p-8 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
             <CreditCard className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
-            <p className="text-sm" style={{ color: "#aaa" }}>Aucune transaction</p>
+            <p className="text-sm" style={{ color: "#aaa" }}>{t("noTransactions")}</p>
           </div>
         ) : (
           filtered.map((tx) => {
@@ -290,10 +292,10 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
                     <div className="flex items-center gap-2 flex-wrap mb-1">
                       <span className="font-mono text-xs font-bold px-2 py-0.5 rounded" style={{ background: "#f0f4ff", color: "#3949ab" }} data-testid={`text-mtx-${tx.id}`}>{tx.txId}</span>
                       <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: statusColor.bg, color: statusColor.color }}>
-                        {tx.status === "confirmed" ? "Confirmé" : tx.status === "pending" ? "En attente" : "Échoué"}
+                        {tx.status === "confirmed" ? t("confirmed") : tx.status === "pending" ? t("pending") : t("failed")}
                       </span>
                       <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "#f0f4ff", color: "#3949ab" }}>{tx.country}</span>
-                      {isTransfer && <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "#fce4ec", color: "#c62828" }}>Transfert</span>}
+                      {isTransfer && <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "#fce4ec", color: "#c62828" }}>{t("transfers")}</span>}
                     </div>
                     {txPayerName && (
                       <p className="text-sm font-semibold mb-0.5" style={{ color: "#1a1a1a" }} data-testid={`text-payer-name-${tx.id}`}>{txPayerName}</p>
@@ -321,6 +323,7 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
 }
 
 function ApiKeysPanel({ token }: { token: string | null }) {
+  const { t } = useLanguage();
   const { toast } = useToast();
   const { data: apiKeys = [], isLoading } = useMerchantFetch("/api/merchant/api-keys", ["/api/merchant/api-keys"], token);
 
@@ -336,9 +339,9 @@ function ApiKeysPanel({ token }: { token: string | null }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/api-keys"] });
-      toast({ title: "Clé API régénérée", description: "L'ancienne clé est maintenant invalidée." });
+      toast({ title: t("apiKey"), description: t("keyActive") });
     },
-    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+    onError: (err: any) => toast({ title: t("error"), description: err.message, variant: "destructive" }),
   });
 
   if (isLoading) return <MerchantLoadingSkeleton />;
@@ -347,8 +350,8 @@ function ApiKeysPanel({ token }: { token: string | null }) {
     <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
       <div className="flex items-center justify-between gap-2 mb-5">
         <div>
-          <h2 className="text-xl font-bold" style={{ color: "#333" }}>Clés API & Intégration</h2>
-          <p className="text-xs mt-0.5" style={{ color: "#888" }}>Utilisez ces clés pour intégrer WestPay dans vos applications.</p>
+          <h2 className="text-xl font-bold" style={{ color: "#333" }}>{t("apiKeysTitle")}</h2>
+          <p className="text-xs mt-0.5" style={{ color: "#888" }}>{t("apiKeysDesc")}</p>
         </div>
         <button
           onClick={() => window.open("/api-docs", "_blank")}
@@ -356,18 +359,18 @@ function ApiKeysPanel({ token }: { token: string | null }) {
           style={{ background: "#fff", border: "1.5px solid #e8ecf0", color: "#333" }}
           data-testid="button-open-api-docs"
         >
-          <BookOpen className="w-4 h-4" /> Documentation
+          <BookOpen className="w-4 h-4" /> {t("apiDocumentation")}
         </button>
       </div>
 
       <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-        Vos clés — {(apiKeys as MerchantCountry[]).length} pays actif{(apiKeys as MerchantCountry[]).length > 1 ? "s" : ""}
+        {t("yourApiKeys")} — {(apiKeys as MerchantCountry[]).length}
       </p>
       <div className="space-y-3 mb-5">
         {(apiKeys as MerchantCountry[]).length === 0 ? (
           <div className="bg-white rounded-2xl p-6 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
             <Key className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
-            <p className="text-sm" style={{ color: "#aaa" }}>Aucune clé API disponible</p>
+            <p className="text-sm" style={{ color: "#aaa" }}>{t("noApiKeys")}</p>
           </div>
         ) : (
           (apiKeys as MerchantCountry[]).map((key, idx) => (
@@ -380,13 +383,13 @@ function ApiKeysPanel({ token }: { token: string | null }) {
                   <div>
                     <p className="text-sm font-bold" style={{ color: "#1a1a1a" }}>{key.country}</p>
                     <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: key.active ? "#d4edda" : "#f8d7da", color: key.active ? "#155724" : "#721c24" }}>
-                      {key.active ? "Active" : "Inactive"}
+                      {key.active ? t("active") : t("inactive")}
                     </span>
                   </div>
                 </div>
                 <button
                   onClick={() => {
-                    if (confirm("Régénérer cette clé API ? L'ancienne clé sera immédiatement invalidée.")) {
+                    if (confirm(t("confirm"))) {
                       regenerateMutation.mutate(key.id);
                     }
                   }}
@@ -396,13 +399,13 @@ function ApiKeysPanel({ token }: { token: string | null }) {
                   data-testid={`button-regenerate-key-${key.id}`}
                 >
                   {regenerateMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                  Régénérer
+                  {t("reset")}
                 </button>
               </div>
               <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: "#f9fafb", border: "1px solid #e2e8f0" }}>
                 <code className="text-xs font-mono flex-1 break-all" style={{ color: "#555" }} data-testid={`text-apikey-${key.id}`}>{key.apiKey}</code>
                 <button
-                  onClick={() => { navigator.clipboard.writeText(key.apiKey); toast({ title: "Clé copiée !" }); }}
+                  onClick={() => { navigator.clipboard.writeText(key.apiKey); toast({ title: t("copied") }); }}
                   className="p-1.5 rounded-lg shrink-0 transition-all hover:bg-gray-200"
                   style={{ color: "#888" }}
                   data-testid={`button-copy-key-${key.id}`}
@@ -421,8 +424,8 @@ function ApiKeysPanel({ token }: { token: string | null }) {
             <BookOpen className="w-5 h-5" style={{ color: "#3949ab" }} />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold" style={{ color: "#1a1a1a" }}>Documentation d'intégration</p>
-            <p className="text-xs" style={{ color: "#888" }}>Accédez à la documentation complète de l'API WestPay.</p>
+            <p className="text-sm font-bold" style={{ color: "#1a1a1a" }}>{t("integrationGuide")}</p>
+            <p className="text-xs" style={{ color: "#888" }}>{t("apiKeysDesc")}</p>
           </div>
           <button
             onClick={() => window.open("/api-docs", "_blank")}
@@ -430,7 +433,7 @@ function ApiKeysPanel({ token }: { token: string | null }) {
             style={{ background: "#3949ab", color: "#fff", border: "none" }}
             data-testid="button-docs-link"
           >
-            <ExternalLink className="w-3.5 h-3.5" /> Ouvrir
+            <ExternalLink className="w-3.5 h-3.5" /> {t("openLink")}
           </button>
         </div>
       </div>
@@ -439,6 +442,7 @@ function ApiKeysPanel({ token }: { token: string | null }) {
 }
 
 function WebhookPanel({ token }: { token: string | null }) {
+  const { t } = useLanguage();
   const { toast } = useToast();
   const [webhookUrl, setWebhookUrl] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -459,12 +463,12 @@ function WebhookPanel({ token }: { token: string | null }) {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ webhookUrl: webhookUrl.trim() }),
       });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
-      toast({ title: webhookUrl.trim() ? "Webhook configuré" : "Webhook supprimé" });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || t("error")); }
+      toast({ title: webhookUrl.trim() ? t("webhookSaved") : t("delete") });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook"] });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook/logs"] });
     } catch (err: any) {
-      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+      toast({ title: t("error"), description: err.message, variant: "destructive" });
     } finally { setIsSaving(false); }
   };
 
@@ -476,11 +480,11 @@ function WebhookPanel({ token }: { token: string | null }) {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      if (data.success) toast({ title: "Test réussi", description: `Réponse: ${data.statusCode}` });
-      else toast({ title: "Test échoué", description: data.error || `Code: ${data.statusCode}`, variant: "destructive" });
+      if (data.success) toast({ title: t("webhookTested"), description: `HTTP ${data.statusCode}` });
+      else toast({ title: t("error"), description: data.error || `Code: ${data.statusCode}`, variant: "destructive" });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook/logs"] });
     } catch (err: any) {
-      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+      toast({ title: t("error"), description: err.message, variant: "destructive" });
     } finally { setIsTesting(false); }
   };
 
@@ -492,12 +496,12 @@ function WebhookPanel({ token }: { token: string | null }) {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ webhookUrl: "" }),
       });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
-      toast({ title: "Webhook supprimé" });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || t("error")); }
+      toast({ title: t("delete") });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook"] });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook/logs"] });
     } catch (err: any) {
-      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+      toast({ title: t("error"), description: err.message, variant: "destructive" });
     } finally { setIsSaving(false); }
   };
 
@@ -505,30 +509,30 @@ function WebhookPanel({ token }: { token: string | null }) {
 
   return (
     <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
-      <h2 className="text-xl font-bold mb-1" style={{ color: "#333" }}>Notifications Webhook</h2>
-      <p className="text-xs mb-5" style={{ color: "#888" }}>Recevez une notification automatique sur votre serveur à chaque paiement confirmé.</p>
+      <h2 className="text-xl font-bold mb-1" style={{ color: "#333" }}>{t("webhookTitle")}</h2>
+      <p className="text-xs mb-5" style={{ color: "#888" }}>{t("webhookDesc")}</p>
 
       {webhookData?.hasWebhook && (
         <div className="rounded-xl px-4 py-3 mb-5 flex items-center gap-2 text-sm" style={{ background: "#d4edda", border: "1px solid #c3e6cb" }}>
           <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: "#155724" }} />
-          <span style={{ color: "#155724", fontWeight: 600 }}>Webhook actif</span>
+          <span style={{ color: "#155724", fontWeight: 600 }}>{t("webhookActive")}</span>
           <span style={{ color: "#155724" }}>— {webhookData.webhookUrl}</span>
         </div>
       )}
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Configuration</p>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("webhookGuide")}</p>
       <div className="bg-white rounded-2xl p-5 mb-5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-        <label className="block text-sm font-bold mb-1.5" style={{ color: "#333" }}>URL du Webhook</label>
+        <label className="block text-sm font-bold mb-1.5" style={{ color: "#333" }}>{t("webhookUrl")}</label>
         <input
           type="url"
-          placeholder="https://votre-site.com/webhook/westpay"
+          placeholder={t("webhookUrlPlaceholder")}
           value={webhookUrl}
           onChange={(e) => setWebhookUrl(e.target.value)}
           className="w-full rounded-xl px-4 py-2.5 text-sm outline-none mb-2"
           style={{ border: "1.5px solid #e2e8f0", background: "#f9fafb", color: "#1a1a1a" }}
           data-testid="input-webhook-url"
         />
-        <p className="text-xs mb-4" style={{ color: "#aaa" }}>WestPay enverra une requête POST à cette URL pour chaque paiement confirmé.</p>
+        <p className="text-xs mb-4" style={{ color: "#aaa" }}>{t("webhookGuideDesc")}</p>
         <div className="flex gap-2 flex-wrap">
           <button
             onClick={handleSave}
@@ -538,7 +542,7 @@ function WebhookPanel({ token }: { token: string | null }) {
             data-testid="button-save-webhook"
           >
             {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            Enregistrer
+            {t("saveWebhook")}
           </button>
           {webhookData?.hasWebhook && (
             <>
@@ -550,7 +554,7 @@ function WebhookPanel({ token }: { token: string | null }) {
                 data-testid="button-test-webhook"
               >
                 {isTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                Tester
+                {t("testWebhook")}
               </button>
               <button
                 onClick={handleRemove}
@@ -559,7 +563,7 @@ function WebhookPanel({ token }: { token: string | null }) {
                 style={{ background: "#fff0f0", color: "#c62828", border: "1px solid #ffcdd2" }}
                 data-testid="button-remove-webhook"
               >
-                <XCircle className="w-4 h-4" /> Supprimer
+                <XCircle className="w-4 h-4" /> {t("delete")}
               </button>
             </>
           )}
@@ -568,15 +572,15 @@ function WebhookPanel({ token }: { token: string | null }) {
 
       {webhookData?.hasWebhook && webhookData.webhookSecret && (
         <>
-          <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Clé secrète HMAC</p>
+          <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("webhookSecret")}</p>
           <div className="bg-white rounded-2xl p-4 mb-5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
             <p className="text-xs mb-3" style={{ color: "#888" }}>
-              Utilisez cette clé pour vérifier l'authenticité des notifications. Signature envoyée dans le header <code className="px-1 rounded" style={{ background: "#f0f4ff", color: "#3949ab" }}>X-RobotPay-Signature</code>.
+              <code className="px-1 rounded" style={{ background: "#f0f4ff", color: "#3949ab" }}>X-RobotPay-Signature</code>
             </p>
             <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: "#f9fafb", border: "1px solid #e2e8f0" }}>
               <code className="text-xs font-mono flex-1 break-all" style={{ color: "#555" }} data-testid="text-webhook-secret">{webhookData.webhookSecret}</code>
               <button
-                onClick={() => { navigator.clipboard.writeText(webhookData.webhookSecret); toast({ title: "Clé copiée" }); }}
+                onClick={() => { navigator.clipboard.writeText(webhookData.webhookSecret); toast({ title: t("copied") }); }}
                 className="p-1.5 rounded-lg hover:bg-gray-200"
                 style={{ color: "#888" }}
                 data-testid="button-copy-webhook-secret"
@@ -588,7 +592,7 @@ function WebhookPanel({ token }: { token: string | null }) {
         </>
       )}
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Format de notification</p>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("payload")}</p>
       <div className="bg-white rounded-2xl p-4 mb-5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
         <pre className="text-xs overflow-x-auto rounded-xl p-3" style={{ background: "#1e2231", color: "#a8d8a8", fontFamily: "monospace" }}>{`{
   "event": "payment.confirmed",
@@ -603,7 +607,7 @@ function WebhookPanel({ token }: { token: string | null }) {
       </div>
 
       <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-        Historique — {(logs as WebhookLog[]).length} envoi{(logs as WebhookLog[]).length > 1 ? "s" : ""}
+        {t("webhookLogs")} — {(logs as WebhookLog[]).length}
       </p>
       <div className="space-y-2">
         {logsLoading ? (
@@ -611,7 +615,7 @@ function WebhookPanel({ token }: { token: string | null }) {
         ) : (logs as WebhookLog[]).length === 0 ? (
           <div className="bg-white rounded-2xl p-6 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
             <Send className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
-            <p className="text-sm" style={{ color: "#aaa" }}>Aucun envoi pour le moment</p>
+            <p className="text-sm" style={{ color: "#aaa" }}>{t("noWebhookLogs")}</p>
           </div>
         ) : (
           (logs as WebhookLog[]).slice(0, 20).map((log) => (
@@ -622,12 +626,12 @@ function WebhookPanel({ token }: { token: string | null }) {
               }
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-semibold truncate" style={{ color: "#1a1a1a" }}>
-                  {log.statusCode ? `HTTP ${log.statusCode}` : "Erreur"} — {log.response?.substring(0, 80) || "Pas de réponse"}
+                  {log.statusCode ? `HTTP ${log.statusCode}` : t("error")} — {log.response?.substring(0, 80) || "—"}
                 </p>
                 <p className="text-xs" style={{ color: "#aaa" }}>{new Date(log.createdAt).toLocaleString("fr-FR")}</p>
               </div>
               <span className="text-xs px-2 py-0.5 rounded-full font-semibold shrink-0" style={{ background: log.success ? "#d4edda" : "#f8d7da", color: log.success ? "#155724" : "#721c24" }}>
-                {log.success ? "OK" : "Échec"}
+                {log.success ? t("delivered") : t("deliveryFailed")}
               </span>
             </div>
           ))
@@ -886,6 +890,7 @@ function StatusPill({ status }: { status: string }) {
 }
 
 function WithdrawalsPanel({ token }: { token: string | null }) {
+  const { t } = useLanguage();
   const { toast } = useToast();
   const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
   const { data: withdrawalList = [], isLoading: wdLoading } = useMerchantFetch("/api/merchant/withdrawals", ["/api/merchant/withdrawals"], token);
@@ -939,7 +944,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
     const amountNum = parseInt(amount);
     if (isNaN(amountNum) || amountNum <= 0) return;
     if (selectedWallet && amountNum > selectedWallet.balance) {
-      toast({ title: "Solde insuffisant", description: `Solde disponible : ${selectedWallet.balance.toLocaleString("fr-FR")} FCFA`, variant: "destructive" });
+      toast({ title: t("error"), description: `${t("availableBalance")} : ${selectedWallet.balance.toLocaleString("fr-FR")} FCFA`, variant: "destructive" });
       return;
     }
     createMutation.mutate({ merchantCountryId: Number(selectedWalletId), amount: amountNum, phone, operator: selectedOperator });
@@ -950,32 +955,32 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
 
   return (
     <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
-      <h2 className="text-xl font-bold mb-5" style={{ color: "#333" }}>Reversements</h2>
+      <h2 className="text-xl font-bold mb-5" style={{ color: "#333" }}>{t("withdrawalsTitle")}</h2>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Aperçu</p>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("summary")}</p>
       <div className="grid grid-cols-2 gap-3 mb-6">
         <div className="rounded-xl p-4" style={{ background: "#26a69a" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Total retiré</p>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("totalWithdrawn")}</p>
           <p className="text-2xl font-bold text-white">{totalWithdrawn.toLocaleString("fr-FR")}<span className="text-sm ml-1 text-white/80">FCFA</span></p>
         </div>
         <div className="rounded-xl p-4" style={{ background: pendingCount > 0 ? "#fb8c00" : "#7e57c2" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">En attente</p>
-          <p className="text-2xl font-bold text-white">{pendingCount}<span className="text-sm ml-1 text-white/80">demande{pendingCount > 1 ? "s" : ""}</span></p>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("pending")}</p>
+          <p className="text-2xl font-bold text-white">{pendingCount}</p>
         </div>
       </div>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Nouvelle demande</p>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("requestWithdrawal")}</p>
       <div className="bg-white rounded-2xl p-5 mb-6 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
         <div className="space-y-5">
           <div>
             <p className="text-sm font-bold mb-3" style={{ color: "#333" }}>
               <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs mr-2" style={{ background: "#00b050" }}>1</span>
-              Choisir le wallet (pays)
+              {t("selectCountry")}
             </p>
             {balLoading ? (
               <div className="grid gap-2 grid-cols-2">{[1,2].map(i => <Skeleton key={i} className="h-16 w-full rounded-xl" />)}</div>
             ) : activeWallets.length === 0 ? (
-              <p className="text-sm" style={{ color: "#888" }}>Aucun wallet actif disponible.</p>
+              <p className="text-sm" style={{ color: "#888" }}>{t("noCountriesActive")}</p>
             ) : (
               <div className="grid gap-2 grid-cols-2">
                 {activeWallets.map((w, idx) => (
@@ -1003,13 +1008,13 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
             <div>
               <p className="text-sm font-bold mb-3" style={{ color: "#333" }}>
                 <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs mr-2" style={{ background: "#00b050" }}>2</span>
-                Choisir l'opérateur
+                {t("selectOperator")}
               </p>
               {opsLoading ? (
                 <div className="grid gap-2 grid-cols-2">{[1,2].map(i => <Skeleton key={i} className="h-14 w-full rounded-xl" />)}</div>
               ) : operatorList.length === 0 ? (
                 <div className="p-3 rounded-xl text-sm" style={{ background: "#fff3cd", color: "#856404" }}>
-                  Aucun opérateur disponible pour {selectedWallet.country}.
+                  {t("noData")} — {selectedWallet.country}
                 </div>
               ) : (
                 <div className="grid gap-2 grid-cols-2">
@@ -1042,14 +1047,14 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
             <form onSubmit={handleSubmit}>
               <p className="text-sm font-bold mb-3" style={{ color: "#333" }}>
                 <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs mr-2" style={{ background: "#00b050" }}>3</span>
-                Informations de retrait
+                {t("withdrawalHistory")}
               </p>
               <div className="rounded-xl p-3 mb-4 text-xs" style={{ background: "#f0faf5", border: "1px solid #c3e6cb" }}>
-                <span style={{ color: "#155724" }}>Wallet : <strong>{selectedWallet.country}</strong> · Opérateur : <strong>{selectedOperator}</strong> · Solde : <strong>{selectedWallet.balance.toLocaleString("fr-FR")} FCFA</strong></span>
+                <span style={{ color: "#155724" }}>{selectedWallet.country} · <strong>{selectedOperator}</strong> · {t("availableBalance")} : <strong>{selectedWallet.balance.toLocaleString("fr-FR")} FCFA</strong></span>
               </div>
               <div className="space-y-3">
                 <div>
-                  <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>Montant (FCFA)</label>
+                  <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>{t("amount")} (FCFA)</label>
                   <input
                     type="number"
                     value={amount}
@@ -1063,7 +1068,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>Numéro Mobile Money</label>
+                  <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>{t("phone")}</label>
                   <input
                     type="text"
                     value={phone}
@@ -1073,7 +1078,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                     style={{ border: "1.5px solid #e2e8f0", background: "#fff", color: "#1a1a1a" }}
                     data-testid="input-withdrawal-phone"
                   />
-                  <p className="text-xs mt-1" style={{ color: "#aaa" }}>Numéro {selectedOperator} où vous recevrez le paiement.</p>
+                  <p className="text-xs mt-1" style={{ color: "#aaa" }}>{selectedOperator}</p>
                 </div>
                 <button
                   type="submit"
@@ -1083,7 +1088,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                   data-testid="button-submit-withdrawal"
                 >
                   {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                  {createMutation.isPending ? "Traitement..." : "Soumettre la demande"}
+                  {createMutation.isPending ? t("loading") : t("requestWithdrawal")}
                 </button>
               </div>
             </form>
@@ -1092,7 +1097,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
       </div>
 
       <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-        Historique — {(withdrawalList as Withdrawal[]).length} demande{(withdrawalList as Withdrawal[]).length > 1 ? "s" : ""}
+        {t("withdrawalHistory")} — {(withdrawalList as Withdrawal[]).length}
       </p>
       <div className="space-y-3">
         {wdLoading ? (
@@ -1100,7 +1105,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
         ) : (withdrawalList as Withdrawal[]).length === 0 ? (
           <div className="bg-white rounded-2xl p-6 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
             <Download className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
-            <p className="text-sm" style={{ color: "#aaa" }}>Aucune demande de reversement</p>
+            <p className="text-sm" style={{ color: "#aaa" }}>{t("noWithdrawals")}</p>
           </div>
         ) : (
           (withdrawalList as Withdrawal[]).map((w) => (
@@ -1114,11 +1119,11 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                 {(w as any).operator && <span style={{ color: "#1e88e5", fontWeight: 600 }}>{(w as any).operator}</span>}
                 <span><Phone className="w-3 h-3 inline mr-0.5" />{w.phone}</span>
                 <span>{new Date(w.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" })}</span>
-                <span className="px-1.5 py-0.5 rounded-full text-xs" style={{ background: "#f0f0f0", color: "#666" }}>{w.withdrawalMode === "auto" ? "Auto" : "Manuel"}</span>
+                <span className="px-1.5 py-0.5 rounded-full text-xs" style={{ background: "#f0f0f0", color: "#666" }}>{w.withdrawalMode === "auto" ? t("autoMode") : t("manualMode")}</span>
               </div>
               {w.adminNote && (
                 <p className="text-xs mt-2 px-2 py-1 rounded-lg italic" style={{ background: "#f8f9fa", color: "#666" }}>
-                  Note : {w.adminNote}
+                  {t("adminNote")} : {w.adminNote}
                 </p>
               )}
             </div>
@@ -1130,6 +1135,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
 }
 
 function WalletTransfersPanel({ token }: { token: string | null }) {
+  const { t } = useLanguage();
   const { toast } = useToast();
   const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
   const { data: walletTransfers = [], isLoading: wtLoading } = useMerchantFetch("/api/merchant/wallet-transfers", ["/api/merchant/wallet-transfers"], token);
@@ -1173,18 +1179,18 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
       });
       setFromCountryId(""); setToCountryId(""); setAmount("");
     },
-    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+    onError: (err: any) => toast({ title: t("error"), description: err.message, variant: "destructive" }),
   });
 
   const handleSubmit = (e: { preventDefault: () => void }) => {
     e.preventDefault();
     if (!fromCountryId || !toCountryId || !amount) {
-      toast({ title: "Erreur", description: "Tous les champs sont requis", variant: "destructive" });
+      toast({ title: t("error"), description: t("confirm"), variant: "destructive" });
       return;
     }
     const parsed = parseInt(amount);
     if (isNaN(parsed) || parsed <= 0) {
-      toast({ title: "Erreur", description: "Montant invalide", variant: "destructive" });
+      toast({ title: t("error"), description: t("amount"), variant: "destructive" });
       return;
     }
     createMutation.mutate({ fromCountryId, toCountryId, amount });
@@ -1199,18 +1205,18 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
 
   return (
     <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
-      <h2 className="text-xl font-bold mb-1" style={{ color: "#333" }}>Virements Inter-Wallets</h2>
-      <p className="text-xs mb-5" style={{ color: "#888" }}>Transférez des fonds entre vos wallets dans la même zone monétaire (XOF ou XAF).</p>
+      <h2 className="text-xl font-bold mb-1" style={{ color: "#333" }}>{t("walletTransfersTitle")}</h2>
+      <p className="text-xs mb-5" style={{ color: "#888" }}>{t("walletTransfersDesc")}</p>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Aperçu</p>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("summary")}</p>
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div className="rounded-xl p-4" style={{ background: "#7e57c2" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Total viré</p>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("totalTransfers")}</p>
           <p className="text-2xl font-bold text-white">{totalTransferred.toLocaleString("fr-FR")}<span className="text-sm ml-1 text-white/80">FCFA</span></p>
         </div>
         <div className="rounded-xl p-4" style={{ background: pendingCount > 0 ? "#fb8c00" : "#1976d2" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">En attente</p>
-          <p className="text-2xl font-bold text-white">{pendingCount}<span className="text-sm ml-1 text-white/80">virement{pendingCount > 1 ? "s" : ""}</span></p>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("pending")}</p>
+          <p className="text-2xl font-bold text-white">{pendingCount}</p>
         </div>
       </div>
 
@@ -1233,18 +1239,18 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
 
       {eligibleCountries.length < 2 && (
         <div className="rounded-xl p-4 mb-5 text-sm" style={{ background: "#fff3cd", border: "1px solid #ffc107", color: "#856404" }}>
-          Il vous faut au moins 2 wallets actifs dans la même zone monétaire pour effectuer un virement.
+          {t("transferWarning")}
         </div>
       )}
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Nouvelle demande</p>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("newTransfer")}</p>
       <div className="bg-white rounded-2xl p-5 mb-6 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>
                 <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs mr-1.5" style={{ background: "#7e57c2" }}>1</span>
-                Wallet source
+                {t("fromCountry")}
               </label>
               <select
                 value={fromCountryId}
@@ -1253,7 +1259,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
                 style={{ border: "1.5px solid #e2e8f0", background: "#fff", color: fromCountryId ? "#1a1a1a" : "#aaa" }}
                 data-testid="select-virement-from"
               >
-                <option value="">{eligibleCountries.length === 0 ? "Aucun wallet éligible" : "Sélectionner..."}</option>
+                <option value="">{eligibleCountries.length === 0 ? t("noData") : t("selectFromCountry")}</option>
                 {eligibleCountries.map(c => (
                   <option key={c.id} value={String(c.id)}>{c.country} — {c.balance.toLocaleString("fr-FR")} FCFA</option>
                 ))}
@@ -1262,7 +1268,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
             <div>
               <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>
                 <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs mr-1.5" style={{ background: "#7e57c2" }}>2</span>
-                Wallet destination
+                {t("toCountry")}
               </label>
               <select
                 value={toCountryId}
@@ -1272,21 +1278,18 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
                 style={{ border: "1.5px solid #e2e8f0", background: !fromCountryId ? "#f5f5f5" : "#fff", color: toCountryId ? "#1a1a1a" : "#aaa" }}
                 data-testid="select-virement-to"
               >
-                <option value="">{fromCountryId && toCountries.length === 0 ? "Aucun wallet compatible" : "Sélectionner..."}</option>
+                <option value="">{fromCountryId && toCountries.length === 0 ? t("noData") : t("selectToCountry")}</option>
                 {toCountries.map(c => (
                   <option key={c.id} value={String(c.id)}>{c.country} — {c.balance.toLocaleString("fr-FR")} FCFA</option>
                 ))}
               </select>
-              {fromCountryId && toCountries.length === 0 && (
-                <p className="text-xs mt-1" style={{ color: "#e53935" }}>Aucun wallet compatible dans la zone {fromZone}</p>
-              )}
             </div>
           </div>
 
           <div>
             <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>
               <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs mr-1.5" style={{ background: "#7e57c2" }}>3</span>
-              Montant ({fromZone || "FCFA"})
+              {t("amount")} ({fromZone || "FCFA"})
             </label>
             <input
               type="number"
@@ -1301,7 +1304,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
             />
             {fromMC && amount && !isNaN(parseInt(amount)) && (
               <p className="text-xs mt-1" style={{ color: "#aaa" }}>
-                Solde disponible : <strong style={{ color: "#555" }}>{fromMC.balance.toLocaleString("fr-FR")} {fromZone}</strong> — Des frais s'appliquent.
+                {t("availableBalance")} : <strong style={{ color: "#555" }}>{fromMC.balance.toLocaleString("fr-FR")} {fromZone}</strong>
               </p>
             )}
           </div>
@@ -1323,13 +1326,13 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
             data-testid="button-submit-virement"
           >
             {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightLeft className="w-4 h-4" />}
-            {createMutation.isPending ? "Traitement..." : "Soumettre la demande"}
+            {createMutation.isPending ? t("loading") : t("confirmTransfer")}
           </button>
         </form>
       </div>
 
       <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-        Historique — {(walletTransfers as WalletTransfer[]).length} virement{(walletTransfers as WalletTransfer[]).length > 1 ? "s" : ""}
+        {t("transferHistory")} — {(walletTransfers as WalletTransfer[]).length}
       </p>
       <div className="space-y-3">
         {wtLoading ? (
@@ -1337,7 +1340,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
         ) : (walletTransfers as WalletTransfer[]).length === 0 ? (
           <div className="bg-white rounded-2xl p-6 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
             <ArrowRightLeft className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
-            <p className="text-sm" style={{ color: "#aaa" }}>Aucun virement pour le moment</p>
+            <p className="text-sm" style={{ color: "#aaa" }}>{t("noTransfers")}</p>
           </div>
         ) : (
           (walletTransfers as WalletTransfer[]).map((wt) => (
@@ -1351,13 +1354,13 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
                 <StatusPill status={wt.status} />
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: "#888" }}>
-                <span>Montant : <strong style={{ color: "#333" }}>{wt.amount.toLocaleString("fr-FR")} {wt.currency}</strong></span>
-                <span>Frais : <strong style={{ color: "#333" }}>{wt.fee.toLocaleString("fr-FR")} {wt.currency}</strong></span>
+                <span>{t("amount")} : <strong style={{ color: "#333" }}>{wt.amount.toLocaleString("fr-FR")} {wt.currency}</strong></span>
+                <span>{t("fees")} : <strong style={{ color: "#333" }}>{wt.fee.toLocaleString("fr-FR")} {wt.currency}</strong></span>
                 <span>{new Date(wt.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" })}</span>
               </div>
               {wt.adminNote && (
                 <p className="text-xs mt-2 px-2 py-1 rounded-lg italic" style={{ background: "#f8f9fa", color: "#666" }}>
-                  Note : {wt.adminNote}
+                  {t("adminNote")} : {wt.adminNote}
                 </p>
               )}
             </div>
@@ -1369,6 +1372,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
 }
 
 function MerchantSettingsPanel({ token }: { token: string | null }) {
+  const { t } = useLanguage();
   const { user, logout } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -1385,19 +1389,19 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ currentPassword, newPassword }),
       });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
-      toast({ title: "Mot de passe modifié" });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || t("error")); }
+      toast({ title: t("passwordChanged") });
       setCurrentPassword(""); setNewPassword("");
     } catch (err: any) {
-      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+      toast({ title: t("error"), description: err.message, variant: "destructive" });
     } finally { setIsChanging(false); }
   };
 
   return (
     <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
-      <h2 className="text-xl font-bold mb-5" style={{ color: "#333" }}>Paramètres du compte</h2>
+      <h2 className="text-xl font-bold mb-5" style={{ color: "#333" }}>{t("settingsTitle")}</h2>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Mon profil</p>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("myProfile")}</p>
       <div className="bg-white rounded-2xl p-5 mb-5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
         <div className="flex items-center gap-4 mb-4">
           <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-bold text-white shrink-0" style={{ background: "#1976d2" }}>
@@ -1409,17 +1413,17 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
           </div>
         </div>
         <div className="flex gap-2">
-          <span className="text-xs px-3 py-1 rounded-full font-semibold" style={{ background: "#e8f5e9", color: "#2e7d32" }}>Marchand</span>
-          <span className="text-xs px-3 py-1 rounded-full font-semibold" style={{ background: "#e3f2fd", color: "#1565c0" }}>Actif</span>
+          <span className="text-xs px-3 py-1 rounded-full font-semibold" style={{ background: "#e8f5e9", color: "#2e7d32" }}>{t("merchant")}</span>
+          <span className="text-xs px-3 py-1 rounded-full font-semibold" style={{ background: "#e3f2fd", color: "#1565c0" }}>{t("statusActive")}</span>
         </div>
       </div>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Sécurité</p>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("security")}</p>
       <div className="bg-white rounded-2xl p-5 mb-5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-        <p className="text-sm font-bold mb-4" style={{ color: "#1a1a1a" }}>Changer le mot de passe</p>
+        <p className="text-sm font-bold mb-4" style={{ color: "#1a1a1a" }}>{t("changePassword")}</p>
         <form onSubmit={handleChangePassword} className="space-y-3">
           <div>
-            <label className="block text-xs font-semibold mb-1.5" style={{ color: "#555" }}>Mot de passe actuel</label>
+            <label className="block text-xs font-semibold mb-1.5" style={{ color: "#555" }}>{t("currentPassword")}</label>
             <input
               type="password"
               value={currentPassword}
@@ -1431,7 +1435,7 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold mb-1.5" style={{ color: "#555" }}>Nouveau mot de passe</label>
+            <label className="block text-xs font-semibold mb-1.5" style={{ color: "#555" }}>{t("newPassword")}</label>
             <input
               type="password"
               value={newPassword}
@@ -1450,20 +1454,20 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
             data-testid="button-merchant-change-password"
           >
             {isChanging ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            Modifier le mot de passe
+            {t("changePassword")}
           </button>
         </form>
       </div>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Session</p>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("session")}</p>
       <div className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #ffcdd2" }}>
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#fff0f0" }}>
             <LogOut className="w-5 h-5" style={{ color: "#e53935" }} />
           </div>
           <div className="flex-1">
-            <p className="text-sm font-bold" style={{ color: "#1a1a1a" }}>Se déconnecter</p>
-            <p className="text-xs" style={{ color: "#aaa" }}>Mettre fin à votre session en cours</p>
+            <p className="text-sm font-bold" style={{ color: "#1a1a1a" }}>{t("logout")}</p>
+            <p className="text-xs" style={{ color: "#aaa" }}>{t("logoutDesc")}</p>
           </div>
           <button
             onClick={() => { logout(); setLocation("/merchant-login"); }}
@@ -1471,7 +1475,7 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
             style={{ background: "#fff0f0", color: "#c62828", border: "1px solid #ffcdd2" }}
             data-testid="button-merchant-logout"
           >
-            Déconnexion
+            {t("logout")}
           </button>
         </div>
       </div>
@@ -1480,6 +1484,7 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
 }
 
 function PaymentLinksPanel({ token }: { token: string | null }) {
+  const { t } = useLanguage();
   const { toast } = useToast();
   const [showCreate, setShowCreate] = useState(false);
   const [editLink, setEditLink] = useState<PaymentLink | null>(null);
@@ -1490,7 +1495,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
     queryKey: ["/api/merchant/payment-links"],
     queryFn: async () => {
       const res = await fetch("/api/merchant/payment-links", { headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) throw new Error("Erreur chargement");
+      if (!res.ok) throw new Error(t("error"));
       return res.json();
     },
     enabled: !!token,
@@ -1511,8 +1516,8 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
       if (!res.ok) throw new Error((await res.json()).message);
       return res.json();
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] }); setShowCreate(false); setForm({ name: "", amountType: "fixed", amount: "", redirectUrl: "", paymentLimit: "" }); toast({ title: "Lien créé avec succès" }); },
-    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] }); setShowCreate(false); setForm({ name: "", amountType: "fixed", amount: "", redirectUrl: "", paymentLimit: "" }); toast({ title: t("linkCreated") }); },
+    onError: (e: any) => toast({ title: t("error"), description: e.message, variant: "destructive" }),
   });
 
   const updateMutation = useMutation({
@@ -1525,21 +1530,21 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
       if (!res.ok) throw new Error((await res.json()).message);
       return res.json();
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] }); setEditLink(null); toast({ title: "Lien mis à jour" }); },
-    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] }); setEditLink(null); toast({ title: t("linkUpdated") }); },
+    onError: (e: any) => toast({ title: t("error"), description: e.message, variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
       const res = await fetch(`/api/merchant/payment-links/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) throw new Error("Erreur suppression");
+      if (!res.ok) throw new Error(t("error"));
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] }); toast({ title: "Lien supprimé" }); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] }); toast({ title: t("linkDeleted") }); },
   });
 
   const copyLink = (uniqueId: string) => {
     navigator.clipboard.writeText(`${baseUrl}/link/${uniqueId}`);
-    toast({ title: "Lien copié !" });
+    toast({ title: t("copied") });
   };
 
   const totalRevenue = links.reduce((s, l) => s + l.totalRevenue, 0);
@@ -1549,8 +1554,8 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
     <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
       <div className="flex items-center justify-between gap-2 mb-5">
         <div>
-          <h2 className="text-xl font-bold" style={{ color: "#333" }}>Liens de Paiement</h2>
-          <p className="text-xs mt-0.5" style={{ color: "#888" }}>Créez des liens partageables pour recevoir des paiements</p>
+          <h2 className="text-xl font-bold" style={{ color: "#333" }}>{t("paymentLinksTitle")}</h2>
+          <p className="text-xs mt-0.5" style={{ color: "#888" }}>{t("paymentLinksDesc")}</p>
         </div>
         <button
           onClick={() => setShowCreate(true)}
@@ -1558,28 +1563,28 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
           style={{ background: "#00b050", color: "#fff", border: "none" }}
           data-testid="button-create-payment-link"
         >
-          <Plus className="w-4 h-4" /> Nouveau lien
+          <Plus className="w-4 h-4" /> {t("newLink")}
         </button>
       </div>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Aperçu</p>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("summary")}</p>
       <div className="grid grid-cols-3 gap-3 mb-6">
         <div className="rounded-xl p-4" style={{ background: "#1976d2" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Liens</p>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("links")}</p>
           <p className="text-2xl font-bold text-white">{links.length}</p>
         </div>
         <div className="rounded-xl p-4" style={{ background: "#26a69a" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Paiements</p>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("payments")}</p>
           <p className="text-2xl font-bold text-white">{totalPayments}</p>
         </div>
         <div className="rounded-xl p-4" style={{ background: "#7e57c2" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Volume</p>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("volume")}</p>
           <p className="text-lg font-bold text-white">{totalRevenue.toLocaleString()}<span className="text-xs ml-1 text-white/70">F</span></p>
         </div>
       </div>
 
       <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-        Vos liens — {links.length}
+        {t("yourLinks")} — {links.length}
       </p>
 
       {isLoading ? <MerchantLoadingSkeleton /> : links.length === 0 ? (
@@ -1587,14 +1592,14 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
           <div className="w-14 h-14 rounded-2xl mx-auto mb-3 flex items-center justify-center" style={{ background: "#f0f4ff" }}>
             <Link className="w-7 h-7" style={{ color: "#3949ab" }} />
           </div>
-          <p className="font-bold text-sm mb-1" style={{ color: "#1a1a1a" }}>Aucun lien de paiement</p>
-          <p className="text-xs mb-4" style={{ color: "#aaa" }}>Créez votre premier lien pour recevoir des paiements</p>
+          <p className="font-bold text-sm mb-1" style={{ color: "#1a1a1a" }}>{t("noLinks")}</p>
+          <p className="text-xs mb-4" style={{ color: "#aaa" }}>{t("noLinksDesc")}</p>
           <button
             onClick={() => setShowCreate(true)}
             className="px-4 py-2 rounded-xl text-sm font-bold"
             style={{ background: "#00b050", color: "#fff", border: "none" }}
           >
-            Créer un lien
+            {t("createLink")}
           </button>
         </div>
       ) : (
@@ -1605,10 +1610,10 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
             const isExpired = link.expiresAt && new Date() > new Date(link.expiresAt);
             const isLimited = link.paymentLimit && link.paymentCount >= link.paymentLimit;
             const inactive = !link.active || isExpired || isLimited;
-            let statusStyle = { bg: "#d4edda", color: "#155724", label: "Actif" };
-            if (isExpired) statusStyle = { bg: "#f8d7da", color: "#721c24", label: "Expiré" };
-            else if (isLimited) statusStyle = { bg: "#f8d7da", color: "#721c24", label: "Limite atteinte" };
-            else if (!link.active) statusStyle = { bg: "#e9ecef", color: "#495057", label: "Inactif" };
+            let statusStyle = { bg: "#d4edda", color: "#155724", label: t("statusActive") };
+            if (isExpired) statusStyle = { bg: "#f8d7da", color: "#721c24", label: t("expired") };
+            else if (isLimited) statusStyle = { bg: "#f8d7da", color: "#721c24", label: t("limitReached") };
+            else if (!link.active) statusStyle = { bg: "#e9ecef", color: "#495057", label: t("inactive") };
             return (
               <div key={link.id} className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #e8ecf0", opacity: inactive ? 0.65 : 1 }} data-testid={`card-payment-link-${link.id}`}>
                 <div className="flex flex-col sm:flex-row sm:items-start gap-4">
@@ -1617,7 +1622,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <div>
                         <p className="font-bold text-sm" style={{ color: "#1a1a1a" }} data-testid={`text-link-name-${link.id}`}>{link.name}</p>
-                        <p className="text-xs" style={{ color: "#888" }}>{link.amountType === "fixed" ? `${link.amount?.toLocaleString()} F CFA · Fixe` : "Montant libre"}</p>
+                        <p className="text-xs" style={{ color: "#888" }}>{link.amountType === "fixed" ? `${link.amount?.toLocaleString()} F CFA` : t("flexibleAmount")}</p>
                       </div>
                       <span className="text-xs px-2 py-0.5 rounded-full font-semibold shrink-0" style={{ background: statusStyle.bg, color: statusStyle.color }}>{statusStyle.label}</span>
                     </div>
@@ -1627,9 +1632,9 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
                       <button className="p-1 rounded hover:bg-gray-200 shrink-0" onClick={() => window.open(url, "_blank")} style={{ color: "#888" }} data-testid={`button-open-link-${link.id}`}><ExternalLink className="w-3 h-3" /></button>
                     </div>
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs" style={{ color: "#888" }}>
-                      <span><BarChart3 className="w-3 h-3 inline mr-0.5" />{link.paymentCount} paiements</span>
-                      <span style={{ color: "#00b050", fontWeight: 600 }}>{link.totalRevenue.toLocaleString()} F reçus</span>
-                      {link.paymentLimit && <span>Limite : {link.paymentCount}/{link.paymentLimit}</span>}
+                      <span><BarChart3 className="w-3 h-3 inline mr-0.5" />{link.paymentCount} {t("payments")}</span>
+                      <span style={{ color: "#00b050", fontWeight: 600 }}>{link.totalRevenue.toLocaleString()} F</span>
+                      {link.paymentLimit && <span>{t("limit")} : {link.paymentCount}/{link.paymentLimit}</span>}
                     </div>
                   </div>
                   <div className="flex sm:flex-col items-center gap-2 shrink-0">
@@ -1661,39 +1666,39 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
       <Dialog open={showCreate || !!editLink} onOpenChange={(o) => { if (!o) { setShowCreate(false); setEditLink(null); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{editLink ? "Modifier le lien" : "Créer un lien de paiement"}</DialogTitle>
+            <DialogTitle>{editLink ? t("editLink") : t("createLink")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-2">
             <div className="space-y-1">
-              <Label>Nom du lien</Label>
+              <Label>{t("linkName")}</Label>
               <Input placeholder="Ex: Paiement commande #42" value={form.name} onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))} data-testid="input-link-name" />
             </div>
             <div className="space-y-1">
-              <Label>Type de montant</Label>
+              <Label>{t("amountType")}</Label>
               <Select value={form.amountType} onValueChange={(v) => setForm(f => ({ ...f, amountType: v }))}>
                 <SelectTrigger data-testid="select-link-amount-type"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="fixed">Montant fixe</SelectItem>
-                  <SelectItem value="flexible">Montant libre</SelectItem>
+                  <SelectItem value="fixed">{t("fixedAmount")}</SelectItem>
+                  <SelectItem value="flexible">{t("flexibleAmount")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             {form.amountType === "fixed" && (
               <div className="space-y-1">
-                <Label>Montant (F CFA)</Label>
+                <Label>{t("amount")} (F CFA)</Label>
                 <Input type="number" placeholder="5000" value={form.amount} onChange={(e) => setForm(f => ({ ...f, amount: e.target.value }))} data-testid="input-link-amount" />
               </div>
             )}
             <div className="space-y-1">
-              <Label>URL de redirection <span className="text-muted-foreground text-xs">(optionnel)</span></Label>
-              <Input placeholder="https://votresite.com/merci" value={form.redirectUrl} onChange={(e) => setForm(f => ({ ...f, redirectUrl: e.target.value }))} data-testid="input-link-redirect" />
+              <Label>{t("redirectUrl")}</Label>
+              <Input placeholder="https://yoursite.com/thanks" value={form.redirectUrl} onChange={(e) => setForm(f => ({ ...f, redirectUrl: e.target.value }))} data-testid="input-link-redirect" />
             </div>
             <div className="space-y-1">
-              <Label>Limite de paiements <span className="text-muted-foreground text-xs">(optionnel)</span></Label>
-              <Input type="number" placeholder="Illimité" value={form.paymentLimit} onChange={(e) => setForm(f => ({ ...f, paymentLimit: e.target.value }))} data-testid="input-link-limit" />
+              <Label>{t("paymentLimit")}</Label>
+              <Input type="number" placeholder={t("unlimited")} value={form.paymentLimit} onChange={(e) => setForm(f => ({ ...f, paymentLimit: e.target.value }))} data-testid="input-link-limit" />
             </div>
             <Button className="w-full" onClick={() => { if (editLink) { updateMutation.mutate({ id: editLink.id, data: { name: form.name, amountType: form.amountType, amount: form.amount ? Number(form.amount) : undefined, redirectUrl: form.redirectUrl || undefined, paymentLimit: form.paymentLimit ? Number(form.paymentLimit) : undefined } }); } else { createMutation.mutate(form); } }} disabled={createMutation.isPending || updateMutation.isPending} data-testid="button-submit-link-form">
-              {createMutation.isPending || updateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : editLink ? "Enregistrer" : "Créer le lien"}
+              {createMutation.isPending || updateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : editLink ? t("save") : t("createLink")}
             </Button>
           </div>
         </DialogContent>
