@@ -82,58 +82,63 @@ function OverviewPanel({ token }: { token: string | null }) {
         </Card>
       )}
 
-      <Card className="bg-primary/5 border-primary/20">
-        <CardContent className="p-6">
+      <Card className="relative overflow-hidden shadow-md" style={{ background: "linear-gradient(135deg, #00b050 0%, #009a45 60%, #007a38 100%)" }}>
+        <div className="absolute right-0 top-0 w-32 h-32 rounded-full opacity-10" style={{ background: "#ffffff", transform: "translate(30%, -30%)" }} />
+        <div className="absolute right-8 bottom-0 w-20 h-20 rounded-full opacity-10" style={{ background: "#ffffff", transform: "translateY(40%)" }} />
+        <CardContent className="p-6 relative">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>
-              <p className="text-sm text-muted-foreground">Solde total</p>
-              <p className="text-3xl font-bold text-foreground mt-1" data-testid="text-total-balance">
-                {totalBalance.toLocaleString("fr-FR")} F CFA
+              <p className="text-sm text-white/80 font-medium">Solde total disponible</p>
+              <p className="text-3xl font-bold text-white mt-1 tracking-tight" data-testid="text-total-balance">
+                {totalBalance.toLocaleString("fr-FR")} <span className="text-xl font-semibold text-white/80">F CFA</span>
               </p>
             </div>
-            <div className="w-14 h-14 rounded-md bg-primary/10 flex items-center justify-center">
-              <DollarSign className="w-7 h-7 text-primary" />
+            <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center">
+              <DollarSign className="w-7 h-7 text-white" />
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="p-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Card className="shadow-card hover:shadow-card-hover transition-shadow duration-200 overflow-hidden relative">
+          <div className="absolute inset-y-0 left-0 w-1 bg-primary" />
+          <CardContent className="p-4 pl-5">
             <div className="flex items-center justify-between gap-2">
               <div>
-                <p className="text-xs text-muted-foreground">Transactions</p>
-                <p className="text-xl font-bold text-foreground mt-1">{stats?.transactionCount || 0}</p>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Transactions</p>
+                <p className="text-2xl font-bold text-foreground mt-1">{stats?.transactionCount || 0}</p>
               </div>
-              <div className="w-10 h-10 rounded-md bg-primary/10 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
                 <Hash className="w-5 h-5 text-primary" />
               </div>
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4">
+        <Card className="shadow-card hover:shadow-card-hover transition-shadow duration-200 overflow-hidden relative">
+          <div className="absolute inset-y-0 left-0 w-1 bg-blue-500" />
+          <CardContent className="p-4 pl-5">
             <div className="flex items-center justify-between gap-2">
               <div>
-                <p className="text-xs text-muted-foreground">Pays actifs</p>
-                <p className="text-xl font-bold text-foreground mt-1">{(balance as MerchantCountry[]).filter(c => c.active).length}</p>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Pays actifs</p>
+                <p className="text-2xl font-bold text-foreground mt-1">{(balance as MerchantCountry[]).filter(c => c.active).length}</p>
               </div>
-              <div className="w-10 h-10 rounded-md bg-primary/10 flex items-center justify-center">
-                <Globe className="w-5 h-5 text-primary" />
+              <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
+                <Globe className="w-5 h-5 text-blue-500" />
               </div>
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4">
+        <Card className="shadow-card hover:shadow-card-hover transition-shadow duration-200 overflow-hidden relative">
+          <div className="absolute inset-y-0 left-0 w-1 bg-orange-500" />
+          <CardContent className="p-4 pl-5">
             <div className="flex items-center justify-between gap-2">
               <div>
-                <p className="text-xs text-muted-foreground">Volume total</p>
-                <p className="text-xl font-bold text-foreground mt-1">{(stats?.totalVolume || 0).toLocaleString("fr-FR")} F</p>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Volume total</p>
+                <p className="text-2xl font-bold text-foreground mt-1">{(stats?.totalVolume || 0).toLocaleString("fr-FR")} F</p>
               </div>
-              <div className="w-10 h-10 rounded-md bg-primary/10 flex items-center justify-center">
-                <TrendingUp className="w-5 h-5 text-primary" />
+              <div className="w-10 h-10 rounded-xl bg-orange-500/10 flex items-center justify-center">
+                <TrendingUp className="w-5 h-5 text-orange-500" />
               </div>
             </div>
           </CardContent>
@@ -1581,32 +1586,36 @@ function SupportBanner() {
   if (!contacts) return null;
 
   return (
-    <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-sm" data-testid="banner-support">
-      <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 mb-2">
-        <MessageCircle className="w-4 h-4" />
-        <span className="font-semibold">Si vous rencontrez un problème, veuillez contacter notre support client</span>
-      </div>
-      <div className="flex flex-wrap gap-x-6 gap-y-1 text-muted-foreground pl-6">
-        <span className="flex items-center gap-1 flex-wrap">
-          <MessageCircle className="w-3 h-3 text-blue-500 shrink-0" />
-          <span>Telegram :</span>
-          <a href={`https://t.me/${contacts.telegram1.replace("@","")}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline font-medium">{contacts.telegram1}</a>
-          {contacts.hours && <span className="text-xs text-muted-foreground">({contacts.hours})</span>}
-          {contacts.telegram2 && <>
-            <span className="mx-0.5">·</span>
-            <a href={`https://t.me/${contacts.telegram2.replace("@","")}`} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline font-medium">{contacts.telegram2}</a>
-            {contacts.hours2 && <span className="text-xs text-muted-foreground">({contacts.hours2})</span>}
-          </>}
-        </span>
-        <span className="flex items-center gap-1 flex-wrap">
-          <Phone className="w-3 h-3 text-green-500 shrink-0" />
-          <span>WhatsApp :</span>
-          <a href={`https://wa.me/${contacts.whatsapp1.replace(/\D/g,"")}`} target="_blank" rel="noopener noreferrer" className="text-green-600 hover:underline font-medium">{contacts.whatsapp1}</a>
-          {contacts.whatsapp2 && <>
-            <span className="mx-0.5">·</span>
-            <a href={`https://wa.me/${contacts.whatsapp2.replace(/\D/g,"")}`} target="_blank" rel="noopener noreferrer" className="text-green-600 hover:underline font-medium">{contacts.whatsapp2}</a>
-          </>}
-        </span>
+    <div className="border rounded-xl p-3 text-sm bg-primary/5 border-primary/20" data-testid="banner-support">
+      <div className="flex items-start gap-2.5">
+        <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+          <MessageCircle className="w-3.5 h-3.5 text-primary" />
+        </div>
+        <div className="min-w-0">
+          <p className="font-semibold text-foreground text-xs mb-1.5">Support client disponible</p>
+          <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1 flex-wrap">
+              <MessageCircle className="w-3 h-3 text-primary shrink-0" />
+              <span>Telegram :</span>
+              <a href={`https://t.me/${contacts.telegram1.replace("@","")}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">{contacts.telegram1}</a>
+              {contacts.hours && <span className="opacity-70">({contacts.hours})</span>}
+              {contacts.telegram2 && <>
+                <span className="opacity-50">·</span>
+                <a href={`https://t.me/${contacts.telegram2.replace("@","")}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">{contacts.telegram2}</a>
+                {contacts.hours2 && <span className="opacity-70">({contacts.hours2})</span>}
+              </>}
+            </span>
+            <span className="flex items-center gap-1 flex-wrap">
+              <Phone className="w-3 h-3 text-primary shrink-0" />
+              <span>WhatsApp :</span>
+              <a href={`https://wa.me/${contacts.whatsapp1.replace(/\D/g,"")}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">{contacts.whatsapp1}</a>
+              {contacts.whatsapp2 && <>
+                <span className="opacity-50">·</span>
+                <a href={`https://wa.me/${contacts.whatsapp2.replace(/\D/g,"")}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">{contacts.whatsapp2}</a>
+              </>}
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1647,13 +1656,15 @@ export default function MerchantDashboard() {
         <Sidebar>
           <SidebarContent>
             <SidebarGroup>
-              <div className="flex items-center gap-2 px-3 py-4">
-                <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center">
-                  <Wallet className="w-4 h-4 text-primary-foreground" />
-                </div>
-                <div>
-                  <p className="text-sm font-bold text-sidebar-foreground">WestPay</p>
-                  <p className="text-xs text-muted-foreground truncate">{user.name}</p>
+              <div className="px-3 py-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center shadow-sm shrink-0">
+                    <Wallet className="w-5 h-5 text-primary-foreground" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-sidebar-foreground leading-tight">WestPay</p>
+                    <p className="text-xs text-muted-foreground truncate leading-tight">{user.name}</p>
+                  </div>
                 </div>
               </div>
             </SidebarGroup>
@@ -1681,12 +1692,18 @@ export default function MerchantDashboard() {
         </Sidebar>
 
         <div className="flex flex-col flex-1 min-w-0">
-          <header className="flex items-center justify-between gap-2 p-3 border-b sticky top-0 z-50 bg-background">
+          <header className="flex items-center justify-between gap-2 px-4 py-2.5 border-b sticky top-0 z-50 bg-background/95 backdrop-blur-sm shadow-xs">
             <div className="flex items-center gap-2">
               <SidebarTrigger data-testid="button-merchant-sidebar-toggle" />
+              <span className="w-px h-5 bg-border hidden sm:block" />
               <h1 className="text-sm font-semibold text-foreground hidden sm:block">Espace Marchand</h1>
             </div>
-            <Badge variant="outline" className="text-xs">{user.name}</Badge>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 bg-primary/8 border border-primary/15 rounded-full px-3 py-1">
+                <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                <span className="text-xs font-medium text-primary truncate max-w-32">{user.name}</span>
+              </div>
+            </div>
           </header>
 
           <main className="flex-1 overflow-auto p-4 md:p-6 space-y-4">

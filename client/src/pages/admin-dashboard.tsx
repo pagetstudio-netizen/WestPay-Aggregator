@@ -47,18 +47,26 @@ function useAdminFetch(url: string, key: string[]) {
   });
 }
 
-function StatCard({ title, value, icon: Icon, subtitle }: { title: string; value: string | number; icon: any; subtitle?: string }) {
+function StatCard({ title, value, icon: Icon, subtitle, accent }: { title: string; value: string | number; icon: any; subtitle?: string; accent?: "green" | "blue" | "orange" | "purple" }) {
+  const accentClasses: Record<string, string> = {
+    green: "bg-green-500/10 text-green-600 dark:text-green-400",
+    blue: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+    orange: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+    purple: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
+  };
+  const iconClass = accent ? accentClasses[accent] : "bg-primary/10 text-primary";
   return (
-    <Card>
-      <CardContent className="p-4">
+    <Card className="shadow-card hover:shadow-card-hover transition-shadow duration-200 overflow-hidden relative">
+      <div className="absolute inset-y-0 left-0 w-1" style={{ background: accent === "green" ? "#00b050" : accent === "blue" ? "#2563eb" : accent === "orange" ? "#f97316" : accent === "purple" ? "#9333ea" : "#00b050" }} />
+      <CardContent className="p-4 pl-5">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="min-w-0">
-            <p className="text-xs text-muted-foreground truncate">{title}</p>
-            <p className="text-2xl font-bold text-foreground mt-1" data-testid={`stat-${title.toLowerCase().replace(/\s/g, '-')}`}>{value}</p>
+            <p className="text-xs font-medium text-muted-foreground truncate uppercase tracking-wide">{title}</p>
+            <p className="text-2xl font-bold text-foreground mt-1 leading-tight" data-testid={`stat-${title.toLowerCase().replace(/\s/g, '-')}`}>{value}</p>
             {subtitle && <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>}
           </div>
-          <div className="w-10 h-10 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
-            <Icon className="w-5 h-5 text-primary" />
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${iconClass}`}>
+            <Icon className="w-5 h-5" />
           </div>
         </div>
       </CardContent>
@@ -290,11 +298,11 @@ function OverviewPanel() {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        <StatCard title="Marchands" value={stats?.merchantCount || 0} icon={Users} />
-        <StatCard title="Liens de paiement" value={stats?.paymentLinkCount || 0} icon={Link} />
-        <StatCard title="Transactions" value={stats?.transactionCount || 0} icon={Hash} />
-        <StatCard title="Volume total" value={`${(stats?.totalVolume || 0).toLocaleString("fr-FR")} F`} icon={DollarSign} />
-        <StatCard title="Paiements auj." value={stats?.todayPayments || 0} icon={TrendingUp} />
+        <StatCard title="Marchands" value={stats?.merchantCount || 0} icon={Users} accent="blue" />
+        <StatCard title="Liens de paiement" value={stats?.paymentLinkCount || 0} icon={Link} accent="purple" />
+        <StatCard title="Transactions" value={stats?.transactionCount || 0} icon={Hash} accent="green" />
+        <StatCard title="Volume total" value={`${(stats?.totalVolume || 0).toLocaleString("fr-FR")} F`} icon={DollarSign} accent="green" />
+        <StatCard title="Paiements auj." value={stats?.todayPayments || 0} icon={TrendingUp} accent="orange" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -3197,13 +3205,15 @@ export default function AdminDashboard() {
         <Sidebar>
           <SidebarContent>
             <SidebarGroup>
-              <div className="flex items-center gap-2 px-3 py-4">
-                <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center">
-                  <Shield className="w-4 h-4 text-primary-foreground" />
-                </div>
-                <div>
-                  <p className="text-sm font-bold text-sidebar-foreground">WestPay</p>
-                  <p className="text-xs text-muted-foreground">Administration</p>
+              <div className="px-3 py-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center shadow-sm shrink-0">
+                    <Shield className="w-5 h-5 text-primary-foreground" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-sidebar-foreground leading-tight">WestPay</p>
+                    <p className="text-xs text-muted-foreground leading-tight">Administration</p>
+                  </div>
                 </div>
               </div>
             </SidebarGroup>
@@ -3231,12 +3241,18 @@ export default function AdminDashboard() {
         </Sidebar>
 
         <div className="flex flex-col flex-1 min-w-0">
-          <header className="flex items-center justify-between gap-2 p-3 border-b sticky top-0 z-50 bg-background">
+          <header className="flex items-center justify-between gap-2 px-4 py-2.5 border-b sticky top-0 z-50 bg-background/95 backdrop-blur-sm shadow-xs">
             <div className="flex items-center gap-2">
               <SidebarTrigger data-testid="button-sidebar-toggle" />
-              <h1 className="text-sm font-semibold text-foreground hidden sm:block">Tableau de bord</h1>
+              <span className="w-px h-5 bg-border hidden sm:block" />
+              <h1 className="text-sm font-semibold text-foreground hidden sm:block">Administration</h1>
             </div>
-            <Badge variant="outline" className="text-xs">{user.email}</Badge>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 bg-primary/8 border border-primary/15 rounded-full px-3 py-1">
+                <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                <span className="text-xs font-medium text-primary truncate max-w-40">{user.email}</span>
+              </div>
+            </div>
           </header>
 
           <main className="flex-1 overflow-auto p-4 md:p-6">
