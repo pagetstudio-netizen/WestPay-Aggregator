@@ -964,6 +964,9 @@ export async function registerRoutes(
         const callbackBaseUrl = `${req.protocol}://${req.get("host")}`;
         const returnUrl = redirectUrl || `${callbackBaseUrl}/pay?merchant=${merchantSlug}&amount=${parsedAmount}&country=${country}&omnipay_status=complete`;
 
+        const isCameroon = country === "Cameroun";
+        const autoOtp = isCameroon ? undefined : (otp || String(Math.floor(100000 + Math.random() * 900000)));
+
         try {
           const omnipayResult = await omnipayInitiatePayment({
             apikey: omnipayApiKey,
@@ -972,7 +975,7 @@ export async function registerRoutes(
             reference,
             first_name: fName,
             last_name: lName,
-            otp: otp || undefined,
+            otp: autoOtp,
             operator: omnipayOperator,
             return_url: omnipayOperator === "wave" ? returnUrl : undefined,
           });
