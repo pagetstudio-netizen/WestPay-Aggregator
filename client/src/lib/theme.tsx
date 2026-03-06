@@ -11,8 +11,8 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
-    const root = document.documentElement;
-    root.classList.remove("dark");
+    document.documentElement.classList.remove("dark");
+    document.body.classList.remove("dark");
     localStorage.removeItem("westpay_theme");
   }, []);
 
