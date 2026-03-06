@@ -2165,7 +2165,11 @@ export async function registerRoutes(
       const merchant = await storage.getMerchantById(merchantId);
       if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
 
-      const mode = merchant.withdrawalMode || "manual";
+      const apiKeyToUse = mc.apiKey || await getOmnipayApiKey();
+      if (!apiKeyToUse) {
+        return res.status(500).json({ message: "Systeme de paiement non configure. Contactez l'administrateur." });
+      }
+
       const w = await storage.createWithdrawal({
         merchantId,
         merchantCountryId: mc.id,
@@ -2174,42 +2178,40 @@ export async function registerRoutes(
         phone,
         operator: operator || null,
         status: "pending",
-        withdrawalMode: mode,
+        withdrawalMode: "auto",
         adminNote: null,
       });
       await storage.decrementMerchantCountryBalance(mc.id, amount);
 
-      if (mode === "auto" && mc.omnipayEnabled && mc.apiKey) {
-        try {
-          const reference = `WD-${w.id}-${Date.now()}`;
-          const nameParts = merchant.name.trim().split(/\s+/);
-          const wdFirstName = nameParts[0] || merchant.name;
-          const wdLastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : nameParts[0] || merchant.name;
-          const result = await omnipayInitiateTransfer({
-            apikey: mc.apiKey,
-            msisdn: phone,
-            amount,
-            reference,
-            first_name: wdFirstName,
-            last_name: wdLastName,
-            operator: operator || undefined,
-          });
-          if (result.success === 1) {
-            await storage.updateWithdrawalStatus(w.id, "approved", "Traitement automatique OmniPay", result.reference || reference, result.fees || 0);
-            return res.json({ ...w, status: "approved", omnipayRef: result.reference, fees: result.fees || 0, autoProcessed: true });
-          } else {
-            const errMsg = result.message || "Echec OmniPay";
-            await storage.updateWithdrawalStatus(w.id, "failed", `OmniPay: ${errMsg}`);
-            await storage.incrementMerchantCountryBalance(mc.id, amount);
-            return res.status(400).json({ message: `Echec traitement automatique : ${errMsg}` });
-          }
-        } catch (omnipayErr: any) {
-          console.error("[AUTO WITHDRAWAL] OmniPay error:", omnipayErr.message);
-          await storage.updateWithdrawalStatus(w.id, "pending", "Erreur OmniPay - en attente validation admin");
+      try {
+        const reference = `WD-${w.id}-${Date.now()}`;
+        const nameParts = merchant.name.trim().split(/\s+/);
+        const wdFirstName = nameParts[0] || merchant.name;
+        const wdLastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : nameParts[0] || merchant.name;
+        const result = await omnipayInitiateTransfer({
+          apikey: apiKeyToUse,
+          msisdn: phone,
+          amount,
+          reference,
+          first_name: wdFirstName,
+          last_name: wdLastName,
+          operator: operator || undefined,
+        });
+        if (result.success === 1) {
+          await storage.updateWithdrawalStatus(w.id, "approved", "Traitement automatique OmniPay", result.reference || reference, result.fees || 0);
+          return res.json({ ...w, status: "approved", omnipayRef: result.reference, fees: result.fees || 0, autoProcessed: true });
+        } else {
+          const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Echec OmniPay";
+          await storage.updateWithdrawalStatus(w.id, "failed", `OmniPay: ${errMsg}`);
+          await storage.incrementMerchantCountryBalance(mc.id, amount);
+          return res.status(400).json({ message: errMsg, omnipayError: true, code: result.code });
         }
+      } catch (omnipayErr: any) {
+        console.error("[WITHDRAWAL AUTO] Erreur OmniPay:", omnipayErr.message);
+        await storage.updateWithdrawalStatus(w.id, "failed", `Erreur technique: ${omnipayErr.message}`);
+        await storage.incrementMerchantCountryBalance(mc.id, amount);
+        return res.status(500).json({ message: "Erreur lors du traitement du retrait. Votre solde a été restitué." });
       }
-
-      res.json(w);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
