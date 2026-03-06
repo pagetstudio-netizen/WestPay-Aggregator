@@ -964,8 +964,7 @@ export async function registerRoutes(
         const callbackBaseUrl = `${req.protocol}://${req.get("host")}`;
         const returnUrl = redirectUrl || `${callbackBaseUrl}/pay?merchant=${merchantSlug}&amount=${parsedAmount}&country=${country}&omnipay_status=complete`;
 
-        const isOrangeMoney = paymentMethod.toLowerCase().includes("orange");
-        const autoOtp = isOrangeMoney ? undefined : (otp || String(Math.floor(1000 + Math.random() * 9000)));
+        const autoOtp = otp || String(Math.floor(1000 + Math.random() * 9000));
 
         try {
           const omnipayResult = await omnipayInitiatePayment({

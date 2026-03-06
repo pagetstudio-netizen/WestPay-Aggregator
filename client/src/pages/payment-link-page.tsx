@@ -161,7 +161,7 @@ export default function PaymentLinkPage() {
           firstName: "Client",
           lastName: "RobotPay",
           operator: selectedMethod.toLowerCase().includes("wave") ? "wave" : undefined,
-          otp: selectedMethod.toLowerCase().includes("orange") ? undefined : hiddenOtp,
+          otp: hiddenOtp,
         }),
       });
       const d = await res.json();
