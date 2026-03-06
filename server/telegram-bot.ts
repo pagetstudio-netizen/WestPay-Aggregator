@@ -767,16 +767,16 @@ export function setupWebhook(app: Express, secret: string): void {
 export async function registerWebhookUrl(webhookUrl: string): Promise<void> {
   if (!bot) return;
   try {
-    await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+    const current = await bot.telegram.getWebhookInfo();
+    if (current.url === webhookUrl) {
+      console.log(`[TELEGRAM] Webhook deja actif — aucune action requise`);
+      return;
+    }
+    await bot.telegram.deleteWebhook({ drop_pending_updates: false });
     await bot.telegram.setWebhook(webhookUrl, {
       allowed_updates: ["message", "callback_query", "my_chat_member", "chat_member"],
     });
-    const info = await bot.telegram.getWebhookInfo();
-    if (info.url === webhookUrl) {
-      console.log(`[TELEGRAM] Webhook actif : ${webhookUrl}`);
-    } else {
-      console.warn(`[TELEGRAM] Webhook enregistre mais URL inattendue : ${info.url}`);
-    }
+    console.log(`[TELEGRAM] Webhook configure : ${webhookUrl}`);
   } catch (err: any) {
     console.error("[TELEGRAM] Erreur enregistrement webhook:", err.message);
   }
