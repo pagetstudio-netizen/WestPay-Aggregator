@@ -1,11 +1,8 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Wallet, Eye, EyeOff, Loader2, Lock } from "lucide-react";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 
 export default function MerchantLogin() {
   const [email, setEmail] = useState("");
@@ -34,7 +31,7 @@ export default function MerchantLogin() {
         name: data.user.name,
         slug: data.user.slug,
       });
-      toast({ title: "Connexion reussie", description: "Redirection vers votre espace..." });
+      toast({ title: "Connexion réussie", description: "Redirection vers votre espace..." });
       const slug = data.user.slug;
       setTimeout(() => setLocation(`/merchant/${slug}`), 300);
     } catch (err: any) {
@@ -45,120 +42,154 @@ export default function MerchantLogin() {
   };
 
   return (
-    <div
-      className="min-h-screen flex items-center justify-center p-4"
-      style={{ background: "linear-gradient(145deg, #00b050 0%, #009a45 50%, #007034 100%)" }}
-    >
+    <div className="min-h-screen flex flex-col items-center justify-center p-4" style={{ background: "#f5f5f5" }}>
       <style>{`
-        .login-card input {
-          background-color: #f9fafb !important;
-          color: #111827 !important;
-          border-color: #d1d5db !important;
-        }
-        .login-card input:focus {
-          border-color: #00b050 !important;
-          box-shadow: 0 0 0 3px rgba(0,176,80,0.12) !important;
-          outline: none;
-        }
-        .login-card input::placeholder {
-          color: #9ca3af !important;
-        }
-        .login-btn {
+        .wp-login-input {
           width: 100%;
-          background-color: #00b050;
-          color: #fff;
-          font-weight: 600;
+          padding: 0.65rem 0.875rem;
           font-size: 0.9rem;
+          border: 1.5px solid #e2e8f0;
+          border-radius: 0.5rem;
+          background: #fff;
+          color: #1a1a1a;
+          outline: none;
+          transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        .wp-login-input:focus {
+          border-color: #00b050;
+          box-shadow: 0 0 0 3px rgba(0,176,80,0.1);
+        }
+        .wp-login-input::placeholder { color: #a0aec0; }
+        .wp-login-btn {
+          width: 100%;
+          padding: 0.75rem;
+          font-size: 0.95rem;
+          font-weight: 600;
+          background: #00b050;
+          color: #fff;
           border: none;
           border-radius: 0.5rem;
-          padding: 0.7rem 1.5rem;
           cursor: pointer;
-          transition: background-color 0.15s, transform 0.1s;
+          transition: background 0.15s, transform 0.1s;
           display: flex;
           align-items: center;
           justify-content: center;
           gap: 0.5rem;
         }
-        .login-btn:hover:not(:disabled) { background-color: #009a45; }
-        .login-btn:active:not(:disabled) { transform: scale(0.98); }
-        .login-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+        .wp-login-btn:hover:not(:disabled) { background: #009a45; }
+        .wp-login-btn:active:not(:disabled) { transform: scale(0.98); }
+        .wp-login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .wp-signup-btn {
+          width: 100%;
+          padding: 0.75rem;
+          font-size: 0.95rem;
+          font-weight: 500;
+          background: #fff;
+          color: #1a1a1a;
+          border: 1.5px solid #e2e8f0;
+          border-radius: 0.5rem;
+          cursor: pointer;
+          transition: background 0.15s, border-color 0.15s;
+        }
+        .wp-signup-btn:hover { background: #f7fafc; border-color: #cbd5e0; }
       `}</style>
 
-      <div className="w-full max-w-[400px]">
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-white/20 flex items-center justify-center mx-auto mb-4">
-            <Wallet className="w-8 h-8 text-white" />
-          </div>
-          <h1 className="text-2xl font-bold text-white">WestPay</h1>
-          <p className="text-white/75 text-sm mt-1">Espace Marchand</p>
+      <div className="w-full max-w-[380px]">
+        <div className="text-center mb-7">
+          <img
+            src="/robotpay-logo.jpg"
+            alt="WestPay"
+            className="w-16 h-16 rounded-2xl object-cover mx-auto mb-4 shadow-sm"
+          />
+          <h1 className="text-2xl font-bold" style={{ color: "#1a1a1a" }}>
+            Se connecter à votre compte
+          </h1>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-2xl p-7 login-card" style={{ color: "#1f2937" }}>
-          <div className="mb-6">
-            <h2 className="text-lg font-bold" style={{ color: "#111827" }}>Connexion</h2>
-            <p className="text-sm mt-0.5" style={{ color: "#6b7280" }}>Accédez à votre tableau de bord</p>
-          </div>
-
+        <div className="bg-white rounded-2xl p-6 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
-              <label className="block text-sm font-medium" style={{ color: "#374151" }}>
+              <label className="block text-sm font-semibold" style={{ color: "#1a1a1a" }}>
                 Adresse email
               </label>
               <input
                 type="email"
+                className="wp-login-input"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="marchand@exemple.com"
                 required
-                className="w-full px-3 py-2.5 text-sm border rounded-lg outline-none transition-all"
                 data-testid="input-merchant-email"
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="block text-sm font-medium" style={{ color: "#374151" }}>
+              <label className="block text-sm font-semibold" style={{ color: "#1a1a1a" }}>
                 Mot de passe
               </label>
               <div className="relative">
                 <input
                   type={showPassword ? "text" : "password"}
+                  className="wp-login-input"
+                  style={{ paddingRight: "2.5rem" }}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Votre mot de passe"
                   required
-                  className="w-full px-3 py-2.5 pr-10 text-sm border rounded-lg outline-none transition-all"
                   data-testid="input-merchant-password"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-1/2 -translate-y-1/2"
-                  style={{ color: "#9ca3af", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+                  style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: "#a0aec0" }}
                   data-testid="button-toggle-merchant-password"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              <div className="flex justify-end mt-1">
+                <button
+                  type="button"
+                  className="text-sm font-medium"
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "#00b050", padding: 0 }}
+                  onClick={() => toast({ title: "Mot de passe oublié", description: "Contactez le support pour réinitialiser votre mot de passe." })}
+                  data-testid="link-forgot-password"
+                >
+                  Mot de passe oublié ?
+                </button>
+              </div>
             </div>
 
-            <div className="pt-1">
-              <button
-                type="submit"
-                disabled={isLoading || !email || !password}
-                className="login-btn"
-                data-testid="button-merchant-login"
-              >
-                {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
-                Se connecter
-              </button>
-            </div>
+            <button
+              type="submit"
+              disabled={isLoading || !email || !password}
+              className="wp-login-btn"
+              style={{ marginTop: "0.5rem" }}
+              data-testid="button-merchant-login"
+            >
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              {isLoading ? "Connexion..." : "Se connecter"}
+            </button>
           </form>
+        </div>
 
-          <div className="mt-6 pt-4 border-t text-center" style={{ borderColor: "#f3f4f6" }}>
-            <p className="text-xs" style={{ color: "#9ca3af" }}>
-              Paiement mobile sécurisé — WestPay
-            </p>
+        <div className="mt-5">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex-1 h-px" style={{ background: "#e2e8f0" }} />
+            <span className="text-sm" style={{ color: "#a0aec0", whiteSpace: "nowrap" }}>
+              Vous n'avez pas de compte ?
+            </span>
+            <div className="flex-1 h-px" style={{ background: "#e2e8f0" }} />
           </div>
+          <button
+            type="button"
+            className="wp-signup-btn"
+            onClick={() => toast({ title: "Créer un compte", description: "Contactez notre équipe pour créer votre compte marchand." })}
+            data-testid="button-merchant-signup"
+          >
+            Créer un compte
+          </button>
         </div>
       </div>
     </div>
