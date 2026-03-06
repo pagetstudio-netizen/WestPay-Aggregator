@@ -2,8 +2,8 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { db } from "./db";
-import { admins } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { admins, merchantCountries } from "@shared/schema";
+import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
@@ -2051,6 +2051,9 @@ export async function registerRoutes(
         netAmount: parsedAmount,
         status: "pending",
       });
+      await db.update(merchantCountries)
+        .set({ balance: sql`${merchantCountries.balance} - ${parsedAmount + fee}` })
+        .where(eq(merchantCountries.id, fromMC.id));
       res.json(transfer);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -2072,10 +2075,6 @@ export async function registerRoutes(
       const transfer = await storage.getWalletTransferById(id);
       if (!transfer) return res.status(404).json({ message: "Transfert introuvable" });
       if (transfer.status !== "pending") return res.status(400).json({ message: "Ce transfert n'est plus en attente" });
-      const fromMC = await storage.getMerchantCountryById(transfer.fromCountryId);
-      if (!fromMC || fromMC.balance < (transfer.amount + transfer.fee)) {
-        return res.status(400).json({ message: "Solde insuffisant pour appliquer le transfert" });
-      }
       await storage.applyWalletTransfer(id);
       await storage.updateWalletTransferStatus(id, "approved", req.body.note || null);
       res.json({ success: true });
@@ -2090,6 +2089,7 @@ export async function registerRoutes(
       const transfer = await storage.getWalletTransferById(id);
       if (!transfer) return res.status(404).json({ message: "Transfert introuvable" });
       if (transfer.status !== "pending") return res.status(400).json({ message: "Ce transfert n'est plus en attente" });
+      await storage.reimbursWalletTransfer(id);
       await storage.updateWalletTransferStatus(id, "rejected", req.body.note || null);
       res.json({ success: true });
     } catch (err: any) {

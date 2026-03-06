@@ -107,6 +107,7 @@ export interface IStorage {
   getWalletTransferById(id: number): Promise<WalletTransfer | undefined>;
   updateWalletTransferStatus(id: number, status: string, adminNote?: string): Promise<void>;
   applyWalletTransfer(id: number): Promise<void>;
+  reimbursWalletTransfer(id: number): Promise<void>;
 
   getWalletTransferCountries(activeOnly?: boolean): Promise<WalletTransferCountry[]>;
   getWalletTransferCountryByName(country: string): Promise<WalletTransferCountry | undefined>;
@@ -554,11 +555,16 @@ export class DatabaseStorage implements IStorage {
     const transfer = await this.getWalletTransferById(id);
     if (!transfer) throw new Error("Transfert introuvable");
     await db.update(merchantCountries)
-      .set({ balance: sql`${merchantCountries.balance} - ${transfer.amount + transfer.fee}` })
-      .where(eq(merchantCountries.id, transfer.fromCountryId));
-    await db.update(merchantCountries)
       .set({ balance: sql`${merchantCountries.balance} + ${transfer.netAmount}` })
       .where(eq(merchantCountries.id, transfer.toCountryId));
+  }
+
+  async reimbursWalletTransfer(id: number): Promise<void> {
+    const transfer = await this.getWalletTransferById(id);
+    if (!transfer) throw new Error("Transfert introuvable");
+    await db.update(merchantCountries)
+      .set({ balance: sql`${merchantCountries.balance} + ${transfer.amount + transfer.fee}` })
+      .where(eq(merchantCountries.id, transfer.fromCountryId));
   }
 
   async getWalletTransferCountries(activeOnly = false): Promise<WalletTransferCountry[]> {
