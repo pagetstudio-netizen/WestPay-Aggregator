@@ -841,6 +841,24 @@ type WithdrawalOperatorFE = {
   maintenanceAll: boolean; maintenanceWithdrawals: boolean;
 };
 
+function StatusPill({ status }: { status: string }) {
+  if (status === "pending") return (
+    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold" style={{ background: "#fff3cd", color: "#856404" }}>
+      <Clock className="w-3 h-3" /> En attente
+    </span>
+  );
+  if (status === "approved") return (
+    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold" style={{ background: "#d4edda", color: "#155724" }}>
+      <CheckCircle2 className="w-3 h-3" /> Approuvé
+    </span>
+  );
+  return (
+    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold" style={{ background: "#f8d7da", color: "#721c24" }}>
+      <XCircle className="w-3 h-3" /> Rejeté
+    </span>
+  );
+}
+
 function WithdrawalsPanel({ token }: { token: string | null }) {
   const { toast } = useToast();
   const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
@@ -883,10 +901,8 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/withdrawals"] });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/balance"] });
-      setAmount("");
-      setPhone("");
-      setSelectedOperator("");
-      toast({ title: "Demande de reversement soumise", description: "Votre demande est en cours de traitement." });
+      setAmount(""); setPhone(""); setSelectedOperator("");
+      toast({ title: "Demande soumise", description: "Votre demande de reversement est en cours de traitement." });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
@@ -903,163 +919,186 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
     createMutation.mutate({ merchantCountryId: Number(selectedWalletId), amount: amountNum, phone, operator: selectedOperator });
   };
 
-  const statusBadge = (status: string) => {
-    if (status === "pending") return <Badge variant="secondary" className="gap-1"><Clock className="w-3 h-3" />En attente</Badge>;
-    if (status === "approved") return <Badge className="bg-green-500 gap-1"><CheckCircle2 className="w-3 h-3" />Approuve</Badge>;
-    return <Badge variant="destructive" className="gap-1"><XCircle className="w-3 h-3" />Rejete</Badge>;
-  };
+  const totalWithdrawn = (withdrawalList as Withdrawal[]).filter(w => w.status === "approved").reduce((s, w) => s + w.amount, 0);
+  const pendingCount = (withdrawalList as Withdrawal[]).filter(w => w.status === "pending").length;
 
   return (
-    <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-foreground">Reversements (Retraits)</h2>
+    <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
+      <h2 className="text-xl font-bold mb-5" style={{ color: "#333" }}>Reversements</h2>
 
-      <Card>
-        <CardHeader><CardTitle className="text-base flex items-center gap-2"><Download className="w-4 h-4" />Nouvelle demande de reversement</CardTitle></CardHeader>
-        <CardContent>
-          <div className="space-y-6">
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Aperçu</p>
+      <div className="grid grid-cols-2 gap-3 mb-6">
+        <div className="rounded-xl p-4" style={{ background: "#26a69a" }}>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Total retiré</p>
+          <p className="text-2xl font-bold text-white">{totalWithdrawn.toLocaleString("fr-FR")}<span className="text-sm ml-1 text-white/80">FCFA</span></p>
+        </div>
+        <div className="rounded-xl p-4" style={{ background: pendingCount > 0 ? "#fb8c00" : "#7e57c2" }}>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">En attente</p>
+          <p className="text-2xl font-bold text-white">{pendingCount}<span className="text-sm ml-1 text-white/80">demande{pendingCount > 1 ? "s" : ""}</span></p>
+        </div>
+      </div>
 
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold shrink-0">1</div>
-                <Label className="text-sm font-semibold">Choisir le wallet (pays)</Label>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Nouvelle demande</p>
+      <div className="bg-white rounded-2xl p-5 mb-6 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+        <div className="space-y-5">
+          <div>
+            <p className="text-sm font-bold mb-3" style={{ color: "#333" }}>
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs mr-2" style={{ background: "#00b050" }}>1</span>
+              Choisir le wallet (pays)
+            </p>
+            {balLoading ? (
+              <div className="grid gap-2 grid-cols-2">{[1,2].map(i => <Skeleton key={i} className="h-16 w-full rounded-xl" />)}</div>
+            ) : activeWallets.length === 0 ? (
+              <p className="text-sm" style={{ color: "#888" }}>Aucun wallet actif disponible.</p>
+            ) : (
+              <div className="grid gap-2 grid-cols-2">
+                {activeWallets.map((w, idx) => (
+                  <div
+                    key={w.id}
+                    onClick={() => handleWalletSelect(String(w.id))}
+                    className="rounded-xl p-3 cursor-pointer transition-all"
+                    style={{
+                      background: String(w.id) === selectedWalletId ? COUNTRY_COLORS[idx % COUNTRY_COLORS.length] : "#f5f6f8",
+                      border: `2px solid ${String(w.id) === selectedWalletId ? COUNTRY_COLORS[idx % COUNTRY_COLORS.length] : "#e8ecf0"}`,
+                    }}
+                    data-testid={`wallet-card-${w.id}`}
+                  >
+                    <p className="text-xs font-bold uppercase tracking-wide mb-1" style={{ color: String(w.id) === selectedWalletId ? "rgba(255,255,255,0.8)" : "#888" }}>{w.country}</p>
+                    <p className="text-lg font-bold" style={{ color: String(w.id) === selectedWalletId ? "#fff" : "#1a1a1a" }}>
+                      {w.balance.toLocaleString("fr-FR")}<span className="text-xs ml-1" style={{ color: String(w.id) === selectedWalletId ? "rgba(255,255,255,0.7)" : "#aaa" }}>FCFA</span>
+                    </p>
+                  </div>
+                ))}
               </div>
-              {balLoading ? (
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{[1,2,3].map(i => <Skeleton key={i} className="h-16 w-full" />)}</div>
-              ) : activeWallets.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Aucun wallet actif disponible.</p>
+            )}
+          </div>
+
+          {selectedWallet && (
+            <div>
+              <p className="text-sm font-bold mb-3" style={{ color: "#333" }}>
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs mr-2" style={{ background: "#00b050" }}>2</span>
+                Choisir l'opérateur
+              </p>
+              {opsLoading ? (
+                <div className="grid gap-2 grid-cols-2">{[1,2].map(i => <Skeleton key={i} className="h-14 w-full rounded-xl" />)}</div>
+              ) : operatorList.length === 0 ? (
+                <div className="p-3 rounded-xl text-sm" style={{ background: "#fff3cd", color: "#856404" }}>
+                  Aucun opérateur disponible pour {selectedWallet.country}.
+                </div>
               ) : (
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {activeWallets.map((w) => (
-                    <div key={w.id}
-                      className={`p-3 rounded border-2 cursor-pointer transition-colors ${String(w.id) === selectedWalletId ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"}`}
-                      onClick={() => handleWalletSelect(String(w.id))}
-                      data-testid={`wallet-card-${w.id}`}>
-                      <div className="flex items-center justify-between mb-0.5">
-                        <span className="text-sm font-medium">{w.country}</span>
-                        {String(w.id) === selectedWalletId && <CheckCircle2 className="w-4 h-4 text-primary" />}
+                <div className="grid gap-2 grid-cols-2">
+                  {operatorList.map((op) => (
+                    <div
+                      key={op.id}
+                      onClick={() => setSelectedOperator(op.name)}
+                      className="rounded-xl p-3 cursor-pointer transition-all flex items-center gap-2"
+                      style={{
+                        background: selectedOperator === op.name ? "#1e88e5" : "#f5f6f8",
+                        border: `2px solid ${selectedOperator === op.name ? "#1e88e5" : "#e8ecf0"}`,
+                      }}
+                      data-testid={`operator-card-${op.id}`}
+                    >
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: selectedOperator === op.name ? "rgba(255,255,255,0.2)" : "#e8ecf0" }}>
+                        <Zap className="w-4 h-4" style={{ color: selectedOperator === op.name ? "#fff" : "#00b050" }} />
                       </div>
-                      <p className="text-lg font-bold">{w.balance.toLocaleString("fr-FR")} <span className="text-xs font-normal text-muted-foreground">FCFA</span></p>
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold truncate" style={{ color: selectedOperator === op.name ? "#fff" : "#1a1a1a" }}>{op.name}</p>
+                        <p className="text-xs" style={{ color: selectedOperator === op.name ? "rgba(255,255,255,0.7)" : "#aaa" }}>{op.type}</p>
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
+          )}
 
-            {selectedWallet && (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold shrink-0">2</div>
-                  <Label className="text-sm font-semibold">Choisir l'opérateur de paiement</Label>
-                </div>
-                {opsLoading ? (
-                  <div className="grid gap-2 sm:grid-cols-2">{[1,2].map(i => <Skeleton key={i} className="h-14 w-full" />)}</div>
-                ) : operatorList.length === 0 ? (
-                  <div className="p-3 rounded border bg-amber-50 dark:bg-amber-950 text-sm text-amber-700 dark:text-amber-400">
-                    Aucun opérateur disponible pour {selectedWallet.country} pour le moment.
-                  </div>
-                ) : (
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {operatorList.map((op) => (
-                      <div key={op.id}
-                        className={`p-3 rounded border-2 cursor-pointer transition-colors flex items-center gap-3 ${selectedOperator === op.name ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"}`}
-                        onClick={() => setSelectedOperator(op.name)}
-                        data-testid={`operator-card-${op.id}`}>
-                        <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center shrink-0">
-                          <Zap className="w-4 h-4 text-primary" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold truncate">{op.name}</p>
-                          <p className="text-xs text-muted-foreground">{op.type}</p>
-                        </div>
-                        {selectedOperator === op.name && <CheckCircle2 className="w-4 h-4 text-primary ml-auto shrink-0" />}
-                      </div>
-                    ))}
-                  </div>
-                )}
+          {selectedWallet && selectedOperator && (
+            <form onSubmit={handleSubmit}>
+              <p className="text-sm font-bold mb-3" style={{ color: "#333" }}>
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs mr-2" style={{ background: "#00b050" }}>3</span>
+                Informations de retrait
+              </p>
+              <div className="rounded-xl p-3 mb-4 text-xs" style={{ background: "#f0faf5", border: "1px solid #c3e6cb" }}>
+                <span style={{ color: "#155724" }}>Wallet : <strong>{selectedWallet.country}</strong> · Opérateur : <strong>{selectedOperator}</strong> · Solde : <strong>{selectedWallet.balance.toLocaleString("fr-FR")} FCFA</strong></span>
               </div>
-            )}
-
-            {selectedWallet && selectedOperator && (
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-6 h-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold shrink-0">3</div>
-                  <Label className="text-sm font-semibold">Saisir les informations de retrait</Label>
-                </div>
-                <div className="p-3 rounded bg-muted/40 text-sm flex flex-wrap gap-x-4 gap-y-1">
-                  <span><span className="text-muted-foreground">Wallet :</span> <span className="font-medium">{selectedWallet.country}</span></span>
-                  <span><span className="text-muted-foreground">Opérateur :</span> <span className="font-medium">{selectedOperator}</span></span>
-                  <span><span className="text-muted-foreground">Solde :</span> <span className="font-semibold">{selectedWallet.balance.toLocaleString("fr-FR")} FCFA</span></span>
-                </div>
-                <div className="space-y-2">
-                  <Label>Montant à retirer (FCFA)</Label>
-                  <Input
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>Montant (FCFA)</label>
+                  <input
                     type="number"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
                     placeholder="Ex: 50000"
                     min="1"
                     max={selectedWallet.balance}
+                    className="w-full rounded-xl px-4 py-2.5 text-sm outline-none transition-all"
+                    style={{ border: "1.5px solid #e2e8f0", background: "#fff", color: "#1a1a1a" }}
                     data-testid="input-withdrawal-amount"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label>Numéro de compte / Mobile Money</Label>
-                  <Input
+                <div>
+                  <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>Numéro Mobile Money</label>
+                  <input
+                    type="text"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     placeholder="Ex: +22507XXXXXXXX"
+                    className="w-full rounded-xl px-4 py-2.5 text-sm outline-none transition-all"
+                    style={{ border: "1.5px solid #e2e8f0", background: "#fff", color: "#1a1a1a" }}
                     data-testid="input-withdrawal-phone"
                   />
-                  <p className="text-xs text-muted-foreground">Numéro {selectedOperator} sur lequel vous souhaitez recevoir le retrait.</p>
+                  <p className="text-xs mt-1" style={{ color: "#aaa" }}>Numéro {selectedOperator} où vous recevrez le paiement.</p>
                 </div>
-                <Button type="submit" disabled={createMutation.isPending || !amount || !phone} data-testid="button-submit-withdrawal">
-                  {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Download className="w-4 h-4 mr-2" />}
-                  Soumettre la demande
-                </Button>
-              </form>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base">Historique des reversements</CardTitle>
-            <Badge variant="secondary">{(withdrawalList as Withdrawal[]).length}</Badge>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {wdLoading ? (
-            <div className="space-y-2"><Skeleton className="h-12 w-full" /><Skeleton className="h-12 w-full" /></div>
-          ) : (withdrawalList as Withdrawal[]).length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">Aucune demande de reversement</p>
-          ) : (
-            <ScrollArea className="max-h-96">
-              <div className="space-y-2">
-                {(withdrawalList as Withdrawal[]).map((w) => (
-                  <div key={w.id} className="p-3 rounded border bg-muted/30" data-testid={`withdrawal-row-${w.id}`}>
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-sm">{w.amount.toLocaleString("fr-FR")} FCFA</span>
-                        <span className="text-muted-foreground text-xs">— {w.country}</span>
-                        {(w as any).operator && <Badge variant="outline" className="text-xs py-0">{(w as any).operator}</Badge>}
-                      </div>
-                      {statusBadge(w.status)}
-                    </div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-xs text-muted-foreground">
-                      <span><Phone className="w-3 h-3 inline mr-1" />{w.phone}</span>
-                      <span>{new Date(w.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                      <Badge variant="outline" className="text-xs py-0">{w.withdrawalMode === "auto" ? "Auto" : "Manuel"}</Badge>
-                    </div>
-                    {w.adminNote && <p className="text-xs text-muted-foreground mt-1 italic">Note : {w.adminNote}</p>}
-                  </div>
-                ))}
+                <button
+                  type="submit"
+                  disabled={createMutation.isPending || !amount || !phone}
+                  className="w-full rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 transition-all"
+                  style={{ background: createMutation.isPending || !amount || !phone ? "#ccc" : "#00b050", color: "#fff", border: "none", cursor: createMutation.isPending ? "not-allowed" : "pointer" }}
+                  data-testid="button-submit-withdrawal"
+                >
+                  {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  {createMutation.isPending ? "Traitement..." : "Soumettre la demande"}
+                </button>
               </div>
-            </ScrollArea>
+            </form>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
+
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
+        Historique — {(withdrawalList as Withdrawal[]).length} demande{(withdrawalList as Withdrawal[]).length > 1 ? "s" : ""}
+      </p>
+      <div className="space-y-3">
+        {wdLoading ? (
+          [1,2,3].map(i => <Skeleton key={i} className="h-20 w-full rounded-2xl" />)
+        ) : (withdrawalList as Withdrawal[]).length === 0 ? (
+          <div className="bg-white rounded-2xl p-6 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+            <Download className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
+            <p className="text-sm" style={{ color: "#aaa" }}>Aucune demande de reversement</p>
+          </div>
+        ) : (
+          (withdrawalList as Withdrawal[]).map((w) => (
+            <div key={w.id} className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }} data-testid={`withdrawal-row-${w.id}`}>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="text-lg font-bold" style={{ color: "#1a1a1a" }}>{w.amount.toLocaleString("fr-FR")} <span className="text-sm font-semibold" style={{ color: "#888" }}>FCFA</span></p>
+                <StatusPill status={w.status} />
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: "#888" }}>
+                <span className="font-medium" style={{ color: "#555" }}>{w.country}</span>
+                {(w as any).operator && <span style={{ color: "#1e88e5", fontWeight: 600 }}>{(w as any).operator}</span>}
+                <span><Phone className="w-3 h-3 inline mr-0.5" />{w.phone}</span>
+                <span>{new Date(w.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" })}</span>
+                <span className="px-1.5 py-0.5 rounded-full text-xs" style={{ background: "#f0f0f0", color: "#666" }}>{w.withdrawalMode === "auto" ? "Auto" : "Manuel"}</span>
+              </div>
+              {w.adminNote && (
+                <p className="text-xs mt-2 px-2 py-1 rounded-lg italic" style={{ background: "#f8f9fa", color: "#666" }}>
+                  Note : {w.adminNote}
+                </p>
+              )}
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }
@@ -1103,12 +1142,10 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/wallet-transfers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/balance"] });
       toast({
-        title: "Demande de virement soumise",
-        description: `${data.amount.toLocaleString("fr-FR")} ${data.currency} de ${data.fromCountry} vers ${data.toCountry}. Frais: ${data.fee.toLocaleString("fr-FR")} ${data.currency}. En attente d'approbation admin.`,
+        title: "Virement soumis",
+        description: `${data.amount.toLocaleString("fr-FR")} ${data.currency} de ${data.fromCountry} → ${data.toCountry}. Frais : ${data.fee.toLocaleString("fr-FR")} ${data.currency}.`,
       });
-      setFromCountryId("");
-      setToCountryId("");
-      setAmount("");
+      setFromCountryId(""); setToCountryId(""); setAmount("");
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
@@ -1127,143 +1164,180 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
     createMutation.mutate({ fromCountryId, toCountryId, amount });
   };
 
-  const statusBadge = (status: string) => {
-    if (status === "pending") return <Badge variant="secondary" className="gap-1"><Clock className="w-3 h-3" />En attente</Badge>;
-    if (status === "approved") return <Badge className="bg-green-500 gap-1"><CheckCircle2 className="w-3 h-3" />Approuve</Badge>;
-    return <Badge variant="destructive" className="gap-1"><XCircle className="w-3 h-3" />Rejete</Badge>;
-  };
-
   if (balLoading) return <MerchantLoadingSkeleton />;
 
   const xofCountries = wtcList.filter((c: WalletTransferCountry) => c.currencyZone === "XOF").map((c: WalletTransferCountry) => c.country).join(", ");
   const xafCountries = wtcList.filter((c: WalletTransferCountry) => c.currencyZone === "XAF").map((c: WalletTransferCountry) => c.country).join(", ");
+  const totalTransferred = (walletTransfers as WalletTransfer[]).filter(w => w.status === "approved").reduce((s, w) => s + w.amount, 0);
+  const pendingCount = (walletTransfers as WalletTransfer[]).filter(w => w.status === "pending").length;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold text-foreground">Virements Inter-Wallets</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Transférez des fonds entre vos wallets dans la même zone monétaire. Soumis à l'approbation de l'administrateur.
-        </p>
+    <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
+      <h2 className="text-xl font-bold mb-1" style={{ color: "#333" }}>Virements Inter-Wallets</h2>
+      <p className="text-xs mb-5" style={{ color: "#888" }}>Transférez des fonds entre vos wallets dans la même zone monétaire (XOF ou XAF).</p>
+
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Aperçu</p>
+      <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className="rounded-xl p-4" style={{ background: "#7e57c2" }}>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Total viré</p>
+          <p className="text-2xl font-bold text-white">{totalTransferred.toLocaleString("fr-FR")}<span className="text-sm ml-1 text-white/80">FCFA</span></p>
+        </div>
+        <div className="rounded-xl p-4" style={{ background: pendingCount > 0 ? "#fb8c00" : "#1976d2" }}>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">En attente</p>
+          <p className="text-2xl font-bold text-white">{pendingCount}<span className="text-sm ml-1 text-white/80">virement{pendingCount > 1 ? "s" : ""}</span></p>
+        </div>
       </div>
 
       {wtcList.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 bg-muted/50 rounded-lg border text-xs">
+        <div className="grid grid-cols-2 gap-2 mb-5">
           {xofCountries && (
-            <div><span className="font-medium">Zone XOF : </span><span className="text-muted-foreground">{xofCountries}</span></div>
+            <div className="rounded-xl px-3 py-2 text-xs" style={{ background: "#e8f5e9", border: "1px solid #c8e6c9" }}>
+              <span className="font-bold" style={{ color: "#2e7d32" }}>Zone XOF : </span>
+              <span style={{ color: "#388e3c" }}>{xofCountries}</span>
+            </div>
           )}
           {xafCountries && (
-            <div><span className="font-medium">Zone XAF : </span><span className="text-muted-foreground">{xafCountries}</span></div>
+            <div className="rounded-xl px-3 py-2 text-xs" style={{ background: "#e3f2fd", border: "1px solid #bbdefb" }}>
+              <span className="font-bold" style={{ color: "#1565c0" }}>Zone XAF : </span>
+              <span style={{ color: "#1976d2" }}>{xafCountries}</span>
+            </div>
           )}
         </div>
       )}
 
       {eligibleCountries.length < 2 && (
-        <div className="p-4 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 text-sm text-amber-800 dark:text-amber-200">
-          Vous avez besoin d'au moins 2 wallets actifs dans la même zone monétaire pour effectuer un virement inter-wallets.
+        <div className="rounded-xl p-4 mb-5 text-sm" style={{ background: "#fff3cd", border: "1px solid #ffc107", color: "#856404" }}>
+          Il vous faut au moins 2 wallets actifs dans la même zone monétaire pour effectuer un virement.
         </div>
       )}
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">Nouvelle demande de virement</CardTitle></CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Wallet source</Label>
-                <Select value={fromCountryId} onValueChange={(v) => { setFromCountryId(v); setToCountryId(""); }}>
-                  <SelectTrigger data-testid="select-virement-from">
-                    <SelectValue placeholder={eligibleCountries.length === 0 ? "Aucun wallet éligible" : "Sélectionner"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {eligibleCountries.map(c => (
-                      <SelectItem key={c.id} value={String(c.id)}>
-                        {c.country} — {c.balance.toLocaleString("fr-FR")} FCFA
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Wallet destination</Label>
-                <Select value={toCountryId} onValueChange={setToCountryId} disabled={!fromCountryId || toCountries.length === 0}>
-                  <SelectTrigger data-testid="select-virement-to">
-                    <SelectValue placeholder={fromCountryId && toCountries.length === 0 ? "Aucun wallet compatible" : "Sélectionner"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {toCountries.map(c => (
-                      <SelectItem key={c.id} value={String(c.id)}>
-                        {c.country} — {c.balance.toLocaleString("fr-FR")} FCFA
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {fromCountryId && toCountries.length === 0 && (
-                  <p className="text-xs text-destructive">Aucun autre wallet dans la même zone ({fromZone})</p>
-                )}
-              </div>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Nouvelle demande</p>
+      <div className="bg-white rounded-2xl p-5 mb-6 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs mr-1.5" style={{ background: "#7e57c2" }}>1</span>
+                Wallet source
+              </label>
+              <select
+                value={fromCountryId}
+                onChange={(e) => { setFromCountryId(e.target.value); setToCountryId(""); }}
+                className="w-full rounded-xl px-4 py-2.5 text-sm outline-none"
+                style={{ border: "1.5px solid #e2e8f0", background: "#fff", color: fromCountryId ? "#1a1a1a" : "#aaa" }}
+                data-testid="select-virement-from"
+              >
+                <option value="">{eligibleCountries.length === 0 ? "Aucun wallet éligible" : "Sélectionner..."}</option>
+                {eligibleCountries.map(c => (
+                  <option key={c.id} value={String(c.id)}>{c.country} — {c.balance.toLocaleString("fr-FR")} FCFA</option>
+                ))}
+              </select>
             </div>
-            <div className="space-y-2">
-              <Label>Montant ({fromZone || "FCFA"})</Label>
-              <Input
-                type="number"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="Ex: 50000"
-                min="1"
-                required
-                data-testid="input-virement-amount"
-              />
-              {fromMC && amount && !isNaN(parseInt(amount)) && (
-                <p className="text-xs text-muted-foreground">
-                  Solde disponible : {fromMC.balance.toLocaleString("fr-FR")} {fromZone} — Des frais s'appliquent.
+            <div>
+              <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs mr-1.5" style={{ background: "#7e57c2" }}>2</span>
+                Wallet destination
+              </label>
+              <select
+                value={toCountryId}
+                onChange={(e) => setToCountryId(e.target.value)}
+                disabled={!fromCountryId || toCountries.length === 0}
+                className="w-full rounded-xl px-4 py-2.5 text-sm outline-none"
+                style={{ border: "1.5px solid #e2e8f0", background: !fromCountryId ? "#f5f5f5" : "#fff", color: toCountryId ? "#1a1a1a" : "#aaa" }}
+                data-testid="select-virement-to"
+              >
+                <option value="">{fromCountryId && toCountries.length === 0 ? "Aucun wallet compatible" : "Sélectionner..."}</option>
+                {toCountries.map(c => (
+                  <option key={c.id} value={String(c.id)}>{c.country} — {c.balance.toLocaleString("fr-FR")} FCFA</option>
+                ))}
+              </select>
+              {fromCountryId && toCountries.length === 0 && (
+                <p className="text-xs mt-1" style={{ color: "#e53935" }}>Aucun wallet compatible dans la zone {fromZone}</p>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs mr-1.5" style={{ background: "#7e57c2" }}>3</span>
+              Montant ({fromZone || "FCFA"})
+            </label>
+            <input
+              type="number"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="Ex: 50000"
+              min="1"
+              required
+              className="w-full rounded-xl px-4 py-2.5 text-sm outline-none"
+              style={{ border: "1.5px solid #e2e8f0", background: "#fff", color: "#1a1a1a" }}
+              data-testid="input-virement-amount"
+            />
+            {fromMC && amount && !isNaN(parseInt(amount)) && (
+              <p className="text-xs mt-1" style={{ color: "#aaa" }}>
+                Solde disponible : <strong style={{ color: "#555" }}>{fromMC.balance.toLocaleString("fr-FR")} {fromZone}</strong> — Des frais s'appliquent.
+              </p>
+            )}
+          </div>
+
+          {fromCountryId && toCountryId && (
+            <div className="rounded-xl p-3 flex items-center gap-3 text-sm" style={{ background: "#f0f4ff", border: "1px solid #c5cae9" }}>
+              <ArrowRightLeft className="w-4 h-4 shrink-0" style={{ color: "#7e57c2" }} />
+              <span style={{ color: "#333" }}>
+                {eligibleCountries.find(c => String(c.id) === fromCountryId)?.country} → {toCountries.find(c => String(c.id) === toCountryId)?.country}
+              </span>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={createMutation.isPending || !fromCountryId || !toCountryId || !amount}
+            className="w-full rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 transition-all"
+            style={{ background: createMutation.isPending || !fromCountryId || !toCountryId || !amount ? "#ccc" : "#7e57c2", color: "#fff", border: "none", cursor: createMutation.isPending ? "not-allowed" : "pointer" }}
+            data-testid="button-submit-virement"
+          >
+            {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightLeft className="w-4 h-4" />}
+            {createMutation.isPending ? "Traitement..." : "Soumettre la demande"}
+          </button>
+        </form>
+      </div>
+
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
+        Historique — {(walletTransfers as WalletTransfer[]).length} virement{(walletTransfers as WalletTransfer[]).length > 1 ? "s" : ""}
+      </p>
+      <div className="space-y-3">
+        {wtLoading ? (
+          [1,2,3].map(i => <Skeleton key={i} className="h-20 w-full rounded-2xl" />)
+        ) : (walletTransfers as WalletTransfer[]).length === 0 ? (
+          <div className="bg-white rounded-2xl p-6 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+            <ArrowRightLeft className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
+            <p className="text-sm" style={{ color: "#aaa" }}>Aucun virement pour le moment</p>
+          </div>
+        ) : (
+          (walletTransfers as WalletTransfer[]).map((wt) => (
+            <div key={wt.id} className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }} data-testid={`virement-row-${wt.id}`}>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-base font-bold" style={{ color: "#1a1a1a" }}>{wt.fromCountry}</span>
+                  <ArrowRightLeft className="w-3.5 h-3.5" style={{ color: "#7e57c2" }} />
+                  <span className="text-base font-bold" style={{ color: "#1a1a1a" }}>{wt.toCountry}</span>
+                </div>
+                <StatusPill status={wt.status} />
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: "#888" }}>
+                <span>Montant : <strong style={{ color: "#333" }}>{wt.amount.toLocaleString("fr-FR")} {wt.currency}</strong></span>
+                <span>Frais : <strong style={{ color: "#333" }}>{wt.fee.toLocaleString("fr-FR")} {wt.currency}</strong></span>
+                <span>{new Date(wt.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" })}</span>
+              </div>
+              {wt.adminNote && (
+                <p className="text-xs mt-2 px-2 py-1 rounded-lg italic" style={{ background: "#f8f9fa", color: "#666" }}>
+                  Note : {wt.adminNote}
                 </p>
               )}
             </div>
-            <Button type="submit" disabled={createMutation.isPending || !fromCountryId || !toCountryId} data-testid="button-submit-virement">
-              {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ArrowRightLeft className="w-4 h-4 mr-2" />}
-              Soumettre la demande
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <CardTitle className="text-base">Historique des virements</CardTitle>
-            <Badge variant="secondary">{(walletTransfers as WalletTransfer[]).length} virement(s)</Badge>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {wtLoading ? (
-            <div className="space-y-2"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>
-          ) : (walletTransfers as WalletTransfer[]).length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">Aucun virement pour le moment</p>
-          ) : (
-            <ScrollArea className="max-h-[400px]">
-              <div className="space-y-2">
-                {(walletTransfers as WalletTransfer[]).map((wt) => (
-                  <div key={wt.id} className="p-3 rounded border text-sm space-y-1" data-testid={`virement-row-${wt.id}`}>
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className="font-medium">{wt.fromCountry} → {wt.toCountry}</span>
-                      {statusBadge(wt.status)}
-                    </div>
-                    <div className="flex items-center gap-4 text-muted-foreground text-xs flex-wrap">
-                      <span>Montant : <span className="text-foreground font-medium">{wt.amount.toLocaleString("fr-FR")} {wt.currency}</span></span>
-                      <span>Frais : <span className="text-foreground">{wt.fee.toLocaleString("fr-FR")} {wt.currency}</span></span>
-                      <span>{new Date(wt.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" })}</span>
-                    </div>
-                    {wt.adminNote && (
-                      <p className="text-xs text-muted-foreground italic">Note admin : {wt.adminNote}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </ScrollArea>
-          )}
-        </CardContent>
-      </Card>
+          ))
+        )}
+      </div>
     </div>
   );
 }
