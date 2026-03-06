@@ -2180,13 +2180,16 @@ export async function registerRoutes(
       if (mode === "auto" && mc.omnipayEnabled && mc.apiKey) {
         try {
           const reference = `WD-${w.id}-${Date.now()}`;
+          const nameParts = merchant.name.trim().split(/\s+/);
+          const wdFirstName = nameParts[0] || merchant.name;
+          const wdLastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : nameParts[0] || merchant.name;
           const result = await omnipayInitiateTransfer({
             apikey: mc.apiKey,
             msisdn: phone,
             amount,
             reference,
-            first_name: merchant.name,
-            last_name: "",
+            first_name: wdFirstName,
+            last_name: wdLastName,
             operator: operator || undefined,
           });
           if (result.success === 1) {
@@ -2246,13 +2249,16 @@ export async function registerRoutes(
       if (mc && mc.omnipayEnabled && mc.apiKey && merchant) {
         try {
           const reference = `WD-${w.id}-${Date.now()}`;
+          const mNameParts = merchant.name.trim().split(/\s+/);
+          const mFirstName = mNameParts[0] || merchant.name;
+          const mLastName = mNameParts.length > 1 ? mNameParts.slice(1).join(" ") : mNameParts[0] || merchant.name;
           const result = await omnipayInitiateTransfer({
             apikey: mc.apiKey,
             msisdn: w.phone,
             amount: w.amount,
             reference,
-            first_name: merchant.name,
-            last_name: "",
+            first_name: mFirstName,
+            last_name: mLastName,
             operator: w.operator || undefined,
           });
           if (result.success === 1) {
