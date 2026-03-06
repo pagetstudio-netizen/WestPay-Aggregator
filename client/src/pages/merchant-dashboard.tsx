@@ -194,108 +194,134 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
   };
 
   const confirmedTotal = allTx.filter(t => t.status === "confirmed" && t.amount > 0).reduce((s, t) => s + t.amount, 0);
+  const confirmedCount = allTx.filter(t => t.status === "confirmed").length;
+  const pendingCount = allTx.filter(t => t.status === "pending").length;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div>
-          <h2 className="text-lg font-semibold text-foreground">Mes transactions</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">Total confirmé : {confirmedTotal.toLocaleString("fr-FR")} F CFA</p>
-        </div>
-        <Button variant="outline" size="sm" onClick={downloadCSV} data-testid="button-merchant-export-csv">
-          <Download className="w-4 h-4 mr-2" />Export CSV
-        </Button>
+    <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
+      <div className="flex items-center justify-between gap-2 mb-5">
+        <h2 className="text-xl font-bold" style={{ color: "#333" }}>Mes transactions</h2>
+        <button
+          onClick={downloadCSV}
+          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all"
+          style={{ background: "#fff", border: "1.5px solid #e8ecf0", color: "#333" }}
+          data-testid="button-merchant-export-csv"
+        >
+          <Download className="w-4 h-4" /> Export CSV
+        </button>
       </div>
 
-      <div className="flex gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-40">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input className="pl-10" placeholder="Rechercher par ID, nom, numéro, pays..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} data-testid="input-merchant-search-tx" />
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Aperçu</p>
+      <div className="grid grid-cols-3 gap-3 mb-6">
+        <div className="rounded-xl p-4" style={{ background: "#1976d2" }}>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Volume</p>
+          <p className="text-xl font-bold text-white">{confirmedTotal.toLocaleString("fr-FR")}<span className="text-xs ml-1 text-white/70">FCFA</span></p>
         </div>
-        <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger className="w-36" data-testid="select-filter-status"><Filter className="w-3 h-3 mr-1" /><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Tous statuts</SelectItem>
-            <SelectItem value="confirmed">Confirmé</SelectItem>
-            <SelectItem value="pending">En attente</SelectItem>
-            <SelectItem value="failed">Echoué</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={filterProvider} onValueChange={setFilterProvider}>
-          <SelectTrigger className="w-40" data-testid="select-filter-provider"><CreditCard className="w-3 h-3 mr-1" /><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Tous modes</SelectItem>
-            <SelectItem value="omnipay">Mobile Money</SelectItem>
-            <SelectItem value="sms">SMS</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="rounded-xl p-4" style={{ background: "#00b050" }}>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Confirmées</p>
+          <p className="text-xl font-bold text-white">{confirmedCount}</p>
+        </div>
+        <div className="rounded-xl p-4" style={{ background: pendingCount > 0 ? "#fb8c00" : "#78909c" }}>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">En attente</p>
+          <p className="text-xl font-bold text-white">{pendingCount}</p>
+        </div>
       </div>
+
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Filtres</p>
+      <div className="bg-white rounded-2xl p-3 mb-4 shadow-sm flex gap-2 flex-wrap" style={{ border: "1.5px solid #e8ecf0" }}>
+        <div className="relative flex-1 min-w-40">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: "#aaa" }} />
+          <input
+            className="w-full rounded-xl pl-9 pr-3 py-2 text-sm outline-none"
+            style={{ border: "1.5px solid #e2e8f0", background: "#f9fafb", color: "#1a1a1a" }}
+            placeholder="ID, nom, numéro, pays..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            data-testid="input-merchant-search-tx"
+          />
+        </div>
+        <select
+          value={filterStatus}
+          onChange={(e) => setFilterStatus(e.target.value)}
+          className="rounded-xl px-3 py-2 text-sm outline-none"
+          style={{ border: "1.5px solid #e2e8f0", background: "#f9fafb", color: "#333" }}
+          data-testid="select-filter-status"
+        >
+          <option value="all">Tous statuts</option>
+          <option value="confirmed">Confirmé</option>
+          <option value="pending">En attente</option>
+          <option value="failed">Échoué</option>
+        </select>
+        <select
+          value={filterProvider}
+          onChange={(e) => setFilterProvider(e.target.value)}
+          className="rounded-xl px-3 py-2 text-sm outline-none"
+          style={{ border: "1.5px solid #e2e8f0", background: "#f9fafb", color: "#333" }}
+          data-testid="select-filter-provider"
+        >
+          <option value="all">Tous modes</option>
+          <option value="omnipay">Mobile Money</option>
+          <option value="sms">SMS</option>
+        </select>
+      </div>
+
       {(searchTerm || filterStatus !== "all" || filterProvider !== "all") && (
-        <p className="text-xs text-muted-foreground">{filtered.length} transaction{filtered.length !== 1 ? "s" : ""} trouvée{filtered.length !== 1 ? "s" : ""}</p>
+        <p className="text-xs mb-2" style={{ color: "#888" }}>{filtered.length} résultat{filtered.length !== 1 ? "s" : ""}</p>
       )}
 
-      <ScrollArea className="h-[calc(100vh-340px)]">
-        <div className="space-y-2">
-          {filtered.length === 0 ? (
-            <Card><CardContent className="p-6 text-center text-muted-foreground text-sm">Aucune transaction</CardContent></Card>
-          ) : (
-            filtered.map((tx) => {
-              const isTransfer = tx.amount < 0 || tx.txId.startsWith("TR-");
-              const txPayerName = (tx as any).payerName;
-              return (
-                <Card key={tx.id} data-testid={`card-tx-${tx.id}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between gap-2 flex-wrap">
-                      <div className="min-w-0 space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-mono text-xs font-semibold text-muted-foreground" data-testid={`text-mtx-${tx.id}`}>{tx.txId}</span>
-                          <Badge variant="outline" className="text-xs">{tx.country}</Badge>
-                          {tx.provider === "omnipay" && <Badge variant="secondary" className="text-xs gap-1"><Zap className="w-3 h-3" />{providerLabel(tx.provider)}</Badge>}
-                          {tx.provider === "sms" && <Badge variant="outline" className="text-xs gap-1"><Phone className="w-3 h-3" />SMS</Badge>}
-                          {isTransfer && <Badge variant="secondary" className="text-xs gap-1"><ArrowUpRight className="w-3 h-3" />Transfert</Badge>}
-                          <Badge variant={tx.status === "confirmed" ? "default" : tx.status === "pending" ? "secondary" : "destructive"} className="text-xs">
-                            {tx.status === "confirmed" ? "Confirmé" : tx.status === "pending" ? "En attente" : tx.status}
-                          </Badge>
-                        </div>
-                        {txPayerName && (
-                          <div className="flex items-center gap-1 text-sm text-foreground">
-                            <User className="w-3 h-3 text-muted-foreground shrink-0" />
-                            <span data-testid={`text-payer-name-${tx.id}`}>{txPayerName}</span>
-                          </div>
-                        )}
-                        <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
-                          {tx.payerNumber && (
-                            <span className="flex items-center gap-1">
-                              <Phone className="w-3 h-3" /><span data-testid={`text-payer-number-${tx.id}`}>{tx.payerNumber}</span>
-                            </span>
-                          )}
-                          <span className="flex items-center gap-1">
-                            <Calendar className="w-3 h-3" />
-                            <span data-testid={`text-tx-date-${tx.id}`}>{new Date(tx.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                          </span>
-                        </div>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className={`text-lg font-bold ${isTransfer ? "text-destructive" : "text-green-600 dark:text-green-400"}`} data-testid={`text-tx-amount-${tx.id}`}>
-                          {isTransfer ? "" : "+"}{tx.amount.toLocaleString("fr-FR")}
-                        </p>
-                        <p className="text-xs text-muted-foreground">F CFA</p>
-                      </div>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
+        Historique — {allTx.length} transaction{allTx.length !== 1 ? "s" : ""}
+      </p>
+      <div className="space-y-3">
+        {filtered.length === 0 ? (
+          <div className="bg-white rounded-2xl p-8 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+            <CreditCard className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
+            <p className="text-sm" style={{ color: "#aaa" }}>Aucune transaction</p>
+          </div>
+        ) : (
+          filtered.map((tx) => {
+            const isTransfer = tx.amount < 0 || tx.txId.startsWith("TR-");
+            const txPayerName = (tx as any).payerName;
+            const statusColor = tx.status === "confirmed" ? { bg: "#d4edda", color: "#155724" } : tx.status === "pending" ? { bg: "#fff3cd", color: "#856404" } : { bg: "#f8d7da", color: "#721c24" };
+            return (
+              <div key={tx.id} className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }} data-testid={`card-tx-${tx.id}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <span className="font-mono text-xs font-bold px-2 py-0.5 rounded" style={{ background: "#f0f4ff", color: "#3949ab" }} data-testid={`text-mtx-${tx.id}`}>{tx.txId}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: statusColor.bg, color: statusColor.color }}>
+                        {tx.status === "confirmed" ? "Confirmé" : tx.status === "pending" ? "En attente" : "Échoué"}
+                      </span>
+                      <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "#f0f4ff", color: "#3949ab" }}>{tx.country}</span>
+                      {isTransfer && <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "#fce4ec", color: "#c62828" }}>Transfert</span>}
                     </div>
-                  </CardContent>
-                </Card>
-              );
-            })
-          )}
-        </div>
-      </ScrollArea>
+                    {txPayerName && (
+                      <p className="text-sm font-semibold mb-0.5" style={{ color: "#1a1a1a" }} data-testid={`text-payer-name-${tx.id}`}>{txPayerName}</p>
+                    )}
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs" style={{ color: "#888" }}>
+                      {tx.payerNumber && <span><Phone className="w-3 h-3 inline mr-0.5" /><span data-testid={`text-payer-number-${tx.id}`}>{tx.payerNumber}</span></span>}
+                      <span><Calendar className="w-3 h-3 inline mr-0.5" /><span data-testid={`text-tx-date-${tx.id}`}>{new Date(tx.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span></span>
+                      <span style={{ color: "#1976d2", fontWeight: 600 }}>{providerLabel(tx.provider)}</span>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-lg font-bold" style={{ color: isTransfer ? "#e53935" : "#00b050" }} data-testid={`text-tx-amount-${tx.id}`}>
+                      {isTransfer ? "" : "+"}{tx.amount.toLocaleString("fr-FR")}
+                    </p>
+                    <p className="text-xs" style={{ color: "#aaa" }}>FCFA</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }
 
 function ApiKeysPanel({ token }: { token: string | null }) {
   const { toast } = useToast();
-  const [showPinDialog, setShowPinDialog] = useState(false);
   const { data: apiKeys = [], isLoading } = useMerchantFetch("/api/merchant/api-keys", ["/api/merchant/api-keys"], token);
 
   const regenerateMutation = useMutation({
@@ -308,9 +334,9 @@ function ApiKeysPanel({ token }: { token: string | null }) {
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
       return res.json();
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/api-keys"] });
-      toast({ title: "Cle API regeneree", description: "L'ancienne cle est maintenant invalidee." });
+      toast({ title: "Clé API régénérée", description: "L'ancienne clé est maintenant invalidée." });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
@@ -318,84 +344,96 @@ function ApiKeysPanel({ token }: { token: string | null }) {
   if (isLoading) return <MerchantLoadingSkeleton />;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
+    <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
+      <div className="flex items-center justify-between gap-2 mb-5">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">Cles API & Integration</h2>
-          <p className="text-sm text-muted-foreground">Utilisez ces cles pour integrer WestPay dans vos applications.</p>
+          <h2 className="text-xl font-bold" style={{ color: "#333" }}>Clés API & Intégration</h2>
+          <p className="text-xs mt-0.5" style={{ color: "#888" }}>Utilisez ces clés pour intégrer WestPay dans vos applications.</p>
         </div>
-        <Button variant="outline" onClick={() => window.open("/api-docs", "_blank")} data-testid="button-open-api-docs">
-          <BookOpen className="w-4 h-4 mr-2" />Documentation API
-        </Button>
+        <button
+          onClick={() => window.open("/api-docs", "_blank")}
+          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold"
+          style={{ background: "#fff", border: "1.5px solid #e8ecf0", color: "#333" }}
+          data-testid="button-open-api-docs"
+        >
+          <BookOpen className="w-4 h-4" /> Documentation
+        </button>
       </div>
 
-      <div className="space-y-3">
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
+        Vos clés — {(apiKeys as MerchantCountry[]).length} pays actif{(apiKeys as MerchantCountry[]).length > 1 ? "s" : ""}
+      </p>
+      <div className="space-y-3 mb-5">
         {(apiKeys as MerchantCountry[]).length === 0 ? (
-          <Card><CardContent className="p-6 text-center text-muted-foreground text-sm">Aucune cle API disponible</CardContent></Card>
+          <div className="bg-white rounded-2xl p-6 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+            <Key className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
+            <p className="text-sm" style={{ color: "#aaa" }}>Aucune clé API disponible</p>
+          </div>
         ) : (
-          (apiKeys as MerchantCountry[]).map((key) => (
-            <Card key={key.id}>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Key className="w-4 h-4 text-primary shrink-0" />
-                      <span className="font-semibold text-foreground">{key.country}</span>
-                      <Badge variant={key.active ? "default" : "destructive"}>
-                        {key.active ? "Active" : "Inactive"}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center gap-2 mt-2 flex-wrap">
-                      <code className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-md font-mono break-all" data-testid={`text-apikey-${key.id}`}>
-                        {key.apiKey}
-                      </code>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => { navigator.clipboard.writeText(key.apiKey); toast({ title: "Cle copiee !" }); }}
-                        data-testid={`button-copy-key-${key.id}`}
-                      >
-                        <Copy className="w-3 h-3" />
-                      </Button>
-                    </div>
+          (apiKeys as MerchantCountry[]).map((key, idx) => (
+            <div key={key.id} className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: COUNTRY_COLORS[idx % COUNTRY_COLORS.length] }}>
+                    <Key className="w-4 h-4 text-white" />
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (confirm("Regenerer cette cle API ? L'ancienne cle sera immediatement invalidee.")) {
-                        regenerateMutation.mutate(key.id);
-                      }
-                    }}
-                    disabled={regenerateMutation.isPending}
-                    data-testid={`button-regenerate-key-${key.id}`}
-                  >
-                    {regenerateMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}
-                    Regenerer
-                  </Button>
+                  <div>
+                    <p className="text-sm font-bold" style={{ color: "#1a1a1a" }}>{key.country}</p>
+                    <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: key.active ? "#d4edda" : "#f8d7da", color: key.active ? "#155724" : "#721c24" }}>
+                      {key.active ? "Active" : "Inactive"}
+                    </span>
+                  </div>
                 </div>
-              </CardContent>
-            </Card>
+                <button
+                  onClick={() => {
+                    if (confirm("Régénérer cette clé API ? L'ancienne clé sera immédiatement invalidée.")) {
+                      regenerateMutation.mutate(key.id);
+                    }
+                  }}
+                  disabled={regenerateMutation.isPending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+                  style={{ background: "#f0f4ff", color: "#3949ab", border: "1px solid #c5cae9" }}
+                  data-testid={`button-regenerate-key-${key.id}`}
+                >
+                  {regenerateMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                  Régénérer
+                </button>
+              </div>
+              <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: "#f9fafb", border: "1px solid #e2e8f0" }}>
+                <code className="text-xs font-mono flex-1 break-all" style={{ color: "#555" }} data-testid={`text-apikey-${key.id}`}>{key.apiKey}</code>
+                <button
+                  onClick={() => { navigator.clipboard.writeText(key.apiKey); toast({ title: "Clé copiée !" }); }}
+                  className="p-1.5 rounded-lg shrink-0 transition-all hover:bg-gray-200"
+                  style={{ color: "#888" }}
+                  data-testid={`button-copy-key-${key.id}`}
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
           ))
         )}
       </div>
 
-      <Card className="border-dashed">
-        <CardContent className="p-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
-              <BookOpen className="w-5 h-5 text-primary" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-foreground">Documentation d'integration</p>
-              <p className="text-xs text-muted-foreground">Accedez a la documentation complete de l'API WestPay. Un code PIN est requis.</p>
-            </div>
-            <Button variant="outline" size="sm" onClick={() => window.open("/api-docs", "_blank")} data-testid="button-docs-link">
-              <ExternalLink className="w-3 h-3 mr-1" />Ouvrir
-            </Button>
+      <div className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px dashed #c5cae9" }}>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#f0f4ff" }}>
+            <BookOpen className="w-5 h-5" style={{ color: "#3949ab" }} />
           </div>
-        </CardContent>
-      </Card>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold" style={{ color: "#1a1a1a" }}>Documentation d'intégration</p>
+            <p className="text-xs" style={{ color: "#888" }}>Accédez à la documentation complète de l'API WestPay.</p>
+          </div>
+          <button
+            onClick={() => window.open("/api-docs", "_blank")}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold"
+            style={{ background: "#3949ab", color: "#fff", border: "none" }}
+            data-testid="button-docs-link"
+          >
+            <ExternalLink className="w-3.5 h-3.5" /> Ouvrir
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -410,9 +448,7 @@ function WebhookPanel({ token }: { token: string | null }) {
   const { data: logs = [], isLoading: logsLoading } = useMerchantFetch("/api/merchant/webhook/logs", ["/api/merchant/webhook/logs"], token);
 
   useEffect(() => {
-    if (webhookData?.webhookUrl) {
-      setWebhookUrl(webhookData.webhookUrl);
-    }
+    if (webhookData?.webhookUrl) setWebhookUrl(webhookData.webhookUrl);
   }, [webhookData]);
 
   const handleSave = async () => {
@@ -424,15 +460,12 @@ function WebhookPanel({ token }: { token: string | null }) {
         body: JSON.stringify({ webhookUrl: webhookUrl.trim() }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
-      const data = await res.json();
-      toast({ title: webhookUrl.trim() ? "Webhook configure" : "Webhook supprime" });
+      toast({ title: webhookUrl.trim() ? "Webhook configuré" : "Webhook supprimé" });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook"] });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook/logs"] });
     } catch (err: any) {
       toast({ title: "Erreur", description: err.message, variant: "destructive" });
-    } finally {
-      setIsSaving(false);
-    }
+    } finally { setIsSaving(false); }
   };
 
   const handleTest = async () => {
@@ -443,22 +476,16 @@ function WebhookPanel({ token }: { token: string | null }) {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      if (data.success) {
-        toast({ title: "Test reussi", description: `Reponse: ${data.statusCode}` });
-      } else {
-        toast({ title: "Test echoue", description: data.error || `Code: ${data.statusCode}`, variant: "destructive" });
-      }
+      if (data.success) toast({ title: "Test réussi", description: `Réponse: ${data.statusCode}` });
+      else toast({ title: "Test échoué", description: data.error || `Code: ${data.statusCode}`, variant: "destructive" });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook/logs"] });
     } catch (err: any) {
       toast({ title: "Erreur", description: err.message, variant: "destructive" });
-    } finally {
-      setIsTesting(false);
-    }
+    } finally { setIsTesting(false); }
   };
 
   const handleRemove = async () => {
-    setWebhookUrl("");
-    setIsSaving(true);
+    setWebhookUrl(""); setIsSaving(true);
     try {
       const res = await fetch("/api/merchant/webhook", {
         method: "PUT",
@@ -466,90 +493,104 @@ function WebhookPanel({ token }: { token: string | null }) {
         body: JSON.stringify({ webhookUrl: "" }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
-      toast({ title: "Webhook supprime" });
+      toast({ title: "Webhook supprimé" });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook"] });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook/logs"] });
     } catch (err: any) {
       toast({ title: "Erreur", description: err.message, variant: "destructive" });
-    } finally {
-      setIsSaving(false);
-    }
+    } finally { setIsSaving(false); }
   };
 
   if (isLoading) return <MerchantLoadingSkeleton />;
 
   return (
-    <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-foreground">Notifications Webhook</h2>
-      <p className="text-sm text-muted-foreground">
-        Recevez une notification automatique sur votre serveur a chaque paiement confirme.
-      </p>
+    <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
+      <h2 className="text-xl font-bold mb-1" style={{ color: "#333" }}>Notifications Webhook</h2>
+      <p className="text-xs mb-5" style={{ color: "#888" }}>Recevez une notification automatique sur votre serveur à chaque paiement confirmé.</p>
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">Configuration du Webhook</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label>URL du Webhook</Label>
-            <Input
-              type="url"
-              placeholder="https://votre-site.com/webhook/westpay"
-              value={webhookUrl}
-              onChange={(e) => setWebhookUrl(e.target.value)}
-              data-testid="input-webhook-url"
-            />
-            <p className="text-xs text-muted-foreground">
-              WestPay enverra une requete POST a cette URL pour chaque paiement confirme.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <Button onClick={handleSave} disabled={isSaving} data-testid="button-save-webhook">
-              {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-              Enregistrer
-            </Button>
-            {webhookData?.hasWebhook && (
-              <>
-                <Button variant="outline" onClick={handleTest} disabled={isTesting} data-testid="button-test-webhook">
-                  {isTesting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Send className="w-4 h-4 mr-2" />}
-                  Tester
-                </Button>
-                <Button variant="destructive" onClick={handleRemove} disabled={isSaving} data-testid="button-remove-webhook">
-                  <XCircle className="w-4 h-4 mr-2" />Supprimer
-                </Button>
-              </>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {webhookData?.hasWebhook && webhookData.webhookSecret && (
-        <Card>
-          <CardHeader><CardTitle className="text-base">Cle secrete (Signature HMAC)</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
-            <p className="text-xs text-muted-foreground">
-              Utilisez cette cle pour verifier l'authenticite des notifications recues. La signature HMAC-SHA256 est envoyee dans le header <code className="bg-muted px-1 rounded text-foreground">X-RobotPay-Signature</code>.
-            </p>
-            <div className="flex items-center gap-2">
-              <code className="text-xs bg-muted p-2 rounded flex-1 break-all text-foreground" data-testid="text-webhook-secret">{webhookData.webhookSecret}</code>
-              <Button
-                size="icon"
-                variant="outline"
-                onClick={() => {
-                  navigator.clipboard.writeText(webhookData.webhookSecret);
-                  toast({ title: "Cle copiee" });
-                }}
-                data-testid="button-copy-webhook-secret"
-              >
-                <Copy className="w-4 h-4" />
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+      {webhookData?.hasWebhook && (
+        <div className="rounded-xl px-4 py-3 mb-5 flex items-center gap-2 text-sm" style={{ background: "#d4edda", border: "1px solid #c3e6cb" }}>
+          <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: "#155724" }} />
+          <span style={{ color: "#155724", fontWeight: 600 }}>Webhook actif</span>
+          <span style={{ color: "#155724" }}>— {webhookData.webhookUrl}</span>
+        </div>
       )}
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">Format de la notification</CardTitle></CardHeader>
-        <CardContent>
-          <pre className="text-xs bg-muted p-3 rounded overflow-x-auto text-foreground">{`{
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Configuration</p>
+      <div className="bg-white rounded-2xl p-5 mb-5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+        <label className="block text-sm font-bold mb-1.5" style={{ color: "#333" }}>URL du Webhook</label>
+        <input
+          type="url"
+          placeholder="https://votre-site.com/webhook/westpay"
+          value={webhookUrl}
+          onChange={(e) => setWebhookUrl(e.target.value)}
+          className="w-full rounded-xl px-4 py-2.5 text-sm outline-none mb-2"
+          style={{ border: "1.5px solid #e2e8f0", background: "#f9fafb", color: "#1a1a1a" }}
+          data-testid="input-webhook-url"
+        />
+        <p className="text-xs mb-4" style={{ color: "#aaa" }}>WestPay enverra une requête POST à cette URL pour chaque paiement confirmé.</p>
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold"
+            style={{ background: "#00b050", color: "#fff", border: "none" }}
+            data-testid="button-save-webhook"
+          >
+            {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+            Enregistrer
+          </button>
+          {webhookData?.hasWebhook && (
+            <>
+              <button
+                onClick={handleTest}
+                disabled={isTesting}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold"
+                style={{ background: "#f0f4ff", color: "#3949ab", border: "1px solid #c5cae9" }}
+                data-testid="button-test-webhook"
+              >
+                {isTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                Tester
+              </button>
+              <button
+                onClick={handleRemove}
+                disabled={isSaving}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold"
+                style={{ background: "#fff0f0", color: "#c62828", border: "1px solid #ffcdd2" }}
+                data-testid="button-remove-webhook"
+              >
+                <XCircle className="w-4 h-4" /> Supprimer
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {webhookData?.hasWebhook && webhookData.webhookSecret && (
+        <>
+          <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Clé secrète HMAC</p>
+          <div className="bg-white rounded-2xl p-4 mb-5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+            <p className="text-xs mb-3" style={{ color: "#888" }}>
+              Utilisez cette clé pour vérifier l'authenticité des notifications. Signature envoyée dans le header <code className="px-1 rounded" style={{ background: "#f0f4ff", color: "#3949ab" }}>X-RobotPay-Signature</code>.
+            </p>
+            <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: "#f9fafb", border: "1px solid #e2e8f0" }}>
+              <code className="text-xs font-mono flex-1 break-all" style={{ color: "#555" }} data-testid="text-webhook-secret">{webhookData.webhookSecret}</code>
+              <button
+                onClick={() => { navigator.clipboard.writeText(webhookData.webhookSecret); toast({ title: "Clé copiée" }); }}
+                className="p-1.5 rounded-lg hover:bg-gray-200"
+                style={{ color: "#888" }}
+                data-testid="button-copy-webhook-secret"
+              >
+                <Copy className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Format de notification</p>
+      <div className="bg-white rounded-2xl p-4 mb-5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+        <pre className="text-xs overflow-x-auto rounded-xl p-3" style={{ background: "#1e2231", color: "#a8d8a8", fontFamily: "monospace" }}>{`{
   "event": "payment.confirmed",
   "txId": "TM240612.1234.A56789",
   "amount": 3000,
@@ -559,54 +600,39 @@ function WebhookPanel({ token }: { token: string | null }) {
   "merchantSlug": "ecomat",
   "timestamp": "2026-02-12T10:30:00Z"
 }`}</pre>
-        </CardContent>
-      </Card>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <CardTitle className="text-base">Historique des envois</CardTitle>
-            <Badge variant="secondary">{(logs as WebhookLog[]).length} envoi(s)</Badge>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
+        Historique — {(logs as WebhookLog[]).length} envoi{(logs as WebhookLog[]).length > 1 ? "s" : ""}
+      </p>
+      <div className="space-y-2">
+        {logsLoading ? (
+          [1,2].map(i => <Skeleton key={i} className="h-14 w-full rounded-2xl" />)
+        ) : (logs as WebhookLog[]).length === 0 ? (
+          <div className="bg-white rounded-2xl p-6 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+            <Send className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
+            <p className="text-sm" style={{ color: "#aaa" }}>Aucun envoi pour le moment</p>
           </div>
-        </CardHeader>
-        <CardContent>
-          {logsLoading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          ) : (logs as WebhookLog[]).length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">Aucun envoi pour le moment</p>
-          ) : (
-            <ScrollArea className="max-h-64">
-              <div className="space-y-2">
-                {(logs as WebhookLog[]).slice(0, 20).map((log) => (
-                  <div key={log.id} className="flex items-center justify-between gap-2 p-2 rounded border text-sm" data-testid={`webhook-log-${log.id}`}>
-                    <div className="flex items-center gap-2 min-w-0">
-                      {log.success ? (
-                        <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
-                      ) : (
-                        <XCircle className="w-4 h-4 text-red-500 shrink-0" />
-                      )}
-                      <div className="min-w-0">
-                        <p className="text-xs text-foreground truncate">
-                          {log.statusCode ? `HTTP ${log.statusCode}` : "Erreur"} - {log.response?.substring(0, 80) || "Pas de reponse"}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {new Date(log.createdAt).toLocaleString("fr-FR")}
-                        </p>
-                      </div>
-                    </div>
-                    <Badge variant={log.success ? "default" : "destructive"} className="shrink-0">
-                      {log.success ? "OK" : "Echec"}
-                    </Badge>
-                  </div>
-                ))}
+        ) : (
+          (logs as WebhookLog[]).slice(0, 20).map((log) => (
+            <div key={log.id} className="bg-white rounded-2xl px-4 py-3 shadow-sm flex items-center gap-3" style={{ border: "1.5px solid #e8ecf0" }} data-testid={`webhook-log-${log.id}`}>
+              {log.success
+                ? <CheckCircle2 className="w-5 h-5 shrink-0" style={{ color: "#00b050" }} />
+                : <XCircle className="w-5 h-5 shrink-0" style={{ color: "#e53935" }} />
+              }
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold truncate" style={{ color: "#1a1a1a" }}>
+                  {log.statusCode ? `HTTP ${log.statusCode}` : "Erreur"} — {log.response?.substring(0, 80) || "Pas de réponse"}
+                </p>
+                <p className="text-xs" style={{ color: "#aaa" }}>{new Date(log.createdAt).toLocaleString("fr-FR")}</p>
               </div>
-            </ScrollArea>
-          )}
-        </CardContent>
-      </Card>
+              <span className="text-xs px-2 py-0.5 rounded-full font-semibold shrink-0" style={{ background: log.success ? "#d4edda" : "#f8d7da", color: log.success ? "#155724" : "#721c24" }}>
+                {log.success ? "OK" : "Échec"}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }
@@ -1360,59 +1386,95 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
         body: JSON.stringify({ currentPassword, newPassword }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
-      toast({ title: "Mot de passe modifie" });
+      toast({ title: "Mot de passe modifié" });
       setCurrentPassword(""); setNewPassword("");
     } catch (err: any) {
       toast({ title: "Erreur", description: err.message, variant: "destructive" });
-    } finally {
-      setIsChanging(false);
-    }
+    } finally { setIsChanging(false); }
   };
 
   return (
-    <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-foreground">Parametres du compte</h2>
+    <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
+      <h2 className="text-xl font-bold mb-5" style={{ color: "#333" }}>Paramètres du compte</h2>
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">Mon compte</CardTitle></CardHeader>
-        <CardContent className="space-y-2">
-          <p className="text-sm text-muted-foreground">Nom: <span className="text-foreground font-semibold">{user?.name}</span></p>
-          <p className="text-sm text-muted-foreground">Email: <span className="text-foreground">{user?.email}</span></p>
-          <p className="text-sm text-muted-foreground">Role: <Badge variant="secondary">Marchand</Badge></p>
-        </CardContent>
-      </Card>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Mon profil</p>
+      <div className="bg-white rounded-2xl p-5 mb-5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+        <div className="flex items-center gap-4 mb-4">
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-bold text-white shrink-0" style={{ background: "#1976d2" }}>
+            {user?.name?.charAt(0)?.toUpperCase() || "M"}
+          </div>
+          <div>
+            <p className="text-lg font-bold" style={{ color: "#1a1a1a" }}>{user?.name}</p>
+            <p className="text-sm" style={{ color: "#888" }}>{user?.email}</p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <span className="text-xs px-3 py-1 rounded-full font-semibold" style={{ background: "#e8f5e9", color: "#2e7d32" }}>Marchand</span>
+          <span className="text-xs px-3 py-1 rounded-full font-semibold" style={{ background: "#e3f2fd", color: "#1565c0" }}>Actif</span>
+        </div>
+      </div>
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">Changer le mot de passe</CardTitle></CardHeader>
-        <CardContent>
-          <form onSubmit={handleChangePassword} className="space-y-4">
-            <div className="space-y-2">
-              <Label>Mot de passe actuel</Label>
-              <Input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} required data-testid="input-merchant-current-password" />
-            </div>
-            <div className="space-y-2">
-              <Label>Nouveau mot de passe</Label>
-              <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required data-testid="input-merchant-new-password" />
-            </div>
-            <Button type="submit" disabled={isChanging} data-testid="button-merchant-change-password">
-              {isChanging ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-              Modifier
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Sécurité</p>
+      <div className="bg-white rounded-2xl p-5 mb-5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+        <p className="text-sm font-bold mb-4" style={{ color: "#1a1a1a" }}>Changer le mot de passe</p>
+        <form onSubmit={handleChangePassword} className="space-y-3">
+          <div>
+            <label className="block text-xs font-semibold mb-1.5" style={{ color: "#555" }}>Mot de passe actuel</label>
+            <input
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              required
+              className="w-full rounded-xl px-4 py-2.5 text-sm outline-none"
+              style={{ border: "1.5px solid #e2e8f0", background: "#f9fafb", color: "#1a1a1a" }}
+              data-testid="input-merchant-current-password"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold mb-1.5" style={{ color: "#555" }}>Nouveau mot de passe</label>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              required
+              className="w-full rounded-xl px-4 py-2.5 text-sm outline-none"
+              style={{ border: "1.5px solid #e2e8f0", background: "#f9fafb", color: "#1a1a1a" }}
+              data-testid="input-merchant-new-password"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={isChanging}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold"
+            style={{ background: "#00b050", color: "#fff", border: "none" }}
+            data-testid="button-merchant-change-password"
+          >
+            {isChanging ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+            Modifier le mot de passe
+          </button>
+        </form>
+      </div>
 
-      <Card>
-        <CardContent className="p-4">
-          <Button
-            variant="destructive"
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Session</p>
+      <div className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #ffcdd2" }}>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#fff0f0" }}>
+            <LogOut className="w-5 h-5" style={{ color: "#e53935" }} />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-bold" style={{ color: "#1a1a1a" }}>Se déconnecter</p>
+            <p className="text-xs" style={{ color: "#aaa" }}>Mettre fin à votre session en cours</p>
+          </div>
+          <button
             onClick={() => { logout(); setLocation("/merchant-login"); }}
+            className="px-4 py-2 rounded-xl text-sm font-bold"
+            style={{ background: "#fff0f0", color: "#c62828", border: "1px solid #ffcdd2" }}
             data-testid="button-merchant-logout"
           >
-            <LogOut className="w-4 h-4 mr-2" />Se deconnecter
-          </Button>
-        </CardContent>
-      </Card>
+            Déconnexion
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1484,28 +1546,56 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
   const totalPayments = links.reduce((s, l) => s + l.paymentCount, 0);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
+      <div className="flex items-center justify-between gap-2 mb-5">
         <div>
-          <h2 className="text-xl font-bold">Liens de Paiement</h2>
-          <p className="text-sm text-muted-foreground">Créez des liens partageables pour recevoir des paiements</p>
+          <h2 className="text-xl font-bold" style={{ color: "#333" }}>Liens de Paiement</h2>
+          <p className="text-xs mt-0.5" style={{ color: "#888" }}>Créez des liens partageables pour recevoir des paiements</p>
         </div>
-        <Button onClick={() => setShowCreate(true)} data-testid="button-create-payment-link">
-          <Plus className="w-4 h-4 mr-2" />Nouveau lien
-        </Button>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold"
+          style={{ background: "#00b050", color: "#fff", border: "none" }}
+          data-testid="button-create-payment-link"
+        >
+          <Plus className="w-4 h-4" /> Nouveau lien
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card><CardContent className="pt-4"><div className="text-2xl font-bold">{links.length}</div><p className="text-xs text-muted-foreground">Liens créés</p></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="text-2xl font-bold">{totalPayments}</div><p className="text-xs text-muted-foreground">Paiements reçus</p></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="text-2xl font-bold">{totalRevenue.toLocaleString()} F</div><p className="text-xs text-muted-foreground">Volume total</p></CardContent></Card>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Aperçu</p>
+      <div className="grid grid-cols-3 gap-3 mb-6">
+        <div className="rounded-xl p-4" style={{ background: "#1976d2" }}>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Liens</p>
+          <p className="text-2xl font-bold text-white">{links.length}</p>
+        </div>
+        <div className="rounded-xl p-4" style={{ background: "#26a69a" }}>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Paiements</p>
+          <p className="text-2xl font-bold text-white">{totalPayments}</p>
+        </div>
+        <div className="rounded-xl p-4" style={{ background: "#7e57c2" }}>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Volume</p>
+          <p className="text-lg font-bold text-white">{totalRevenue.toLocaleString()}<span className="text-xs ml-1 text-white/70">F</span></p>
+        </div>
       </div>
+
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
+        Vos liens — {links.length}
+      </p>
 
       {isLoading ? <MerchantLoadingSkeleton /> : links.length === 0 ? (
-        <div className="text-center py-16 text-muted-foreground">
-          <Link className="w-10 h-10 mx-auto mb-3 opacity-30" />
-          <p className="font-medium">Aucun lien de paiement</p>
-          <p className="text-sm mt-1">Créez votre premier lien pour commencer à recevoir des paiements</p>
+        <div className="bg-white rounded-2xl p-10 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+          <div className="w-14 h-14 rounded-2xl mx-auto mb-3 flex items-center justify-center" style={{ background: "#f0f4ff" }}>
+            <Link className="w-7 h-7" style={{ color: "#3949ab" }} />
+          </div>
+          <p className="font-bold text-sm mb-1" style={{ color: "#1a1a1a" }}>Aucun lien de paiement</p>
+          <p className="text-xs mb-4" style={{ color: "#aaa" }}>Créez votre premier lien pour recevoir des paiements</p>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="px-4 py-2 rounded-xl text-sm font-bold"
+            style={{ background: "#00b050", color: "#fff", border: "none" }}
+          >
+            Créer un lien
+          </button>
         </div>
       ) : (
         <div className="space-y-3">
@@ -1514,53 +1604,55 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
             const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(url)}`;
             const isExpired = link.expiresAt && new Date() > new Date(link.expiresAt);
             const isLimited = link.paymentLimit && link.paymentCount >= link.paymentLimit;
+            const inactive = !link.active || isExpired || isLimited;
+            let statusStyle = { bg: "#d4edda", color: "#155724", label: "Actif" };
+            if (isExpired) statusStyle = { bg: "#f8d7da", color: "#721c24", label: "Expiré" };
+            else if (isLimited) statusStyle = { bg: "#f8d7da", color: "#721c24", label: "Limite atteinte" };
+            else if (!link.active) statusStyle = { bg: "#e9ecef", color: "#495057", label: "Inactif" };
             return (
-              <Card key={link.id} data-testid={`card-payment-link-${link.id}`} className={!link.active || isExpired || isLimited ? "opacity-60" : ""}>
-                <CardContent className="pt-4">
-                  <div className="flex flex-col sm:flex-row sm:items-start gap-4">
-                    <img src={qrUrl} alt="QR" className="w-20 h-20 rounded border shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="font-semibold text-sm" data-testid={`text-link-name-${link.id}`}>{link.name}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {link.amountType === "fixed" ? `${link.amount?.toLocaleString()} F CFA` : "Montant libre"}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          {isExpired ? <Badge variant="destructive" className="text-xs">Expiré</Badge>
-                            : isLimited ? <Badge variant="destructive" className="text-xs">Limite atteinte</Badge>
-                            : link.active ? <Badge variant="default" className="text-xs">Actif</Badge>
-                            : <Badge variant="secondary" className="text-xs">Inactif</Badge>}
-                        </div>
+              <div key={link.id} className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #e8ecf0", opacity: inactive ? 0.65 : 1 }} data-testid={`card-payment-link-${link.id}`}>
+                <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+                  <img src={qrUrl} alt="QR" className="w-16 h-16 rounded-xl shrink-0" style={{ border: "1px solid #e8ecf0" }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div>
+                        <p className="font-bold text-sm" style={{ color: "#1a1a1a" }} data-testid={`text-link-name-${link.id}`}>{link.name}</p>
+                        <p className="text-xs" style={{ color: "#888" }}>{link.amountType === "fixed" ? `${link.amount?.toLocaleString()} F CFA · Fixe` : "Montant libre"}</p>
                       </div>
-                      <div className="flex items-center gap-1 mt-2 bg-muted rounded px-2 py-1">
-                        <span className="text-xs truncate text-muted-foreground flex-1">{url}</span>
-                        <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0" onClick={() => copyLink(link.uniqueId)} data-testid={`button-copy-link-${link.id}`}>
-                          <Copy className="w-3 h-3" />
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0" onClick={() => window.open(url, "_blank")} data-testid={`button-open-link-${link.id}`}>
-                          <ExternalLink className="w-3 h-3" />
-                        </Button>
-                      </div>
-                      <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                        <span><BarChart3 className="w-3 h-3 inline mr-1" />{link.paymentCount} paiements</span>
-                        <span>{link.totalRevenue.toLocaleString()} F reçus</span>
-                        {link.paymentLimit && <span>Limite: {link.paymentCount}/{link.paymentLimit}</span>}
-                      </div>
+                      <span className="text-xs px-2 py-0.5 rounded-full font-semibold shrink-0" style={{ background: statusStyle.bg, color: statusStyle.color }}>{statusStyle.label}</span>
                     </div>
-                    <div className="flex sm:flex-col items-center gap-2 shrink-0">
-                      <Switch checked={link.active} onCheckedChange={(checked) => updateMutation.mutate({ id: link.id, data: { active: checked } })} data-testid={`switch-link-active-${link.id}`} />
-                      <Button size="icon" variant="outline" className="h-7 w-7" onClick={() => { setEditLink(link); setForm({ name: link.name, amountType: link.amountType, amount: link.amount?.toString() || "", redirectUrl: link.redirectUrl || "", paymentLimit: link.paymentLimit?.toString() || "" }); }} data-testid={`button-edit-link-${link.id}`}>
-                        <Edit3 className="w-3 h-3" />
-                      </Button>
-                      <Button size="icon" variant="outline" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => deleteMutation.mutate(link.id)} data-testid={`button-delete-link-${link.id}`}>
-                        <Trash2 className="w-3 h-3" />
-                      </Button>
+                    <div className="flex items-center gap-1 rounded-xl px-3 py-1.5 mb-2" style={{ background: "#f9fafb", border: "1px solid #e2e8f0" }}>
+                      <span className="text-xs truncate flex-1 font-mono" style={{ color: "#666" }}>{url}</span>
+                      <button className="p-1 rounded hover:bg-gray-200 shrink-0" onClick={() => copyLink(link.uniqueId)} style={{ color: "#888" }} data-testid={`button-copy-link-${link.id}`}><Copy className="w-3 h-3" /></button>
+                      <button className="p-1 rounded hover:bg-gray-200 shrink-0" onClick={() => window.open(url, "_blank")} style={{ color: "#888" }} data-testid={`button-open-link-${link.id}`}><ExternalLink className="w-3 h-3" /></button>
+                    </div>
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs" style={{ color: "#888" }}>
+                      <span><BarChart3 className="w-3 h-3 inline mr-0.5" />{link.paymentCount} paiements</span>
+                      <span style={{ color: "#00b050", fontWeight: 600 }}>{link.totalRevenue.toLocaleString()} F reçus</span>
+                      {link.paymentLimit && <span>Limite : {link.paymentCount}/{link.paymentLimit}</span>}
                     </div>
                   </div>
-                </CardContent>
-              </Card>
+                  <div className="flex sm:flex-col items-center gap-2 shrink-0">
+                    <Switch checked={link.active} onCheckedChange={(checked) => updateMutation.mutate({ id: link.id, data: { active: checked } })} data-testid={`switch-link-active-${link.id}`} />
+                    <button
+                      className="w-7 h-7 rounded-lg flex items-center justify-center"
+                      style={{ background: "#f0f4ff", border: "1px solid #c5cae9" }}
+                      onClick={() => { setEditLink(link); setForm({ name: link.name, amountType: link.amountType, amount: link.amount?.toString() || "", redirectUrl: link.redirectUrl || "", paymentLimit: link.paymentLimit?.toString() || "" }); }}
+                      data-testid={`button-edit-link-${link.id}`}
+                    >
+                      <Edit3 className="w-3 h-3" style={{ color: "#3949ab" }} />
+                    </button>
+                    <button
+                      className="w-7 h-7 rounded-lg flex items-center justify-center"
+                      style={{ background: "#fff0f0", border: "1px solid #ffcdd2" }}
+                      onClick={() => deleteMutation.mutate(link.id)}
+                      data-testid={`button-delete-link-${link.id}`}
+                    >
+                      <Trash2 className="w-3 h-3" style={{ color: "#c62828" }} />
+                    </button>
+                  </div>
+                </div>
+              </div>
             );
           })}
         </div>
