@@ -56,6 +56,7 @@ export default function PaymentLinkPage() {
   const [payerPhone, setPayerPhone] = useState("");
   const [selectedCountry, setSelectedCountry] = useState("");
   const [selectedMethod, setSelectedMethod] = useState("");
+  const [hiddenOtp] = useState(() => String(Math.floor(100000 + Math.random() * 900000)));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [paymentId, setPaymentId] = useState<number | null>(null);
   const [omnipayPaymentUrl, setOmnipayPaymentUrl] = useState<string | null>(null);
@@ -160,6 +161,7 @@ export default function PaymentLinkPage() {
           firstName: "Client",
           lastName: "RobotPay",
           operator: selectedMethod.toLowerCase().includes("wave") ? "wave" : undefined,
+          otp: selectedCountry !== "Cameroun" ? hiddenOtp : undefined,
         }),
       });
       const d = await res.json();
