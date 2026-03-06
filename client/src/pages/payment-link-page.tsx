@@ -224,7 +224,7 @@ export default function PaymentLinkPage() {
 
       <div className="plp-root w-full max-w-[420px] px-4 py-3">
         <div className="mb-2">
-          <p className="text-white font-bold text-lg">{merchantName}</p>
+          <p className="text-white font-bold text-lg">RobotPay</p>
           <p className="text-white/80 text-sm">{link.name}</p>
         </div>
 
