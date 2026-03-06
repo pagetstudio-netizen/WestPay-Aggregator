@@ -1192,12 +1192,14 @@ export async function registerRoutes(
 
           const existingTx = await storage.getTransactionByTxId(txId);
           if (!existingTx) {
+            const payerFullName = [payload.first_name, payload.last_name].filter(Boolean).join(" ") || pending.payerName || null;
             await storage.createTransaction({
               merchantId: pending.merchantId,
               country: pending.country,
               txId,
               amount: pending.amount,
               payerNumber: payload.msisdn || pending.payerPhone || null,
+              payerName: payerFullName,
               status: "confirmed",
               provider: "omnipay",
               omnipayTxId: payload.id || null,
@@ -2160,6 +2162,8 @@ export async function registerRoutes(
       if (mc.balance < amount) return res.status(400).json({ message: "Solde insuffisant" });
       const merchant = await storage.getMerchantById(merchantId);
       if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
+
+      const mode = merchant.withdrawalMode || "manual";
       const w = await storage.createWithdrawal({
         merchantId,
         merchantCountryId: mc.id,
@@ -2168,10 +2172,38 @@ export async function registerRoutes(
         phone,
         operator: operator || null,
         status: "pending",
-        withdrawalMode: merchant.withdrawalMode || "manual",
+        withdrawalMode: mode,
         adminNote: null,
       });
       await storage.decrementMerchantCountryBalance(mc.id, amount);
+
+      if (mode === "auto" && mc.omnipayEnabled && mc.apiKey) {
+        try {
+          const reference = `WD-${w.id}-${Date.now()}`;
+          const result = await omnipayInitiateTransfer({
+            apikey: mc.apiKey,
+            msisdn: phone,
+            amount,
+            reference,
+            first_name: merchant.name,
+            last_name: "",
+            operator: operator || undefined,
+          });
+          if (result.success === 1) {
+            await storage.updateWithdrawalStatus(w.id, "approved", "Traitement automatique OmniPay", result.reference || reference, result.fees || 0);
+            return res.json({ ...w, status: "approved", omnipayRef: result.reference, fees: result.fees || 0, autoProcessed: true });
+          } else {
+            const errMsg = result.message || "Echec OmniPay";
+            await storage.updateWithdrawalStatus(w.id, "failed", `OmniPay: ${errMsg}`);
+            await storage.incrementMerchantCountryBalance(mc.id, amount);
+            return res.status(400).json({ message: `Echec traitement automatique : ${errMsg}` });
+          }
+        } catch (omnipayErr: any) {
+          console.error("[AUTO WITHDRAWAL] OmniPay error:", omnipayErr.message);
+          await storage.updateWithdrawalStatus(w.id, "pending", "Erreur OmniPay - en attente validation admin");
+        }
+      }
+
       res.json(w);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -2205,8 +2237,37 @@ export async function registerRoutes(
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
       if (w.status !== "pending") return res.status(400).json({ message: "Reversement deja traite" });
-      await storage.updateWithdrawalStatus(id, "approved", note);
-      res.json({ success: true });
+
+      const mc = await storage.getMerchantCountryById(w.merchantCountryId);
+      const merchant = await storage.getMerchantById(w.merchantId);
+      let omnipayRef: string | undefined;
+      let fees: number | undefined;
+
+      if (mc && mc.omnipayEnabled && mc.apiKey && merchant) {
+        try {
+          const reference = `WD-${w.id}-${Date.now()}`;
+          const result = await omnipayInitiateTransfer({
+            apikey: mc.apiKey,
+            msisdn: w.phone,
+            amount: w.amount,
+            reference,
+            first_name: merchant.name,
+            last_name: "",
+            operator: w.operator || undefined,
+          });
+          if (result.success === 1) {
+            omnipayRef = result.reference || reference;
+            fees = result.fees || 0;
+          } else {
+            console.error(`[ADMIN APPROVE WD] OmniPay echec: ${result.message}`);
+          }
+        } catch (omnipayErr: any) {
+          console.error("[ADMIN APPROVE WD] OmniPay error:", omnipayErr.message);
+        }
+      }
+
+      await storage.updateWithdrawalStatus(id, "approved", note, omnipayRef, fees);
+      res.json({ success: true, omnipayRef, fees });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

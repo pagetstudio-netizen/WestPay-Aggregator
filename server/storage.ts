@@ -115,9 +115,9 @@ export interface IStorage {
   deleteWalletTransferCountry(id: number): Promise<void>;
 
   createWithdrawal(data: InsertWithdrawal): Promise<Withdrawal>;
-  getWithdrawals(merchantId?: number): Promise<(Withdrawal & { merchantName: string })[]>;
+  getWithdrawals(merchantId?: number): Promise<(Withdrawal & { merchantName: string; merchantWebsite?: string | null })[]>;
   getWithdrawalById(id: number): Promise<Withdrawal | undefined>;
-  updateWithdrawalStatus(id: number, status: string, adminNote?: string): Promise<void>;
+  updateWithdrawalStatus(id: number, status: string, adminNote?: string, omnipayRef?: string, fees?: number): Promise<void>;
   applyWithdrawal(id: number): Promise<void>;
 
   getWithdrawalOperators(country?: string, activeOnly?: boolean): Promise<WithdrawalOperator[]>;
@@ -591,7 +591,7 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async getWithdrawals(merchantId?: number): Promise<(Withdrawal & { merchantName: string })[]> {
+  async getWithdrawals(merchantId?: number): Promise<(Withdrawal & { merchantName: string; merchantWebsite?: string | null })[]> {
     const rows = await db
       .select({
         id: withdrawals.id,
@@ -600,12 +600,16 @@ export class DatabaseStorage implements IStorage {
         country: withdrawals.country,
         amount: withdrawals.amount,
         phone: withdrawals.phone,
+        operator: withdrawals.operator,
         status: withdrawals.status,
         withdrawalMode: withdrawals.withdrawalMode,
         adminNote: withdrawals.adminNote,
+        omnipayRef: withdrawals.omnipayRef,
+        fees: withdrawals.fees,
         createdAt: withdrawals.createdAt,
         processedAt: withdrawals.processedAt,
         merchantName: merchants.name,
+        merchantWebsite: merchants.website,
       })
       .from(withdrawals)
       .leftJoin(merchants, eq(withdrawals.merchantId, merchants.id))
@@ -619,12 +623,15 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async updateWithdrawalStatus(id: number, status: string, adminNote?: string): Promise<void> {
-    await db.update(withdrawals).set({
+  async updateWithdrawalStatus(id: number, status: string, adminNote?: string, omnipayRef?: string, fees?: number): Promise<void> {
+    const updateData: any = {
       status,
       adminNote: adminNote || null,
       processedAt: new Date(),
-    }).where(eq(withdrawals.id, id));
+    };
+    if (omnipayRef) updateData.omnipayRef = omnipayRef;
+    if (fees !== undefined) updateData.fees = fees;
+    await db.update(withdrawals).set(updateData).where(eq(withdrawals.id, id));
   }
 
   async applyWithdrawal(id: number): Promise<void> {

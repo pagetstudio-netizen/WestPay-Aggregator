@@ -2499,9 +2499,13 @@ function AdminWithdrawalsPanel() {
 
   const [activeSubTab, setActiveSubTab] = useState<"requests" | "operators">("requests");
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
-  const [selectedWd, setSelectedWd] = useState<(Withdrawal & { merchantName: string }) | null>(null);
+  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [selectedWd, setSelectedWd] = useState<any | null>(null);
   const [wdAction, setWdAction] = useState<"approve" | "reject">("approve");
   const [note, setNote] = useState("");
+  const [searchWd, setSearchWd] = useState("");
+  const [websiteFilterWd, setWebsiteFilterWd] = useState("");
+  const [statusFilterWd, setStatusFilterWd] = useState("all");
 
   const actionMutation = useMutation({
     mutationFn: async ({ id, action, note: n }: { id: number; action: "approve" | "reject"; note: string }) => {
@@ -2513,9 +2517,12 @@ function AdminWithdrawalsPanel() {
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
       return res.json();
     },
-    onSuccess: (_, vars) => {
+    onSuccess: (data, vars) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawals"] });
-      toast({ title: vars.action === "approve" ? "Reversement approuve" : "Reversement rejete (solde restitue)" });
+      const msg = vars.action === "approve"
+        ? data.omnipayRef ? `Approuvé via OmniPay (Réf: ${data.omnipayRef})` : "Reversement approuvé"
+        : "Reversement rejeté (solde restitué)";
+      toast({ title: msg });
       setNoteDialogOpen(false);
       setNote("");
       setSelectedWd(null);
@@ -2523,7 +2530,7 @@ function AdminWithdrawalsPanel() {
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
-  const openAction = (wd: Withdrawal & { merchantName: string }, action: "approve" | "reject") => {
+  const openAction = (wd: any, action: "approve" | "reject") => {
     setSelectedWd(wd);
     setWdAction(action);
     setNote("");
@@ -2532,12 +2539,21 @@ function AdminWithdrawalsPanel() {
 
   const statusBadge = (status: string) => {
     if (status === "pending") return <Badge variant="secondary" className="gap-1"><Clock className="w-3 h-3" />En attente</Badge>;
-    if (status === "approved") return <Badge className="bg-green-500 gap-1"><CheckCircle className="w-3 h-3" />Approuve</Badge>;
-    return <Badge variant="destructive" className="gap-1"><XCircle className="w-3 h-3" />Rejete</Badge>;
+    if (status === "approved") return <Badge className="bg-green-500 gap-1"><CheckCircle className="w-3 h-3" />Approuvé</Badge>;
+    if (status === "failed") return <Badge variant="destructive" className="gap-1"><XCircle className="w-3 h-3" />Échoué</Badge>;
+    return <Badge variant="destructive" className="gap-1"><XCircle className="w-3 h-3" />Rejeté</Badge>;
   };
 
-  const allWd = (wdList as (Withdrawal & { merchantName: string })[]);
+  const allWd = (wdList as any[]);
   const pending = allWd.filter(w => w.status === "pending");
+
+  const filteredWd = allWd.filter((w) => {
+    const term = searchWd.toLowerCase();
+    const matchSearch = !term || w.merchantName?.toLowerCase().includes(term) || w.phone?.includes(term) || w.country?.toLowerCase().includes(term) || (w.operator || "").toLowerCase().includes(term);
+    const matchWebsite = !websiteFilterWd || (w.merchantWebsite || "").toLowerCase().includes(websiteFilterWd.toLowerCase());
+    const matchStatus = statusFilterWd === "all" || w.status === statusFilterWd;
+    return matchSearch && matchWebsite && matchStatus;
+  });
 
   return (
     <div className="space-y-6">
@@ -2547,13 +2563,11 @@ function AdminWithdrawalsPanel() {
       </div>
 
       <div className="flex gap-1 border-b">
-        <button
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeSubTab === "requests" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+        <button className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeSubTab === "requests" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
           onClick={() => setActiveSubTab("requests")} data-testid="tab-wd-requests">
           Demandes{pending.length > 0 && <Badge variant="secondary" className="ml-2 text-xs">{pending.length}</Badge>}
         </button>
-        <button
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeSubTab === "operators" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+        <button className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeSubTab === "operators" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
           onClick={() => setActiveSubTab("operators")} data-testid="tab-wd-operators">
           Opérateurs
         </button>
@@ -2562,10 +2576,10 @@ function AdminWithdrawalsPanel() {
       {activeSubTab === "operators" && <WithdrawalOperatorsPanel />}
 
       {activeSubTab === "requests" && (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {pending.length > 0 && (
             <Card className="border-orange-200 dark:border-orange-800">
-              <CardHeader>
+              <CardHeader className="pb-2">
                 <div className="flex items-center justify-between gap-2">
                   <CardTitle className="text-base text-orange-600 dark:text-orange-400">Demandes en attente</CardTitle>
                   <Badge variant="secondary">{pending.length}</Badge>
@@ -2573,73 +2587,121 @@ function AdminWithdrawalsPanel() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {pending.map((wd) => (
-                    <div key={wd.id} className="p-3 rounded border bg-muted/30 space-y-2" data-testid={`withdrawal-pending-${wd.id}`}>
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <div>
-                          <span className="font-medium text-sm">{wd.merchantName}</span>
-                          <span className="text-muted-foreground text-xs ml-2">#{wd.id}</span>
-                          <Badge variant="outline" className="ml-2 text-xs">{wd.withdrawalMode === "auto" ? "Auto" : "Manuel"}</Badge>
+                  {pending.map((wd) => {
+                    const fees = wd.fees || 0;
+                    const net = wd.amount - fees;
+                    return (
+                      <div key={wd.id} className="p-3 rounded border bg-muted/30 space-y-2" data-testid={`withdrawal-pending-${wd.id}`}>
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-medium text-sm">{wd.merchantName}</span>
+                              <span className="text-muted-foreground text-xs">#{wd.id}</span>
+                              <Badge variant="outline" className="text-xs">{wd.withdrawalMode === "auto" ? "Auto" : "Manuel"}</Badge>
+                            </div>
+                            {wd.merchantWebsite && (
+                              <a href={wd.merchantWebsite.startsWith("http") ? wd.merchantWebsite : `https://${wd.merchantWebsite}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline">{wd.merchantWebsite}</a>
+                            )}
+                          </div>
+                          <div className="flex gap-2 shrink-0">
+                            <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-8"
+                              onClick={() => openAction(wd, "approve")} data-testid={`button-approve-wd-${wd.id}`}>
+                              <CheckCircle className="w-3 h-3" />Valider via OmniPay
+                            </Button>
+                            <Button size="sm" variant="destructive" className="gap-1 h-8"
+                              onClick={() => openAction(wd, "reject")} data-testid={`button-reject-wd-${wd.id}`}>
+                              <XCircle className="w-3 h-3" />Rejeter
+                            </Button>
+                          </div>
                         </div>
-                        <div className="flex gap-2">
-                          <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1"
-                            onClick={() => openAction(wd, "approve")} data-testid={`button-approve-wd-${wd.id}`}>
-                            <CheckCircle className="w-3 h-3" />Approuver
-                          </Button>
-                          <Button size="sm" variant="destructive" className="gap-1"
-                            onClick={() => openAction(wd, "reject")} data-testid={`button-reject-wd-${wd.id}`}>
-                            <XCircle className="w-3 h-3" />Rejeter
-                          </Button>
+                        <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+                          <div><span className="text-muted-foreground">Montant demandé :</span> <span className="font-semibold text-foreground">{wd.amount.toLocaleString("fr-FR")} FCFA</span></div>
+                          <div><span className="text-muted-foreground">Pays :</span> <span className="font-medium text-foreground">{wd.country}</span></div>
+                          {wd.operator && <div><span className="text-muted-foreground">Opérateur :</span> <span className="font-medium text-foreground">{wd.operator}</span></div>}
+                          <div><span className="text-muted-foreground">N° réception :</span> <span className="font-medium text-foreground">{wd.phone}</span></div>
+                          <div><span className="text-muted-foreground">Date :</span> <span>{new Date(wd.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span></div>
                         </div>
                       </div>
-                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                        <span className="font-medium text-foreground">{wd.amount.toLocaleString("fr-FR")} FCFA</span>
-                        <span>Pays : {wd.country}</span>
-                        {(wd as any).operator && <span>Opérateur : <span className="font-medium text-foreground">{(wd as any).operator}</span></span>}
-                        <span>Tel : {wd.phone}</span>
-                        <span>{new Date(wd.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </CardContent>
             </Card>
           )}
 
+          <div className="flex gap-2 flex-wrap">
+            <div className="relative flex-1 min-w-40">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input className="pl-10" placeholder="Marchand, pays, numéro..." value={searchWd} onChange={e => setSearchWd(e.target.value)} data-testid="input-search-wd" />
+            </div>
+            <div className="relative flex-1 min-w-40">
+              <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input className="pl-10" placeholder="Filtrer par site web..." value={websiteFilterWd} onChange={e => setWebsiteFilterWd(e.target.value)} data-testid="input-filter-wd-website" />
+            </div>
+            <Select value={statusFilterWd} onValueChange={setStatusFilterWd}>
+              <SelectTrigger className="w-36" data-testid="select-filter-wd-status"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous statuts</SelectItem>
+                <SelectItem value="pending">En attente</SelectItem>
+                <SelectItem value="approved">Approuvé</SelectItem>
+                <SelectItem value="rejected">Rejeté</SelectItem>
+                <SelectItem value="failed">Échoué</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           <Card>
-            <CardHeader>
+            <CardHeader className="pb-2">
               <div className="flex items-center justify-between gap-2">
                 <CardTitle className="text-base">Tous les reversements</CardTitle>
-                <Badge variant="secondary">{allWd.length}</Badge>
+                <Badge variant="secondary">{filteredWd.length}</Badge>
               </div>
             </CardHeader>
             <CardContent>
               {isLoading ? (
                 <div className="space-y-2"><Skeleton className="h-12 w-full" /><Skeleton className="h-12 w-full" /></div>
-              ) : allWd.length === 0 ? (
+              ) : filteredWd.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-4">Aucun reversement</p>
               ) : (
-                <ScrollArea className="max-h-[500px]">
+                <ScrollArea className="max-h-[600px]">
                   <div className="space-y-2">
-                    {allWd.map((wd) => (
-                      <div key={wd.id} className="p-3 rounded border bg-muted/20 text-sm" data-testid={`withdrawal-row-${wd.id}`}>
-                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold">{wd.amount.toLocaleString("fr-FR")} FCFA</span>
-                            <span className="text-muted-foreground">— {wd.country}</span>
-                            <span className="text-muted-foreground text-xs">({wd.merchantName})</span>
+                    {filteredWd.map((wd) => {
+                      const fees = wd.fees || 0;
+                      const net = wd.amount - fees;
+                      return (
+                        <div key={wd.id} className="p-3 rounded border bg-muted/20 space-y-2" data-testid={`withdrawal-row-${wd.id}`}>
+                          <div className="flex items-start justify-between gap-2 flex-wrap">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-semibold text-sm text-foreground">{wd.merchantName}</span>
+                                <span className="text-muted-foreground text-xs">#{wd.id}</span>
+                                <Badge variant="outline" className="text-xs">{wd.withdrawalMode === "auto" ? "Auto" : "Manuel"}</Badge>
+                                {statusBadge(wd.status)}
+                              </div>
+                              {wd.merchantWebsite && (
+                                <a href={wd.merchantWebsite.startsWith("http") ? wd.merchantWebsite : `https://${wd.merchantWebsite}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline flex items-center gap-1 mt-0.5">
+                                  <Globe className="w-3 h-3" />{wd.merchantWebsite}
+                                </a>
+                              )}
+                            </div>
+                            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setSelectedWd(wd); setDetailDialogOpen(true); }} data-testid={`button-wd-detail-${wd.id}`}>
+                              <Eye className="w-3 h-3 mr-1" />Détails
+                            </Button>
                           </div>
-                          {statusBadge(wd.status)}
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-0.5 text-xs">
+                            <div><span className="text-muted-foreground">Montant :</span> <span className="font-semibold text-foreground">{wd.amount.toLocaleString("fr-FR")} FCFA</span></div>
+                            {fees > 0 && <div><span className="text-muted-foreground">Frais :</span> <span className="text-orange-500">{fees.toLocaleString("fr-FR")} FCFA</span></div>}
+                            {fees > 0 && <div><span className="text-muted-foreground">Net envoyé :</span> <span className="font-semibold text-green-600">{net.toLocaleString("fr-FR")} FCFA</span></div>}
+                            <div><span className="text-muted-foreground">Pays :</span> {wd.country}</div>
+                            {wd.operator && <div><span className="text-muted-foreground">Opérateur :</span> {wd.operator}</div>}
+                            <div><span className="text-muted-foreground">N° réception :</span> <span className="font-medium">{wd.phone}</span></div>
+                            <div className="col-span-2"><span className="text-muted-foreground">Date :</span> {new Date(wd.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</div>
+                          </div>
+                          {wd.omnipayRef && <p className="text-xs text-muted-foreground">Réf OmniPay : <span className="font-mono">{wd.omnipayRef}</span></p>}
+                          {wd.adminNote && <p className="text-xs italic text-muted-foreground">Note : {wd.adminNote}</p>}
                         </div>
-                        <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-xs text-muted-foreground">
-                          {(wd as any).operator && <span className="font-medium text-foreground">{(wd as any).operator}</span>}
-                          <span>Tel : {wd.phone}</span>
-                          <Badge variant="outline" className="text-xs py-0">{wd.withdrawalMode === "auto" ? "Auto" : "Manuel"}</Badge>
-                          <span>{new Date(wd.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                        </div>
-                        {wd.adminNote && <p className="text-xs italic text-muted-foreground mt-0.5">Note : {wd.adminNote}</p>}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </ScrollArea>
               )}
@@ -2648,31 +2710,85 @@ function AdminWithdrawalsPanel() {
         </div>
       )}
 
+      <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Détails du reversement #{selectedWd?.id}</DialogTitle>
+          </DialogHeader>
+          {selectedWd && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-muted rounded p-3">
+                  <p className="text-xs text-muted-foreground mb-1">Marchand</p>
+                  <p className="font-semibold text-sm">{selectedWd.merchantName}</p>
+                  {selectedWd.merchantWebsite && <a href={selectedWd.merchantWebsite.startsWith("http") ? selectedWd.merchantWebsite : `https://${selectedWd.merchantWebsite}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline">{selectedWd.merchantWebsite}</a>}
+                </div>
+                <div className="bg-muted rounded p-3">
+                  <p className="text-xs text-muted-foreground mb-1">Statut</p>
+                  {selectedWd && statusBadge(selectedWd.status)}
+                  <p className="text-xs mt-1">{selectedWd.withdrawalMode === "auto" ? "Traitement auto" : "Traitement manuel"}</p>
+                </div>
+              </div>
+              <div className="rounded border p-3 space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-muted-foreground">Montant demandé</span><span className="font-semibold">{selectedWd.amount.toLocaleString("fr-FR")} FCFA</span></div>
+                {(selectedWd.fees || 0) > 0 && <>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Frais OmniPay</span><span className="text-orange-500">- {(selectedWd.fees || 0).toLocaleString("fr-FR")} FCFA</span></div>
+                  <div className="flex justify-between border-t pt-2"><span className="font-medium">Net envoyé</span><span className="font-bold text-green-600">{(selectedWd.amount - (selectedWd.fees || 0)).toLocaleString("fr-FR")} FCFA</span></div>
+                </>}
+              </div>
+              <div className="space-y-1 text-sm">
+                <div className="flex gap-2"><span className="text-muted-foreground w-32 shrink-0">Pays :</span><span className="font-medium">{selectedWd.country}</span></div>
+                {selectedWd.operator && <div className="flex gap-2"><span className="text-muted-foreground w-32 shrink-0">Mode paiement :</span><span className="font-medium">{selectedWd.operator}</span></div>}
+                <div className="flex gap-2"><span className="text-muted-foreground w-32 shrink-0">N° réception :</span><span className="font-medium font-mono">{selectedWd.phone}</span></div>
+                <div className="flex gap-2"><span className="text-muted-foreground w-32 shrink-0">Date :</span><span>{new Date(selectedWd.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span></div>
+                {selectedWd.processedAt && <div className="flex gap-2"><span className="text-muted-foreground w-32 shrink-0">Traité le :</span><span>{new Date(selectedWd.processedAt).toLocaleString("fr-FR", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span></div>}
+                {selectedWd.omnipayRef && <div className="flex gap-2"><span className="text-muted-foreground w-32 shrink-0">Réf OmniPay :</span><span className="font-mono text-xs">{selectedWd.omnipayRef}</span></div>}
+                {selectedWd.adminNote && <div className="flex gap-2"><span className="text-muted-foreground w-32 shrink-0">Note :</span><span className="italic">{selectedWd.adminNote}</span></div>}
+              </div>
+              {selectedWd.status === "pending" && (
+                <div className="flex gap-2 pt-2">
+                  <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 flex-1"
+                    onClick={() => { setDetailDialogOpen(false); openAction(selectedWd, "approve"); }}>
+                    <CheckCircle className="w-3 h-3" />Valider via OmniPay
+                  </Button>
+                  <Button size="sm" variant="destructive" className="gap-1 flex-1"
+                    onClick={() => { setDetailDialogOpen(false); openAction(selectedWd, "reject"); }}>
+                    <XCircle className="w-3 h-3" />Rejeter
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={noteDialogOpen} onOpenChange={setNoteDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{wdAction === "approve" ? "Approuver le reversement" : "Rejeter le reversement"}</DialogTitle>
+            <DialogTitle>{wdAction === "approve" ? "Valider via OmniPay" : "Rejeter le reversement"}</DialogTitle>
           </DialogHeader>
           {selectedWd && (
             <div className="space-y-4">
               <div className="p-3 rounded bg-muted text-sm space-y-1">
                 <p><span className="text-muted-foreground">Marchand :</span> <span className="font-medium">{selectedWd.merchantName}</span></p>
+                {selectedWd.merchantWebsite && <p><span className="text-muted-foreground">Site :</span> <span className="text-blue-500">{selectedWd.merchantWebsite}</span></p>}
                 <p><span className="text-muted-foreground">Montant :</span> <span className="font-semibold">{selectedWd.amount.toLocaleString("fr-FR")} FCFA</span></p>
                 <p><span className="text-muted-foreground">Pays :</span> {selectedWd.country}</p>
-                {(selectedWd as any).operator && <p><span className="text-muted-foreground">Opérateur :</span> {(selectedWd as any).operator}</p>}
-                <p><span className="text-muted-foreground">Numéro :</span> {selectedWd.phone}</p>
+                {selectedWd.operator && <p><span className="text-muted-foreground">Opérateur :</span> {selectedWd.operator}</p>}
+                <p><span className="text-muted-foreground">N° réception :</span> <span className="font-mono">{selectedWd.phone}</span></p>
+                <p><span className="text-muted-foreground">Date :</span> {new Date(selectedWd.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
               </div>
+              {wdAction === "approve" && (
+                <p className="text-xs text-green-700 bg-green-50 dark:bg-green-950 dark:text-green-300 p-2 rounded">Le paiement sera traité via OmniPay si le wallet OmniPay est activé.</p>
+              )}
               {wdAction === "reject" && (
                 <p className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-950 p-2 rounded">Le solde sera restitué au marchand en cas de rejet.</p>
               )}
               <div className="space-y-2">
                 <Label>Note (optionnelle)</Label>
-                <Input
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
+                <Input value={note} onChange={(e) => setNote(e.target.value)}
                   placeholder={wdAction === "approve" ? "Ex: Paiement effectué" : "Ex: Informations insuffisantes"}
-                  data-testid="input-wd-note"
-                />
+                  data-testid="input-wd-note" />
               </div>
               <div className="flex gap-2 justify-end">
                 <Button variant="outline" onClick={() => setNoteDialogOpen(false)}>Annuler</Button>
@@ -2684,7 +2800,7 @@ function AdminWithdrawalsPanel() {
                   data-testid="button-confirm-wd-action"
                 >
                   {actionMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                  {wdAction === "approve" ? "Confirmer l'approbation" : "Confirmer le rejet"}
+                  {wdAction === "approve" ? "Valider et envoyer" : "Confirmer le rejet"}
                 </Button>
               </div>
             </div>

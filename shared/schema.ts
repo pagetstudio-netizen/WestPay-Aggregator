@@ -53,6 +53,7 @@ export const transactions = pgTable("transactions", {
   txId: text("tx_id").notNull().unique(),
   amount: integer("amount").notNull(),
   payerNumber: text("payer_number"),
+  payerName: text("payer_name"),
   status: text("status").notNull().default("confirmed"),
   provider: text("provider").notNull().default("sms"),
   omnipayTxId: text("omnipay_tx_id"),
@@ -170,6 +171,8 @@ export const withdrawals = pgTable("withdrawals", {
   status: text("status").notNull().default("pending"),
   withdrawalMode: text("withdrawal_mode").notNull().default("manual"),
   adminNote: text("admin_note"),
+  omnipayRef: text("omnipay_ref"),
+  fees: integer("fees").default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   processedAt: timestamp("processed_at"),
 });

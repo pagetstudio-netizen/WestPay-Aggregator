@@ -24,12 +24,12 @@ import {
   Wallet, ArrowRightLeft, Key, Settings, LogOut, Loader2, Download,
   Copy, Globe, DollarSign, Hash, TrendingUp, Search, RefreshCw, BookOpen, Lock, ExternalLink,
   Webhook, Send, CheckCircle2, XCircle, Clock, ArrowUpRight, Zap, Link, QrCode,
-  Trash2, Plus, ToggleLeft, ToggleRight, Edit3, BarChart3, MessageCircle, Phone
+  Trash2, Plus, ToggleLeft, ToggleRight, Edit3, BarChart3, MessageCircle, Phone, Receipt, User, Calendar, CreditCard, Filter
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry, Withdrawal } from "@shared/schema";
 
-type MerchantTab = "overview" | "apikeys" | "webhook" | "virements" | "reversements" | "settings" | "paymentlinks";
+type MerchantTab = "overview" | "apikeys" | "webhook" | "virements" | "reversements" | "settings" | "paymentlinks" | "transactions";
 
 function useMerchantFetch(url: string, key: string[], token: string | null) {
   return useQuery({
@@ -183,77 +183,131 @@ function OverviewPanel({ token }: { token: string | null }) {
 function MerchantTransactionsPanel({ token }: { token: string | null }) {
   const { data: transactions = [], isLoading } = useMerchantFetch("/api/merchant/transactions", ["/api/merchant/transactions"], token);
   const [searchTerm, setSearchTerm] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterProvider, setFilterProvider] = useState("all");
 
   if (isLoading) return <MerchantLoadingSkeleton />;
 
-  const filtered = (transactions as Transaction[]).filter(
-    (t) => t.txId.toLowerCase().includes(searchTerm.toLowerCase()) || t.country.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const allTx = (transactions as (Transaction & { payerName?: string | null })[]);
+
+  const filtered = allTx.filter((t) => {
+    const term = searchTerm.toLowerCase();
+    const matchSearch = !term || t.txId.toLowerCase().includes(term) || t.country.toLowerCase().includes(term) || (t.payerNumber || "").includes(term) || (t.payerName || "").toLowerCase().includes(term);
+    const matchStatus = filterStatus === "all" || t.status === filterStatus;
+    const matchProvider = filterProvider === "all" || t.provider === filterProvider;
+    return matchSearch && matchStatus && matchProvider;
+  });
 
   const downloadCSV = () => {
-    const header = "TXID,Montant,Pays,Statut,Date\n";
+    const header = "TXID,Nom payeur,Numéro,Montant,Pays,Statut,Mode,Date\n";
     const rows = filtered.map((t) =>
-      `${t.txId},${t.amount},${t.country},${t.status},${new Date(t.createdAt).toLocaleDateString("fr-FR")}`
+      `${t.txId},"${(t as any).payerName || ""}",${t.payerNumber || ""},${t.amount},${t.country},${t.status},${t.provider},${new Date(t.createdAt).toLocaleString("fr-FR")}`
     ).join("\n");
-    const blob = new Blob([header + rows], { type: "text/csv" });
+    const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = "mes-transactions.csv"; a.click();
+    a.href = url; a.download = "transactions.csv"; a.click();
   };
+
+  const providerLabel = (p: string) => {
+    if (p === "omnipay") return "Mobile Money";
+    if (p === "sms") return "SMS";
+    return p;
+  };
+
+  const confirmedTotal = allTx.filter(t => t.status === "confirmed" && t.amount > 0).reduce((s, t) => s + t.amount, 0);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <h2 className="text-lg font-semibold text-foreground">Mes transactions</h2>
-        <Button variant="outline" onClick={downloadCSV} data-testid="button-merchant-export-csv">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Mes transactions</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">Total confirmé : {confirmedTotal.toLocaleString("fr-FR")} F CFA</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={downloadCSV} data-testid="button-merchant-export-csv">
           <Download className="w-4 h-4 mr-2" />Export CSV
         </Button>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input className="pl-10" placeholder="Rechercher..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} data-testid="input-merchant-search-tx" />
+      <div className="flex gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-40">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input className="pl-10" placeholder="Rechercher par ID, nom, numéro, pays..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} data-testid="input-merchant-search-tx" />
+        </div>
+        <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <SelectTrigger className="w-36" data-testid="select-filter-status"><Filter className="w-3 h-3 mr-1" /><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tous statuts</SelectItem>
+            <SelectItem value="confirmed">Confirmé</SelectItem>
+            <SelectItem value="pending">En attente</SelectItem>
+            <SelectItem value="failed">Echoué</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={filterProvider} onValueChange={setFilterProvider}>
+          <SelectTrigger className="w-40" data-testid="select-filter-provider"><CreditCard className="w-3 h-3 mr-1" /><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tous modes</SelectItem>
+            <SelectItem value="omnipay">Mobile Money</SelectItem>
+            <SelectItem value="sms">SMS</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
+      {(searchTerm || filterStatus !== "all" || filterProvider !== "all") && (
+        <p className="text-xs text-muted-foreground">{filtered.length} transaction{filtered.length !== 1 ? "s" : ""} trouvée{filtered.length !== 1 ? "s" : ""}</p>
+      )}
 
-      <ScrollArea className="h-[calc(100vh-280px)]">
+      <ScrollArea className="h-[calc(100vh-340px)]">
         <div className="space-y-2">
           {filtered.length === 0 ? (
             <Card><CardContent className="p-6 text-center text-muted-foreground text-sm">Aucune transaction</CardContent></Card>
           ) : (
-            filtered.map((tx) => (
-              <Card key={tx.id}>
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-sm font-semibold text-foreground" data-testid={`text-mtx-${tx.id}`}>{tx.txId}</span>
-                        <Badge variant="secondary">{tx.country}</Badge>
-                        {tx.provider === "omnipay" && (
-                          <Badge variant="outline"><Zap className="w-3 h-3 mr-1" />Mobile Money</Badge>
+            filtered.map((tx) => {
+              const isTransfer = tx.amount < 0 || tx.txId.startsWith("TR-");
+              const txPayerName = (tx as any).payerName;
+              return (
+                <Card key={tx.id} data-testid={`card-tx-${tx.id}`}>
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-2 flex-wrap">
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-xs font-semibold text-muted-foreground" data-testid={`text-mtx-${tx.id}`}>{tx.txId}</span>
+                          <Badge variant="outline" className="text-xs">{tx.country}</Badge>
+                          {tx.provider === "omnipay" && <Badge variant="secondary" className="text-xs gap-1"><Zap className="w-3 h-3" />{providerLabel(tx.provider)}</Badge>}
+                          {tx.provider === "sms" && <Badge variant="outline" className="text-xs gap-1"><Phone className="w-3 h-3" />SMS</Badge>}
+                          {isTransfer && <Badge variant="secondary" className="text-xs gap-1"><ArrowUpRight className="w-3 h-3" />Transfert</Badge>}
+                          <Badge variant={tx.status === "confirmed" ? "default" : tx.status === "pending" ? "secondary" : "destructive"} className="text-xs">
+                            {tx.status === "confirmed" ? "Confirmé" : tx.status === "pending" ? "En attente" : tx.status}
+                          </Badge>
+                        </div>
+                        {txPayerName && (
+                          <div className="flex items-center gap-1 text-sm text-foreground">
+                            <User className="w-3 h-3 text-muted-foreground shrink-0" />
+                            <span data-testid={`text-payer-name-${tx.id}`}>{txPayerName}</span>
+                          </div>
                         )}
-                        {(tx.amount < 0 || tx.txId.startsWith("TR-")) && (
-                          <Badge variant="secondary"><ArrowUpRight className="w-3 h-3 mr-1" />Transfert</Badge>
-                        )}
-                        <Badge variant={tx.status === "confirmed" ? "default" : "destructive"}>
-                          {tx.status === "confirmed" ? "Confirme" : tx.status}
-                        </Badge>
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                          {tx.payerNumber && (
+                            <span className="flex items-center gap-1">
+                              <Phone className="w-3 h-3" /><span data-testid={`text-payer-number-${tx.id}`}>{tx.payerNumber}</span>
+                            </span>
+                          )}
+                          <span className="flex items-center gap-1">
+                            <Calendar className="w-3 h-3" />
+                            <span data-testid={`text-tx-date-${tx.id}`}>{new Date(tx.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                          </span>
+                        </div>
                       </div>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        {tx.amount.toLocaleString("fr-FR")} F CFA
-                        {tx.payerNumber ? ` de ${tx.payerNumber}` : ""}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">{new Date(tx.createdAt).toLocaleString("fr-FR")}</p>
+                      <div className="text-right shrink-0">
+                        <p className={`text-lg font-bold ${isTransfer ? "text-destructive" : "text-green-600 dark:text-green-400"}`} data-testid={`text-tx-amount-${tx.id}`}>
+                          {isTransfer ? "" : "+"}{tx.amount.toLocaleString("fr-FR")}
+                        </p>
+                        <p className="text-xs text-muted-foreground">F CFA</p>
+                      </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <p className={`text-lg font-bold ${tx.amount < 0 || tx.txId.startsWith("TR-") ? "text-destructive" : "text-foreground"}`}>
-                        {tx.amount < 0 ? "" : "+"}{tx.amount.toLocaleString("fr-FR")}
-                      </p>
-                      <p className="text-xs text-muted-foreground">F CFA</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))
+                  </CardContent>
+                </Card>
+              );
+            })
           )}
         </div>
       </ScrollArea>
@@ -1573,6 +1627,7 @@ export default function MerchantDashboard() {
 
   const menuItems: { title: string; icon: any; tab: MerchantTab }[] = [
     { title: "Vue d'ensemble", icon: Wallet, tab: "overview" },
+    { title: "Transactions", icon: Receipt, tab: "transactions" },
     { title: "Virements", icon: ArrowUpRight, tab: "virements" },
     { title: "Reversements", icon: Download, tab: "reversements" },
     { title: "Liens de paiement", icon: Link, tab: "paymentlinks" },
@@ -1637,6 +1692,7 @@ export default function MerchantDashboard() {
           <main className="flex-1 overflow-auto p-4 md:p-6 space-y-4">
             <SupportBanner />
             {activeTab === "overview" && <OverviewPanel token={token} />}
+            {activeTab === "transactions" && <MerchantTransactionsPanel token={token} />}
             {activeTab === "virements" && <WalletTransfersPanel token={token} />}
             {activeTab === "reversements" && <WithdrawalsPanel token={token} />}
             {activeTab === "paymentlinks" && <PaymentLinksPanel token={token} />}
