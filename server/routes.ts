@@ -964,8 +964,8 @@ export async function registerRoutes(
         const callbackBaseUrl = `${req.protocol}://${req.get("host")}`;
         const returnUrl = redirectUrl || `${callbackBaseUrl}/pay?merchant=${merchantSlug}&amount=${parsedAmount}&country=${country}&omnipay_status=complete`;
 
-        const isCameroon = country === "Cameroun";
-        const autoOtp = isCameroon ? undefined : (otp || String(Math.floor(100000 + Math.random() * 900000)));
+        const isOrangeCameroon = country === "Cameroun" && paymentMethod.toLowerCase().includes("orange");
+        const autoOtp = isOrangeCameroon ? undefined : (otp || String(Math.floor(1000 + Math.random() * 9000)));
 
         try {
           const omnipayResult = await omnipayInitiatePayment({
