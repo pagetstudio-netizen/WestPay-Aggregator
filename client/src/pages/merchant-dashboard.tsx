@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -24,10 +24,12 @@ import {
   Wallet, ArrowRightLeft, Key, Settings, LogOut, Loader2, Download,
   Copy, Globe, DollarSign, Hash, TrendingUp, Search, RefreshCw, BookOpen, Lock, ExternalLink,
   Webhook, Send, CheckCircle2, XCircle, Clock, ArrowUpRight, Zap, Link, QrCode,
-  Trash2, Plus, ToggleLeft, ToggleRight, Edit3, BarChart3, MessageCircle, Phone, Receipt, User, Calendar, CreditCard, Filter
+  Trash2, Plus, ToggleLeft, ToggleRight, Edit3, BarChart3, MessageCircle, Phone, Receipt, User, Calendar, CreditCard, Filter,
+  Bell, Mail, HelpCircle, Power
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry, Withdrawal } from "@shared/schema";
+import { useLanguage, LANGUAGES } from "@/lib/language";
 
 type MerchantTab = "overview" | "apikeys" | "webhook" | "virements" | "reversements" | "settings" | "paymentlinks" | "transactions";
 
@@ -1592,10 +1594,66 @@ function SupportBanner() {
   );
 }
 
+function LanguageDropdown() {
+  const { lang, setLang, currentLanguage } = useLanguage();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm font-medium transition-colors"
+        style={{ background: open ? "rgba(255,255,255,0.15)" : "transparent", color: "#fff", border: "none", cursor: "pointer" }}
+        title="Langue / Language"
+        data-testid="button-language-selector"
+      >
+        <span className="text-base leading-none">{currentLanguage.flag}</span>
+        <span className="text-xs font-bold uppercase hidden sm:inline">{currentLanguage.code}</span>
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 top-full mt-1 rounded-xl shadow-xl overflow-hidden z-50"
+          style={{ minWidth: "140px", background: "#1e2231", border: "1px solid rgba(255,255,255,0.1)" }}
+        >
+          {LANGUAGES.map(l => (
+            <button
+              key={l.code}
+              onClick={() => { setLang(l.code); setOpen(false); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-left transition-colors"
+              style={{
+                background: lang === l.code ? "rgba(255,255,255,0.12)" : "transparent",
+                color: lang === l.code ? "#fff" : "rgba(255,255,255,0.7)",
+                border: "none", cursor: "pointer"
+              }}
+              data-testid={`button-lang-${l.code}`}
+            >
+              <span className="text-base">{l.flag}</span>
+              <span>{l.label}</span>
+              {lang === l.code && <span className="ml-auto text-green-400 text-xs">✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function MerchantDashboard() {
-  const { user, token, isLoading: authLoading } = useAuth();
+  const { user, token, logout, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState<MerchantTab>("overview");
+  const { t } = useLanguage();
+  const { toast } = useToast();
+
   useEffect(() => {
     if (!authLoading && (!user || user.role !== "merchant")) {
       setLocation("/merchant-login");
@@ -1606,19 +1664,24 @@ export default function MerchantDashboard() {
   if (!user || user.role !== "merchant") return <div className="min-h-screen bg-background flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
 
   const menuItems: { title: string; icon: any; tab: MerchantTab }[] = [
-    { title: "Vue d'ensemble", icon: Wallet, tab: "overview" },
-    { title: "Transactions", icon: Receipt, tab: "transactions" },
-    { title: "Virements", icon: ArrowUpRight, tab: "virements" },
-    { title: "Reversements", icon: Download, tab: "reversements" },
-    { title: "Liens de paiement", icon: Link, tab: "paymentlinks" },
-    { title: "Cles API", icon: Key, tab: "apikeys" },
-    { title: "Webhook", icon: Webhook, tab: "webhook" },
-    { title: "Parametres", icon: Settings, tab: "settings" },
+    { title: t("overview"), icon: Wallet, tab: "overview" },
+    { title: t("transactions"), icon: Receipt, tab: "transactions" },
+    { title: t("transfers"), icon: ArrowUpRight, tab: "virements" },
+    { title: t("withdrawals"), icon: Download, tab: "reversements" },
+    { title: t("paymentlinks"), icon: Link, tab: "paymentlinks" },
+    { title: t("apikeys"), icon: Key, tab: "apikeys" },
+    { title: t("webhook"), icon: Webhook, tab: "webhook" },
+    { title: t("settings"), icon: Settings, tab: "settings" },
   ];
 
   const style = {
     "--sidebar-width": "16rem",
     "--sidebar-width-icon": "3.5rem",
+  };
+
+  const handleLogout = () => {
+    logout();
+    setLocation("/merchant-login");
   };
 
   return (
@@ -1641,7 +1704,7 @@ export default function MerchantDashboard() {
             </SidebarGroup>
             <Separator />
             <SidebarGroup>
-              <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+              <SidebarGroupLabel>{t("navigation")}</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
                   {menuItems.map((item) => (
@@ -1663,17 +1726,65 @@ export default function MerchantDashboard() {
         </Sidebar>
 
         <div className="flex flex-col flex-1 min-w-0">
-          <header className="flex items-center justify-between gap-2 px-4 py-2.5 border-b sticky top-0 z-50 bg-background/95 backdrop-blur-sm shadow-xs">
-            <div className="flex items-center gap-2">
-              <SidebarTrigger data-testid="button-merchant-sidebar-toggle" />
-              <span className="w-px h-5 bg-border hidden sm:block" />
-              <h1 className="text-sm font-semibold text-foreground hidden sm:block">Espace Marchand</h1>
+          <header
+            className="flex items-center justify-between gap-2 px-4 sticky top-0 z-50 shadow-sm"
+            style={{ background: "#1e2231", height: "52px" }}
+          >
+            <div className="flex items-center">
+              <SidebarTrigger
+                className="text-white/80 hover:text-white hover:bg-white/10"
+                data-testid="button-merchant-sidebar-toggle"
+              />
             </div>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 bg-primary/8 border border-primary/15 rounded-full px-3 py-1">
-                <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                <span className="text-xs font-medium text-primary truncate max-w-32">{user.name}</span>
-              </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                className="relative p-2 rounded-lg transition-colors"
+                style={{ background: "transparent", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.8)" }}
+                title={t("notifications")}
+                onClick={() => toast({ title: t("notifications"), description: "Aucune nouvelle notification." })}
+                data-testid="button-notifications"
+              >
+                <Bell className="w-5 h-5" />
+                <span
+                  className="absolute top-1 right-1 w-4 h-4 rounded-full flex items-center justify-center text-white font-bold"
+                  style={{ background: "#e91e63", fontSize: "10px", lineHeight: 1 }}
+                >
+                  0
+                </span>
+              </button>
+
+              <button
+                className="p-2 rounded-lg transition-colors"
+                style={{ background: "transparent", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.8)" }}
+                title={t("messages")}
+                onClick={() => setActiveTab("settings")}
+                data-testid="button-messages"
+              >
+                <Mail className="w-5 h-5" />
+              </button>
+
+              <button
+                className="p-2 rounded-lg transition-colors"
+                style={{ background: "transparent", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.8)" }}
+                title={t("help")}
+                onClick={() => window.open("/api-docs", "_blank")}
+                data-testid="button-help"
+              >
+                <HelpCircle className="w-5 h-5" />
+              </button>
+
+              <button
+                className="p-2 rounded-lg transition-colors"
+                style={{ background: "transparent", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.8)" }}
+                title={t("logout")}
+                onClick={handleLogout}
+                data-testid="button-merchant-logout"
+              >
+                <Power className="w-5 h-5" />
+              </button>
+
+              <LanguageDropdown />
             </div>
           </header>
 
