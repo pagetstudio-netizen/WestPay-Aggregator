@@ -93,7 +93,7 @@ app.use((req, res, next) => {
       setupWebhook(app, webhookSecret);
       await registerWebhookUrl(webhookUrl);
     } else {
-      await startPolling();
+      console.log("[TELEGRAM] Mode developpement — bot actif (envoi uniquement, pas de polling)");
     }
   }
 
