@@ -611,7 +611,7 @@ export function initTelegramBot(): Telegraf | null {
     }
 
     try {
-      const platformUrl = await storage.getSetting("platform_url") || "https://westpay.replit.app";
+      const platformUrl = await storage.getSetting("platform_url") || "https://westpay.cloud";
       const adminEmail = await storage.getSetting("admin_email_hint") || "admin@westpay.com";
 
       await ctx.reply(

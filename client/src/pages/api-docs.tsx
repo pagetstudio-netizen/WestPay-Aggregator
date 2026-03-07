@@ -12,7 +12,7 @@ import {
   Send, ArrowDownCircle, Bell, Menu, X, ShieldCheck, FileText, Hash
 } from "lucide-react";
 
-const BASE_URL = "https://west-pay-aggregator.replit.app";
+const BASE_URL = "https://westpay.cloud";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);

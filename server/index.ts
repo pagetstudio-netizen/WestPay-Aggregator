@@ -89,7 +89,7 @@ app.use((req, res, next) => {
         webhookSecret = randomBytes(24).toString("hex");
         await storage.setSetting("telegram_webhook_secret", webhookSecret);
       }
-      const webhookUrl = `https://west-pay-aggregator.replit.app/api/telegram/webhook/${webhookSecret}`;
+      const webhookUrl = `https://westpay.cloud/api/telegram/webhook/${webhookSecret}`;
       setupWebhook(app, webhookSecret);
       await registerWebhookUrl(webhookUrl);
     } else {

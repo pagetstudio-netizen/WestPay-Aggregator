@@ -58,7 +58,7 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 - OmniPay references prefixed: OP- (payments), TR- (transfers), WP (internal refs)
 - Service module: `server/omnipay.ts`
 - API keys stored as environment secrets: OMNIPAY_API_KEY, OMNIPAY_CALLBACK_KEY (DB fallback)
-- Callback URL: https://westpay.replit.app/api/omnipay/callback
+- Callback URL: https://westpay.cloud/api/omnipay/callback
 
 ## API Management System
 - Each merchant has unique API keys per country (format: PREFIX-[40char hex])
