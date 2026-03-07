@@ -43,6 +43,14 @@ function calcWithdrawalFee(amount: number): number {
   return Math.floor(amount * WITHDRAWAL_FEE_RATE);
 }
 
+function toOmnipayOperatorCode(operatorName: string | null | undefined): string | undefined {
+  if (!operatorName) return undefined;
+  const n = operatorName.toLowerCase();
+  if (n.includes("wave")) return "wave";
+  if (n.includes("mixx") || n.includes("yas")) return "mixx";
+  return undefined;
+}
+
 function generateSecureApiKey(country: string): string {
   const prefixes: Record<string, string> = {
     "Togo": "TGO", "Benin": "BEN", "Cote d'Ivoire": "CIV",
@@ -972,7 +980,7 @@ export async function registerRoutes(
         const cleanPhone = payerPhone.replace(/[\s\-\(\)\+]/g, "");
         const msisdn = cleanPhone.startsWith(dialCode) ? cleanPhone : `${dialCode}${cleanPhone}`;
 
-        const omnipayOperator = operator || (paymentMethod.toLowerCase().includes("wave") ? "wave" : undefined);
+        const omnipayOperator = toOmnipayOperatorCode(operator) || (paymentMethod.toLowerCase().includes("wave") ? "wave" : paymentMethod.toLowerCase().includes("mixx") || paymentMethod.toLowerCase().includes("yas") ? "mixx" : undefined);
 
         const callbackBaseUrl = `${req.protocol}://${req.get("host")}`;
         const returnUrl = redirectUrl || `${callbackBaseUrl}/pay?merchant=${merchantSlug}&amount=${parsedAmount}&country=${country}&omnipay_status=complete`;
@@ -2217,7 +2225,7 @@ export async function registerRoutes(
           reference,
           first_name: wdFirstName,
           last_name: wdLastName,
-          operator: operator || undefined,
+          operator: toOmnipayOperatorCode(operator),
         });
         if (result.success === 1) {
           await storage.updateWithdrawalStatus(w.id, "approved", `Traitement automatique OmniPay - Frais: ${withdrawalFee} F`, result.reference || reference, withdrawalFee);
@@ -2285,7 +2293,7 @@ export async function registerRoutes(
             reference,
             first_name: mFirstName,
             last_name: mLastName,
-            operator: w.operator || undefined,
+            operator: toOmnipayOperatorCode(w.operator),
           });
           if (result.success === 1) {
             omnipayRef = result.reference || reference;
