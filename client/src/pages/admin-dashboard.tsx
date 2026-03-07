@@ -615,7 +615,7 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
 function AdminPaymentLinksPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
-  const baseUrl = window.location.origin;
+  const baseUrl = "https://westpay.cloud";
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterType, setFilterType] = useState("all");
@@ -1835,7 +1835,7 @@ function OmniPayPanel() {
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
-  const callbackUrl = typeof window !== "undefined" ? `${window.location.origin}/api/omnipay/callback` : "";
+  const callbackUrl = "https://westpay.cloud/api/omnipay/callback";
 
   if (settingsLoading) return <LoadingSkeleton />;
 

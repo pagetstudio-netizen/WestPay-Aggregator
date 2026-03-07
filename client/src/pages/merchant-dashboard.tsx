@@ -1496,7 +1496,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
   const [showCreate, setShowCreate] = useState(false);
   const [editLink, setEditLink] = useState<PaymentLink | null>(null);
   const [form, setForm] = useState({ name: "", amountType: "fixed", amount: "", redirectUrl: "", paymentLimit: "" });
-  const baseUrl = window.location.origin;
+  const baseUrl = "https://westpay.cloud";
 
   const { data: links = [], isLoading } = useQuery<PaymentLink[]>({
     queryKey: ["/api/merchant/payment-links"],
