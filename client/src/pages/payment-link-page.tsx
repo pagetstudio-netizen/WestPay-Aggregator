@@ -343,7 +343,7 @@ export default function PaymentLinkPage() {
                   <div className="p-3 rounded-md text-center text-sm font-medium" style={{ backgroundColor: "#dbeafe", color: "#1e40af" }}>
                     Cliquez ci-dessous pour valider votre paiement de {formatAmount(fixedAmount)} F CFA
                   </div>
-                  {omnipayFees > 0 && <p className="text-xs text-center" style={{ color: "#6b7280" }}>Frais : {formatAmount(omnipayFees)} F CFA</p>}
+                  
                   <button type="button" onClick={() => { window.open(omnipayPaymentUrl, "_blank"); if (paymentId) startPolling(paymentId); }}
                     className="plp-btn plp-btn-green w-full" data-testid="button-wave-pay">
                     <ExternalLink className="w-4 h-4" /> Valider le paiement
@@ -368,7 +368,7 @@ export default function PaymentLinkPage() {
                     </div>
                     <p className="text-sm mt-4 font-medium" style={{ color: "#374151" }}>Validez le paiement sur votre téléphone</p>
                     <p className="text-xs mt-1" style={{ color: "#6b7280" }}>Composez votre code secret pour confirmer la transaction de {formatAmount(fixedAmount)} F CFA</p>
-                    {omnipayFees > 0 && <p className="text-xs mt-1" style={{ color: "#6b7280" }}>Frais : {formatAmount(omnipayFees)} F CFA</p>}
+                    
                   </div>
                   {omnipayPolling && (
                     <div className="flex items-center justify-center gap-2" style={{ color: "#6b7280" }}>

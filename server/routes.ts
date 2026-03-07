@@ -34,6 +34,15 @@ async function getOmnipayCallbackKey(): Promise<string | undefined> {
   return process.env.OMNIPAY_CALLBACK_KEY || await storage.getSetting("omnipay_callback_key");
 }
 
+const COLLECTION_FEE_RATE = 0.055;
+const WITHDRAWAL_FEE_RATE = 0.045;
+function calcMerchantCredit(grossAmount: number): number {
+  return Math.floor(grossAmount * (1 - COLLECTION_FEE_RATE));
+}
+function calcWithdrawalFee(amount: number): number {
+  return Math.floor(amount * WITHDRAWAL_FEE_RATE);
+}
+
 function generateSecureApiKey(country: string): string {
   const prefixes: Record<string, string> = {
     "Togo": "TGO", "Benin": "BEN", "Cote d'Ivoire": "CIV",
@@ -1199,6 +1208,7 @@ export async function registerRoutes(
           const existingTx = await storage.getTransactionByTxId(txId);
           if (!existingTx) {
             const payerFullName = [payload.first_name, payload.last_name].filter(Boolean).join(" ") || pending.payerName || null;
+            const merchantCredit1 = calcMerchantCredit(pending.amount);
             await storage.createTransaction({
               merchantId: pending.merchantId,
               country: pending.country,
@@ -1211,9 +1221,9 @@ export async function registerRoutes(
               omnipayTxId: payload.id || null,
             });
 
-            await storage.incrementMerchantCountryBalance(merchantCountry.id, pending.amount);
+            await storage.incrementMerchantCountryBalance(merchantCountry.id, merchantCredit1);
 
-            console.log(`[OMNIPAY CALLBACK] Paiement confirme: ${txId} - ${pending.amount} - Marchand #${pending.merchantId}`);
+            console.log(`[OMNIPAY CALLBACK] Paiement confirme: ${txId} - Brut: ${pending.amount} - Net marchand: ${merchantCredit1} - Marchand #${pending.merchantId}`);
 
             await storage.createApiLog({
               merchantId: pending.merchantId,
@@ -1644,6 +1654,7 @@ export async function registerRoutes(
           return res.json({ status: "inactive", message: "Le pays n'est pas actif pour ce marchand" });
         }
 
+        const merchantCredit2 = calcMerchantCredit(amount);
         await storage.createTransaction({
           merchantId: found.merchantId,
           country: found.country,
@@ -1653,7 +1664,7 @@ export async function registerRoutes(
           status: "confirmed",
         });
 
-        await storage.incrementMerchantCountryBalance(merchantCountry.id, amount);
+        await storage.incrementMerchantCountryBalance(merchantCountry.id, merchantCredit2);
 
         await storage.createSmsLog({
           fromSim: normalizedSim,
@@ -1736,6 +1747,7 @@ export async function registerRoutes(
         return res.json({ status: "inactive", message: "Le pays n'est pas actif pour ce marchand" });
       }
 
+      const merchantCredit3 = calcMerchantCredit(amount);
       await storage.createTransaction({
         merchantId: simNumber.merchantId,
         country: simNumber.country,
@@ -1745,7 +1757,7 @@ export async function registerRoutes(
         status: "confirmed",
       });
 
-      await storage.incrementMerchantCountryBalance(merchantCountry.id, amount);
+      await storage.incrementMerchantCountryBalance(merchantCountry.id, merchantCredit3);
 
       await storage.createSmsLog({
         fromSim: normalizedSim,
@@ -2037,7 +2049,7 @@ export async function registerRoutes(
       const feeTypeSetting = await storage.getSetting("wallet_transfer_fee_type");
       const feeValueSetting = await storage.getSetting("wallet_transfer_fee_value");
       const feeType = feeTypeSetting?.value || "percentage";
-      const feeValue = parseFloat(feeValueSetting?.value || "2");
+      const feeValue = parseFloat(feeValueSetting?.value || "3");
       let fee = 0;
       if (feeType === "percentage") {
         fee = Math.round((parsedAmount * feeValue) / 100);
@@ -2190,6 +2202,9 @@ export async function registerRoutes(
       });
       await storage.decrementMerchantCountryBalance(mc.id, amount);
 
+      const withdrawalFee = calcWithdrawalFee(amount);
+      const netAmount = amount - withdrawalFee;
+
       try {
         const reference = `WD-${w.id}-${Date.now()}`;
         const nameParts = merchant.name.trim().split(/\s+/);
@@ -2198,15 +2213,15 @@ export async function registerRoutes(
         const result = await omnipayInitiateTransfer({
           apikey: apiKeyToUse,
           msisdn: phone,
-          amount,
+          amount: netAmount,
           reference,
           first_name: wdFirstName,
           last_name: wdLastName,
           operator: operator || undefined,
         });
         if (result.success === 1) {
-          await storage.updateWithdrawalStatus(w.id, "approved", "Traitement automatique OmniPay", result.reference || reference, result.fees || 0);
-          return res.json({ ...w, status: "approved", omnipayRef: result.reference, fees: result.fees || 0, autoProcessed: true });
+          await storage.updateWithdrawalStatus(w.id, "approved", `Traitement automatique OmniPay - Frais: ${withdrawalFee} F`, result.reference || reference, withdrawalFee);
+          return res.json({ ...w, status: "approved", omnipayRef: result.reference, fees: withdrawalFee, netAmount, autoProcessed: true });
         } else {
           const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Echec OmniPay";
           await storage.updateWithdrawalStatus(w.id, "failed", `OmniPay: ${errMsg}`);
@@ -2224,7 +2239,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/merchant/withdrawal-operators/:country", authMiddleware("merchant"), async (req, res) => {
+  app.get("/api/merchant/withdrawal-operators/:country", async (req, res) => {
     try {
       const country = req.params.country;
       const ops = await storage.getWithdrawalOperators(country, true);

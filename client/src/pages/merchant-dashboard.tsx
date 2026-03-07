@@ -1066,6 +1066,17 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                     style={{ border: "1.5px solid #e2e8f0", background: "#fff", color: "#1a1a1a" }}
                     data-testid="input-withdrawal-amount"
                   />
+                  {amount && parseInt(amount) > 0 && (() => {
+                    const gross = parseInt(amount);
+                    const fee = Math.floor(gross * 0.045);
+                    const net = gross - fee;
+                    return (
+                      <div className="mt-2 rounded-lg p-2.5 text-xs space-y-1" style={{ background: "#f0faf5", border: "1px solid #c3e6cb" }}>
+                        <div className="flex justify-between"><span style={{ color: "#666" }}>Frais WestPay (4,5 %)</span><span style={{ color: "#e53e3e", fontWeight: 600 }}>−{fee.toLocaleString("fr-FR")} F</span></div>
+                        <div className="flex justify-between border-t pt-1" style={{ borderColor: "#c3e6cb" }}><span style={{ color: "#155724", fontWeight: 700 }}>Vous recevrez</span><span style={{ color: "#155724", fontWeight: 700 }}>{net.toLocaleString("fr-FR")} F</span></div>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div>
                   <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>{t("phone")}</label>
