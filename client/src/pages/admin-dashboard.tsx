@@ -1791,6 +1791,7 @@ function OmniPayPanel() {
   const { toast } = useToast();
   const [apiKey, setApiKey] = useState("");
   const [callbackKey, setCallbackKey] = useState("");
+  const [payoutApiKey, setPayoutApiKey] = useState("");
   const [isInitialized, setIsInitialized] = useState(false);
 
   const { data: omnipaySettings, isLoading: settingsLoading } = useAdminFetch("/api/admin/omnipay/settings", ["/api/admin/omnipay/settings"]);
@@ -1799,6 +1800,7 @@ function OmniPayPanel() {
     if (omnipaySettings && !isInitialized) {
       setApiKey(omnipaySettings.apiKey || "");
       setCallbackKey(omnipaySettings.callbackKey || "");
+      setPayoutApiKey(omnipaySettings.payoutApiKey || "");
       setIsInitialized(true);
     }
   }, [omnipaySettings, isInitialized]);
@@ -1820,7 +1822,7 @@ function OmniPayPanel() {
       const res = await fetch("/api/admin/omnipay/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ apiKey, callbackKey }),
+        body: JSON.stringify({ apiKey, callbackKey, payoutApiKey }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
       return res.json();
@@ -1921,6 +1923,16 @@ function OmniPayPanel() {
                 data-testid="input-omnipay-apikey"
               />
               <p className="text-xs text-muted-foreground">Cle API pour authentifier les requetes de paiement.</p>
+            </div>
+            <div className="space-y-2">
+              <Label>Cle API Retrait / Payout (payout_apikey)</Label>
+              <Input
+                value={payoutApiKey}
+                onChange={(e) => setPayoutApiKey(e.target.value)}
+                placeholder="Cle API specifique pour les retraits marchands"
+                data-testid="input-omnipay-payout-apikey"
+              />
+              <p className="text-xs text-muted-foreground">Cle API utilisee pour les retraits (transferts vers les marchands). Si vide, utilise la cle principale.</p>
             </div>
             <div className="space-y-2">
               <Label>Cle de callback (callback_key)</Label>

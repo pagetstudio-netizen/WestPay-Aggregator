@@ -26,6 +26,10 @@ async function getOmnipayApiKey(): Promise<string | undefined> {
   return process.env.OMNIPAY_API_KEY || await storage.getSetting("omnipay_api_key");
 }
 
+async function getOmnipayPayoutApiKey(): Promise<string | undefined> {
+  return process.env.OMNIPAY_PAYOUT_API_KEY || await storage.getSetting("omnipay_payout_api_key") || await getOmnipayApiKey();
+}
+
 async function getOmnipayCallbackKey(): Promise<string | undefined> {
   return process.env.OMNIPAY_CALLBACK_KEY || await storage.getSetting("omnipay_callback_key");
 }
@@ -1305,9 +1309,11 @@ export async function registerRoutes(
     try {
       const apiKey = await getOmnipayApiKey();
       const callbackKey = await getOmnipayCallbackKey();
+      const payoutApiKey = await storage.getSetting("omnipay_payout_api_key");
       res.json({
         apiKey: apiKey || "",
         callbackKey: callbackKey || "",
+        payoutApiKey: payoutApiKey || "",
         configured: !!apiKey,
       });
     } catch (err: any) {
@@ -1317,9 +1323,10 @@ export async function registerRoutes(
 
   app.post("/api/admin/omnipay/settings", authMiddleware("admin"), async (req, res) => {
     try {
-      const { apiKey, callbackKey } = req.body;
+      const { apiKey, callbackKey, payoutApiKey } = req.body;
       if (apiKey !== undefined) await storage.setSetting("omnipay_api_key", apiKey);
       if (callbackKey !== undefined) await storage.setSetting("omnipay_callback_key", callbackKey);
+      if (payoutApiKey !== undefined) await storage.setSetting("omnipay_payout_api_key", payoutApiKey);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -2165,9 +2172,9 @@ export async function registerRoutes(
       const merchant = await storage.getMerchantById(merchantId);
       if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
 
-      const apiKeyToUse = mc.apiKey || await getOmnipayApiKey();
+      const apiKeyToUse = await getOmnipayPayoutApiKey();
       if (!apiKeyToUse) {
-        return res.status(500).json({ message: "Systeme de paiement non configure. Contactez l'administrateur." });
+        return res.status(500).json({ message: "Cle API retrait non configuree. Contactez l'administrateur." });
       }
 
       const w = await storage.createWithdrawal({
