@@ -14,10 +14,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
-  SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger
-} from "@/components/ui/sidebar";
-import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
 import {
@@ -25,7 +21,7 @@ import {
   Copy, Globe, DollarSign, Hash, TrendingUp, Search, RefreshCw, BookOpen, Lock, ExternalLink,
   Webhook, Send, CheckCircle2, XCircle, Clock, ArrowUpRight, Zap, Link, QrCode,
   Trash2, Plus, ToggleLeft, ToggleRight, Edit3, BarChart3, MessageCircle, Phone, Receipt, User, Calendar, CreditCard, Filter,
-  Bell, Mail, HelpCircle, Power
+  Bell, Mail, HelpCircle, Power, Menu, X, ChevronLeft, ChevronRight
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry, Withdrawal } from "@shared/schema";
@@ -1829,10 +1825,124 @@ function LanguageDropdown() {
   );
 }
 
+const NAV_ITEMS: { key: MerchantTab; icon: any; color: string }[] = [
+  { key: "overview",      icon: BarChart3,    color: "#1976d2" },
+  { key: "transactions",  icon: Receipt,      color: "#26a69a" },
+  { key: "virements",     icon: ArrowRightLeft, color: "#7e57c2" },
+  { key: "reversements",  icon: Download,     color: "#fb8c00" },
+  { key: "paymentlinks",  icon: Link,         color: "#e57373" },
+  { key: "apikeys",       icon: Key,          color: "#039be5" },
+  { key: "webhook",       icon: Webhook,      color: "#43a047" },
+  { key: "settings",      icon: Settings,     color: "#6d4c41" },
+];
+
+function NavItem({
+  icon: Icon, label, color, active, collapsed, onClick, testId
+}: {
+  icon: any; label: string; color: string; active: boolean;
+  collapsed: boolean; onClick: () => void; testId: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      data-testid={testId}
+      className="w-full flex items-center gap-3 rounded-xl transition-all duration-150 text-left group"
+      style={{
+        padding: collapsed ? "10px" : "9px 12px",
+        justifyContent: collapsed ? "center" : undefined,
+        background: active ? "#00b050" : "transparent",
+        color: active ? "#fff" : "rgba(255,255,255,0.55)",
+      }}
+      title={collapsed ? label : undefined}
+    >
+      <div
+        className="flex items-center justify-center rounded-lg shrink-0 transition-all"
+        style={{
+          width: 32, height: 32,
+          background: active ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.06)",
+        }}
+      >
+        <Icon className="w-4 h-4" style={{ color: active ? "#fff" : color }} />
+      </div>
+      {!collapsed && (
+        <span className="text-sm font-medium truncate">{label}</span>
+      )}
+      {!collapsed && active && (
+        <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white/70 shrink-0" />
+      )}
+    </button>
+  );
+}
+
+function MerchantSidebarContent({
+  user, activeTab, collapsed, onTabChange, onLogout, t
+}: {
+  user: any; activeTab: MerchantTab; collapsed: boolean;
+  onTabChange: (tab: MerchantTab) => void; onLogout: () => void;
+  t: (key: string) => string;
+}) {
+  return (
+    <div className="flex flex-col h-full select-none">
+      <div className="px-3 py-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+        <div className={`flex items-center gap-3 ${collapsed ? "justify-center" : ""}`}>
+          <div
+            className="flex items-center justify-center rounded-xl shrink-0 shadow-md"
+            style={{ width: 38, height: 38, background: "linear-gradient(135deg,#00b050,#00832a)" }}
+          >
+            <span className="text-white font-black text-base">W</span>
+          </div>
+          {!collapsed && (
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-white leading-tight tracking-wide">WestPay</p>
+              <p className="text-xs truncate leading-tight" style={{ color: "rgba(255,255,255,0.45)", maxWidth: 150 }}>{user?.name}</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto py-2 px-2 space-y-0.5">
+        {NAV_ITEMS.map(item => (
+          <NavItem
+            key={item.key}
+            icon={item.icon}
+            label={t(item.key === "virements" ? "transfers" : item.key === "reversements" ? "withdrawals" : item.key === "paymentlinks" ? "paymentlinks" : item.key === "apikeys" ? "apikeys" : item.key)}
+            color={item.color}
+            active={activeTab === item.key}
+            collapsed={collapsed}
+            onClick={() => onTabChange(item.key)}
+            testId={`merchant-nav-${item.key}`}
+          />
+        ))}
+      </div>
+
+      <div className="p-2" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+        <button
+          onClick={onLogout}
+          data-testid="button-merchant-logout"
+          className="w-full flex items-center gap-3 rounded-xl transition-all duration-150"
+          style={{
+            padding: collapsed ? "10px" : "9px 12px",
+            justifyContent: collapsed ? "center" : undefined,
+            color: "rgba(255,255,255,0.45)",
+          }}
+          title={collapsed ? t("logout") : undefined}
+        >
+          <div className="flex items-center justify-center rounded-lg shrink-0" style={{ width: 32, height: 32, background: "rgba(255,255,255,0.06)" }}>
+            <LogOut className="w-4 h-4 text-red-400" />
+          </div>
+          {!collapsed && <span className="text-sm font-medium text-red-400">{t("logout")}</span>}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function MerchantDashboard() {
   const { user, token, logout, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState<MerchantTab>("overview");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const { t } = useLanguage();
   const { toast } = useToast();
 
@@ -1842,147 +1952,145 @@ export default function MerchantDashboard() {
     }
   }, [authLoading, user, setLocation]);
 
-  if (authLoading) return <div className="min-h-screen bg-background flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
-  if (!user || user.role !== "merchant") return <div className="min-h-screen bg-background flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+  if (authLoading) return (
+    <div className="min-h-screen flex items-center justify-center" style={{ background: "#e8eaed" }}>
+      <Loader2 className="w-8 h-8 animate-spin" style={{ color: "#00b050" }} />
+    </div>
+  );
+  if (!user || user.role !== "merchant") return (
+    <div className="min-h-screen flex items-center justify-center" style={{ background: "#e8eaed" }}>
+      <Loader2 className="w-8 h-8 animate-spin" style={{ color: "#00b050" }} />
+    </div>
+  );
 
-  const menuItems: { title: string; icon: any; tab: MerchantTab }[] = [
-    { title: t("overview"), icon: Wallet, tab: "overview" },
-    { title: t("transactions"), icon: Receipt, tab: "transactions" },
-    { title: t("transfers"), icon: ArrowUpRight, tab: "virements" },
-    { title: t("withdrawals"), icon: Download, tab: "reversements" },
-    { title: t("paymentlinks"), icon: Link, tab: "paymentlinks" },
-    { title: t("apikeys"), icon: Key, tab: "apikeys" },
-    { title: t("webhook"), icon: Webhook, tab: "webhook" },
-    { title: t("settings"), icon: Settings, tab: "settings" },
-  ];
+  const handleLogout = () => { logout(); setLocation("/merchant-login"); };
+  const handleTabChange = (tab: MerchantTab) => { setActiveTab(tab); setMobileOpen(false); };
 
-  const style = {
-    "--sidebar-width": "16rem",
-    "--sidebar-width-icon": "3.5rem",
-  };
-
-  const handleLogout = () => {
-    logout();
-    setLocation("/merchant-login");
-  };
+  const currentItem = NAV_ITEMS.find(n => n.key === activeTab);
 
   return (
-    <SidebarProvider style={style as React.CSSProperties}>
-      <div className="flex h-screen w-full">
-        <Sidebar>
-          <SidebarContent>
-            <SidebarGroup>
-              <div className="px-3 py-4">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center shadow-sm shrink-0">
-                    <Wallet className="w-5 h-5 text-primary-foreground" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-sidebar-foreground leading-tight">WestPay</p>
-                    <p className="text-xs text-muted-foreground truncate leading-tight">{user.name}</p>
-                  </div>
-                </div>
-              </div>
-            </SidebarGroup>
-            <Separator />
-            <SidebarGroup>
-              <SidebarGroupLabel>{t("navigation")}</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {menuItems.map((item) => (
-                    <SidebarMenuItem key={item.tab}>
-                      <SidebarMenuButton
-                        onClick={() => setActiveTab(item.tab)}
-                        isActive={activeTab === item.tab}
-                        data-testid={`merchant-nav-${item.tab}`}
-                      >
-                        <item.icon className="w-4 h-4" />
-                        <span>{item.title}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          </SidebarContent>
-        </Sidebar>
+    <div className="flex h-screen w-full overflow-hidden" style={{ background: "#e8eaed" }}>
 
-        <div className="flex flex-col flex-1 min-w-0">
-          <header
-            className="flex items-center justify-between gap-2 px-4 sticky top-0 z-50 shadow-sm"
-            style={{ background: "#1e2231", height: "52px" }}
-          >
-            <div className="flex items-center">
-              <SidebarTrigger
-                className="text-white/80 hover:text-white hover:bg-white/10"
-                data-testid="button-merchant-sidebar-toggle"
-              />
-            </div>
+      {/* ── Desktop sidebar ── */}
+      <aside
+        className="hidden md:flex flex-col shrink-0 transition-all duration-300 overflow-hidden"
+        style={{
+          width: sidebarCollapsed ? 64 : 240,
+          background: "#1e2231",
+          boxShadow: "2px 0 16px rgba(0,0,0,0.18)",
+        }}
+      >
+        <MerchantSidebarContent
+          user={user}
+          activeTab={activeTab}
+          collapsed={sidebarCollapsed}
+          onTabChange={handleTabChange}
+          onLogout={handleLogout}
+          t={t}
+        />
+      </aside>
 
-            <div className="flex items-center gap-1">
-              <button
-                className="relative p-2 rounded-lg transition-colors"
-                style={{ background: "transparent", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.8)" }}
-                title={t("notifications")}
-                onClick={() => toast({ title: t("notifications"), description: "Aucune nouvelle notification." })}
-                data-testid="button-notifications"
-              >
-                <Bell className="w-5 h-5" />
-                <span
-                  className="absolute top-1 right-1 w-4 h-4 rounded-full flex items-center justify-center text-white font-bold"
-                  style={{ background: "#e91e63", fontSize: "10px", lineHeight: 1 }}
-                >
-                  0
-                </span>
-              </button>
+      {/* ── Mobile overlay ── */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 md:hidden"
+          style={{ background: "rgba(0,0,0,0.55)" }}
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
 
-              <button
-                className="p-2 rounded-lg transition-colors"
-                style={{ background: "transparent", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.8)" }}
-                title={t("messages")}
-                onClick={() => setActiveTab("settings")}
-                data-testid="button-messages"
-              >
-                <Mail className="w-5 h-5" />
-              </button>
-
-              <button
-                className="p-2 rounded-lg transition-colors"
-                style={{ background: "transparent", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.8)" }}
-                title={t("help")}
-                onClick={() => window.open("/api-docs", "_blank")}
-                data-testid="button-help"
-              >
-                <HelpCircle className="w-5 h-5" />
-              </button>
-
-              <button
-                className="p-2 rounded-lg transition-colors"
-                style={{ background: "transparent", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.8)" }}
-                title={t("logout")}
-                onClick={handleLogout}
-                data-testid="button-merchant-logout"
-              >
-                <Power className="w-5 h-5" />
-              </button>
-
-              <LanguageDropdown />
-            </div>
-          </header>
-
-          <main className="flex-1 overflow-auto p-4 md:p-6 space-y-4">
-            <SupportBanner />
-            {activeTab === "overview" && <OverviewPanel token={token} />}
-            {activeTab === "transactions" && <MerchantTransactionsPanel token={token} />}
-            {activeTab === "virements" && <WalletTransfersPanel token={token} />}
-            {activeTab === "reversements" && <WithdrawalsPanel token={token} />}
-            {activeTab === "paymentlinks" && <PaymentLinksPanel token={token} />}
-            {activeTab === "apikeys" && <ApiKeysPanel token={token} />}
-            {activeTab === "webhook" && <WebhookPanel token={token} />}
-            {activeTab === "settings" && <MerchantSettingsPanel token={token} />}
-          </main>
+      {/* ── Mobile drawer ── */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-64 flex flex-col md:hidden transition-transform duration-300 ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
+        style={{ background: "#1e2231", boxShadow: "4px 0 24px rgba(0,0,0,0.3)" }}
+      >
+        <div className="flex items-center justify-end px-3 pt-3 pb-1">
+          <button onClick={() => setMobileOpen(false)} className="p-1.5 rounded-lg" style={{ color: "rgba(255,255,255,0.5)" }}>
+            <X className="w-4 h-4" />
+          </button>
         </div>
+        <MerchantSidebarContent
+          user={user}
+          activeTab={activeTab}
+          collapsed={false}
+          onTabChange={handleTabChange}
+          onLogout={handleLogout}
+          t={t}
+        />
+      </aside>
+
+      {/* ── Main content ── */}
+      <div className="flex flex-col flex-1 min-w-0">
+
+        {/* Header */}
+        <header
+          className="flex items-center justify-between gap-2 px-4 shrink-0 shadow-md"
+          style={{ background: "#1e2231", height: 52, zIndex: 30 }}
+        >
+          <div className="flex items-center gap-3">
+            <button
+              className="hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-colors hover:bg-white/10"
+              style={{ color: "rgba(255,255,255,0.7)" }}
+              onClick={() => setSidebarCollapsed(c => !c)}
+              data-testid="button-merchant-sidebar-toggle"
+            >
+              {sidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+            </button>
+            <button
+              className="flex md:hidden w-8 h-8 rounded-lg items-center justify-center transition-colors hover:bg-white/10"
+              style={{ color: "rgba(255,255,255,0.7)" }}
+              onClick={() => setMobileOpen(o => !o)}
+              data-testid="button-mobile-sidebar-toggle"
+            >
+              <Menu className="w-4 h-4" />
+            </button>
+
+            {currentItem && (
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: "rgba(255,255,255,0.1)" }}>
+                  <currentItem.icon className="w-3.5 h-3.5" style={{ color: currentItem.color }} />
+                </div>
+                <span className="text-sm font-semibold text-white/80 hidden sm:block">
+                  {t(activeTab === "virements" ? "transfers" : activeTab === "reversements" ? "withdrawals" : activeTab === "paymentlinks" ? "paymentlinks" : activeTab === "apikeys" ? "apikeys" : activeTab)}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-0.5">
+            <button
+              className="relative p-2 rounded-lg hover:bg-white/10 transition-colors"
+              style={{ color: "rgba(255,255,255,0.7)" }}
+              onClick={() => toast({ title: t("notifications"), description: "Aucune nouvelle notification." })}
+              data-testid="button-notifications"
+            >
+              <Bell className="w-4 h-4" />
+            </button>
+            <button
+              className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+              style={{ color: "rgba(255,255,255,0.7)" }}
+              onClick={() => window.open("/api-docs", "_blank")}
+              data-testid="button-help"
+              title="Documentation API"
+            >
+              <HelpCircle className="w-4 h-4" />
+            </button>
+            <LanguageDropdown />
+          </div>
+        </header>
+
+        <main className="flex-1 overflow-auto p-4 md:p-6">
+          <SupportBanner />
+          {activeTab === "overview"      && <OverviewPanel token={token} />}
+          {activeTab === "transactions"  && <MerchantTransactionsPanel token={token} />}
+          {activeTab === "virements"     && <WalletTransfersPanel token={token} />}
+          {activeTab === "reversements"  && <WithdrawalsPanel token={token} />}
+          {activeTab === "paymentlinks"  && <PaymentLinksPanel token={token} />}
+          {activeTab === "apikeys"       && <ApiKeysPanel token={token} />}
+          {activeTab === "webhook"       && <WebhookPanel token={token} />}
+          {activeTab === "settings"      && <MerchantSettingsPanel token={token} />}
+        </main>
       </div>
-    </SidebarProvider>
+    </div>
   );
 }
