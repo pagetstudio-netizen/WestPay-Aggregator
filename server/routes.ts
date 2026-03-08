@@ -48,21 +48,19 @@ function toOmnipayOperatorCode(operatorName: string | null | undefined): string 
   const n = operatorName.toLowerCase();
   if (n.includes("wave")) return "wave";
   if (n.includes("mixx") || n.includes("yas")) return "mixx";
-  if (n.includes("mtn")) return "mtn";
-  if (n.includes("moov")) return "moov";
-  if (n.includes("orange")) return "orange";
-  if (n.includes("tmoney") || n.includes("t-money")) return "tmoney";
-  if (n.includes("airtel")) return "airtel";
-  if (n.includes("flooz")) return "flooz";
+  // MTN, Moov, Orange, TMoney etc. are auto-detected by OmniPay via phone number — do not send operator
   return undefined;
 }
 
+const OMNIPAY_MANDATORY_OPERATORS = ["wave", "mixx"];
 async function resolveOmnipayOperatorCode(operatorName: string | null | undefined, country: string | null | undefined): Promise<string | undefined> {
   if (!operatorName) return undefined;
   if (country) {
     try {
       const op = await storage.getWithdrawalOperatorByNameAndCountry(operatorName, country);
-      if (op?.omnipayCode) return op.omnipayCode;
+      if (op?.omnipayCode && OMNIPAY_MANDATORY_OPERATORS.includes(op.omnipayCode.toLowerCase())) {
+        return op.omnipayCode.toLowerCase();
+      }
     } catch {}
   }
   return toOmnipayOperatorCode(operatorName);
@@ -2298,15 +2296,17 @@ export async function registerRoutes(
       let omnipayRef: string | undefined;
       let fees: number | undefined;
 
-      if (mc && mc.omnipayEnabled && mc.apiKey && merchant) {
+      const omnipayApiKey = await getOmnipayPayoutApiKey();
+      if (mc && mc.omnipayEnabled && omnipayApiKey && merchant) {
         try {
           const reference = `WD-${w.id}-${Date.now()}`;
           const mNameParts = merchant.name.trim().split(/\s+/);
           const mFirstName = mNameParts[0] || merchant.name;
           const mLastName = mNameParts.length > 1 ? mNameParts.slice(1).join(" ") : mNameParts[0] || merchant.name;
           const adminOmnipayCode = await resolveOmnipayOperatorCode(w.operator, w.country);
+          console.log(`[ADMIN APPROVE WD] Transfert: ${w.amount} vers ${w.phone}, operateur: ${adminOmnipayCode || "(auto)"}, ref: ${reference}`);
           const result = await omnipayInitiateTransfer({
-            apikey: mc.apiKey,
+            apikey: omnipayApiKey,
             msisdn: w.phone,
             amount: w.amount,
             reference,
@@ -2317,11 +2317,13 @@ export async function registerRoutes(
           if (result.success === 1) {
             omnipayRef = result.reference || reference;
             fees = result.fees || 0;
+            console.log(`[ADMIN APPROVE WD] Succes OmniPay - ID: ${result.id}, Ref: ${omnipayRef}`);
           } else {
-            console.error(`[ADMIN APPROVE WD] OmniPay echec: ${result.message}`);
+            const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Echec inconnu";
+            console.error(`[ADMIN APPROVE WD] OmniPay echec (code ${result.code}): ${errMsg}`);
           }
         } catch (omnipayErr: any) {
-          console.error("[ADMIN APPROVE WD] OmniPay error:", omnipayErr.message);
+          console.error("[ADMIN APPROVE WD] OmniPay erreur:", omnipayErr.message);
         }
       }
 
