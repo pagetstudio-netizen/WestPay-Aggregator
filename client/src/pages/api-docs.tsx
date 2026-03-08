@@ -525,6 +525,21 @@ Content-Type: application/json`} />
                 </div>
               </CardContent>
             </Card>
+
+            <Card className="border-orange-300 bg-orange-50 dark:bg-orange-950/20">
+              <CardContent className="p-4 flex gap-3">
+                <span className="text-orange-500 text-lg shrink-0">⚠️</span>
+                <div className="text-sm text-orange-800 dark:text-orange-300 space-y-1">
+                  <p className="font-semibold">Orange Money — Burkina Faso : code OTP obligatoire</p>
+                  <p>Pour payer via Orange Money au Burkina Faso, le client doit d'abord <strong>générer un code OTP</strong> depuis son téléphone, puis le saisir sur la page de paiement.</p>
+                  <p className="font-mono text-xs bg-orange-100 dark:bg-orange-900 px-2 py-1 rounded mt-1">
+                    Composer sur le téléphone : <strong>*144*4*6*montant#</strong><br />
+                    Ex. pour 5 000 F CFA : <strong>*144*4*6*5000#</strong>
+                  </p>
+                  <p>Un champ de saisie OTP s'affiche automatiquement sur la page de paiement RobotPay lorsque Orange Money Burkina Faso est sélectionné.</p>
+                </div>
+              </CardContent>
+            </Card>
           </section>
 
           <Separator />

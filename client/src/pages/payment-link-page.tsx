@@ -57,6 +57,7 @@ export default function PaymentLinkPage() {
   const [selectedCountry, setSelectedCountry] = useState("");
   const [selectedMethod, setSelectedMethod] = useState("");
   const [hiddenOtp] = useState(() => String(Math.floor(1000 + Math.random() * 9000)));
+  const [otpCode, setOtpCode] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [paymentId, setPaymentId] = useState<number | null>(null);
   const [omnipayPaymentUrl, setOmnipayPaymentUrl] = useState<string | null>(null);
@@ -115,7 +116,8 @@ export default function PaymentLinkPage() {
 
   const availableMethods = PAYMENT_METHODS[selectedCountry] || [];
   const dialCode = DIAL_CODES[selectedCountry] || "+";
-  const handleSelectMethod = useCallback((m: string) => setSelectedMethod(m), []);
+  const needsManualOtp = selectedCountry === "Burkina Faso" && selectedMethod === "Orange Money";
+  const handleSelectMethod = useCallback((m: string) => { setSelectedMethod(m); setOtpCode(""); }, []);
 
   const startPolling = (pId: number) => {
     setOmnipayPolling(true);
@@ -141,6 +143,7 @@ export default function PaymentLinkPage() {
   const handlePay = async () => {
     if (!payerPhone.trim()) { toast({ title: "Veuillez entrer votre numéro de téléphone", variant: "destructive" }); return; }
     if (!selectedMethod) { toast({ title: "Veuillez choisir une méthode de paiement", variant: "destructive" }); return; }
+    if (needsManualOtp && !otpCode.trim()) { toast({ title: "Veuillez entrer votre code OTP Orange Money", variant: "destructive" }); return; }
 
     const amount = data!.link.amountType === "fixed" ? data!.link.amount! : Number(customAmount);
     if (!amount || amount <= 0) { toast({ title: "Montant invalide", variant: "destructive" }); return; }
@@ -161,7 +164,7 @@ export default function PaymentLinkPage() {
           firstName: "Client",
           lastName: "RobotPay",
           operator: selectedMethod.toLowerCase().includes("wave") ? "wave" : undefined,
-          otp: hiddenOtp,
+          otp: needsManualOtp ? otpCode.trim() : hiddenOtp,
         }),
       });
       const d = await res.json();
@@ -325,9 +328,29 @@ export default function PaymentLinkPage() {
                 </div>
               </div>
 
+              {needsManualOtp && (
+                <div className="rounded-md p-3 space-y-2" style={{ backgroundColor: "#fff7ed", border: "1px solid #fdba74" }}>
+                  <p className="text-sm font-semibold" style={{ color: "#c2410c" }}>Code OTP requis — Orange Money Burkina Faso</p>
+                  <p className="text-xs" style={{ color: "#9a3412" }}>
+                    Composez <span className="font-mono font-bold">*144*4*6*{data?.link.amountType === "fixed" ? data.link.amount : (customAmount || "montant")}#</span> sur votre téléphone pour générer votre code OTP, puis saisissez-le ci-dessous.
+                  </p>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={8}
+                    value={otpCode}
+                    onChange={e => setOtpCode(e.target.value.replace(/\D/g, ""))}
+                    placeholder="Code OTP reçu par SMS"
+                    className="w-full py-2 px-3 text-sm border rounded-md"
+                    style={{ borderColor: "#f97316" }}
+                    data-testid="input-otp-code"
+                  />
+                </div>
+              )}
+
               <div className="flex items-center justify-end pt-1">
                 <button type="button" onClick={handlePay}
-                  disabled={isSubmitting || !payerPhone.trim() || !selectedMethod || (link.amountType === "flexible" && !customAmount)}
+                  disabled={isSubmitting || !payerPhone.trim() || !selectedMethod || (link.amountType === "flexible" && !customAmount) || (needsManualOtp && !otpCode.trim())}
                   className="plp-btn plp-btn-green" data-testid="button-pay-now">
                   {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                   Payer maintenant <ChevronRight className="w-4 h-4" />
