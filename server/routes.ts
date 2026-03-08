@@ -61,17 +61,38 @@ const COUNTRY_DIAL_CODES: Record<string, string> = {
 };
 
 const COUNTRY_ALIASES: Record<string, string> = {
+  // Noms complets (variations casse/accents)
   "togo": "Togo",
   "benin": "Benin", "bénin": "Benin",
   "cote d'ivoire": "Cote d'Ivoire", "côte d'ivoire": "Cote d'Ivoire",
   "cote divoire": "Cote d'Ivoire", "côte divoire": "Cote d'Ivoire",
-  "ivory coast": "Cote d'Ivoire", "ci": "Cote d'Ivoire",
+  "ivory coast": "Cote d'Ivoire",
   "senegal": "Senegal", "sénégal": "Senegal",
   "mali": "Mali",
   "burkina faso": "Burkina Faso", "burkina": "Burkina Faso",
   "cameroun": "Cameroun", "cameroon": "Cameroun",
   "congo brazzaville": "Congo Brazzaville", "congo": "Congo Brazzaville",
   "gabon": "Gabon",
+  // Codes API (préfixe des clés WestPay : TGO-xxx, BEN-xxx, etc.)
+  "tgo": "Togo",
+  "ben": "Benin",
+  "civ": "Cote d'Ivoire",
+  "sen": "Senegal",
+  "mli": "Mali",
+  "bfa": "Burkina Faso",
+  "cmr": "Cameroun",
+  "cog": "Congo Brazzaville",
+  "gab": "Gabon",
+  // Codes ISO 3166-1 alpha-2
+  "tg": "Togo",
+  "bj": "Benin",
+  "ci": "Cote d'Ivoire",
+  "sn": "Senegal",
+  "ml": "Mali",
+  "bf": "Burkina Faso",
+  "cm": "Cameroun",
+  "cg": "Congo Brazzaville",
+  "ga": "Gabon",
 };
 
 function normalizeCountry(country: string): string {
