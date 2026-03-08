@@ -48,7 +48,24 @@ function toOmnipayOperatorCode(operatorName: string | null | undefined): string 
   const n = operatorName.toLowerCase();
   if (n.includes("wave")) return "wave";
   if (n.includes("mixx") || n.includes("yas")) return "mixx";
+  if (n.includes("mtn")) return "mtn";
+  if (n.includes("moov")) return "moov";
+  if (n.includes("orange")) return "orange";
+  if (n.includes("tmoney") || n.includes("t-money")) return "tmoney";
+  if (n.includes("airtel")) return "airtel";
+  if (n.includes("flooz")) return "flooz";
   return undefined;
+}
+
+async function resolveOmnipayOperatorCode(operatorName: string | null | undefined, country: string | null | undefined): Promise<string | undefined> {
+  if (!operatorName) return undefined;
+  if (country) {
+    try {
+      const op = await storage.getWithdrawalOperatorByNameAndCountry(operatorName, country);
+      if (op?.omnipayCode) return op.omnipayCode;
+    } catch {}
+  }
+  return toOmnipayOperatorCode(operatorName);
 }
 
 function generateSecureApiKey(country: string): string {
@@ -2218,6 +2235,7 @@ export async function registerRoutes(
         const nameParts = merchant.name.trim().split(/\s+/);
         const wdFirstName = nameParts[0] || merchant.name;
         const wdLastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : nameParts[0] || merchant.name;
+        const omnipayOperatorCode = await resolveOmnipayOperatorCode(operator, mc.country);
         const result = await omnipayInitiateTransfer({
           apikey: apiKeyToUse,
           msisdn: phone,
@@ -2225,7 +2243,7 @@ export async function registerRoutes(
           reference,
           first_name: wdFirstName,
           last_name: wdLastName,
-          operator: toOmnipayOperatorCode(operator),
+          operator: omnipayOperatorCode,
         });
         if (result.success === 1) {
           await storage.updateWithdrawalStatus(w.id, "approved", `Traitement automatique OmniPay - Frais: ${withdrawalFee} F`, result.reference || reference, withdrawalFee);
@@ -2286,6 +2304,7 @@ export async function registerRoutes(
           const mNameParts = merchant.name.trim().split(/\s+/);
           const mFirstName = mNameParts[0] || merchant.name;
           const mLastName = mNameParts.length > 1 ? mNameParts.slice(1).join(" ") : mNameParts[0] || merchant.name;
+          const adminOmnipayCode = await resolveOmnipayOperatorCode(w.operator, w.country);
           const result = await omnipayInitiateTransfer({
             apikey: mc.apiKey,
             msisdn: w.phone,
@@ -2293,7 +2312,7 @@ export async function registerRoutes(
             reference,
             first_name: mFirstName,
             last_name: mLastName,
-            operator: toOmnipayOperatorCode(w.operator),
+            operator: adminOmnipayCode,
           });
           if (result.success === 1) {
             omnipayRef = result.reference || reference;
@@ -2353,7 +2372,7 @@ export async function registerRoutes(
 
   app.post("/api/admin/withdrawal-operators", authMiddleware("admin"), async (req, res) => {
     try {
-      const { name, type, country, dailyLimit, gateway, active } = req.body;
+      const { name, type, country, dailyLimit, gateway, omnipayCode, active } = req.body;
       if (!name || !country) return res.status(400).json({ message: "Nom et pays requis" });
       const op = await storage.createWithdrawalOperator({
         name,
@@ -2361,6 +2380,7 @@ export async function registerRoutes(
         country,
         dailyLimit: dailyLimit ? Number(dailyLimit) : 1000000,
         gateway: gateway || "OmniPay",
+        omnipayCode: omnipayCode?.trim() || null,
         active: active !== false,
         maintenanceAll: false,
         maintenanceDeposits: false,
@@ -2377,13 +2397,14 @@ export async function registerRoutes(
   app.put("/api/admin/withdrawal-operators/:id", authMiddleware("admin"), async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const { name, type, country, dailyLimit, gateway, active, maintenanceAll, maintenanceDeposits, maintenanceWithdrawals, maintenancePaymentLinks, maintenanceApiPayment } = req.body;
+      const { name, type, country, dailyLimit, gateway, omnipayCode, active, maintenanceAll, maintenanceDeposits, maintenanceWithdrawals, maintenancePaymentLinks, maintenanceApiPayment } = req.body;
       const updated = await storage.updateWithdrawalOperator(id, {
         ...(name !== undefined && { name }),
         ...(type !== undefined && { type }),
         ...(country !== undefined && { country }),
         ...(dailyLimit !== undefined && { dailyLimit: Number(dailyLimit) }),
         ...(gateway !== undefined && { gateway }),
+        ...(omnipayCode !== undefined && { omnipayCode: omnipayCode?.trim() || null }),
         ...(active !== undefined && { active }),
         ...(maintenanceAll !== undefined && { maintenanceAll }),
         ...(maintenanceDeposits !== undefined && { maintenanceDeposits }),

@@ -123,6 +123,7 @@ export interface IStorage {
 
   getWithdrawalOperators(country?: string, activeOnly?: boolean): Promise<WithdrawalOperator[]>;
   getWithdrawalOperatorById(id: number): Promise<WithdrawalOperator | undefined>;
+  getWithdrawalOperatorByNameAndCountry(name: string, country: string): Promise<WithdrawalOperator | undefined>;
   createWithdrawalOperator(data: InsertWithdrawalOperator): Promise<WithdrawalOperator>;
   updateWithdrawalOperator(id: number, data: Partial<InsertWithdrawalOperator>): Promise<WithdrawalOperator>;
   deleteWithdrawalOperator(id: number): Promise<void>;
@@ -670,6 +671,12 @@ export class DatabaseStorage implements IStorage {
 
   async getWithdrawalOperatorById(id: number): Promise<WithdrawalOperator | undefined> {
     const [op] = await db.select().from(withdrawalOperators).where(eq(withdrawalOperators.id, id));
+    return op;
+  }
+
+  async getWithdrawalOperatorByNameAndCountry(name: string, country: string): Promise<WithdrawalOperator | undefined> {
+    const [op] = await db.select().from(withdrawalOperators)
+      .where(and(eq(withdrawalOperators.name, name), eq(withdrawalOperators.country, country)));
     return op;
   }
 
