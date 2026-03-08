@@ -2709,7 +2709,15 @@ function AdminWithdrawalsPanel() {
                             <div><span className="text-muted-foreground">N° réception :</span> <span className="font-medium">{wd.phone}</span></div>
                             <div className="col-span-2"><span className="text-muted-foreground">Date :</span> {new Date(wd.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</div>
                           </div>
-                          {wd.omnipayRef && <p className="text-xs text-muted-foreground">Réf OmniPay : <span className="font-mono">{wd.omnipayRef}</span></p>}
+                          {wd.omnipayRef && (
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-xs text-muted-foreground">Réf OmniPay :</span>
+                              <code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded text-foreground">{wd.omnipayRef}</code>
+                              <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => { navigator.clipboard.writeText(wd.omnipayRef!); }} title="Copier la référence" data-testid={`button-copy-ref-${wd.id}`}>
+                                <Copy className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          )}
                           {wd.adminNote && <p className="text-xs italic text-muted-foreground">Note : {wd.adminNote}</p>}
                         </div>
                       );
@@ -2754,7 +2762,15 @@ function AdminWithdrawalsPanel() {
                 <div className="flex gap-2"><span className="text-muted-foreground w-32 shrink-0">N° réception :</span><span className="font-medium font-mono">{selectedWd.phone}</span></div>
                 <div className="flex gap-2"><span className="text-muted-foreground w-32 shrink-0">Date :</span><span>{new Date(selectedWd.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span></div>
                 {selectedWd.processedAt && <div className="flex gap-2"><span className="text-muted-foreground w-32 shrink-0">Traité le :</span><span>{new Date(selectedWd.processedAt).toLocaleString("fr-FR", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span></div>}
-                {selectedWd.omnipayRef && <div className="flex gap-2"><span className="text-muted-foreground w-32 shrink-0">Réf OmniPay :</span><span className="font-mono text-xs">{selectedWd.omnipayRef}</span></div>}
+                {selectedWd.omnipayRef && (
+                  <div className="flex gap-2 items-center">
+                    <span className="text-muted-foreground w-32 shrink-0">Réf OmniPay :</span>
+                    <code className="font-mono text-xs bg-muted px-2 py-1 rounded flex-1 break-all">{selectedWd.omnipayRef}</code>
+                    <Button variant="outline" size="sm" className="h-7 text-xs shrink-0" onClick={() => { navigator.clipboard.writeText(selectedWd.omnipayRef!); }} data-testid="button-copy-omnipayref-dialog">
+                      <Copy className="w-3 h-3 mr-1" />Copier
+                    </Button>
+                  </div>
+                )}
                 {selectedWd.adminNote && <div className="flex gap-2"><span className="text-muted-foreground w-32 shrink-0">Note :</span><span className="italic">{selectedWd.adminNote}</span></div>}
               </div>
               {selectedWd.status === "pending" && (

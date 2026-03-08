@@ -2245,16 +2245,16 @@ export async function registerRoutes(
         });
         if (result.success === 1) {
           await storage.updateWithdrawalStatus(w.id, "approved", `Traitement automatique OmniPay - Frais: ${withdrawalFee} F`, result.reference || reference, withdrawalFee);
-          return res.json({ ...w, status: "approved", omnipayRef: result.reference, fees: withdrawalFee, netAmount, autoProcessed: true });
+          return res.json({ ...w, status: "approved", omnipayRef: result.reference || reference, fees: withdrawalFee, netAmount, autoProcessed: true });
         } else {
           const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Echec OmniPay";
-          await storage.updateWithdrawalStatus(w.id, "failed", `OmniPay: ${errMsg}`);
+          await storage.updateWithdrawalStatus(w.id, "failed", `OmniPay (code ${result.code}): ${errMsg}`, reference);
           await storage.incrementMerchantCountryBalance(mc.id, amount);
           return res.status(400).json({ message: errMsg, omnipayError: true, code: result.code });
         }
       } catch (omnipayErr: any) {
         console.error("[WITHDRAWAL AUTO] Erreur OmniPay:", omnipayErr.message);
-        await storage.updateWithdrawalStatus(w.id, "failed", `Erreur technique: ${omnipayErr.message}`);
+        await storage.updateWithdrawalStatus(w.id, "failed", `Erreur technique: ${omnipayErr.message}`, reference);
         await storage.incrementMerchantCountryBalance(mc.id, amount);
         return res.status(500).json({ message: "Erreur lors du traitement du retrait. Votre solde a été restitué." });
       }
@@ -2305,6 +2305,7 @@ export async function registerRoutes(
           const mLastName = mNameParts.length > 1 ? mNameParts.slice(1).join(" ") : mNameParts[0] || merchant.name;
           const adminOmnipayCode = await resolveOmnipayOperatorCode(w.operator, w.country);
           console.log(`[ADMIN APPROVE WD] Transfert: ${w.amount} vers ${w.phone}, operateur: ${adminOmnipayCode || "(auto)"}, ref: ${reference}`);
+          omnipayRef = reference;
           const result = await omnipayInitiateTransfer({
             apikey: omnipayApiKey,
             msisdn: w.phone,
