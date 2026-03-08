@@ -601,6 +601,32 @@ export function initTelegramBot(): Telegraf | null {
     }
   });
 
+  // ─── /status (groupe admin uniquement) ───────────────────────────────────
+  bot.command("status", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
+    if (!isGroup || !await isAdminGroup(chatId)) return;
+    try {
+      const webhookInfo = await bot!.telegram.getWebhookInfo();
+      const merchants = await storage.getMerchants();
+      const linkedCount = merchants.filter(m => m.telegramChatId).length;
+      const groups = await getKnownGroups();
+      const webhookOk = webhookInfo.url && webhookInfo.url.length > 0;
+      const lastError = webhookInfo.last_error_message ? `\n⚠️ Dernière erreur : ${webhookInfo.last_error_message}` : "";
+      await ctx.reply(
+        `🤖 *Statut du Bot WestPay*\n\n` +
+        `🔗 *Webhook :* ${webhookOk ? "✅ Actif" : "❌ Non configuré"}\n` +
+        `${webhookOk ? `🌐 URL : \`${webhookInfo.url!.slice(-20)}\`` : ""}${lastError}\n` +
+        `📊 *Mises à jour en attente :* ${webhookInfo.pending_update_count || 0}\n\n` +
+        `👥 *Groupes connectés :* ${groups.length}\n` +
+        `🏪 *Marchands Telegram :* ${linkedCount}/${merchants.length}`,
+        { parse_mode: "Markdown" }
+      );
+    } catch (err: any) {
+      await ctx.reply(`❌ Erreur vérification statut : ${err.message}`);
+    }
+  });
+
   // ─── /connexionid (groupe admin uniquement) ───────────────────────────────
   bot.command("connexionid", async (ctx) => {
     const chatId = String(ctx.chat.id);
@@ -670,6 +696,7 @@ export function initTelegramBot(): Telegraf | null {
           `📢 *Diffusion*\n` +
           `/broadcast MESSAGE — Envoyer un message dans tous les groupes\n\n` +
           `🔐 *Utilitaires*\n` +
+          `/status — Vérifier l'état du bot et du webhook\n` +
           `/connexionid — Rappel des URLs et identifiants admin\n` +
           `/seturl URL — Définir l'URL de la plateforme\n` +
           `/restreint — Voir les utilisateurs bloqués\n` +
@@ -697,7 +724,49 @@ export function initTelegramBot(): Telegraf | null {
     }
   });
 
-  // ─── Bot ajouté à un groupe ────────────────────────────────────────────────
+  // ─── Bot ajouté à un groupe (API moderne : my_chat_member) ──────────────────
+  bot.on("my_chat_member", async (ctx) => {
+    const update = ctx.update.my_chat_member;
+    if (!update) return;
+    const newStatus = update.new_chat_member?.status;
+    if (newStatus !== "member" && newStatus !== "administrator") return;
+
+    const chat = update.chat;
+    if (chat.type !== "group" && chat.type !== "supergroup") return;
+
+    const chatId = String(chat.id);
+    const groupTitle = (chat as any).title || "ce groupe";
+
+    await registerKnownGroup(chatId);
+
+    if (await isAdminGroup(chatId)) {
+      await bot!.telegram.sendMessage(chatId,
+        "✅ *Bot WestPay actif dans le groupe admin.*\n\nTapez /aide pour voir toutes les commandes.",
+        { parse_mode: "Markdown" }
+      ).catch(() => {});
+      return;
+    }
+
+    const linkedMerchant = await getMerchantForGroup(chatId);
+    if (linkedMerchant) {
+      await bot!.telegram.sendMessage(chatId,
+        `✅ *Bot WestPay actif — ${linkedMerchant.name}*\n\n` + MERCHANT_AIDE_MSG(linkedMerchant.name),
+        { parse_mode: "Markdown" }
+      ).catch(() => {});
+      return;
+    }
+
+    await bot!.telegram.sendMessage(chatId,
+      `👋 *Bot WestPay ajouté à ${groupTitle}.*\n\n` +
+      `Pour lier ce groupe à un compte marchand :\n\n` +
+      `\`/setmarchand CODE\`\n\n` +
+      `_(Le code d'activation est généré depuis le dashboard WestPay)_`,
+      { parse_mode: "Markdown" }
+    ).catch(() => {});
+    await alertAdminGroup(`ℹ️ *Bot ajouté à un nouveau groupe*\n\n👥 Groupe : *${groupTitle}*\n🆔 Chat ID : \`${chatId}\``);
+  });
+
+  // ─── Bot ajouté à un groupe (API classique : new_chat_members) ───────────
   bot.on("new_chat_members", async (ctx) => {
     const newMembers = ctx.message.new_chat_members;
     const botInfo = await ctx.telegram.getMe();
@@ -764,22 +833,27 @@ export function setupWebhook(app: Express, secret: string): void {
   console.log(`[TELEGRAM] Route webhook enregistree : POST ${path}`);
 }
 
-export async function registerWebhookUrl(webhookUrl: string): Promise<void> {
+export async function registerWebhookUrl(webhookUrl: string, retries = 5, delayMs = 3000): Promise<void> {
   if (!bot) return;
-  try {
-    const current = await bot.telegram.getWebhookInfo();
-    if (current.url === webhookUrl) {
-      console.log(`[TELEGRAM] Webhook deja actif — aucune action requise`);
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const current = await bot.telegram.getWebhookInfo();
+      if (current.url === webhookUrl) {
+        console.log(`[TELEGRAM] Webhook deja actif — aucune action requise`);
+        return;
+      }
+      await bot.telegram.deleteWebhook({ drop_pending_updates: false });
+      await bot.telegram.setWebhook(webhookUrl, {
+        allowed_updates: ["message", "callback_query", "my_chat_member", "chat_member"],
+      });
+      console.log(`[TELEGRAM] Webhook configure : ${webhookUrl}`);
       return;
+    } catch (err: any) {
+      console.error(`[TELEGRAM] Erreur enregistrement webhook (tentative ${attempt}/${retries}): ${err.message}`);
+      if (attempt < retries) await new Promise(r => setTimeout(r, delayMs));
     }
-    await bot.telegram.deleteWebhook({ drop_pending_updates: false });
-    await bot.telegram.setWebhook(webhookUrl, {
-      allowed_updates: ["message", "callback_query", "my_chat_member", "chat_member"],
-    });
-    console.log(`[TELEGRAM] Webhook configure : ${webhookUrl}`);
-  } catch (err: any) {
-    console.error("[TELEGRAM] Erreur enregistrement webhook:", err.message);
   }
+  console.error(`[TELEGRAM] Echec enregistrement webhook apres ${retries} tentatives`);
 }
 
 export async function startPolling(): Promise<void> {
@@ -919,9 +993,24 @@ export async function notifyMerchantPayment(merchantId: number, data: {
       `${t.successRate} ${successRate(todayStats.success, todayStats.total)}`,
     ].join("\n");
 
-    await bot.telegram.sendMessage(merchant.telegramChatId, msg, { parse_mode: "Markdown" });
+    await safeSend(merchant.telegramChatId, msg);
   } catch (err) {
     console.error("[TELEGRAM] Erreur notification marchand:", (err as any).message);
+  }
+}
+
+async function safeSend(chatId: string, message: string): Promise<void> {
+  if (!bot) return;
+  try {
+    await bot.telegram.sendMessage(chatId, message, { parse_mode: "Markdown" });
+  } catch (err: any) {
+    console.error("[TELEGRAM] Echec envoi Markdown, tentative texte brut:", err.message);
+    try {
+      const plain = message.replace(/[*_`[\]()~>#+=|{}.!\\-]/g, "");
+      await bot.telegram.sendMessage(chatId, plain);
+    } catch (err2: any) {
+      console.error("[TELEGRAM] Echec envoi texte brut:", err2.message);
+    }
   }
 }
 
@@ -930,7 +1019,7 @@ export async function notifyAdminGroup(message: string): Promise<void> {
   try {
     const groupId = await storage.getSetting("telegram_group_id");
     if (!groupId) return;
-    await bot.telegram.sendMessage(groupId, message, { parse_mode: "Markdown" });
+    await safeSend(groupId, message);
   } catch (err) {
     console.error("[TELEGRAM] Erreur notification groupe:", (err as any).message);
   }
