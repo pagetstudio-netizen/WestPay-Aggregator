@@ -1622,13 +1622,27 @@ function ApiKeysManagementPanel() {
 
   const merchantsList = merchants as (Merchant & { hasPin: boolean })[];
   const countriesList = allCountries as (MerchantCountry & { merchantName: string })[];
+  const filteredMerchants = selectedMerchant
+    ? merchantsList.filter(m => m.id === selectedMerchant)
+    : merchantsList;
   const filteredCountries = selectedMerchant
     ? countriesList.filter(c => c.merchantId === selectedMerchant)
     : countriesList;
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-foreground">Gestion des cles API & PIN</h2>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h2 className="text-lg font-semibold text-foreground">Gestion des cles API & PIN</h2>
+        <Select value={selectedMerchant ? String(selectedMerchant) : "all"} onValueChange={v => setSelectedMerchant(v === "all" ? null : parseInt(v))}>
+          <SelectTrigger className="w-52 h-9 text-sm" data-testid="select-filter-merchant-top">
+            <SelectValue placeholder="Tous les marchands" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tous les marchands</SelectItem>
+            {merchantsList.map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card>
@@ -1638,7 +1652,9 @@ function ApiKeysManagementPanel() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {merchantsList.map((m) => (
+            {filteredMerchants.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">Aucun marchand</p>
+            ) : filteredMerchants.map((m) => (
               <div key={m.id} className="flex items-center justify-between gap-2 p-2 rounded-md hover-elevate">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-foreground truncate">{m.name}</p>
@@ -1694,22 +1710,10 @@ function ApiKeysManagementPanel() {
 
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Key className="w-4 h-4" />Cles API par pays
-            </CardTitle>
-            <select
-              className="text-sm border rounded-md px-2 py-1 bg-background text-foreground"
-              value={selectedMerchant || ""}
-              onChange={(e) => setSelectedMerchant(e.target.value ? parseInt(e.target.value) : null)}
-              data-testid="select-filter-merchant"
-            >
-              <option value="">Tous les marchands</option>
-              {merchantsList.map(m => (
-                <option key={m.id} value={m.id}>{m.name}</option>
-              ))}
-            </select>
-          </div>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Key className="w-4 h-4" />Cles API par pays
+            {selectedMerchant && <Badge variant="secondary" className="text-xs font-normal ml-1">{merchantsList.find(m => m.id === selectedMerchant)?.name}</Badge>}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-2">
