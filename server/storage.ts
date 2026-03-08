@@ -38,6 +38,7 @@ export interface IStorage {
   updateMerchantCountryBalance(id: number, balance: number): Promise<void>;
   incrementMerchantCountryBalance(id: number, amount: number): Promise<void>;
   findMerchantCountryBySimAndCountry(merchantId: number, country: string): Promise<MerchantCountry | undefined>;
+  findMerchantCountryByApiKey(apiKey: string): Promise<MerchantCountry | undefined>;
   updateMerchantCountryApiKey(id: number, apiKey: string): Promise<void>;
   updateMerchantCountryActive(id: number, active: boolean): Promise<void>;
 
@@ -124,6 +125,7 @@ export interface IStorage {
   createWithdrawal(data: InsertWithdrawal): Promise<Withdrawal>;
   getWithdrawals(merchantId?: number): Promise<(Withdrawal & { merchantName: string; merchantWebsite?: string | null })[]>;
   getWithdrawalById(id: number): Promise<Withdrawal | undefined>;
+  getWithdrawalByOmnipayRef(ref: string): Promise<Withdrawal | undefined>;
   updateWithdrawalStatus(id: number, status: string, adminNote?: string, omnipayRef?: string, fees?: number): Promise<void>;
   applyWithdrawal(id: number): Promise<void>;
 
@@ -220,6 +222,12 @@ export class DatabaseStorage implements IStorage {
         eq(merchantCountries.merchantId, merchantId),
         sql`LOWER(${merchantCountries.country}) = LOWER(${country.trim()})`
       ));
+    return mc;
+  }
+
+  async findMerchantCountryByApiKey(apiKey: string): Promise<MerchantCountry | undefined> {
+    const [mc] = await db.select().from(merchantCountries)
+      .where(eq(merchantCountries.apiKey, apiKey));
     return mc;
   }
 
@@ -700,6 +708,11 @@ export class DatabaseStorage implements IStorage {
 
   async getWithdrawalById(id: number): Promise<Withdrawal | undefined> {
     const [row] = await db.select().from(withdrawals).where(eq(withdrawals.id, id));
+    return row;
+  }
+
+  async getWithdrawalByOmnipayRef(ref: string): Promise<Withdrawal | undefined> {
+    const [row] = await db.select().from(withdrawals).where(eq(withdrawals.omnipayRef, ref));
     return row;
   }
 

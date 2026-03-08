@@ -155,6 +155,34 @@ function authMiddleware(role: "admin" | "merchant") {
   };
 }
 
+async function apiKeyAuthMiddleware(req: Request, res: Response, next: NextFunction) {
+  const apiKey = (req.headers["x-api-key"] as string) || "";
+
+  if (apiKey) {
+    try {
+      const mc = await storage.findMerchantCountryByApiKey(apiKey);
+      if (mc) {
+        (req as any).user = { id: mc.merchantId, role: "merchant" };
+        (req as any).apiKeyMerchantCountry = mc;
+        return next();
+      }
+    } catch {}
+  }
+
+  const auth = req.headers.authorization;
+  if (auth && auth.startsWith("Bearer ")) {
+    try {
+      const decoded = jwt.verify(auth.split(" ")[1], JWT_SECRET) as any;
+      if (decoded.role === "merchant") {
+        (req as any).user = decoded;
+        return next();
+      }
+    } catch {}
+  }
+
+  return res.status(401).json({ message: "Non autorise. Fournissez un Bearer token JWT ou un header X-API-KEY valide." });
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -1280,8 +1308,18 @@ export async function registerRoutes(
 
       const pending = await storage.getPendingPaymentByOmnipayReference(payload.reference);
       if (!pending) {
-        console.log(`[OMNIPAY CALLBACK] Paiement en attente non trouve pour ref: ${payload.reference}`);
-        return res.status(404).json({ message: "Paiement non trouve" });
+        const withdrawal = await storage.getWithdrawalByOmnipayRef(payload.reference);
+        if (withdrawal) {
+          console.log(`[OMNIPAY CALLBACK] Retrait connu ref=${payload.reference} statut=${payload.status}`);
+          return res.json({ status: "acknowledged" });
+        }
+        const txByRef = await storage.getTransactionByTxId(payload.reference);
+        if (txByRef) {
+          console.log(`[OMNIPAY CALLBACK] Transfert connu ref=${payload.reference}`);
+          return res.json({ status: "acknowledged" });
+        }
+        console.log(`[OMNIPAY CALLBACK] Reference inconnue: ${payload.reference}`);
+        return res.json({ status: "unknown" });
       }
 
       if (pending.status === "confirmed" || pending.status === "omnipay_confirmed") {
@@ -1491,7 +1529,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/merchant/transfer", authMiddleware("merchant"), async (req, res) => {
+  app.post("/api/merchant/transfer", apiKeyAuthMiddleware, async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
       const { msisdn, amount, firstName, lastName, operator } = req.body;
@@ -1526,7 +1564,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Solde insuffisant" });
       }
 
-      const omnipayApiKey = await getOmnipayApiKey();
+      const omnipayApiKey = await getOmnipayPayoutApiKey();
       if (!omnipayApiKey) {
         return res.status(500).json({ message: "Systeme de paiement non configure" });
       }

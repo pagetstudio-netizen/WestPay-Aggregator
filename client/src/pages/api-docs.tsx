@@ -353,12 +353,15 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
 Content-Type: application/json`} />
               </div>
               <div>
-                <p className="text-sm font-semibold text-foreground mb-2">3. Cle API par pays</p>
+                <p className="text-sm font-semibold text-foreground mb-2">3. Cle API par pays (methode simplifiee pour les retraits)</p>
                 <p className="text-sm text-muted-foreground mb-2">
-                  Chaque pays actif dispose d'une cle API unique. Disponible dans votre dashboard sous "Cles API".
-                  Format : <code className="bg-muted px-1 rounded text-xs">PREFIX-[40 caracteres]</code>
+                  Pour les retraits via <code className="bg-muted px-1 rounded text-xs">POST /api/merchant/transfer</code>,
+                  vous pouvez utiliser directement votre <strong>cle API pays</strong> sans passer par la connexion JWT.
+                  Disponible dans votre dashboard sous "Cles API". Format : <code className="bg-muted px-1 rounded text-xs">PREFIX-[40 caracteres]</code>
                 </p>
-                <CodeBlock label="Header optionnel (requis pour certains endpoints)" code={`X-API-KEY: TGO-a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0`} />
+                <CodeBlock label="Header X-API-KEY (suffit pour les retraits)" code={`X-API-KEY: TGO-a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0
+Content-Type: application/json`} />
+                <p className="text-xs text-muted-foreground mt-2">Chaque cle est liee a un pays precis — utilisez la cle du pays concerne par le retrait.</p>
               </div>
             </div>
           </section>
