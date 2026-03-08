@@ -833,27 +833,46 @@ export function setupWebhook(app: Express, secret: string): void {
   console.log(`[TELEGRAM] Route webhook enregistree : POST ${path}`);
 }
 
-export async function registerWebhookUrl(webhookUrl: string, retries = 5, delayMs = 3000): Promise<void> {
-  if (!bot) return;
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      const current = await bot.telegram.getWebhookInfo();
-      if (current.url === webhookUrl) {
-        console.log(`[TELEGRAM] Webhook deja actif — aucune action requise`);
-        return;
-      }
-      await bot.telegram.deleteWebhook({ drop_pending_updates: false });
-      await bot.telegram.setWebhook(webhookUrl, {
-        allowed_updates: ["message", "callback_query", "my_chat_member", "chat_member"],
-      });
-      console.log(`[TELEGRAM] Webhook configure : ${webhookUrl}`);
-      return;
-    } catch (err: any) {
-      console.error(`[TELEGRAM] Erreur enregistrement webhook (tentative ${attempt}/${retries}): ${err.message}`);
-      if (attempt < retries) await new Promise(r => setTimeout(r, delayMs));
+async function tryRegisterWebhook(webhookUrl: string): Promise<boolean> {
+  if (!bot) return false;
+  try {
+    const current = await bot.telegram.getWebhookInfo();
+    console.log(`[TELEGRAM] Webhook actuel : "${current.url || "(vide)"}"`);
+    if (current.url === webhookUrl) {
+      console.log(`[TELEGRAM] Webhook deja actif — aucune action requise`);
+      return true;
     }
+    await bot.telegram.deleteWebhook({ drop_pending_updates: false });
+    await bot.telegram.setWebhook(webhookUrl, {
+      allowed_updates: ["message", "callback_query", "my_chat_member", "chat_member"],
+    });
+    const check = await bot.telegram.getWebhookInfo();
+    if (check.url === webhookUrl) {
+      console.log(`[TELEGRAM] Webhook configure avec succes : ${webhookUrl}`);
+      return true;
+    }
+    console.error(`[TELEGRAM] Verification post-enregistrement echouee. URL actuelle : "${check.url}"`);
+    return false;
+  } catch (err: any) {
+    const detail = err.response ? ` (HTTP ${err.response.statusCode}: ${JSON.stringify(err.response.body)})` : "";
+    console.error(`[TELEGRAM] Erreur enregistrement webhook: ${err.message}${detail}`);
+    return false;
   }
-  console.error(`[TELEGRAM] Echec enregistrement webhook apres ${retries} tentatives`);
+}
+
+export async function registerWebhookUrl(webhookUrl: string): Promise<void> {
+  if (!bot) return;
+  const delays = [0, 5000, 15000, 30000, 60000];
+  for (let i = 0; i < delays.length; i++) {
+    if (delays[i] > 0) {
+      console.log(`[TELEGRAM] Nouvelle tentative webhook dans ${delays[i] / 1000}s...`);
+      await new Promise(r => setTimeout(r, delays[i]));
+    }
+    console.log(`[TELEGRAM] Tentative enregistrement webhook ${i + 1}/${delays.length}`);
+    const ok = await tryRegisterWebhook(webhookUrl);
+    if (ok) return;
+  }
+  console.error(`[TELEGRAM] Echec definitif enregistrement webhook — bot en mode reception uniquement`);
 }
 
 export async function startPolling(): Promise<void> {
