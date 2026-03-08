@@ -60,6 +60,27 @@ const COUNTRY_DIAL_CODES: Record<string, string> = {
   "Cameroun": "237", "Congo Brazzaville": "242", "Gabon": "241",
 };
 
+const COUNTRY_ALIASES: Record<string, string> = {
+  "togo": "Togo",
+  "benin": "Benin", "bénin": "Benin",
+  "cote d'ivoire": "Cote d'Ivoire", "côte d'ivoire": "Cote d'Ivoire",
+  "cote divoire": "Cote d'Ivoire", "côte divoire": "Cote d'Ivoire",
+  "ivory coast": "Cote d'Ivoire", "ci": "Cote d'Ivoire",
+  "senegal": "Senegal", "sénégal": "Senegal",
+  "mali": "Mali",
+  "burkina faso": "Burkina Faso", "burkina": "Burkina Faso",
+  "cameroun": "Cameroun", "cameroon": "Cameroun",
+  "congo brazzaville": "Congo Brazzaville", "congo": "Congo Brazzaville",
+  "gabon": "Gabon",
+};
+
+function normalizeCountry(country: string): string {
+  if (!country) return country;
+  const trimmed = country.trim();
+  const lower = trimmed.toLowerCase();
+  return COUNTRY_ALIASES[lower] || trimmed;
+}
+
 function prependDialCode(phone: string, country: string): string {
   const cleaned = phone.replace(/[\s\-\(\)\+]/g, "");
   const dialCode = COUNTRY_DIAL_CODES[country] || "";
@@ -1452,7 +1473,8 @@ export async function registerRoutes(
   app.post("/api/merchant/transfer", authMiddleware("merchant"), async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
-      const { country, msisdn, amount, firstName, lastName, operator } = req.body;
+      const { msisdn, amount, firstName, lastName, operator } = req.body;
+      const country = normalizeCountry(req.body.country || "");
 
       if (!country || !msisdn || !amount || !firstName || !lastName) {
         return res.status(400).json({ message: "Pays, numero, montant, prenom et nom requis" });
@@ -1464,8 +1486,15 @@ export async function registerRoutes(
       }
 
       const merchantCountry = await storage.findMerchantCountryBySimAndCountry(merchantId, country);
-      if (!merchantCountry || !merchantCountry.active) {
-        return res.status(400).json({ message: "Pays non disponible" });
+      if (!merchantCountry) {
+        const availableMCs = await storage.getMerchantCountries(merchantId);
+        const available = availableMCs.filter(c => c.active).map(c => c.country);
+        return res.status(400).json({
+          message: `Pays "${country}" non configure sur ce compte. Pays disponibles : ${available.join(", ") || "aucun"}`,
+        });
+      }
+      if (!merchantCountry.active) {
+        return res.status(400).json({ message: `Le pays "${country}" est desactive sur ce compte marchand` });
       }
 
       if (!merchantCountry.omnipayEnabled) {

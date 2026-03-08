@@ -216,7 +216,10 @@ export class DatabaseStorage implements IStorage {
 
   async findMerchantCountryBySimAndCountry(merchantId: number, country: string): Promise<MerchantCountry | undefined> {
     const [mc] = await db.select().from(merchantCountries)
-      .where(and(eq(merchantCountries.merchantId, merchantId), eq(merchantCountries.country, country)));
+      .where(and(
+        eq(merchantCountries.merchantId, merchantId),
+        sql`LOWER(${merchantCountries.country}) = LOWER(${country.trim()})`
+      ));
     return mc;
   }
 
