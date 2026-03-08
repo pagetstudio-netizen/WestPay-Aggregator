@@ -1045,19 +1045,36 @@ function MerchantsPanel() {
 }
 
 function TransactionsPanel() {
+  const { toast } = useToast();
   const { data: transactions = [], isLoading } = useAdminFetch("/api/admin/transactions", ["/api/admin/transactions"]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
 
   if (isLoading) return <LoadingSkeleton />;
 
-  const filtered = (transactions as any[]).filter(
-    (t) => t.txId?.toLowerCase().includes(searchTerm.toLowerCase()) || t.country?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filtered = (transactions as any[]).filter((t) => {
+    const matchSearch =
+      t.txId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      t.country?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      t.merchantName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      t.payerNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      t.omnipayReference?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchStatus =
+      statusFilter === "all" ||
+      (statusFilter === "confirmed" && t.status === "confirmed") ||
+      (statusFilter === "failed" && t.status === "failed");
+    return matchSearch && matchStatus;
+  });
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    toast({ title: "Copié", description: `${label} copié dans le presse-papiers` });
+  };
 
   const downloadCSV = () => {
-    const header = "TXID,Montant,Pays,Marchand,Statut,Date\n";
+    const header = "TXID,Référence OmniPay,Montant,Pays,Marchand,Numéro,Opérateur,Statut,Erreur,Date\n";
     const rows = filtered.map((t: any) =>
-      `${t.txId},${t.amount},${t.country},${t.merchantName || t.merchantId},${t.status},${new Date(t.createdAt).toLocaleDateString("fr-FR")}`
+      `${t.txId},${t.omnipayReference || ""},${t.amount},${t.country},${t.merchantName || t.merchantId},${t.payerNumber || ""},${t.operator || ""},${t.status},${t.errorMessage || ""},${new Date(t.createdAt).toLocaleDateString("fr-FR")}`
     ).join("\n");
     const blob = new Blob([header + rows], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -1065,50 +1082,92 @@ function TransactionsPanel() {
     a.href = url; a.download = "transactions.csv"; a.click();
   };
 
+  const failedCount = (transactions as any[]).filter((t) => t.status === "failed").length;
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <h2 className="text-lg font-semibold text-foreground">Transactions</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold text-foreground">Transactions</h2>
+          {failedCount > 0 && (
+            <Badge variant="destructive" className="text-xs">{failedCount} échoué{failedCount > 1 ? "s" : ""}</Badge>
+          )}
+        </div>
         <Button variant="outline" onClick={downloadCSV} data-testid="button-export-csv">
           <Download className="w-4 h-4 mr-2" />Export CSV
         </Button>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input className="pl-10" placeholder="Rechercher par TXID ou pays..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} data-testid="input-search-transactions" />
+      <div className="flex gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input className="pl-10" placeholder="Rechercher TXID, référence, pays, marchand, numéro..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} data-testid="input-search-transactions" />
+        </div>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-36" data-testid="select-status-filter">
+            <SelectValue placeholder="Statut" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tous</SelectItem>
+            <SelectItem value="confirmed">Confirmés</SelectItem>
+            <SelectItem value="failed">Échoués</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
-      <ScrollArea className="h-[calc(100vh-280px)]">
+      <ScrollArea className="h-[calc(100vh-300px)]">
         <div className="space-y-2">
           {filtered.length === 0 ? (
             <Card><CardContent className="p-6 text-center text-muted-foreground text-sm">Aucune transaction</CardContent></Card>
           ) : (
-            filtered.map((tx: any) => (
-              <Card key={tx.id}>
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-sm font-semibold text-foreground" data-testid={`text-txid-${tx.id}`}>{tx.txId}</span>
-                        <Badge variant="secondary">{tx.country}</Badge>
-                        <Badge variant={tx.status === "confirmed" ? "default" : "destructive"}>
-                          {tx.status === "confirmed" ? "Confirme" : tx.status}
-                        </Badge>
+            filtered.map((tx: any) => {
+              const isFailed = tx.status === "failed";
+              return (
+                <Card key={tx.id} className={isFailed ? "border-destructive/40 bg-destructive/5 dark:bg-destructive/10" : ""}>
+                  <CardContent className="p-4">
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between gap-2 flex-wrap">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-mono text-xs font-semibold text-foreground truncate max-w-[180px]" data-testid={`text-txid-${tx.id}`} title={tx.txId}>{tx.txId}</span>
+                            <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={() => copyToClipboard(tx.txId, "ID transaction")} title="Copier l'ID" data-testid={`button-copy-txid-${tx.id}`}>
+                              <Copy className="w-3 h-3" />
+                            </Button>
+                            <Badge variant="secondary" className="text-xs">{tx.country}</Badge>
+                            <Badge variant={isFailed ? "destructive" : "default"} className="text-xs">
+                              {isFailed ? "Échoué" : "Confirmé"}
+                            </Badge>
+                            {tx.provider && <Badge variant="outline" className="text-xs">{tx.provider === "sms" ? "SMS" : "Mobile Money"}</Badge>}
+                          </div>
+                          <div className="flex items-center gap-3 flex-wrap mt-1.5">
+                            <p className="text-sm font-medium text-foreground">{tx.amount?.toLocaleString("fr-FR")} F CFA</p>
+                            {tx.merchantName && <p className="text-xs text-muted-foreground">🏪 {tx.merchantName}</p>}
+                            {tx.payerNumber && <p className="text-xs text-muted-foreground">📞 {tx.payerNumber}</p>}
+                            {tx.operator && <p className="text-xs text-muted-foreground">📱 {tx.operator}</p>}
+                          </div>
+                          {tx.omnipayReference && (
+                            <div className="flex items-center gap-1 mt-1">
+                              <p className="text-xs text-muted-foreground font-mono truncate max-w-[200px]" title={tx.omnipayReference}>Réf: {tx.omnipayReference}</p>
+                              <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={() => copyToClipboard(tx.omnipayReference, "Référence OmniPay")} title="Copier la référence" data-testid={`button-copy-ref-${tx.id}`}>
+                                <Copy className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          )}
+                          {isFailed && tx.errorMessage && (
+                            <p className="text-xs text-destructive mt-1 bg-destructive/10 rounded px-2 py-1">⚠️ {tx.errorMessage}</p>
+                          )}
+                          <p className="text-xs text-muted-foreground mt-1">{new Date(tx.createdAt).toLocaleString("fr-FR")}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className={`text-lg font-bold ${isFailed ? "text-destructive" : "text-foreground"}`}>{tx.amount?.toLocaleString("fr-FR")}</p>
+                          <p className="text-xs text-muted-foreground">F CFA</p>
+                        </div>
                       </div>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        {tx.amount?.toLocaleString("fr-FR")} F CFA {tx.payerNumber ? `de ${tx.payerNumber}` : ""}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">{new Date(tx.createdAt).toLocaleString("fr-FR")}</p>
                     </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-lg font-bold text-foreground">{tx.amount?.toLocaleString("fr-FR")}</p>
-                      <p className="text-xs text-muted-foreground">F CFA</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))
+                  </CardContent>
+                </Card>
+              );
+            })
           )}
         </div>
       </ScrollArea>

@@ -1038,6 +1038,20 @@ export async function registerRoutes(
 
           if (omnipayResult.success !== 1) {
             const errorMsg = OMNIPAY_ERRORS[omnipayResult.code || 0] || omnipayResult.message || "Erreur de paiement";
+            storage.createTransaction({
+              merchantId: merchant.id,
+              country,
+              txId: reference,
+              amount: parsedAmount,
+              payerNumber: msisdn || null,
+              payerName: payerName || null,
+              status: "failed",
+              provider: "omnipay",
+              omnipayTxId: null,
+              operator: operator || omnipayOperator || null,
+              omnipayReference: reference,
+              errorMessage: errorMsg,
+            }).catch(() => {});
             return res.status(400).json({ message: errorMsg, omnipayError: true, code: omnipayResult.code });
           }
 
@@ -1314,6 +1328,23 @@ export async function registerRoutes(
         res.json({ status: "confirmed" });
       } else if (statusNum === OMNIPAY_STATUS.FAILED) {
         await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+
+        const failedRef = payload.reference || pending.omnipayReference || `FAIL-${Date.now()}-${pending.id}`;
+        const failErrorMsg = payload.message || "Paiement refusé par l'opérateur";
+        storage.createTransaction({
+          merchantId: pending.merchantId,
+          country: pending.country,
+          txId: failedRef,
+          amount: pending.amount,
+          payerNumber: payload.msisdn || pending.payerPhone || null,
+          payerName: pending.payerName || null,
+          status: "failed",
+          provider: "omnipay",
+          omnipayTxId: payload.id ? String(payload.id) : null,
+          operator: null,
+          omnipayReference: failedRef,
+          errorMessage: failErrorMsg,
+        }).catch(() => {});
 
         await storage.createApiLog({
           merchantId: pending.merchantId,

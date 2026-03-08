@@ -57,6 +57,9 @@ export const transactions = pgTable("transactions", {
   status: text("status").notNull().default("confirmed"),
   provider: text("provider").notNull().default("sms"),
   omnipayTxId: text("omnipay_tx_id"),
+  operator: text("operator"),
+  omnipayReference: text("omnipay_reference"),
+  errorMessage: text("error_message"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
