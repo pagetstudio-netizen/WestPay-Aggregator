@@ -7,7 +7,7 @@ import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal } from "./telegram-bot";
+import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate } from "./telegram-bot";
 import {
   initiatePayment as omnipayInitiatePayment,
   initiateTransfer as omnipayInitiateTransfer,
@@ -396,6 +396,11 @@ export async function registerRoutes(
       const { id, balance } = req.body;
       if (id === undefined || balance === undefined) return res.status(400).json({ message: "ID et solde requis" });
       await storage.updateMerchantCountryBalance(id, balance);
+      const updatedMC = await storage.getMerchantCountryById(id);
+      if (updatedMC) {
+        const balMerchant = await storage.getMerchantById(updatedMC.merchantId);
+        notifyAdminBalanceUpdate({ merchantName: balMerchant?.name || `#${updatedMC.merchantId}`, country: updatedMC.country, newBalance: balance }).catch(() => {});
+      }
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -1843,6 +1848,24 @@ export async function registerRoutes(
         }).catch(err => console.error("[WEBHOOK] Erreur async:", err));
       }
 
+      notifyMerchantPayment(simNumber.merchantId, {
+        txId,
+        amount,
+        payerNumber,
+        country: simNumber.country,
+        provider: "sms",
+      }).catch(() => {});
+
+      notifyAdminPayment({
+        txId,
+        merchantName: simMerchant?.name || `#${simNumber.merchantId}`,
+        payerNumber,
+        country: simNumber.country,
+        amount,
+        provider: "sms",
+        status: "confirmed",
+      }).catch(() => {});
+
       console.log(`[SMS] Transaction confirmee: TX=${txId}, Montant=${amount}, Marchand=#${simNumber.merchantId}, Pays=${simNumber.country}`);
       return res.json({ status: "processed", txId, amount, country: simNumber.country });
     } catch (err: any) {
@@ -2127,6 +2150,10 @@ export async function registerRoutes(
       await db.update(merchantCountries)
         .set({ balance: sql`${merchantCountries.balance} - ${parsedAmount + fee}` })
         .where(eq(merchantCountries.id, fromMC.id));
+
+      const wtMerchant = await storage.getMerchantById(merchantId);
+      notifyAdminWalletTransfer({ id: transfer.id, merchantName: wtMerchant?.name || `#${merchantId}`, fromCountry: fromMC.country, toCountry: toMC.country, amount: parsedAmount, fee, currency: fromZone, status: "pending" }).catch(() => {});
+
       res.json(transfer);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -2150,6 +2177,8 @@ export async function registerRoutes(
       if (transfer.status !== "pending") return res.status(400).json({ message: "Ce transfert n'est plus en attente" });
       await storage.applyWalletTransfer(id);
       await storage.updateWalletTransferStatus(id, "approved", req.body.note || null);
+      const wtApprMerchant = await storage.getMerchantById(transfer.merchantId);
+      notifyAdminWalletTransfer({ id, merchantName: wtApprMerchant?.name || `#${transfer.merchantId}`, fromCountry: transfer.fromCountry, toCountry: transfer.toCountry, amount: transfer.amount, fee: transfer.fee, currency: transfer.currency, status: "approved" }).catch(() => {});
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -2164,6 +2193,8 @@ export async function registerRoutes(
       if (transfer.status !== "pending") return res.status(400).json({ message: "Ce transfert n'est plus en attente" });
       await storage.reimbursWalletTransfer(id);
       await storage.updateWalletTransferStatus(id, "rejected", req.body.note || null);
+      const wtRejMerchant = await storage.getMerchantById(transfer.merchantId);
+      notifyAdminWalletTransfer({ id, merchantName: wtRejMerchant?.name || `#${transfer.merchantId}`, fromCountry: transfer.fromCountry, toCountry: transfer.toCountry, amount: transfer.amount, fee: transfer.fee, currency: transfer.currency, status: "rejected" }).catch(() => {});
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -2253,6 +2284,8 @@ export async function registerRoutes(
         adminNote: null,
       });
       await storage.decrementMerchantCountryBalance(mc.id, amount);
+
+      notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "pending", mode: "auto" }).catch(() => {});
 
       const withdrawalFee = calcWithdrawalFee(amount);
       const netAmount = amount - withdrawalFee;

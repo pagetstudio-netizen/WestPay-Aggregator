@@ -1090,15 +1090,15 @@ export async function notifyAdminWithdrawal(data: {
   fees: number;
   phone: string;
   operator?: string | null;
-  status: "approved" | "failed" | "rejected";
+  status: "pending" | "approved" | "failed" | "rejected";
   mode: "auto" | "manual";
 }): Promise<void> {
   const dateStr = new Date().toLocaleString("fr-FR", {
     day: "2-digit", month: "long", year: "numeric",
     hour: "2-digit", minute: "2-digit", timeZone: "UTC",
   });
-  const icon = data.status === "approved" ? "💸" : "❌";
-  const statusLabel = data.status === "approved" ? "Effectué" : data.status === "rejected" ? "Rejeté" : "Échoué";
+  const icon = data.status === "approved" ? "💸" : data.status === "pending" ? "⏳" : "❌";
+  const statusLabel = data.status === "approved" ? "Effectué" : data.status === "rejected" ? "Rejeté" : data.status === "pending" ? "En attente" : "Échoué";
   const net = data.amount - data.fees;
 
   const lines = [
@@ -1119,6 +1119,65 @@ export async function notifyAdminWithdrawal(data: {
   ].filter(Boolean) as string[];
 
   await notifyAdminGroup(lines.join("\n"));
+}
+
+export async function notifyAdminWalletTransfer(data: {
+  id: number;
+  merchantName: string;
+  fromCountry: string;
+  toCountry: string;
+  amount: number;
+  fee: number;
+  currency: string;
+  status: "pending" | "approved" | "rejected";
+}): Promise<void> {
+  const dateStr = new Date().toLocaleString("fr-FR", {
+    day: "2-digit", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", timeZone: "UTC",
+  });
+  const icon = data.status === "approved" ? "🔄" : data.status === "rejected" ? "❌" : "⏳";
+  const statusLabel = data.status === "approved" ? "Approuvé" : data.status === "rejected" ? "Rejeté" : "En attente";
+  const net = data.amount - data.fee;
+
+  const msg = [
+    `${icon} *Transfert entre wallets WestPay*`,
+    ``,
+    `📋 *Type :* Échange de wallets`,
+    `🔖 *ID :* \`WT-${data.id}\``,
+    `🏪 *Marchand :* ${data.merchantName}`,
+    `🌍 *De :* ${countryLabel(data.fromCountry)} → *Vers :* ${countryLabel(data.toCountry)}`,
+    `💰 *Montant total :* ${formatAmount(data.amount)} ${data.currency}`,
+    `💵 *Frais plateforme :* ${formatAmount(data.fee)} ${data.currency}`,
+    `✅ *Montant reçu :* ${formatAmount(net)} ${data.currency}`,
+    `📊 *Statut :* ${statusLabel}`,
+    `📅 *Date :* ${dateStr}`,
+  ].join("\n");
+
+  await notifyAdminGroup(msg);
+}
+
+export async function notifyAdminBalanceUpdate(data: {
+  merchantName: string;
+  country: string;
+  newBalance: number;
+}): Promise<void> {
+  const dateStr = new Date().toLocaleString("fr-FR", {
+    day: "2-digit", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", timeZone: "UTC",
+  });
+
+  const msg = [
+    `🛠️ *Ajustement de solde WestPay*`,
+    ``,
+    `📋 *Type :* Dépôt / Ajustement admin`,
+    `🏪 *Marchand :* ${data.merchantName}`,
+    `🌍 *Pays :* ${countryLabel(data.country)}`,
+    `💰 *Nouveau solde :* ${formatAmount(data.newBalance)}`,
+    `📊 *Statut :* Effectué`,
+    `📅 *Date :* ${dateStr}`,
+  ].join("\n");
+
+  await notifyAdminGroup(msg);
 }
 
 async function sendDailyReport(): Promise<void> {
