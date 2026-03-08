@@ -2339,13 +2339,13 @@ function WithdrawalOperatorsPanel() {
   const [editingOp, setEditingOp] = useState<WithdrawalOperator | null>(null);
   const [filterCountry, setFilterCountry] = useState("all");
 
-  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "OmniPay", omnipayCode: "", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false };
+  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "OmniPay", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false };
   const [form, setForm] = useState(emptyForm);
 
   const openCreate = () => { setEditingOp(null); setForm(emptyForm); setOpDialogOpen(true); };
   const openEdit = (op: WithdrawalOperator) => {
     setEditingOp(op);
-    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, omnipayCode: op.omnipayCode || "", active: op.active, maintenanceAll: op.maintenanceAll, maintenanceDeposits: op.maintenanceDeposits, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment });
+    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, active: op.active, maintenanceAll: op.maintenanceAll, maintenanceDeposits: op.maintenanceDeposits, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment });
     setOpDialogOpen(true);
   };
 
@@ -2423,7 +2423,7 @@ function WithdrawalOperatorsPanel() {
                       <Badge variant="secondary" className="text-xs py-0">{op.country}</Badge>
                       {!op.active && <Badge variant="destructive" className="text-xs py-0">Inactif</Badge>}
                     </div>
-                    <span className="text-xs text-muted-foreground">Passerelle : {op.gateway} · Code OmniPay : <span className={op.omnipayCode ? "font-mono text-green-600 dark:text-green-400" : "text-red-500"}>{op.omnipayCode || "non défini"}</span> · Limite : {op.dailyLimit.toLocaleString("fr-FR")} FCFA/j</span>
+                    <span className="text-xs text-muted-foreground">Passerelle : {op.gateway} · Limite : {op.dailyLimit.toLocaleString("fr-FR")} FCFA/j</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -2487,18 +2487,12 @@ function WithdrawalOperatorsPanel() {
               <Label>Limite journalière (FCFA)</Label>
               <Input type="number" value={form.dailyLimit} onChange={e => setForm(f => ({ ...f, dailyLimit: Number(e.target.value) }))} data-testid="input-op-limit" />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Passerelle de paiement</Label>
-                <Select value={form.gateway} onValueChange={v => setForm(f => ({ ...f, gateway: v }))}>
-                  <SelectTrigger data-testid="select-op-gateway"><SelectValue /></SelectTrigger>
-                  <SelectContent>{GATEWAYS.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Code OmniPay</Label>
-                <Input value={form.omnipayCode} onChange={e => setForm(f => ({ ...f, omnipayCode: e.target.value }))} placeholder="Ex: mtn, moov, wave..." data-testid="input-op-omnipay-code" />
-              </div>
+            <div className="space-y-2">
+              <Label>Passerelle de paiement</Label>
+              <Select value={form.gateway} onValueChange={v => setForm(f => ({ ...f, gateway: v }))}>
+                <SelectTrigger data-testid="select-op-gateway"><SelectValue /></SelectTrigger>
+                <SelectContent>{GATEWAYS.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}</SelectContent>
+              </Select>
             </div>
             <div className="flex items-center gap-3">
               <Switch checked={form.active} onCheckedChange={v => setForm(f => ({ ...f, active: v }))} data-testid="switch-op-active-form" />

@@ -245,6 +245,14 @@ export async function runMigrations() {
     )`);
 
     await client.query(`ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS operator text`);
+    await client.query(`ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS omnipay_ref text`);
+    await client.query(`ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS fees integer DEFAULT 0`);
+
+    await client.query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS payer_name text`);
+    await client.query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS merchant_country_id integer`);
+    await client.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS payer_name text`);
+
+    await client.query(`ALTER TABLE merchants ADD COLUMN IF NOT EXISTS website text`);
 
     await client.query(`CREATE TABLE IF NOT EXISTS withdrawal_operators (
       id serial PRIMARY KEY,
@@ -294,6 +302,23 @@ export async function runMigrations() {
         [op.name, op.type, op.country, op.dailyLimit, op.gateway]
       );
     }
+
+    await client.query(`ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS omnipay_code text`);
+
+    await client.query(`
+      UPDATE withdrawal_operators SET omnipay_code = CASE
+        WHEN LOWER(name) LIKE '%mtn%' THEN 'mtn'
+        WHEN LOWER(name) LIKE '%moov%' THEN 'moov'
+        WHEN LOWER(name) LIKE '%orange%' THEN 'orange'
+        WHEN LOWER(name) LIKE '%wave%' THEN 'wave'
+        WHEN LOWER(name) LIKE '%tmoney%' OR LOWER(name) LIKE '%t-money%' THEN 'tmoney'
+        WHEN LOWER(name) LIKE '%mixx%' OR LOWER(name) LIKE '%yas%' THEN 'mixx'
+        WHEN LOWER(name) LIKE '%airtel%' THEN 'airtel'
+        WHEN LOWER(name) LIKE '%flooz%' THEN 'flooz'
+        ELSE omnipay_code
+      END
+      WHERE omnipay_code IS NULL
+    `);
 
     console.log("[DB] Migrations appliquees avec succes");
   } catch (err) {
