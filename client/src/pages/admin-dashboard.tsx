@@ -295,14 +295,65 @@ function OverviewPanel() {
   const recentLinks = (links as any[]).slice(0, 5);
   const recentMerchants = (merchants as any[]).slice(0, 5);
 
+  const fmtF = (n: number) => `${n.toLocaleString("fr-FR")} F`;
+
   return (
     <div className="space-y-6">
+      {/* Statistiques principales */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <StatCard title="Marchands" value={stats?.merchantCount || 0} icon={Users} accent="blue" />
         <StatCard title="Liens de paiement" value={stats?.paymentLinkCount || 0} icon={Link} accent="purple" />
         <StatCard title="Transactions" value={stats?.transactionCount || 0} icon={Hash} accent="green" />
-        <StatCard title="Volume total" value={`${(stats?.totalVolume || 0).toLocaleString("fr-FR")} F`} icon={DollarSign} accent="green" />
+        <StatCard title="Volume total" value={fmtF(stats?.totalVolume || 0)} icon={DollarSign} accent="green" />
         <StatCard title="Paiements auj." value={stats?.todayPayments || 0} icon={TrendingUp} accent="orange" />
+      </div>
+
+      {/* Commissions WestPay */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Commissions WestPay</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard title="Commission totale" value={fmtF(stats?.commissionTotal || 0)} icon={DollarSign} accent="green" />
+          <StatCard title="Commission du jour" value={fmtF(stats?.commissionToday || 0)} icon={TrendingUp} accent="orange" />
+          <StatCard title="Commission ce mois" value={fmtF(stats?.commissionThisMonth || 0)} icon={BarChart3} accent="blue" />
+          <StatCard title="Mois précédent" value={fmtF(stats?.commissionPrevMonth || 0)} icon={BarChart3} accent="purple" />
+        </div>
+      </div>
+
+      {/* Paiements par canal & Retraits */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Canaux de paiement & Retraits</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Card className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30"><Hash className="w-4 h-4 text-blue-600" /></div>
+              <div>
+                <p className="text-xs text-muted-foreground">Paiements par API</p>
+                <p className="text-lg font-bold">{(stats?.apiPaymentsCount || 0).toLocaleString("fr-FR")}</p>
+                <p className="text-xs text-muted-foreground">{fmtF(stats?.apiPaymentsTotal || 0)}</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/30"><Link className="w-4 h-4 text-purple-600" /></div>
+              <div>
+                <p className="text-xs text-muted-foreground">Paiements par lien</p>
+                <p className="text-lg font-bold">{(stats?.linkPaymentsCount || 0).toLocaleString("fr-FR")}</p>
+                <p className="text-xs text-muted-foreground">{fmtF(stats?.linkPaymentsTotal || 0)}</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30"><Download className="w-4 h-4 text-green-600" /></div>
+              <div>
+                <p className="text-xs text-muted-foreground">Retraits effectués</p>
+                <p className="text-lg font-bold">{(stats?.withdrawalsCount || 0).toLocaleString("fr-FR")}</p>
+                <p className="text-xs text-muted-foreground">{fmtF(stats?.withdrawalsTotal || 0)}</p>
+              </div>
+            </div>
+          </Card>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -2023,8 +2074,20 @@ function AdminWalletTransfersPanel() {
     return <Badge variant="destructive" className="gap-1"><XCircle className="w-3 h-3" />Rejete</Badge>;
   };
 
+  const [searchVt, setSearchVt] = useState("");
+  const [statusFilterVt, setStatusFilterVt] = useState("all");
+  const [countryFilterVt, setCountryFilterVt] = useState("all");
+
   const allTransfers = (transfers as (WalletTransfer & { merchantName: string })[]);
   const pending = allTransfers.filter(t => t.status === "pending");
+
+  const filteredTransfers = allTransfers.filter((wt) => {
+    const term = searchVt.toLowerCase();
+    const matchSearch = !term || wt.merchantName?.toLowerCase().includes(term) || wt.fromCountry?.toLowerCase().includes(term) || wt.toCountry?.toLowerCase().includes(term);
+    const matchStatus = statusFilterVt === "all" || wt.status === statusFilterVt;
+    const matchCountry = countryFilterVt === "all" || wt.fromCountry === countryFilterVt || wt.toCountry === countryFilterVt;
+    return matchSearch && matchStatus && matchCountry;
+  });
 
   return (
     <div className="space-y-6">
@@ -2231,22 +2294,45 @@ function AdminWalletTransfersPanel() {
         </Card>
       )}
 
+      <div className="flex gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-44">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input className="pl-10" placeholder="Marchand, pays..." value={searchVt} onChange={e => setSearchVt(e.target.value)} data-testid="input-search-vt" />
+        </div>
+        <Select value={statusFilterVt} onValueChange={setStatusFilterVt}>
+          <SelectTrigger className="w-36" data-testid="select-filter-vt-status"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tous statuts</SelectItem>
+            <SelectItem value="pending">En attente</SelectItem>
+            <SelectItem value="approved">Approuvé</SelectItem>
+            <SelectItem value="rejected">Rejeté</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={countryFilterVt} onValueChange={setCountryFilterVt}>
+          <SelectTrigger className="w-40" data-testid="select-filter-vt-country"><SelectValue placeholder="Pays" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tous pays</SelectItem>
+            {COUNTRIES_LIST.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between gap-2">
             <CardTitle className="text-base">Tous les virements</CardTitle>
-            <Badge variant="secondary">{allTransfers.length}</Badge>
+            <Badge variant="secondary">{filteredTransfers.length}</Badge>
           </div>
         </CardHeader>
         <CardContent>
           {isLoading ? (
             <div className="space-y-2"><Skeleton className="h-12 w-full" /><Skeleton className="h-12 w-full" /></div>
-          ) : allTransfers.length === 0 ? (
+          ) : filteredTransfers.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">Aucun virement</p>
           ) : (
             <ScrollArea className="max-h-[500px]">
               <div className="space-y-2">
-                {allTransfers.map((wt) => (
+                {filteredTransfers.map((wt) => (
                   <div key={wt.id} className="p-3 rounded border text-sm space-y-1" data-testid={`virement-row-${wt.id}`}>
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -2518,6 +2604,8 @@ function AdminWithdrawalsPanel() {
   const [searchWd, setSearchWd] = useState("");
   const [websiteFilterWd, setWebsiteFilterWd] = useState("");
   const [statusFilterWd, setStatusFilterWd] = useState("all");
+  const [countryFilterWd, setCountryFilterWd] = useState("all");
+  const [modeFilterWd, setModeFilterWd] = useState("all");
 
   const actionMutation = useMutation({
     mutationFn: async ({ id, action, note: n }: { id: number; action: "approve" | "reject"; note: string }) => {
@@ -2564,7 +2652,9 @@ function AdminWithdrawalsPanel() {
     const matchSearch = !term || w.merchantName?.toLowerCase().includes(term) || w.phone?.includes(term) || w.country?.toLowerCase().includes(term) || (w.operator || "").toLowerCase().includes(term);
     const matchWebsite = !websiteFilterWd || (w.merchantWebsite || "").toLowerCase().includes(websiteFilterWd.toLowerCase());
     const matchStatus = statusFilterWd === "all" || w.status === statusFilterWd;
-    return matchSearch && matchWebsite && matchStatus;
+    const matchCountry = countryFilterWd === "all" || w.country === countryFilterWd;
+    const matchMode = modeFilterWd === "all" || w.withdrawalMode === modeFilterWd;
+    return matchSearch && matchWebsite && matchStatus && matchCountry && matchMode;
   });
 
   return (
@@ -2648,7 +2738,7 @@ function AdminWithdrawalsPanel() {
             </div>
             <div className="relative flex-1 min-w-40">
               <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input className="pl-10" placeholder="Filtrer par site web..." value={websiteFilterWd} onChange={e => setWebsiteFilterWd(e.target.value)} data-testid="input-filter-wd-website" />
+              <Input className="pl-10" placeholder="Site web..." value={websiteFilterWd} onChange={e => setWebsiteFilterWd(e.target.value)} data-testid="input-filter-wd-website" />
             </div>
             <Select value={statusFilterWd} onValueChange={setStatusFilterWd}>
               <SelectTrigger className="w-36" data-testid="select-filter-wd-status"><SelectValue /></SelectTrigger>
@@ -2658,6 +2748,21 @@ function AdminWithdrawalsPanel() {
                 <SelectItem value="approved">Approuvé</SelectItem>
                 <SelectItem value="rejected">Rejeté</SelectItem>
                 <SelectItem value="failed">Échoué</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={countryFilterWd} onValueChange={setCountryFilterWd}>
+              <SelectTrigger className="w-40" data-testid="select-filter-wd-country"><SelectValue placeholder="Pays" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous pays</SelectItem>
+                {COUNTRIES_LIST.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={modeFilterWd} onValueChange={setModeFilterWd}>
+              <SelectTrigger className="w-32" data-testid="select-filter-wd-mode"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous modes</SelectItem>
+                <SelectItem value="auto">Automatique</SelectItem>
+                <SelectItem value="manual">Manuel</SelectItem>
               </SelectContent>
             </Select>
           </div>

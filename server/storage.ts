@@ -61,6 +61,12 @@ export interface IStorage {
   getFailedLoginCount(userId: number, role: string): Promise<number>;
 
   getStats(): Promise<{ merchantCount: number; transactionCount: number; totalVolume: number; activeNumbers: number }>;
+  getAdminDetailedStats(): Promise<{
+    commissionTotal: number; commissionToday: number; commissionThisMonth: number; commissionPrevMonth: number;
+    apiPaymentsCount: number; apiPaymentsTotal: number;
+    linkPaymentsCount: number; linkPaymentsTotal: number;
+    withdrawalsCount: number; withdrawalsTotal: number;
+  }>;
   getMerchantStats(merchantId: number): Promise<{ transactionCount: number; totalVolume: number; todayVolume: number; yesterdayVolume: number; totalWithdrawn: number }>;
 
   getMerchantPin(merchantId: number): Promise<MerchantPin | undefined>;
@@ -313,6 +319,60 @@ export class DatabaseStorage implements IStorage {
       transactionCount: Number(tc?.count || 0),
       totalVolume: Number(tv?.total || 0),
       activeNumbers: Number(an?.count || 0),
+    };
+  }
+
+  async getAdminDetailedStats() {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 1);
+    const todayIso = todayStart.toISOString();
+    const monthIso = monthStart.toISOString();
+    const prevMonthIso = prevMonthStart.toISOString();
+    const prevMonthEndIso = prevMonthEnd.toISOString();
+
+    const [wdFees] = await db.select({
+      total: sql<number>`coalesce(sum(fees), 0)`,
+      today: sql<number>`coalesce(sum(case when processed_at >= ${todayIso}::timestamp then fees else 0 end), 0)`,
+      thisMonth: sql<number>`coalesce(sum(case when processed_at >= ${monthIso}::timestamp then fees else 0 end), 0)`,
+      prevMonth: sql<number>`coalesce(sum(case when processed_at >= ${prevMonthIso}::timestamp and processed_at < ${prevMonthEndIso}::timestamp then fees else 0 end), 0)`,
+    }).from(withdrawals).where(eq(withdrawals.status, "approved"));
+
+    const [wtFees] = await db.select({
+      total: sql<number>`coalesce(sum(fee), 0)`,
+      today: sql<number>`coalesce(sum(case when processed_at >= ${todayIso}::timestamp then fee else 0 end), 0)`,
+      thisMonth: sql<number>`coalesce(sum(case when processed_at >= ${monthIso}::timestamp then fee else 0 end), 0)`,
+      prevMonth: sql<number>`coalesce(sum(case when processed_at >= ${prevMonthIso}::timestamp and processed_at < ${prevMonthEndIso}::timestamp then fee else 0 end), 0)`,
+    }).from(walletTransfers).where(eq(walletTransfers.status, "approved"));
+
+    const [apiPay] = await db.select({
+      count: sql<number>`count(*)`,
+      total: sql<number>`coalesce(sum(amount), 0)`,
+    }).from(transactions).where(and(eq(transactions.provider, "omnipay"), sql`amount > 0`, sql`tx_id NOT LIKE 'TR-%'`));
+
+    const [linkPay] = await db.select({
+      count: sql<number>`count(*)`,
+      total: sql<number>`coalesce(sum(total_revenue), 0)`,
+    }).from(paymentLinks);
+
+    const [wdStats] = await db.select({
+      count: sql<number>`count(*)`,
+      total: sql<number>`coalesce(sum(amount), 0)`,
+    }).from(withdrawals).where(eq(withdrawals.status, "approved"));
+
+    return {
+      commissionTotal: Number(wdFees?.total || 0) + Number(wtFees?.total || 0),
+      commissionToday: Number(wdFees?.today || 0) + Number(wtFees?.today || 0),
+      commissionThisMonth: Number(wdFees?.thisMonth || 0) + Number(wtFees?.thisMonth || 0),
+      commissionPrevMonth: Number(wdFees?.prevMonth || 0) + Number(wtFees?.prevMonth || 0),
+      apiPaymentsCount: Number(apiPay?.count || 0),
+      apiPaymentsTotal: Number(apiPay?.total || 0),
+      linkPaymentsCount: Number(linkPay?.count || 0),
+      linkPaymentsTotal: Number(linkPay?.total || 0),
+      withdrawalsCount: Number(wdStats?.count || 0),
+      withdrawalsTotal: Number(wdStats?.total || 0),
     };
   }
 

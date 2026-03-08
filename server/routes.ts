@@ -210,11 +210,14 @@ export async function registerRoutes(
 
   app.get("/api/admin/stats", authMiddleware("admin"), async (_req, res) => {
     try {
-      const stats = await storage.getStats();
-      const allLinks = await storage.getAllPaymentLinks();
+      const [stats, detailedStats, allLinks] = await Promise.all([
+        storage.getStats(),
+        storage.getAdminDetailedStats(),
+        storage.getAllPaymentLinks(),
+      ]);
       const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
       const todayPayments = allLinks.reduce((s, l) => s + (l.lastPaymentAt && new Date(l.lastPaymentAt) >= todayStart ? 1 : 0), 0);
-      res.json({ ...stats, paymentLinkCount: allLinks.length, todayPayments });
+      res.json({ ...stats, paymentLinkCount: allLinks.length, todayPayments, ...detailedStats });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
