@@ -7,7 +7,7 @@ import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import { notifyMerchantPayment, notifyAdminGroup } from "./telegram-bot";
+import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal } from "./telegram-bot";
 import {
   initiatePayment as omnipayInitiatePayment,
   initiateTransfer as omnipayInitiateTransfer,
@@ -1294,9 +1294,15 @@ export async function registerRoutes(
               provider: "omnipay",
             }).catch(() => {});
 
-            notifyAdminGroup(
-              `✅ *Paiement confirmé*\n\n🏪 Marchand : *${merchant?.name || `#${pending.merchantId}`}*\n💰 Montant : *${pending.amount.toLocaleString("fr-FR")} F CFA*\n🌍 Pays : ${pending.country.toUpperCase()}\n🔖 TX : \`${txId}\``
-            ).catch(() => {});
+            notifyAdminPayment({
+              txId,
+              merchantName: merchant?.name || `#${pending.merchantId}`,
+              payerNumber: payload.msisdn || pending.payerPhone,
+              country: pending.country,
+              amount: pending.amount,
+              provider: "omnipay",
+              status: "confirmed",
+            }).catch(() => {});
           }
         }
 
@@ -1746,9 +1752,15 @@ export async function registerRoutes(
           provider: "sms",
         }).catch(() => {});
 
-        notifyAdminGroup(
-          `✅ *Paiement SMS confirmé*\n\n🏪 Marchand : *${foundMerchant?.name || `#${found.merchantId}`}*\n💰 Montant : *${amount.toLocaleString("fr-FR")} F CFA*\n🌍 Pays : ${found.country.toUpperCase()}${payerNumber ? `\n📞 Payeur : ${payerNumber}` : ""}\n🔖 TX : \`${txId}\``
-        ).catch(() => {});
+        notifyAdminPayment({
+          txId,
+          merchantName: foundMerchant?.name || `#${found.merchantId}`,
+          payerNumber,
+          country: found.country,
+          amount,
+          provider: "sms",
+          status: "confirmed",
+        }).catch(() => {});
 
         console.log(`[SMS] Transaction confirmee: TX=${txId}, Montant=${amount}, Marchand=#${found.merchantId}, Pays=${found.country}`);
         return res.json({ status: "processed", txId, amount, country: found.country });
@@ -2263,16 +2275,19 @@ export async function registerRoutes(
         });
         if (result.success === 1) {
           await storage.updateWithdrawalStatus(w.id, "approved", `Traitement automatique - Frais: ${withdrawalFee} F`, result.reference || reference, withdrawalFee);
+          notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: withdrawalFee, phone, operator: operator || null, status: "approved", mode: "auto" }).catch(() => {});
           return res.json({ ...w, status: "approved", omnipayRef: result.reference || reference, fees: withdrawalFee, netAmount, autoProcessed: true });
         } else {
           const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Echec de traitement";
           await storage.updateWithdrawalStatus(w.id, "failed", `Echec de traitement (code ${result.code}): ${errMsg}`, reference);
+          notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
           await storage.incrementMerchantCountryBalance(mc.id, amount);
           return res.status(400).json({ message: errMsg, omnipayError: true, code: result.code });
         }
       } catch (omnipayErr: any) {
         console.error("[WITHDRAWAL AUTO] Erreur OmniPay:", omnipayErr.message);
         await storage.updateWithdrawalStatus(w.id, "failed", `Erreur technique: ${omnipayErr.message}`, reference);
+        notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
         await storage.incrementMerchantCountryBalance(mc.id, amount);
         return res.status(500).json({ message: "Erreur lors du traitement du retrait. Votre solde a été restitué." });
       }
@@ -2348,6 +2363,7 @@ export async function registerRoutes(
       }
 
       await storage.updateWithdrawalStatus(id, "approved", note, omnipayRef, fees);
+      notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: fees || 0, phone: w.phone, operator: w.operator, status: "approved", mode: "manual" }).catch(() => {});
       res.json({ success: true, omnipayRef, fees });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -2361,8 +2377,10 @@ export async function registerRoutes(
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
       if (w.status !== "pending") return res.status(400).json({ message: "Reversement deja traite" });
+      const rejMerchant = await storage.getMerchantById(w.merchantId);
       await storage.updateWithdrawalStatus(id, "rejected", note);
       await storage.incrementMerchantCountryBalance(w.merchantCountryId, w.amount);
+      notifyAdminWithdrawal({ id, merchantName: rejMerchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: 0, phone: w.phone, operator: w.operator, status: "rejected", mode: "manual" }).catch(() => {});
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });

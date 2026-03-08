@@ -1,6 +1,7 @@
 import { Telegraf } from "telegraf";
 import type { Express, Request, Response } from "express";
 import { storage } from "./storage";
+import { pool } from "./db";
 
 let bot: Telegraf | null = null;
 
@@ -815,6 +816,7 @@ export function initTelegramBot(): Telegraf | null {
   });
 
   console.log("[TELEGRAM] Bot initialise");
+  scheduleDailyReport();
 
   return bot;
 }
@@ -1042,6 +1044,150 @@ export async function notifyAdminGroup(message: string): Promise<void> {
   } catch (err) {
     console.error("[TELEGRAM] Erreur notification groupe:", (err as any).message);
   }
+}
+
+export async function notifyAdminPayment(data: {
+  txId: string;
+  merchantName: string;
+  payerNumber?: string | null;
+  country: string;
+  amount: number;
+  provider: "omnipay" | "sms";
+  status: "confirmed" | "failed";
+}): Promise<void> {
+  const dateStr = new Date().toLocaleString("fr-FR", {
+    day: "2-digit", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", timeZone: "UTC",
+  });
+  const icon = data.status === "confirmed" ? "✅" : "❌";
+  const statusLabel = data.status === "confirmed" ? "Succès" : "Échoué";
+  const methodLabel = data.provider === "omnipay" ? "Mobile Money" : "SMS";
+
+  const msg = [
+    `${icon} *Nouvelle transaction WestPay*`,
+    ``,
+    `📋 *Type :* Paiement`,
+    `🔖 *ID :* \`${data.txId}\``,
+    `🏪 *Marchand :* ${data.merchantName}`,
+    `📞 *Numéro client :* ${data.payerNumber || "N/A"}`,
+    `🌍 *Pays :* ${countryLabel(data.country)}`,
+    `💰 *Montant total :* ${formatAmount(data.amount)}`,
+    `💵 *Frais plateforme :* 0 F CFA`,
+    `✅ *Montant reçu :* ${formatAmount(data.amount)}`,
+    `📱 *Méthode :* ${methodLabel}`,
+    `📊 *Statut :* ${statusLabel}`,
+    `📅 *Date :* ${dateStr}`,
+  ].join("\n");
+
+  await notifyAdminGroup(msg);
+}
+
+export async function notifyAdminWithdrawal(data: {
+  id: number;
+  merchantName: string;
+  country: string;
+  amount: number;
+  fees: number;
+  phone: string;
+  operator?: string | null;
+  status: "approved" | "failed" | "rejected";
+  mode: "auto" | "manual";
+}): Promise<void> {
+  const dateStr = new Date().toLocaleString("fr-FR", {
+    day: "2-digit", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", timeZone: "UTC",
+  });
+  const icon = data.status === "approved" ? "💸" : "❌";
+  const statusLabel = data.status === "approved" ? "Effectué" : data.status === "rejected" ? "Rejeté" : "Échoué";
+  const net = data.amount - data.fees;
+
+  const lines = [
+    `${icon} *Retrait WestPay*`,
+    ``,
+    `📋 *Type :* Retrait`,
+    `🔖 *ID :* \`WD-${data.id}\``,
+    `🏪 *Marchand :* ${data.merchantName}`,
+    `📞 *Numéro réception :* ${data.phone}`,
+    `🌍 *Pays :* ${countryLabel(data.country)}`,
+    `💰 *Montant demandé :* ${formatAmount(data.amount)}`,
+    `💵 *Frais plateforme :* ${formatAmount(data.fees)}`,
+    `✅ *Montant envoyé :* ${formatAmount(net)}`,
+    data.operator ? `📱 *Opérateur :* ${data.operator}` : null,
+    `⚙️ *Mode :* ${data.mode === "auto" ? "Automatique" : "Manuel"}`,
+    `📊 *Statut :* ${statusLabel}`,
+    `📅 *Date :* ${dateStr}`,
+  ].filter(Boolean) as string[];
+
+  await notifyAdminGroup(lines.join("\n"));
+}
+
+async function sendDailyReport(): Promise<void> {
+  const groupId = await storage.getSetting("telegram_group_id");
+  if (!groupId || !bot) return;
+
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const dayStart = new Date(yesterday); dayStart.setUTCHours(0, 0, 0, 0);
+  const dayEnd = new Date(yesterday); dayEnd.setUTCHours(23, 59, 59, 999);
+
+  const [txRow] = await pool.query(
+    `SELECT COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS total_payments,
+            COUNT(*) AS total_count
+     FROM transactions WHERE created_at >= $1 AND created_at <= $2 AND status = 'confirmed'`,
+    [dayStart.toISOString(), dayEnd.toISOString()]
+  ).then(r => r.rows);
+
+  const [wdRow] = await pool.query(
+    `SELECT COALESCE(SUM(amount), 0) AS total_withdrawals,
+            COALESCE(SUM(fees), 0) AS total_fees,
+            COUNT(*) AS wd_count
+     FROM withdrawals WHERE processed_at >= $1 AND processed_at <= $2 AND status = 'approved'`,
+    [dayStart.toISOString(), dayEnd.toISOString()]
+  ).then(r => r.rows);
+
+  const dateLabel = yesterday.toLocaleDateString("fr-FR", {
+    day: "2-digit", month: "long", year: "numeric", timeZone: "UTC",
+  });
+
+  const totalPay = Number(txRow.total_payments);
+  const totalWd = Number(wdRow.total_withdrawals);
+  const totalFees = Number(wdRow.total_fees);
+  const txCount = Number(txRow.total_count) + Number(wdRow.wd_count);
+
+  const msg = [
+    `📊 *Rapport journalier WestPay*`,
+    ``,
+    `📅 *Date :* ${dateLabel}`,
+    ``,
+    `💰 *Total paiements :* ${formatAmount(totalPay)}`,
+    `💸 *Total retraits :* ${formatAmount(totalWd)}`,
+    `💵 *Frais collectés :* ${formatAmount(totalFees)}`,
+    `📋 *Nombre de transactions :* ${txCount.toLocaleString("fr-FR")}`,
+    `📈 *Volume total traité :* ${formatAmount(totalPay + totalWd)}`,
+  ].join("\n");
+
+  await safeSend(groupId, msg);
+  console.log("[TELEGRAM] Rapport journalier envoyé");
+}
+
+function scheduleDailyReport(): void {
+  const scheduleNext = () => {
+    const now = new Date();
+    const next = new Date();
+    next.setUTCHours(1, 0, 0, 0);
+    if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1);
+    const delay = next.getTime() - now.getTime();
+    setTimeout(async () => {
+      try { await sendDailyReport(); } catch (e) {
+        console.error("[TELEGRAM] Erreur rapport journalier:", (e as any).message);
+      }
+      scheduleNext();
+    }, delay);
+  };
+  scheduleNext();
+  const h = Math.round((new Date(new Date().setUTCHours(1,0,0,0)).getTime() - Date.now()) / 3600000);
+  console.log(`[TELEGRAM] Rapport journalier programme (dans ~${h < 0 ? 24 + h : h}h)`);
 }
 
 export function getBot(): Telegraf | null {
