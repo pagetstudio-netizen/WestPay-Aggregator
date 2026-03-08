@@ -53,6 +53,19 @@ function toOmnipayOperatorCode(operatorName: string | null | undefined): string 
 }
 
 const OMNIPAY_MANDATORY_OPERATORS = ["wave", "mixx"];
+
+const COUNTRY_DIAL_CODES: Record<string, string> = {
+  "Togo": "228", "Benin": "229", "Cote d'Ivoire": "225",
+  "Senegal": "221", "Mali": "223", "Burkina Faso": "226",
+  "Cameroun": "237", "Congo Brazzaville": "242", "Gabon": "241",
+};
+
+function prependDialCode(phone: string, country: string): string {
+  const cleaned = phone.replace(/[\s\-\(\)\+]/g, "");
+  const dialCode = COUNTRY_DIAL_CODES[country] || "";
+  if (!dialCode || cleaned.startsWith(dialCode)) return cleaned;
+  return `${dialCode}${cleaned}`;
+}
 async function resolveOmnipayOperatorCode(operatorName: string | null | undefined, country: string | null | undefined): Promise<string | undefined> {
   if (!operatorName) return undefined;
   if (country) {
@@ -1424,10 +1437,11 @@ export async function registerRoutes(
       }
 
       const reference = omnipayGenerateRef();
+      const msisdnFull = prependDialCode(msisdn, country);
 
       const result = await omnipayInitiateTransfer({
         apikey: omnipayApiKey,
-        msisdn,
+        msisdn: msisdnFull,
         amount: parsedAmount,
         reference,
         first_name: firstName,
@@ -2234,9 +2248,10 @@ export async function registerRoutes(
         const wdFirstName = nameParts[0] || merchant.name;
         const wdLastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : nameParts[0] || merchant.name;
         const omnipayOperatorCode = await resolveOmnipayOperatorCode(operator, mc.country);
+        const msisdnFull = prependDialCode(phone, mc.country);
         const result = await omnipayInitiateTransfer({
           apikey: apiKeyToUse,
-          msisdn: phone,
+          msisdn: msisdnFull,
           amount: netAmount,
           reference,
           first_name: wdFirstName,
@@ -2244,11 +2259,11 @@ export async function registerRoutes(
           operator: omnipayOperatorCode,
         });
         if (result.success === 1) {
-          await storage.updateWithdrawalStatus(w.id, "approved", `Traitement automatique OmniPay - Frais: ${withdrawalFee} F`, result.reference || reference, withdrawalFee);
+          await storage.updateWithdrawalStatus(w.id, "approved", `Traitement automatique - Frais: ${withdrawalFee} F`, result.reference || reference, withdrawalFee);
           return res.json({ ...w, status: "approved", omnipayRef: result.reference || reference, fees: withdrawalFee, netAmount, autoProcessed: true });
         } else {
-          const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Echec OmniPay";
-          await storage.updateWithdrawalStatus(w.id, "failed", `OmniPay (code ${result.code}): ${errMsg}`, reference);
+          const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Echec de traitement";
+          await storage.updateWithdrawalStatus(w.id, "failed", `Echec de traitement (code ${result.code}): ${errMsg}`, reference);
           await storage.incrementMerchantCountryBalance(mc.id, amount);
           return res.status(400).json({ message: errMsg, omnipayError: true, code: result.code });
         }
@@ -2304,11 +2319,12 @@ export async function registerRoutes(
           const mFirstName = mNameParts[0] || merchant.name;
           const mLastName = mNameParts.length > 1 ? mNameParts.slice(1).join(" ") : mNameParts[0] || merchant.name;
           const adminOmnipayCode = await resolveOmnipayOperatorCode(w.operator, w.country);
-          console.log(`[ADMIN APPROVE WD] Transfert: ${w.amount} vers ${w.phone}, operateur: ${adminOmnipayCode || "(auto)"}, ref: ${reference}`);
+          const wdMsisdn = prependDialCode(w.phone, w.country);
+          console.log(`[ADMIN APPROVE WD] Transfert: ${w.amount} vers ${wdMsisdn}, operateur: ${adminOmnipayCode || "(auto)"}, ref: ${reference}`);
           omnipayRef = reference;
           const result = await omnipayInitiateTransfer({
             apikey: omnipayApiKey,
-            msisdn: w.phone,
+            msisdn: wdMsisdn,
             amount: w.amount,
             reference,
             first_name: mFirstName,

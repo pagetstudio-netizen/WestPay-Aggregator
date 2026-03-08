@@ -550,8 +550,23 @@ Content-Type: application/json`} />
                 </ol>
               </CardContent>
             </Card>
+            <Card className="bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800">
+              <CardContent className="p-4 flex gap-3">
+                <span className="text-amber-500 text-lg shrink-0">⚠️</span>
+                <div className="text-sm text-amber-800 dark:text-amber-300 space-y-1">
+                  <p className="font-semibold">Format du numero de telephone (msisdn)</p>
+                  <p>Le numero doit toujours inclure l'indicatif pays, sans le <code className="bg-amber-100 dark:bg-amber-900 px-1 rounded">+</code>.</p>
+                  <p className="font-mono text-xs bg-amber-100 dark:bg-amber-900 px-2 py-1 rounded mt-1">
+                    228 + 90123456 → <strong>22890123456</strong> &nbsp;(Togo)<br />
+                    225 + 0789012345 → <strong>2250789012345</strong> &nbsp;(Côte d'Ivoire)<br />
+                    229 + 97123456 → <strong>22997123456</strong> &nbsp;(Bénin)<br />
+                    221 + 771234567 → <strong>221771234567</strong> &nbsp;(Sénégal)
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
             <EndpointCard method="POST" path="/api/merchant/transfer" description="Effectue un retrait automatique vers un portefeuille Mobile Money. Debite votre solde marchand." authRequired
-              notes="Verifiez que votre solde est suffisant avant d'appeler cet endpoint. Le champ operator est optionnel."
+              notes="Le numero msisdn doit inclure l'indicatif pays (ex: 228 pour Togo, 225 pour Cote d'Ivoire). Le champ operator est optionnel — auto-detecte depuis le numero."
               requestBody={`{
   "country": "Togo",
   "msisdn": "22890123456",
