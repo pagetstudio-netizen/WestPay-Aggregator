@@ -1564,7 +1564,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Solde insuffisant" });
       }
 
-      const omnipayApiKey = await getOmnipayPayoutApiKey();
+      const omnipayApiKey = await getOmnipayApiKey();
       if (!omnipayApiKey) {
         return res.status(500).json({ message: "Systeme de paiement non configure" });
       }
