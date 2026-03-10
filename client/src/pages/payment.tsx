@@ -55,6 +55,7 @@ export default function PaymentPage() {
   const [payerName, setPayerName] = useState("");
   const [selectedCountry, setSelectedCountry] = useState(countryParam);
   const [selectedMethod, setSelectedMethod] = useState("");
+  const [otpCode, setOtpCode] = useState("");
   const [paymentId, setPaymentId] = useState<number | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [redirectCountdown, setRedirectCountdown] = useState(5);
@@ -102,9 +103,11 @@ export default function PaymentPage() {
   };
 
   const availableMethods = PAYMENT_METHODS[selectedCountry] || [];
+  const needsManualOtp = selectedCountry === "Burkina Faso" && selectedMethod === "Orange Money";
 
   const handleSelectMethod = useCallback((method: string) => {
     setSelectedMethod(method);
+    setOtpCode("");
   }, []);
 
   const startOmnipayPolling = (pId: number) => {
@@ -146,6 +149,10 @@ export default function PaymentPage() {
       toast({ title: "Veuillez choisir une methode de paiement", variant: "destructive" });
       return;
     }
+    if (needsManualOtp && !otpCode.trim()) {
+      toast({ title: "Veuillez entrer votre code OTP Orange Money", variant: "destructive" });
+      return;
+    }
     setIsSubmitting(true);
     try {
       const firstName = "Client";
@@ -165,6 +172,7 @@ export default function PaymentPage() {
           firstName,
           lastName,
           operator: selectedMethod.toLowerCase().includes("wave") ? "wave" : undefined,
+          otp: needsManualOtp ? otpCode.trim() : undefined,
         }),
       });
       const data = await res.json();
@@ -482,11 +490,37 @@ export default function PaymentPage() {
                 )}
               </div>
 
+              {needsManualOtp && (
+                <div
+                  className="p-3 rounded-md space-y-2"
+                  style={{ backgroundColor: "#fff7ed", border: "1px solid #fed7aa" }}
+                  data-testid="otp-orange-bfa-block"
+                >
+                  <p className="text-xs font-semibold" style={{ color: "#c2410c" }}>
+                    Orange Money Burkina Faso — Code OTP requis
+                  </p>
+                  <p className="text-xs" style={{ color: "#92400e" }}>
+                    Composez <span className="font-bold font-mono">*144*4*6*montant#</span> sur votre telephone pour recevoir votre code OTP, puis entrez-le ci-dessous.
+                  </p>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={8}
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
+                    placeholder="Entrez votre code OTP"
+                    className="w-full py-2 px-3 text-sm border rounded-md outline-none"
+                    style={{ borderColor: "#fb923c", backgroundColor: "#ffffff", color: "#111827" }}
+                    data-testid="input-otp-orange-bfa"
+                  />
+                </div>
+              )}
+
               <div className="flex items-center justify-end gap-3 pt-1">
                 <button
                   type="button"
                   onClick={handleStep1Next}
-                  disabled={isSubmitting || !payerPhone.trim() || !selectedMethod}
+                  disabled={isSubmitting || !payerPhone.trim() || !selectedMethod || (needsManualOtp && !otpCode.trim())}
                   className="pay-btn pay-btn-green"
                   data-testid="button-step1-next"
                 >
