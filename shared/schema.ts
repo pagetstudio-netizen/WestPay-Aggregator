@@ -205,6 +205,20 @@ export const walletTransferCountries = pgTable("wallet_transfer_countries", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const statsBaselines = pgTable("stats_baselines", {
+  id: serial("id").primaryKey(),
+  resetAt: timestamp("reset_at").defaultNow().notNull(),
+  transactionCount: integer("transaction_count").default(0).notNull(),
+  totalVolume: integer("total_volume").default(0).notNull(),
+  commissionTotal: integer("commission_total").default(0).notNull(),
+  apiPaymentsCount: integer("api_payments_count").default(0).notNull(),
+  apiPaymentsTotal: integer("api_payments_total").default(0).notNull(),
+  linkPaymentsCount: integer("link_payments_count").default(0).notNull(),
+  linkPaymentsTotal: integer("link_payments_total").default(0).notNull(),
+  withdrawalsCount: integer("withdrawals_count").default(0).notNull(),
+  withdrawalsTotal: integer("withdrawals_total").default(0).notNull(),
+});
+
 export const walletTransfers = pgTable("wallet_transfers", {
   id: serial("id").primaryKey(),
   merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),

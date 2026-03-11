@@ -26,7 +26,7 @@ import {
   MessageSquare, Key, DollarSign, Hash, Calendar, Search, Clock,
   RefreshCw, Lock, BookOpen, FileText, Webhook, Zap, ToggleLeft, ToggleRight, Link2,
   Link, BarChart3, TrendingUp, Eye, ToggleLeft as Toggle, ExternalLink, Filter,
-  Check, ChevronsUpDown, ArrowUpRight, Edit3
+  Check, ChevronsUpDown, ArrowUpRight, Edit3, Wallet, AlertTriangle, RotateCcw
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
@@ -286,10 +286,13 @@ function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string
 }
 
 function OverviewPanel() {
+  const { toast } = useToast();
   const { data: stats } = useAdminFetch("/api/admin/stats", ["/api/admin/stats"]);
   const { data: transactions = [] } = useAdminFetch("/api/admin/transactions", ["/api/admin/transactions"]);
   const { data: merchants = [] } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
   const { data: links = [] } = useAdminFetch("/api/admin/payment-links", ["/api/admin/payment-links"]);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   const recentTx = (transactions as Transaction[]).slice(0, 5);
   const recentLinks = (links as any[]).slice(0, 5);
@@ -297,8 +300,80 @@ function OverviewPanel() {
 
   const fmtF = (n: number) => `${n.toLocaleString("fr-FR")} F`;
 
+  const handleResetStats = async () => {
+    setIsResetting(true);
+    try {
+      const token = localStorage.getItem("adminToken");
+      const res = await fetch("/api/admin/reset-stats", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Échec de la réinitialisation");
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      toast({ title: "Statistiques réinitialisées", description: "Les compteurs ont été remis à zéro." });
+    } catch (e: any) {
+      toast({ title: "Erreur", description: e.message, variant: "destructive" });
+    } finally {
+      setIsResetting(false);
+      setShowResetConfirm(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {/* Solde total de la plateforme */}
+      <div className="rounded-lg border bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 p-4 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/50">
+            <Wallet className="w-5 h-5 text-green-700 dark:text-green-400" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Solde total de la plateforme</p>
+            <p className="text-2xl font-bold text-green-700 dark:text-green-400" data-testid="stat-platform-balance">
+              {(stats?.platformBalance || 0).toLocaleString("fr-FR")} <span className="text-base font-semibold">F CFA</span>
+            </p>
+            <p className="text-xs text-muted-foreground">Cumul de tous les wallets marchands actifs</p>
+          </div>
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          {!showResetConfirm ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-xs border-orange-300 text-orange-700 hover:bg-orange-50 dark:border-orange-700 dark:text-orange-400"
+              onClick={() => setShowResetConfirm(true)}
+              data-testid="button-reset-stats"
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> Réinitialiser les stats
+            </Button>
+          ) : (
+            <div className="flex flex-col items-end gap-1.5 bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-800 rounded-md p-2">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-orange-700 dark:text-orange-400">
+                <AlertTriangle className="w-3.5 h-3.5" /> Confirmer la réinitialisation ?
+              </div>
+              <p className="text-xs text-muted-foreground max-w-[200px] text-right">Les compteurs (transactions, volumes, commissions) seront remis à zéro. Pas le nombre de marchands.</p>
+              <div className="flex gap-1.5">
+                <Button variant="ghost" size="sm" className="text-xs h-7" onClick={() => setShowResetConfirm(false)}>Annuler</Button>
+                <Button
+                  size="sm"
+                  className="text-xs h-7 bg-orange-600 hover:bg-orange-700 text-white"
+                  onClick={handleResetStats}
+                  disabled={isResetting}
+                  data-testid="button-confirm-reset-stats"
+                >
+                  {isResetting ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />} Confirmer
+                </Button>
+              </div>
+            </div>
+          )}
+          {stats?.lastStatsReset && (
+            <p className="text-xs text-muted-foreground">
+              Dernier reset : {new Date(stats.lastStatsReset).toLocaleDateString("fr-FR")}
+            </p>
+          )}
+        </div>
+      </div>
+
       {/* Statistiques principales */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <StatCard title="Marchands" value={stats?.merchantCount || 0} icon={Users} accent="blue" />

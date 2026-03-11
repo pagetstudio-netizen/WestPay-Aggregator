@@ -1,7 +1,7 @@
 import {
   admins, merchants, merchantCountries, transactions, smsLogs, numbers, settings, loginLogs,
   merchantPins, apiLogs, pendingPayments, webhookLogs, telegramActivationCodes, paymentLinks,
-  walletTransfers, walletTransferCountries, withdrawals, withdrawalOperators,
+  walletTransfers, walletTransferCountries, withdrawals, withdrawalOperators, statsBaselines,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
@@ -69,6 +69,9 @@ export interface IStorage {
     withdrawalsCount: number; withdrawalsTotal: number;
   }>;
   getMerchantStats(merchantId: number): Promise<{ transactionCount: number; totalVolume: number; todayVolume: number; yesterdayVolume: number; totalWithdrawn: number }>;
+  getPlatformBalance(): Promise<number>;
+  getLatestStatsBaseline(): Promise<typeof statsBaselines.$inferSelect | undefined>;
+  createStatsBaseline(values: { transactionCount: number; totalVolume: number; commissionTotal: number; apiPaymentsCount: number; apiPaymentsTotal: number; linkPaymentsCount: number; linkPaymentsTotal: number; withdrawalsCount: number; withdrawalsTotal: number }): Promise<void>;
 
   getMerchantPin(merchantId: number): Promise<MerchantPin | undefined>;
   upsertMerchantPin(merchantId: number, pinHash: string): Promise<MerchantPin>;
@@ -385,6 +388,20 @@ export class DatabaseStorage implements IStorage {
       withdrawalsCount: Number(wdStats?.count || 0),
       withdrawalsTotal: Number(wdStats?.total || 0),
     };
+  }
+
+  async getPlatformBalance(): Promise<number> {
+    const [row] = await db.select({ total: sql<number>`coalesce(sum(balance), 0)` }).from(merchantCountries);
+    return Number(row?.total || 0);
+  }
+
+  async getLatestStatsBaseline() {
+    const [row] = await db.select().from(statsBaselines).orderBy(desc(statsBaselines.id)).limit(1);
+    return row;
+  }
+
+  async createStatsBaseline(values: { transactionCount: number; totalVolume: number; commissionTotal: number; apiPaymentsCount: number; apiPaymentsTotal: number; linkPaymentsCount: number; linkPaymentsTotal: number; withdrawalsCount: number; withdrawalsTotal: number }) {
+    await db.insert(statsBaselines).values(values);
   }
 
   async getMerchantStats(merchantId: number) {

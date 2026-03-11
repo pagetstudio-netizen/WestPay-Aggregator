@@ -280,14 +280,57 @@ export async function registerRoutes(
 
   app.get("/api/admin/stats", authMiddleware("admin"), async (_req, res) => {
     try {
-      const [stats, detailedStats, allLinks] = await Promise.all([
+      const [stats, detailedStats, allLinks, platformBalance, baseline] = await Promise.all([
         storage.getStats(),
         storage.getAdminDetailedStats(),
         storage.getAllPaymentLinks(),
+        storage.getPlatformBalance(),
+        storage.getLatestStatsBaseline(),
       ]);
       const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
       const todayPayments = allLinks.reduce((s, l) => s + (l.lastPaymentAt && new Date(l.lastPaymentAt) >= todayStart ? 1 : 0), 0);
-      res.json({ ...stats, paymentLinkCount: allLinks.length, todayPayments, ...detailedStats });
+      const b = baseline || { transactionCount: 0, totalVolume: 0, commissionTotal: 0, apiPaymentsCount: 0, apiPaymentsTotal: 0, linkPaymentsCount: 0, linkPaymentsTotal: 0, withdrawalsCount: 0, withdrawalsTotal: 0 };
+      const sub = (a: number, bv: number) => Math.max(0, a - bv);
+      res.json({
+        ...stats,
+        transactionCount: sub(stats.transactionCount, b.transactionCount),
+        totalVolume: sub(stats.totalVolume, b.totalVolume),
+        paymentLinkCount: allLinks.length,
+        todayPayments,
+        platformBalance,
+        ...detailedStats,
+        commissionTotal: sub(detailedStats.commissionTotal, b.commissionTotal),
+        apiPaymentsCount: sub(detailedStats.apiPaymentsCount, b.apiPaymentsCount),
+        apiPaymentsTotal: sub(detailedStats.apiPaymentsTotal, b.apiPaymentsTotal),
+        linkPaymentsCount: sub(detailedStats.linkPaymentsCount, b.linkPaymentsCount),
+        linkPaymentsTotal: sub(detailedStats.linkPaymentsTotal, b.linkPaymentsTotal),
+        withdrawalsCount: sub(detailedStats.withdrawalsCount, b.withdrawalsCount),
+        withdrawalsTotal: sub(detailedStats.withdrawalsTotal, b.withdrawalsTotal),
+        lastStatsReset: baseline?.resetAt || null,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/reset-stats", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const [stats, detailedStats] = await Promise.all([
+        storage.getStats(),
+        storage.getAdminDetailedStats(),
+      ]);
+      await storage.createStatsBaseline({
+        transactionCount: stats.transactionCount,
+        totalVolume: stats.totalVolume,
+        commissionTotal: detailedStats.commissionTotal,
+        apiPaymentsCount: detailedStats.apiPaymentsCount,
+        apiPaymentsTotal: detailedStats.apiPaymentsTotal,
+        linkPaymentsCount: detailedStats.linkPaymentsCount,
+        linkPaymentsTotal: detailedStats.linkPaymentsTotal,
+        withdrawalsCount: detailedStats.withdrawalsCount,
+        withdrawalsTotal: detailedStats.withdrawalsTotal,
+      });
+      res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
