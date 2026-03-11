@@ -214,6 +214,17 @@ export default function PaymentPage() {
     }
   };
 
+  const safeRedirect = (rawUrl: string, extra?: Record<string, string>) => {
+    const normalized = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
+    try {
+      const url = new URL(normalized);
+      if (extra) Object.entries(extra).forEach(([k, v]) => url.searchParams.set(k, v));
+      window.location.replace(url.toString());
+    } catch {
+      window.location.replace(normalized);
+    }
+  };
+
   useEffect(() => {
     if (step !== 3) return;
     const timer = setInterval(() => {
@@ -221,15 +232,11 @@ export default function PaymentPage() {
         if (prev <= 1) {
           clearInterval(timer);
           if (redirectUrl) {
-            try {
-              const url = new URL(redirectUrl);
-              url.searchParams.set("status", "success");
-              url.searchParams.set("amount", String(amount));
-              url.searchParams.set("ref", omnipayReference || "");
-              window.location.href = url.toString();
-            } catch {
-              window.location.href = redirectUrl;
-            }
+            safeRedirect(redirectUrl, {
+              status: "success",
+              amount: String(amount),
+              ref: omnipayReference || "",
+            });
           }
           return 0;
         }
@@ -662,14 +669,15 @@ export default function PaymentPage() {
                   </p>
                   <a
                     href={(() => {
+                      const normalized = /^https?:\/\//i.test(redirectUrl) ? redirectUrl : `https://${redirectUrl}`;
                       try {
-                        const url = new URL(redirectUrl);
+                        const url = new URL(normalized);
                         url.searchParams.set("status", "success");
                         url.searchParams.set("amount", String(amount));
                         url.searchParams.set("ref", omnipayReference || "");
                         return url.toString();
                       } catch {
-                        return redirectUrl;
+                        return normalized;
                       }
                     })()}
                     className="pay-btn pay-btn-green mt-3 inline-flex"

@@ -102,6 +102,17 @@ export default function PaymentLinkPage() {
     return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
   }, []);
 
+  const safeRedirect = (rawUrl: string, extra?: Record<string, string>) => {
+    const normalized = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
+    try {
+      const url = new URL(normalized);
+      if (extra) Object.entries(extra).forEach(([k, v]) => url.searchParams.set(k, v));
+      window.location.replace(url.toString());
+    } catch {
+      window.location.replace(normalized);
+    }
+  };
+
   useEffect(() => {
     if (step !== 3) return;
     const timer = setInterval(() => {
@@ -110,12 +121,7 @@ export default function PaymentLinkPage() {
           clearInterval(timer);
           const redirectUrl = data?.link.redirectUrl;
           if (redirectUrl) {
-            try {
-              const url = new URL(redirectUrl);
-              url.searchParams.set("status", "success");
-              url.searchParams.set("ref", omnipayReference || "");
-              window.location.href = url.toString();
-            } catch { window.location.href = redirectUrl; }
+            safeRedirect(redirectUrl, { status: "success", ref: omnipayReference || "" });
           }
           return 0;
         }

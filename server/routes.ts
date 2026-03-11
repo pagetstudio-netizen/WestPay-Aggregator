@@ -1149,8 +1149,8 @@ export async function registerRoutes(
 
         const omnipayOperator = toOmnipayOperatorCode(operator) || (paymentMethod.toLowerCase().includes("wave") ? "wave" : paymentMethod.toLowerCase().includes("mixx") || paymentMethod.toLowerCase().includes("yas") ? "mixx" : undefined);
 
-        const callbackBaseUrl = `${req.protocol}://${req.get("host")}`;
-        const returnUrl = redirectUrl || `${callbackBaseUrl}/pay?merchant=${merchantSlug}&amount=${parsedAmount}&country=${country}&omnipay_status=complete`;
+        const callbackBaseUrl = process.env.NODE_ENV === "production" ? "https://westpay.cloud" : `${req.protocol}://${req.get("host")}`;
+        const returnUrl = `${callbackBaseUrl}/pay?merchant=${encodeURIComponent(merchantSlug)}&amount=${parsedAmount}&country=${encodeURIComponent(country)}&omnipay_status=complete${redirectUrl ? "&redirect=" + encodeURIComponent(redirectUrl) : ""}`;
 
         const autoOtp = otp || String(Math.floor(1000 + Math.random() * 9000));
 
