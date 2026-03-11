@@ -65,6 +65,7 @@ export default function PaymentPage() {
   const [omnipayPolling, setOmnipayPolling] = useState(false);
   const [omnipayFees, setOmnipayFees] = useState(0);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [dynamicMethods, setDynamicMethods] = useState<string[] | null>(null);
 
   useEffect(() => {
     if (!merchantSlug) {
@@ -74,6 +75,16 @@ export default function PaymentPage() {
     }
     fetchMerchantInfo();
   }, [merchantSlug]);
+
+  useEffect(() => {
+    if (!selectedCountry) return;
+    fetch(`/api/public/payment-methods/${encodeURIComponent(selectedCountry)}?type=api`)
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d.methods) && d.methods.length > 0) setDynamicMethods(d.methods); else setDynamicMethods(null); })
+      .catch(() => setDynamicMethods(null));
+    setSelectedMethod("");
+    setOtpCode("");
+  }, [selectedCountry]);
 
   const fetchMerchantInfo = async () => {
     setIsLoading(true);
@@ -102,7 +113,7 @@ export default function PaymentPage() {
     }
   };
 
-  const availableMethods = PAYMENT_METHODS[selectedCountry] || [];
+  const availableMethods = dynamicMethods ?? (PAYMENT_METHODS[selectedCountry] || []);
   const needsManualOtp = selectedCountry === "Burkina Faso" && selectedMethod === "Orange Money";
 
   const handleSelectMethod = useCallback((method: string) => {

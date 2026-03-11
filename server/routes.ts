@@ -1056,6 +1056,24 @@ export async function registerRoutes(
   });
 
   // ==================== PAYMENT PAGE (public) ====================
+  app.get("/api/public/payment-methods/:country", async (req, res) => {
+    try {
+      const { country } = req.params;
+      const type = (req.query.type as string) || "api";
+      const ops = await storage.getWithdrawalOperators(country, true);
+      const activeOps = ops.filter(op => {
+        if (op.maintenanceAll) return false;
+        if (op.maintenanceDeposits) return false;
+        if (type === "link" && op.maintenancePaymentLinks) return false;
+        if (type === "api" && op.maintenanceApiPayment) return false;
+        return true;
+      });
+      res.json({ methods: activeOps.map(o => o.name) });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/payment/:slug/info", async (req, res) => {
     try {
       const merchant = await storage.getMerchantBySlug(req.params.slug);

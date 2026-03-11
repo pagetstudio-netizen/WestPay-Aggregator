@@ -66,6 +66,7 @@ export default function PaymentLinkPage() {
   const [omnipayPolling, setOmnipayPolling] = useState(false);
   const [redirectCountdown, setRedirectCountdown] = useState(5);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [dynamicMethods, setDynamicMethods] = useState<string[] | null>(null);
 
   const { data, isLoading, error } = useQuery<LinkInfo>({
     queryKey: ["/api/payment-link", uniqueId],
@@ -86,6 +87,16 @@ export default function PaymentLinkPage() {
       setSelectedCountry(data.countries[0]);
     }
   }, [data]);
+
+  useEffect(() => {
+    if (!selectedCountry) return;
+    fetch(`/api/public/payment-methods/${encodeURIComponent(selectedCountry)}?type=link`)
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d.methods) && d.methods.length > 0) setDynamicMethods(d.methods); else setDynamicMethods(null); })
+      .catch(() => setDynamicMethods(null));
+    setSelectedMethod("");
+    setOtpCode("");
+  }, [selectedCountry]);
 
   useEffect(() => {
     return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
@@ -114,7 +125,7 @@ export default function PaymentLinkPage() {
     return () => clearInterval(timer);
   }, [step]);
 
-  const availableMethods = PAYMENT_METHODS[selectedCountry] || [];
+  const availableMethods = dynamicMethods ?? (PAYMENT_METHODS[selectedCountry] || []);
   const dialCode = DIAL_CODES[selectedCountry] || "+";
   const needsManualOtp = selectedCountry === "Burkina Faso" && selectedMethod === "Orange Money";
   const handleSelectMethod = useCallback((m: string) => { setSelectedMethod(m); setOtpCode(""); }, []);
