@@ -133,7 +133,7 @@ function generateSecureApiKey(country: string): string {
 }
 
 function signToken(payload: { id: number; role: string; email: string }) {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: "24h" });
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
 }
 
 function authMiddleware(role: "admin" | "merchant") {

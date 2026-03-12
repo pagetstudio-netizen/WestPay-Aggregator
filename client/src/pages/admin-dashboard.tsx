@@ -34,13 +34,19 @@ import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, Payme
 type AdminTab = "overview" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "virements" | "reversements" | "settings";
 
 function useAdminFetch(url: string, key: string[]) {
-  const { token } = useAuth();
+  const { token, logout } = useAuth();
+  const [, setLocation] = useLocation();
   return useQuery({
     queryKey: key,
     queryFn: async () => {
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (res.status === 401 || res.status === 403) {
+        logout();
+        setLocation("/admin-access-9584");
+        throw new Error("Session expiree");
+      }
       if (!res.ok) throw new Error("Erreur de chargement");
       return res.json();
     },
