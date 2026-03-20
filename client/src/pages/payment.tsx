@@ -701,8 +701,8 @@ export default function PaymentPage() {
         <p className="text-center text-white/60 text-xs mt-3">
           Paiement securise via RobotPay
         </p>
+        <HelpButton />
       </div>
-      <HelpButton />
     </div>
   );
 }

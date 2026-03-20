@@ -51,29 +51,26 @@ export default function HelpButton() {
         onClick={() => { setOpen(true); setSent(false); setError(""); }}
         data-testid="button-help"
         style={{
-          position: "fixed",
-          bottom: "18px",
-          left: "50%",
-          transform: "translateX(-50%)",
-          zIndex: 9999,
           display: "flex",
           alignItems: "center",
-          gap: "6px",
+          gap: "4px",
+          margin: "8px auto 0",
+          width: "fit-content",
           background: "#1f2937",
           color: "#fff",
           border: "none",
           borderRadius: "999px",
-          padding: "8px 16px",
-          fontSize: "13px",
+          padding: "5px 12px",
+          fontSize: "11px",
           fontWeight: 600,
           cursor: "pointer",
-          boxShadow: "0 2px 12px rgba(0,0,0,0.25)",
+          boxShadow: "0 2px 8px rgba(0,0,0,0.20)",
           whiteSpace: "nowrap",
         }}
       >
-        <span style={{ fontSize: "16px" }}>🧑‍💻</span>
+        <span style={{ fontSize: "13px" }}>🧑‍💻</span>
         Besoin d&apos;aide ?
-        <span style={{ fontSize: "12px", opacity: 0.7 }}>↗</span>
+        <span style={{ fontSize: "10px", opacity: 0.7 }}>↗</span>
       </button>
 
       {open && (

@@ -450,8 +450,8 @@ export default function PaymentLinkPage() {
         </div>
 
         <p className="text-center text-white/60 text-xs mt-3">Paiement sécurisé via RobotPay</p>
+        <HelpButton />
       </div>
-      <HelpButton />
     </div>
   );
 }
