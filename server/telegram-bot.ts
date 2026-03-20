@@ -1156,6 +1156,90 @@ export async function notifyAdminWalletTransfer(data: {
   await notifyAdminGroup(msg);
 }
 
+export async function notifyMerchantWithdrawal(merchantId: number, data: {
+  id: number;
+  country: string;
+  amount: number;
+  fees: number;
+  phone: string;
+  operator?: string | null;
+  status: "pending" | "approved" | "failed" | "rejected";
+}): Promise<void> {
+  if (!bot) return;
+  try {
+    const merchant = await storage.getMerchantById(merchantId);
+    if (!merchant?.telegramChatId) return;
+
+    const dateStr = new Date().toLocaleString("fr-FR", {
+      day: "2-digit", month: "long", year: "numeric",
+      hour: "2-digit", minute: "2-digit", timeZone: "UTC",
+    });
+
+    const icon = data.status === "approved" ? "✅" : (data.status === "failed" || data.status === "rejected") ? "❌" : "⏳";
+    const statusLabel = data.status === "approved" ? "Approuvé ✅" : data.status === "rejected" ? "Rejeté ❌" : data.status === "failed" ? "Échoué ❌" : "En attente ⏳";
+    const net = data.amount - data.fees;
+
+    const lines = [
+      `${icon} *Demande de retrait*`,
+      ``,
+      `🔖 *Référence :* \`WD-${data.id}\``,
+      `💰 *Montant demandé :* ${formatAmount(data.amount)}`,
+      data.fees > 0 ? `💵 *Frais :* ${formatAmount(data.fees)}` : null,
+      data.fees > 0 ? `✅ *Montant envoyé :* ${formatAmount(net)}` : null,
+      `📞 *Numéro de réception :* ${data.phone}`,
+      `🌍 *Pays :* ${countryLabel(data.country)}`,
+      data.operator ? `📱 *Opérateur :* ${data.operator}` : null,
+      `📊 *Statut :* ${statusLabel}`,
+      `📅 *Date :* ${dateStr}`,
+    ].filter(Boolean) as string[];
+
+    await safeSend(merchant.telegramChatId, lines.join("\n"));
+  } catch (err) {
+    console.error("[TELEGRAM] Erreur notification retrait marchand:", (err as any).message);
+  }
+}
+
+export async function notifyMerchantWalletTransfer(merchantId: number, data: {
+  id: number;
+  fromCountry: string;
+  toCountry: string;
+  amount: number;
+  fee: number;
+  currency: string;
+  status: "pending" | "approved" | "rejected";
+}): Promise<void> {
+  if (!bot) return;
+  try {
+    const merchant = await storage.getMerchantById(merchantId);
+    if (!merchant?.telegramChatId) return;
+
+    const dateStr = new Date().toLocaleString("fr-FR", {
+      day: "2-digit", month: "long", year: "numeric",
+      hour: "2-digit", minute: "2-digit", timeZone: "UTC",
+    });
+
+    const icon = data.status === "approved" ? "✅" : data.status === "rejected" ? "❌" : "⏳";
+    const statusLabel = data.status === "approved" ? "Approuvé ✅" : data.status === "rejected" ? "Rejeté ❌" : "En attente ⏳";
+    const net = data.amount - data.fee;
+
+    const msg = [
+      `${icon} *Virement entre wallets*`,
+      ``,
+      `🔖 *Référence :* \`TR-${data.id}\``,
+      `🌍 *De :* ${countryLabel(data.fromCountry)} ➡️ *Vers :* ${countryLabel(data.toCountry)}`,
+      `💰 *Montant :* ${formatAmount(data.amount)} ${data.currency}`,
+      `💵 *Frais :* ${formatAmount(data.fee)} ${data.currency}`,
+      `✅ *Montant reçu :* ${formatAmount(net)} ${data.currency}`,
+      `📊 *Statut :* ${statusLabel}`,
+      `📅 *Date :* ${dateStr}`,
+    ].join("\n");
+
+    await safeSend(merchant.telegramChatId, msg);
+  } catch (err) {
+    console.error("[TELEGRAM] Erreur notification virement marchand:", (err as any).message);
+  }
+}
+
 export async function notifyAdminBalanceUpdate(data: {
   merchantName: string;
   country: string;
