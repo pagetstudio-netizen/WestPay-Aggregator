@@ -3,6 +3,7 @@ import { useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, AlertCircle, ChevronRight, Check, Phone, ExternalLink } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import HelpButton from "@/components/HelpButton";
 
 const PAYMENT_METHODS: Record<string, string[]> = {
   "Togo": ["Moov Money", "TMoney"],
@@ -450,6 +451,7 @@ export default function PaymentLinkPage() {
 
         <p className="text-center text-white/60 text-xs mt-3">Paiement sécurisé via RobotPay</p>
       </div>
+      <HelpButton />
     </div>
   );
 }

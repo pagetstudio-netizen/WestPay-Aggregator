@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, ChevronRight, Check, Phone, ExternalLink } from "lucide-react";
+import HelpButton from "@/components/HelpButton";
 
 type MerchantInfo = {
   name: string;
@@ -701,6 +702,7 @@ export default function PaymentPage() {
           Paiement securise via RobotPay
         </p>
       </div>
+      <HelpButton />
     </div>
   );
 }
