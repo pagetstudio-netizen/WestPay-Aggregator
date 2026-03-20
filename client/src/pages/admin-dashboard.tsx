@@ -1288,8 +1288,7 @@ function TransactionsPanel() {
         </div>
       )}
 
-      <ScrollArea className="h-[calc(100vh-300px)]">
-        <div className="space-y-2">
+      <div className="space-y-2">
           {filtered.length === 0 ? (
             <Card><CardContent className="p-6 text-center text-muted-foreground text-sm">Aucune transaction pour cette période</CardContent></Card>
           ) : (
@@ -1342,7 +1341,6 @@ function TransactionsPanel() {
             })
           )}
         </div>
-      </ScrollArea>
     </div>
   );
 }
@@ -2314,7 +2312,7 @@ function AdminWalletTransfersPanel() {
 
   const filteredTransfers = allTransfers.filter((wt) => {
     const term = searchVt.toLowerCase();
-    const matchSearch = !term || wt.merchantName?.toLowerCase().includes(term) || wt.fromCountry?.toLowerCase().includes(term) || wt.toCountry?.toLowerCase().includes(term);
+    const matchSearch = !term || wt.merchantName?.toLowerCase().includes(term) || wt.fromCountry?.toLowerCase().includes(term) || wt.toCountry?.toLowerCase().includes(term) || `TR-${wt.id}`.toLowerCase().includes(term);
     const matchStatus = statusFilterVt === "all" || wt.status === statusFilterVt;
     const matchCountry = countryFilterVt === "all" || wt.fromCountry === countryFilterVt || wt.toCountry === countryFilterVt;
     return matchSearch && matchStatus && matchCountry;
@@ -2528,7 +2526,7 @@ function AdminWalletTransfersPanel() {
       <div className="flex gap-2 flex-wrap">
         <div className="relative flex-1 min-w-44">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input className="pl-10" placeholder="Marchand, pays..." value={searchVt} onChange={e => setSearchVt(e.target.value)} data-testid="input-search-vt" />
+          <Input className="pl-10" placeholder="Marchand, pays, référence TR-..." value={searchVt} onChange={e => setSearchVt(e.target.value)} data-testid="input-search-vt" />
         </div>
         <Select value={statusFilterVt} onValueChange={setStatusFilterVt}>
           <SelectTrigger className="w-36" data-testid="select-filter-vt-status"><SelectValue /></SelectTrigger>
@@ -2561,8 +2559,7 @@ function AdminWalletTransfersPanel() {
           ) : filteredTransfers.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">Aucun virement</p>
           ) : (
-            <ScrollArea className="max-h-[500px]">
-              <div className="space-y-2">
+            <div className="space-y-2">
                 {filteredTransfers.map((wt) => (
                   <div key={wt.id} className="p-3 rounded border text-sm space-y-1" data-testid={`virement-row-${wt.id}`}>
                     <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -2581,8 +2578,7 @@ function AdminWalletTransfersPanel() {
                     {wt.adminNote && <p className="text-xs text-muted-foreground italic">Note : {wt.adminNote}</p>}
                   </div>
                 ))}
-              </div>
-            </ScrollArea>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -2880,7 +2876,7 @@ function AdminWithdrawalsPanel() {
 
   const filteredWd = allWd.filter((w) => {
     const term = searchWd.toLowerCase();
-    const matchSearch = !term || w.merchantName?.toLowerCase().includes(term) || w.phone?.includes(term) || w.country?.toLowerCase().includes(term) || (w.operator || "").toLowerCase().includes(term);
+    const matchSearch = !term || w.merchantName?.toLowerCase().includes(term) || w.phone?.includes(term) || w.country?.toLowerCase().includes(term) || (w.operator || "").toLowerCase().includes(term) || (w.omnipayRef || "").toLowerCase().includes(term);
     const matchWebsite = !websiteFilterWd || (w.merchantWebsite || "").toLowerCase().includes(websiteFilterWd.toLowerCase());
     const matchStatus = statusFilterWd === "all" || w.status === statusFilterWd;
     const matchCountry = countryFilterWd === "all" || w.country === countryFilterWd;
@@ -2965,7 +2961,7 @@ function AdminWithdrawalsPanel() {
           <div className="flex gap-2 flex-wrap">
             <div className="relative flex-1 min-w-40">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input className="pl-10" placeholder="Marchand, pays, numéro..." value={searchWd} onChange={e => setSearchWd(e.target.value)} data-testid="input-search-wd" />
+              <Input className="pl-10" placeholder="Marchand, pays, numéro, réf OmniPay..." value={searchWd} onChange={e => setSearchWd(e.target.value)} data-testid="input-search-wd" />
             </div>
             <div className="relative flex-1 min-w-40">
               <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -3011,8 +3007,7 @@ function AdminWithdrawalsPanel() {
               ) : filteredWd.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-4">Aucun reversement</p>
               ) : (
-                <ScrollArea className="max-h-[600px]">
-                  <div className="space-y-2">
+                <div className="space-y-2">
                     {filteredWd.map((wd) => {
                       const fees = wd.fees || 0;
                       const net = wd.amount - fees;
@@ -3058,8 +3053,7 @@ function AdminWithdrawalsPanel() {
                         </div>
                       );
                     })}
-                  </div>
-                </ScrollArea>
+                </div>
               )}
             </CardContent>
           </Card>
