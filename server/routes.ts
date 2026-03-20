@@ -520,16 +520,106 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/admin/transactions", authMiddleware("admin"), async (_req, res) => {
+  app.get("/api/admin/transactions", authMiddleware("admin"), async (req, res) => {
     try {
-      const txs = await storage.getTransactions();
-      const merchantsList = await storage.getMerchants();
+      const { dateFilter = "all", startDate, endDate } = req.query as { dateFilter?: string; startDate?: string; endDate?: string };
+
+      const now = new Date();
+      let dateFrom: Date | null = null;
+      let dateTo: Date | null = null;
+
+      if (dateFilter === "today") {
+        dateFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      } else if (dateFilter === "yesterday") {
+        dateFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+        dateTo = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      } else if (dateFilter === "week") {
+        dateFrom = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      } else if (dateFilter === "month") {
+        dateFrom = new Date(now.getFullYear(), now.getMonth(), 1);
+      } else if (dateFilter === "custom" && startDate) {
+        dateFrom = new Date(startDate as string);
+        if (endDate) {
+          dateTo = new Date(endDate as string);
+          dateTo.setDate(dateTo.getDate() + 1);
+        }
+      }
+
+      const [txs, wds, wts, merchantsList] = await Promise.all([
+        storage.getTransactions(),
+        storage.getWithdrawals(),
+        storage.getWalletTransfers(),
+        storage.getMerchants(),
+      ]);
+
       const merchantMap = new Map(merchantsList.map(m => [m.id, m.name]));
-      const enriched = txs.map(t => ({
-        ...t,
+
+      const payments = txs.map(t => ({
+        id: `pay-${t.id}`,
+        rowId: t.id,
+        type: "payment" as const,
+        txId: t.txId,
+        amount: t.amount,
+        status: t.status,
+        country: t.country,
+        merchantId: t.merchantId,
         merchantName: merchantMap.get(t.merchantId) || `Marchand #${t.merchantId}`,
+        payerNumber: t.payerNumber,
+        operator: t.operator,
+        provider: t.provider,
+        omnipayReference: t.omnipayReference,
+        errorMessage: t.errorMessage,
+        createdAt: t.createdAt,
       }));
-      res.json(enriched);
+
+      const withdrawalItems = wds.map(w => ({
+        id: `wd-${w.id}`,
+        rowId: w.id,
+        type: "withdrawal" as const,
+        txId: w.omnipayRef || `WD-${w.id}`,
+        amount: w.amount,
+        status: w.status,
+        country: w.country,
+        merchantId: w.merchantId,
+        merchantName: w.merchantName,
+        payerNumber: w.phone,
+        operator: w.operator,
+        provider: null,
+        omnipayReference: w.omnipayRef,
+        errorMessage: w.adminNote,
+        createdAt: w.createdAt,
+      }));
+
+      const transferItems = wts.map(t => ({
+        id: `wt-${t.id}`,
+        rowId: t.id,
+        type: "transfer" as const,
+        txId: `TR-${t.id}`,
+        amount: t.amount,
+        status: t.status,
+        country: `${t.fromCountry} → ${t.toCountry}`,
+        merchantId: t.merchantId,
+        merchantName: t.merchantName,
+        payerNumber: null,
+        operator: null,
+        provider: null,
+        omnipayReference: null,
+        errorMessage: t.adminNote,
+        createdAt: t.createdAt,
+      }));
+
+      let all = [...payments, ...withdrawalItems, ...transferItems];
+
+      if (dateFrom) {
+        all = all.filter(t => new Date(t.createdAt!) >= dateFrom!);
+      }
+      if (dateTo) {
+        all = all.filter(t => new Date(t.createdAt!) < dateTo!);
+      }
+
+      all.sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime());
+
+      res.json(all);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

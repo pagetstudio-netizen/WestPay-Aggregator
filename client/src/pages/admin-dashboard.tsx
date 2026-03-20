@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/auth";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -33,7 +33,7 @@ import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, Payme
 
 type AdminTab = "overview" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "virements" | "reversements" | "settings";
 
-function useAdminFetch(url: string, key: string[]) {
+function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: { staleTime?: number; refetchOnWindowFocus?: boolean }) {
   const { token, logout } = useAuth();
   const [, setLocation] = useLocation();
   return useQuery({
@@ -50,6 +50,8 @@ function useAdminFetch(url: string, key: string[]) {
       if (!res.ok) throw new Error("Erreur de chargement");
       return res.json();
     },
+    staleTime: opts?.staleTime,
+    refetchOnWindowFocus: opts?.refetchOnWindowFocus,
   });
 }
 
@@ -293,7 +295,7 @@ function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string
 
 function OverviewPanel() {
   const { toast } = useToast();
-  const { data: stats } = useAdminFetch("/api/admin/stats", ["/api/admin/stats"]);
+  const { data: stats, refetch: refetchStats, isFetching: isFetchingStats } = useAdminFetch("/api/admin/stats", ["/api/admin/stats"], { staleTime: 60_000, refetchOnWindowFocus: true });
   const { data: transactions = [] } = useAdminFetch("/api/admin/transactions", ["/api/admin/transactions"]);
   const { data: merchants = [] } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
   const { data: links = [] } = useAdminFetch("/api/admin/payment-links", ["/api/admin/payment-links"]);
@@ -342,17 +344,30 @@ function OverviewPanel() {
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">
-          {!showResetConfirm ? (
+          <div className="flex gap-2">
             <Button
               variant="outline"
               size="sm"
-              className="gap-1.5 text-xs border-orange-300 text-orange-700 hover:bg-orange-50 dark:border-orange-700 dark:text-orange-400"
-              onClick={() => setShowResetConfirm(true)}
-              data-testid="button-reset-stats"
+              className="gap-1.5 text-xs"
+              onClick={() => refetchStats()}
+              disabled={isFetchingStats}
+              data-testid="button-refresh-stats"
             >
-              <RotateCcw className="w-3.5 h-3.5" /> Réinitialiser les stats
+              <RefreshCw className={`w-3.5 h-3.5 ${isFetchingStats ? "animate-spin" : ""}`} /> Actualiser
             </Button>
-          ) : (
+            {!showResetConfirm && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-xs border-orange-300 text-orange-700 hover:bg-orange-50 dark:border-orange-700 dark:text-orange-400"
+                onClick={() => setShowResetConfirm(true)}
+                data-testid="button-reset-stats"
+              >
+                <RotateCcw className="w-3.5 h-3.5" /> Réinitialiser les stats
+              </Button>
+            )}
+          </div>
+          {showResetConfirm && (
             <div className="flex flex-col items-end gap-1.5 bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-800 rounded-md p-2">
               <div className="flex items-center gap-1.5 text-xs font-medium text-orange-700 dark:text-orange-400">
                 <AlertTriangle className="w-3.5 h-3.5" /> Confirmer la réinitialisation ?
@@ -1127,24 +1142,43 @@ function MerchantsPanel() {
 
 function TransactionsPanel() {
   const { toast } = useToast();
-  const { data: transactions = [], isLoading } = useAdminFetch("/api/admin/transactions", ["/api/admin/transactions"]);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState("all");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+
+  const apiUrl = useMemo(() => {
+    const params = new URLSearchParams({ dateFilter });
+    if (dateFilter === "custom") {
+      if (startDate) params.set("startDate", startDate);
+      if (endDate) params.set("endDate", endDate);
+    }
+    return `/api/admin/transactions?${params.toString()}`;
+  }, [dateFilter, startDate, endDate]);
+
+  const { data: transactions = [], isLoading, refetch } = useAdminFetch(apiUrl, ["/api/admin/transactions", dateFilter, startDate, endDate]);
 
   if (isLoading) return <LoadingSkeleton />;
 
   const filtered = (transactions as any[]).filter((t) => {
-    const matchSearch =
-      t.txId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.country?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.merchantName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.payerNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.omnipayReference?.toLowerCase().includes(searchTerm.toLowerCase());
+    const term = searchTerm.toLowerCase();
+    const matchSearch = !term ||
+      t.txId?.toLowerCase().includes(term) ||
+      t.country?.toLowerCase().includes(term) ||
+      t.merchantName?.toLowerCase().includes(term) ||
+      t.payerNumber?.toLowerCase().includes(term) ||
+      t.omnipayReference?.toLowerCase().includes(term);
     const matchStatus =
       statusFilter === "all" ||
-      (statusFilter === "confirmed" && t.status === "confirmed") ||
-      (statusFilter === "failed" && t.status === "failed");
-    return matchSearch && matchStatus;
+      (statusFilter === "confirmed" && ["confirmed", "approved", "success", "completed"].includes(t.status)) ||
+      (statusFilter === "failed" && ["failed", "rejected"].includes(t.status)) ||
+      (statusFilter === "pending" && t.status === "pending");
+    const matchType =
+      typeFilter === "all" ||
+      t.type === typeFilter;
+    return matchSearch && matchStatus && matchType;
   });
 
   const copyToClipboard = (text: string, label: string) => {
@@ -1153,9 +1187,9 @@ function TransactionsPanel() {
   };
 
   const downloadCSV = () => {
-    const header = "TXID,Référence OmniPay,Montant,Pays,Marchand,Numéro,Opérateur,Statut,Erreur,Date\n";
+    const header = "Type,TXID,Référence,Montant,Pays,Marchand,Numéro,Opérateur,Statut,Note,Date\n";
     const rows = filtered.map((t: any) =>
-      `${t.txId},${t.omnipayReference || ""},${t.amount},${t.country},${t.merchantName || t.merchantId},${t.payerNumber || ""},${t.operator || ""},${t.status},${t.errorMessage || ""},${new Date(t.createdAt).toLocaleDateString("fr-FR")}`
+      `${t.type || "payment"},${t.txId},${t.omnipayReference || ""},${t.amount},${t.country},${t.merchantName || t.merchantId},${t.payerNumber || ""},${t.operator || ""},${t.status},${t.errorMessage || ""},${new Date(t.createdAt).toLocaleDateString("fr-FR")}`
     ).join("\n");
     const blob = new Blob([header + rows], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -1163,20 +1197,40 @@ function TransactionsPanel() {
     a.href = url; a.download = "transactions.csv"; a.click();
   };
 
-  const failedCount = (transactions as any[]).filter((t) => t.status === "failed").length;
+  const failedCount = (transactions as any[]).filter((t) => ["failed", "rejected"].includes(t.status)).length;
+
+  const getTypeBadge = (type: string) => {
+    if (type === "withdrawal") return <Badge className="text-xs bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400">Retrait</Badge>;
+    if (type === "transfer") return <Badge className="text-xs bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400">Transfert</Badge>;
+    return <Badge className="text-xs bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400">Paiement</Badge>;
+  };
+
+  const getStatusBadge = (status: string) => {
+    if (["confirmed", "approved", "success", "completed"].includes(status))
+      return <Badge variant="default" className="text-xs">{status === "approved" ? "Approuvé" : "Confirmé"}</Badge>;
+    if (["failed", "rejected"].includes(status))
+      return <Badge variant="destructive" className="text-xs">{status === "rejected" ? "Rejeté" : "Échoué"}</Badge>;
+    return <Badge variant="secondary" className="text-xs">En attente</Badge>;
+  };
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           <h2 className="text-lg font-semibold text-foreground">Transactions</h2>
+          <Badge variant="secondary" className="text-xs">{filtered.length} résultat{filtered.length > 1 ? "s" : ""}</Badge>
           {failedCount > 0 && (
             <Badge variant="destructive" className="text-xs">{failedCount} échoué{failedCount > 1 ? "s" : ""}</Badge>
           )}
         </div>
-        <Button variant="outline" onClick={downloadCSV} data-testid="button-export-csv">
-          <Download className="w-4 h-4 mr-2" />Export CSV
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => refetch()} data-testid="button-refresh-transactions">
+            <RefreshCw className="w-4 h-4" />
+          </Button>
+          <Button variant="outline" onClick={downloadCSV} data-testid="button-export-csv">
+            <Download className="w-4 h-4 mr-2" />Export CSV
+          </Button>
+        </div>
       </div>
 
       <div className="flex gap-2 flex-wrap">
@@ -1184,25 +1238,63 @@ function TransactionsPanel() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input className="pl-10" placeholder="Rechercher TXID, référence, pays, marchand, numéro..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} data-testid="input-search-transactions" />
         </div>
+        <Select value={dateFilter} onValueChange={setDateFilter}>
+          <SelectTrigger className="w-40" data-testid="select-date-filter">
+            <SelectValue placeholder="Période" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Toutes</SelectItem>
+            <SelectItem value="today">Aujourd'hui</SelectItem>
+            <SelectItem value="yesterday">Hier</SelectItem>
+            <SelectItem value="week">Cette semaine</SelectItem>
+            <SelectItem value="month">Ce mois</SelectItem>
+            <SelectItem value="custom">Plage personnalisée</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={typeFilter} onValueChange={setTypeFilter}>
+          <SelectTrigger className="w-36" data-testid="select-type-filter">
+            <SelectValue placeholder="Type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tous types</SelectItem>
+            <SelectItem value="payment">Paiements</SelectItem>
+            <SelectItem value="withdrawal">Retraits</SelectItem>
+            <SelectItem value="transfer">Transferts</SelectItem>
+          </SelectContent>
+        </Select>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-36" data-testid="select-status-filter">
             <SelectValue placeholder="Statut" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Tous</SelectItem>
+            <SelectItem value="all">Tous statuts</SelectItem>
             <SelectItem value="confirmed">Confirmés</SelectItem>
             <SelectItem value="failed">Échoués</SelectItem>
+            <SelectItem value="pending">En attente</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
+      {dateFilter === "custom" && (
+        <div className="flex gap-2 flex-wrap items-center">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-muted-foreground whitespace-nowrap">Du :</label>
+            <Input type="date" className="w-36 text-xs" value={startDate} onChange={(e) => setStartDate(e.target.value)} data-testid="input-start-date" />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-muted-foreground whitespace-nowrap">Au :</label>
+            <Input type="date" className="w-36 text-xs" value={endDate} onChange={(e) => setEndDate(e.target.value)} data-testid="input-end-date" />
+          </div>
+        </div>
+      )}
+
       <ScrollArea className="h-[calc(100vh-300px)]">
         <div className="space-y-2">
           {filtered.length === 0 ? (
-            <Card><CardContent className="p-6 text-center text-muted-foreground text-sm">Aucune transaction</CardContent></Card>
+            <Card><CardContent className="p-6 text-center text-muted-foreground text-sm">Aucune transaction pour cette période</CardContent></Card>
           ) : (
             filtered.map((tx: any) => {
-              const isFailed = tx.status === "failed";
+              const isFailed = ["failed", "rejected"].includes(tx.status);
               return (
                 <Card key={tx.id} className={isFailed ? "border-destructive/40 bg-destructive/5 dark:bg-destructive/10" : ""}>
                   <CardContent className="p-4">
@@ -1214,10 +1306,9 @@ function TransactionsPanel() {
                             <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={() => copyToClipboard(tx.txId, "ID transaction")} title="Copier l'ID" data-testid={`button-copy-txid-${tx.id}`}>
                               <Copy className="w-3 h-3" />
                             </Button>
+                            {getTypeBadge(tx.type)}
                             <Badge variant="secondary" className="text-xs">{tx.country}</Badge>
-                            <Badge variant={isFailed ? "destructive" : "default"} className="text-xs">
-                              {isFailed ? "Échoué" : "Confirmé"}
-                            </Badge>
+                            {getStatusBadge(tx.status)}
                             {tx.provider && <Badge variant="outline" className="text-xs">{tx.provider === "sms" ? "SMS" : "Mobile Money"}</Badge>}
                           </div>
                           <div className="flex items-center gap-3 flex-wrap mt-1.5">
@@ -1234,7 +1325,7 @@ function TransactionsPanel() {
                               </Button>
                             </div>
                           )}
-                          {isFailed && tx.errorMessage && (
+                          {tx.errorMessage && (
                             <p className="text-xs text-destructive mt-1 bg-destructive/10 rounded px-2 py-1">⚠️ {tx.errorMessage}</p>
                           )}
                           <p className="text-xs text-muted-foreground mt-1">{new Date(tx.createdAt).toLocaleString("fr-FR")}</p>

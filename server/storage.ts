@@ -16,7 +16,7 @@ import {
   type WithdrawalOperator, type InsertWithdrawalOperator,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, sql, and, gte, lt } from "drizzle-orm";
+import { eq, desc, sql, and, gte, lt, inArray } from "drizzle-orm";
 
 export interface IStorage {
   getAdminByEmail(email: string): Promise<Admin | undefined>;
@@ -324,9 +324,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getStats() {
+    const validStatuses = ["confirmed", "success", "completed"];
     const [mc] = await db.select({ count: sql<number>`count(*)` }).from(merchants);
-    const [tc] = await db.select({ count: sql<number>`count(*)` }).from(transactions);
-    const [tv] = await db.select({ total: sql<number>`coalesce(sum(amount), 0)` }).from(transactions);
+    const [tc] = await db.select({ count: sql<number>`count(*)` }).from(transactions).where(inArray(transactions.status, validStatuses));
+    const [tv] = await db.select({ total: sql<number>`coalesce(sum(amount), 0)` }).from(transactions).where(inArray(transactions.status, validStatuses));
     const [an] = await db.select({ count: sql<number>`count(*)` }).from(numbers).where(eq(numbers.status, "active"));
     return {
       merchantCount: Number(mc?.count || 0),
@@ -364,7 +365,7 @@ export class DatabaseStorage implements IStorage {
     const [apiPay] = await db.select({
       count: sql<number>`count(*)`,
       total: sql<number>`coalesce(sum(amount), 0)`,
-    }).from(transactions).where(and(eq(transactions.provider, "omnipay"), sql`amount > 0`, sql`tx_id NOT LIKE 'TR-%'`));
+    }).from(transactions).where(and(eq(transactions.provider, "omnipay"), sql`amount > 0`, sql`tx_id NOT LIKE 'TR-%'`, inArray(transactions.status, ["confirmed", "success", "completed"])));
 
     const [linkPay] = await db.select({
       count: sql<number>`count(*)`,
