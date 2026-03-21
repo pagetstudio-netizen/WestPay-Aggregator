@@ -1471,8 +1471,46 @@ export async function registerRoutes(
       if (!pending) {
         const withdrawal = await storage.getWithdrawalByOmnipayRef(payload.reference);
         if (withdrawal) {
-          console.log(`[OMNIPAY CALLBACK] Retrait connu ref=${payload.reference} statut=${payload.status}`);
-          return res.json({ status: "acknowledged" });
+          console.log(`[OMNIPAY CALLBACK] Retrait ref=${payload.reference} statut OmniPay=${payload.status} statut local=${withdrawal.status}`);
+
+          if (withdrawal.status === "approved" || withdrawal.status === "rejected" || withdrawal.status === "failed") {
+            return res.json({ status: "already_processed" });
+          }
+
+          const wdStatusNum = parseInt(payload.status);
+          const wdMerchant = await storage.getMerchantById(withdrawal.merchantId);
+
+          if (wdStatusNum === OMNIPAY_STATUS.SUCCESS) {
+            const wdFees = payload.fees ? parseInt(payload.fees) : undefined;
+            await storage.updateWithdrawalStatus(
+              withdrawal.id,
+              "approved",
+              `Confirmé par OmniPay${wdFees !== undefined ? ` - Frais: ${wdFees} F` : ""}`,
+              payload.reference,
+              wdFees,
+            );
+            notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees || 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: withdrawal.withdrawalMode }).catch(() => {});
+            notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees || 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
+            console.log(`[OMNIPAY CALLBACK] Retrait #${withdrawal.id} approuvé - ref=${payload.reference}`);
+            return res.json({ status: "approved" });
+
+          } else if (wdStatusNum === OMNIPAY_STATUS.FAILED) {
+            await storage.updateWithdrawalStatus(
+              withdrawal.id,
+              "failed",
+              `Echec OmniPay: ${payload.message || "Echec opérateur"}`,
+              payload.reference,
+            );
+            await storage.incrementMerchantCountryBalance(withdrawal.merchantCountryId, withdrawal.amount);
+            notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed", mode: withdrawal.withdrawalMode }).catch(() => {});
+            notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed" }).catch(() => {});
+            console.log(`[OMNIPAY CALLBACK] Retrait #${withdrawal.id} échoué - ref=${payload.reference} - ${payload.message}`);
+            return res.json({ status: "failed" });
+
+          } else {
+            console.log(`[OMNIPAY CALLBACK] Retrait #${withdrawal.id} toujours en cours (OmniPay status=${wdStatusNum})`);
+            return res.json({ status: "pending", omnipayStatus: wdStatusNum });
+          }
         }
         const txByRef = await storage.getTransactionByTxId(payload.reference);
         if (txByRef) {
@@ -2615,10 +2653,10 @@ export async function registerRoutes(
           operator: omnipayOperatorCode,
         });
         if (result.success === 1) {
-          await storage.updateWithdrawalStatus(w.id, "approved", `Traitement automatique - Frais: ${withdrawalFee} F`, result.reference || reference, withdrawalFee);
-          notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: withdrawalFee, phone, operator: operator || null, status: "approved", mode: "auto" }).catch(() => {});
-          notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: withdrawalFee, phone, operator: operator || null, status: "approved" }).catch(() => {});
-          return res.json({ ...w, status: "approved", omnipayRef: result.reference || reference, fees: withdrawalFee, netAmount, autoProcessed: true });
+          const omnipayRef = result.reference || reference;
+          await storage.updateWithdrawalStatus(w.id, "pending", `Initié chez OmniPay - en attente de confirmation - Frais prévus: ${withdrawalFee} F`, omnipayRef, withdrawalFee);
+          console.log(`[WITHDRAWAL AUTO] Initié chez OmniPay ref=${omnipayRef} - en attente du callback`);
+          return res.json({ ...w, status: "pending", omnipayRef, fees: withdrawalFee, netAmount, autoProcessed: true });
         } else {
           const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Echec de traitement";
           await storage.updateWithdrawalStatus(w.id, "failed", `Echec de traitement (code ${result.code}): ${errMsg}`, reference);
@@ -2672,6 +2710,7 @@ export async function registerRoutes(
       const merchant = await storage.getMerchantById(w.merchantId);
       let omnipayRef: string | undefined;
       let fees: number | undefined;
+      let sentToOmnipay = false;
 
       const omnipayApiKey = await getOmnipayPayoutApiKey();
       if (mc && mc.omnipayEnabled && omnipayApiKey && merchant) {
@@ -2683,7 +2722,6 @@ export async function registerRoutes(
           const adminOmnipayCode = await resolveOmnipayOperatorCode(w.operator, w.country);
           const wdMsisdn = prependDialCode(w.phone, w.country);
           console.log(`[ADMIN APPROVE WD] Transfert: ${w.amount} vers ${wdMsisdn}, operateur: ${adminOmnipayCode || "(auto)"}, ref: ${reference}`);
-          omnipayRef = reference;
           const result = await omnipayInitiateTransfer({
             apikey: omnipayApiKey,
             msisdn: wdMsisdn,
@@ -2696,7 +2734,8 @@ export async function registerRoutes(
           if (result.success === 1) {
             omnipayRef = result.reference || reference;
             fees = result.fees || 0;
-            console.log(`[ADMIN APPROVE WD] Succes OmniPay - ID: ${result.id}, Ref: ${omnipayRef}`);
+            sentToOmnipay = true;
+            console.log(`[ADMIN APPROVE WD] Initié chez OmniPay - ID: ${result.id}, Ref: ${omnipayRef} - en attente callback`);
           } else {
             const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Echec inconnu";
             console.error(`[ADMIN APPROVE WD] OmniPay echec (code ${result.code}): ${errMsg}`);
@@ -2706,10 +2745,16 @@ export async function registerRoutes(
         }
       }
 
-      await storage.updateWithdrawalStatus(id, "approved", note, omnipayRef, fees);
-      notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: fees || 0, phone: w.phone, operator: w.operator, status: "approved", mode: "manual" }).catch(() => {});
-      notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: fees || 0, phone: w.phone, operator: w.operator, status: "approved" }).catch(() => {});
-      res.json({ success: true, omnipayRef, fees });
+      if (sentToOmnipay) {
+        await storage.updateWithdrawalStatus(id, "pending", `Initié chez OmniPay par admin - en attente de confirmation${note ? ` - Note: ${note}` : ""}`, omnipayRef, fees);
+        console.log(`[ADMIN APPROVE WD] Retrait #${id} en attente confirmation OmniPay - ref=${omnipayRef}`);
+        res.json({ success: true, omnipayRef, fees, pendingOmnipay: true });
+      } else {
+        await storage.updateWithdrawalStatus(id, "approved", note, omnipayRef, fees);
+        notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: fees || 0, phone: w.phone, operator: w.operator, status: "approved", mode: "manual" }).catch(() => {});
+        notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: fees || 0, phone: w.phone, operator: w.operator, status: "approved" }).catch(() => {});
+        res.json({ success: true, omnipayRef, fees });
+      }
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
