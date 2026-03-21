@@ -306,6 +306,7 @@ export async function runMigrations() {
       );
     }
 
+    await client.query(`ALTER TABLE merchants ADD COLUMN IF NOT EXISTS fee_exempt boolean NOT NULL DEFAULT false`);
     await client.query(`ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS omnipay_code text`);
 
     await client.query(`

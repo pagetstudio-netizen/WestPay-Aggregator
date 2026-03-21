@@ -73,6 +73,7 @@ function OverviewPanel({ token }: { token: string | null }) {
   const { t } = useLanguage();
   const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
   const { data: stats } = useMerchantFetch("/api/merchant/stats", ["/api/merchant/stats"], token);
+  const { data: me } = useMerchantFetch("/api/merchant/me", ["/api/merchant/me"], token);
 
   if (balLoading) return <MerchantLoadingSkeleton />;
 
@@ -85,7 +86,14 @@ function OverviewPanel({ token }: { token: string | null }) {
       className="-m-4 md:-m-6 p-4 md:p-6 min-h-full"
       style={{ background: "#e8eaed" }}
     >
-      <h2 className="text-xl font-bold mb-5" style={{ color: "#333" }}>{t("dashboard")}</h2>
+      <div className="flex items-center gap-3 mb-5 flex-wrap">
+        <h2 className="text-xl font-bold" style={{ color: "#333" }}>{t("dashboard")}</h2>
+        {(me as any)?.feeExempt && (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-600 text-white">
+            ✦ Zéro frais activé
+          </span>
+        )}
+      </div>
 
       <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
         {t("balance")} / {t("reversements")}

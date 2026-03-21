@@ -18,6 +18,7 @@ export const merchants = pgTable("merchants", {
   slug: text("slug").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   suspended: boolean("suspended").default(false).notNull(),
+  feeExempt: boolean("fee_exempt").default(false).notNull(),
   webhookUrl: text("webhook_url"),
   webhookSecret: text("webhook_secret"),
   telegramChatId: text("telegram_chat_id"),

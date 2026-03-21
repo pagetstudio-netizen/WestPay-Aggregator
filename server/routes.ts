@@ -888,6 +888,16 @@ export async function registerRoutes(
   });
 
   // ==================== MERCHANT ROUTES ====================
+  app.get("/api/merchant/me", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchant = await storage.getMerchantById((req as any).user.id);
+      if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
+      res.json({ id: merchant.id, name: merchant.name, email: merchant.email, slug: merchant.slug, feeExempt: merchant.feeExempt });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/merchant/balance", authMiddleware("merchant"), async (req, res) => {
     try {
       const countries = await storage.getMerchantCountries((req as any).user.id);
@@ -1497,7 +1507,7 @@ export async function registerRoutes(
           const existingTx = await storage.getTransactionByTxId(txId);
           if (!existingTx) {
             const payerFullName = [payload.first_name, payload.last_name].filter(Boolean).join(" ") || pending.payerName || null;
-            const merchantCredit1 = calcMerchantCredit(pending.amount);
+            const merchantCredit1 = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount);
             await storage.createTransaction({
               merchantId: pending.merchantId,
               country: pending.country,
@@ -1975,7 +1985,8 @@ export async function registerRoutes(
           return res.json({ status: "inactive", message: "Le pays n'est pas actif pour ce marchand" });
         }
 
-        const merchantCredit2 = calcMerchantCredit(amount);
+        const smsM2 = await storage.getMerchantById(found.merchantId);
+        const merchantCredit2 = smsM2?.feeExempt ? amount : calcMerchantCredit(amount);
         await storage.createTransaction({
           merchantId: found.merchantId,
           country: found.country,
@@ -2074,7 +2085,8 @@ export async function registerRoutes(
         return res.json({ status: "inactive", message: "Le pays n'est pas actif pour ce marchand" });
       }
 
-      const merchantCredit3 = calcMerchantCredit(amount);
+      const smsM3 = await storage.getMerchantById(simNumber.merchantId);
+      const merchantCredit3 = smsM3?.feeExempt ? amount : calcMerchantCredit(amount);
       await storage.createTransaction({
         merchantId: simNumber.merchantId,
         country: simNumber.country,
@@ -2411,15 +2423,18 @@ export async function registerRoutes(
       if (!fromZone || !toZone || fromZone !== toZone) {
         return res.status(400).json({ message: "Les deux pays doivent etre dans la meme zone monetaire (XOF ou XAF)" });
       }
+      const wtMerchantForFee = await storage.getMerchantById(merchantId);
       const feeTypeSetting = await storage.getSetting("wallet_transfer_fee_type");
       const feeValueSetting = await storage.getSetting("wallet_transfer_fee_value");
       const feeType = feeTypeSetting?.value || "percentage";
       const feeValue = parseFloat(feeValueSetting?.value || "3");
       let fee = 0;
-      if (feeType === "percentage") {
-        fee = Math.round((parsedAmount * feeValue) / 100);
-      } else {
-        fee = Math.round(feeValue);
+      if (!wtMerchantForFee?.feeExempt) {
+        if (feeType === "percentage") {
+          fee = Math.round((parsedAmount * feeValue) / 100);
+        } else {
+          fee = Math.round(feeValue);
+        }
       }
       const totalNeeded = parsedAmount + fee;
       if (fromMC.balance < totalNeeded) {
@@ -2441,8 +2456,7 @@ export async function registerRoutes(
         .set({ balance: sql`${merchantCountries.balance} - ${parsedAmount + fee}` })
         .where(eq(merchantCountries.id, fromMC.id));
 
-      const wtMerchant = await storage.getMerchantById(merchantId);
-      notifyAdminWalletTransfer({ id: transfer.id, merchantName: wtMerchant?.name || `#${merchantId}`, fromCountry: fromMC.country, toCountry: toMC.country, amount: parsedAmount, fee, currency: fromZone, status: "pending" }).catch(() => {});
+      notifyAdminWalletTransfer({ id: transfer.id, merchantName: wtMerchantForFee?.name || `#${merchantId}`, fromCountry: fromMC.country, toCountry: toMC.country, amount: parsedAmount, fee, currency: fromZone, status: "pending" }).catch(() => {});
       notifyMerchantWalletTransfer(merchantId, { id: transfer.id, fromCountry: fromMC.country, toCountry: toMC.country, amount: parsedAmount, fee, currency: fromZone, status: "pending" }).catch(() => {});
 
       res.json(transfer);
@@ -2581,7 +2595,7 @@ export async function registerRoutes(
       notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "pending", mode: "auto" }).catch(() => {});
       notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "pending" }).catch(() => {});
 
-      const withdrawalFee = calcWithdrawalFee(amount);
+      const withdrawalFee = merchant.feeExempt ? 0 : calcWithdrawalFee(amount);
       const netAmount = amount - withdrawalFee;
 
       try {
@@ -2726,6 +2740,18 @@ export async function registerRoutes(
       if (!["auto", "manual"].includes(mode)) return res.status(400).json({ message: "Mode invalide" });
       await storage.updateMerchant(id, { withdrawalMode: mode });
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.patch("/api/admin/merchants/:id/fee-exempt", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { feeExempt } = req.body;
+      if (typeof feeExempt !== "boolean") return res.status(400).json({ message: "Valeur invalide" });
+      await storage.updateMerchant(id, { feeExempt });
+      res.json({ success: true, feeExempt });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

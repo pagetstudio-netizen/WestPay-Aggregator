@@ -633,9 +633,10 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+          <DialogTitle className="flex items-center gap-2 flex-wrap">
             {isLoading ? "Chargement..." : merchant?.name}
             {merchant && <Badge variant={merchant.suspended ? "destructive" : "secondary"} className="text-xs">{merchant.suspended ? "Suspendu" : "Actif"}</Badge>}
+            {merchant?.feeExempt && <Badge className="text-xs bg-emerald-600 text-white">Zéro frais</Badge>}
           </DialogTitle>
         </DialogHeader>
 
@@ -676,6 +677,31 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
                   {profileMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                   Enregistrer les modifications
                 </Button>
+
+                <div className="flex items-center justify-between rounded-lg border p-3 bg-emerald-50 dark:bg-emerald-950/20">
+                  <div>
+                    <p className="text-sm font-medium">Mode sans frais</p>
+                    <p className="text-xs text-muted-foreground">Exempte ce marchand de tous les frais (payin 5.5%, payout 4.5%, virements)</p>
+                  </div>
+                  <Switch
+                    checked={!!merchant?.feeExempt}
+                    onCheckedChange={async (val) => {
+                      const res = await fetch(`/api/admin/merchants/${merchantId}/fee-exempt`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                        body: JSON.stringify({ feeExempt: val }),
+                      });
+                      if (res.ok) {
+                        refetch();
+                        queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
+                        toast({ title: val ? "Mode sans frais activé" : "Mode sans frais désactivé" });
+                      } else {
+                        toast({ title: "Erreur", variant: "destructive" });
+                      }
+                    }}
+                    data-testid="switch-fee-exempt"
+                  />
+                </div>
               </div>
             )}
 
@@ -1067,6 +1093,7 @@ function MerchantsPanel() {
                       <Badge variant={merchant.suspended ? "destructive" : "secondary"}>
                         {merchant.suspended ? "Suspendu" : "Actif"}
                       </Badge>
+                      {merchant.feeExempt && <Badge className="text-xs bg-emerald-600 text-white">Zéro frais</Badge>}
                     </div>
                     <p className="text-sm text-muted-foreground mt-1">{merchant.email}</p>
                     <p className="text-xs text-muted-foreground">Slug: /{merchant.slug}</p>
