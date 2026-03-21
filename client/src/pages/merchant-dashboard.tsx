@@ -898,6 +898,8 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
   const { toast } = useToast();
   const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
   const { data: withdrawalList = [], isLoading: wdLoading } = useMerchantFetch("/api/merchant/withdrawals", ["/api/merchant/withdrawals"], token);
+  const { data: me } = useMerchantFetch("/api/merchant/me", ["/api/merchant/me"], token);
+  const feeExempt = !!(me as any)?.feeExempt;
 
   const [selectedWalletId, setSelectedWalletId] = useState("");
   const [selectedOperator, setSelectedOperator] = useState("");
@@ -1072,11 +1074,18 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                   />
                   {amount && parseInt(amount) > 0 && (() => {
                     const gross = parseInt(amount);
-                    const fee = Math.floor(gross * 0.045);
+                    const fee = feeExempt ? 0 : Math.floor(gross * 0.045);
                     const net = gross - fee;
                     return (
                       <div className="mt-2 rounded-lg p-2.5 text-xs space-y-1" style={{ background: "#f0faf5", border: "1px solid #c3e6cb" }}>
-                        <div className="flex justify-between"><span style={{ color: "#666" }}>Frais WestPay (4,5 %)</span><span style={{ color: "#e53e3e", fontWeight: 600 }}>−{fee.toLocaleString("fr-FR")} F</span></div>
+                        {feeExempt ? (
+                          <div className="flex justify-between items-center">
+                            <span style={{ color: "#155724", fontWeight: 600 }}>✦ Mode sans frais</span>
+                            <span style={{ color: "#155724", fontWeight: 600 }}>0 F</span>
+                          </div>
+                        ) : (
+                          <div className="flex justify-between"><span style={{ color: "#666" }}>Frais WestPay (4,5 %)</span><span style={{ color: "#e53e3e", fontWeight: 600 }}>−{fee.toLocaleString("fr-FR")} F</span></div>
+                        )}
                         <div className="flex justify-between border-t pt-1" style={{ borderColor: "#c3e6cb" }}><span style={{ color: "#155724", fontWeight: 700 }}>Vous recevrez</span><span style={{ color: "#155724", fontWeight: 700 }}>{net.toLocaleString("fr-FR")} F</span></div>
                       </div>
                     );
@@ -1154,6 +1163,8 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
   const { toast } = useToast();
   const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
   const { data: walletTransfers = [], isLoading: wtLoading } = useMerchantFetch("/api/merchant/wallet-transfers", ["/api/merchant/wallet-transfers"], token);
+  const { data: me } = useMerchantFetch("/api/merchant/me", ["/api/merchant/me"], token);
+  const feeExempt = !!(me as any)?.feeExempt;
   const { data: wtcList = [] } = useQuery<WalletTransferCountry[]>({
     queryKey: ["/api/wallet-transfer-countries"],
     queryFn: () => fetch("/api/wallet-transfer-countries").then(r => r.json()),
@@ -1190,7 +1201,9 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/balance"] });
       toast({
         title: "Virement soumis",
-        description: `${data.amount.toLocaleString("fr-FR")} ${data.currency} de ${data.fromCountry} → ${data.toCountry}. Frais : ${data.fee.toLocaleString("fr-FR")} ${data.currency}.`,
+        description: data.fee === 0
+          ? `${data.amount.toLocaleString("fr-FR")} ${data.currency} de ${data.fromCountry} → ${data.toCountry}. ✦ Sans frais.`
+          : `${data.amount.toLocaleString("fr-FR")} ${data.currency} de ${data.fromCountry} → ${data.toCountry}. Frais : ${data.fee.toLocaleString("fr-FR")} ${data.currency}.`,
       });
       setFromCountryId(""); setToCountryId(""); setAmount("");
     },
@@ -1333,6 +1346,26 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
             </div>
           )}
 
+          {fromCountryId && toCountryId && amount && !isNaN(parseInt(amount)) && parseInt(amount) > 0 && (
+            <div className="rounded-lg p-2.5 text-xs space-y-1" style={{ background: "#f0faf5", border: "1px solid #c3e6cb" }}>
+              {feeExempt ? (
+                <div className="flex justify-between items-center">
+                  <span style={{ color: "#155724", fontWeight: 600 }}>✦ Mode sans frais</span>
+                  <span style={{ color: "#155724", fontWeight: 600 }}>0 {fromZone || "FCFA"}</span>
+                </div>
+              ) : (
+                <div className="flex justify-between">
+                  <span style={{ color: "#666" }}>Frais de virement</span>
+                  <span style={{ color: "#e53e3e", fontWeight: 600 }}>estimé selon configuration</span>
+                </div>
+              )}
+              <div className="flex justify-between border-t pt-1" style={{ borderColor: "#c3e6cb" }}>
+                <span style={{ color: "#155724", fontWeight: 700 }}>Montant transféré</span>
+                <span style={{ color: "#155724", fontWeight: 700 }}>{parseInt(amount).toLocaleString("fr-FR")} {fromZone || "FCFA"}</span>
+              </div>
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={createMutation.isPending || !fromCountryId || !toCountryId || !amount}
@@ -1370,7 +1403,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: "#888" }}>
                 <span>{t("amount")} : <strong style={{ color: "#333" }}>{wt.amount.toLocaleString("fr-FR")} {wt.currency}</strong></span>
-                <span>{t("fees")} : <strong style={{ color: "#333" }}>{wt.fee.toLocaleString("fr-FR")} {wt.currency}</strong></span>
+                <span>{t("fees")} : <strong style={{ color: wt.fee === 0 ? "#00b050" : "#333" }}>{wt.fee === 0 ? "Sans frais" : `${wt.fee.toLocaleString("fr-FR")} ${wt.currency}`}</strong></span>
                 <span>{new Date(wt.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" })}</span>
               </div>
               {wt.adminNote && (
