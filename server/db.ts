@@ -293,6 +293,8 @@ export async function runMigrations() {
       { name: "MTN Mobile Money", type: "Mobile Money", country: "Congo Brazzaville", dailyLimit: 1000000, gateway: "OmniPay" },
       { name: "Airtel Money", type: "Mobile Money", country: "Gabon", dailyLimit: 1000000, gateway: "OmniPay" },
       { name: "Moov Money", type: "Mobile Money", country: "Gabon", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "Orange Money", type: "Mobile Money", country: "Congo RDC", dailyLimit: 500000, gateway: "OmniPay" },
+      { name: "M-Pesa", type: "Mobile Money", country: "Congo RDC", dailyLimit: 500000, gateway: "OmniPay" },
     ];
 
     for (const op of defaultOperators) {
@@ -319,6 +321,7 @@ export async function runMigrations() {
         WHEN LOWER(name) LIKE '%mixx%' OR LOWER(name) LIKE '%yas%' THEN 'mixx'
         WHEN LOWER(name) LIKE '%airtel%' THEN 'airtel'
         WHEN LOWER(name) LIKE '%flooz%' THEN 'flooz'
+        WHEN LOWER(name) LIKE '%mpesa%' OR LOWER(name) LIKE '%m-pesa%' OR LOWER(name) LIKE '%m pesa%' THEN 'mpesa'
         ELSE omnipay_code
       END
       WHERE omnipay_code IS NULL

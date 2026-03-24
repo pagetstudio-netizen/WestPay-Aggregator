@@ -1442,7 +1442,7 @@ function CountriesPanel() {
 
   if (isLoading) return <LoadingSkeleton />;
 
-  const availableCountries = ["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Gabon"];
+  const availableCountries = ["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon"];
   const selectedMerchantName = (merchants as Merchant[]).find(m => m.id.toString() === merchantId)?.name;
   const filteredCountries = filterSearch.trim()
     ? (countries as any[]).filter((mc: any) =>
@@ -2656,7 +2656,7 @@ function AdminWalletTransfersPanel() {
 
 const COUNTRIES_LIST = [
   "Togo", "Benin", "Burkina Faso", "Cote d'Ivoire", "Senegal", "Mali",
-  "Cameroun", "Congo Brazzaville", "Gabon", "Niger", "Guinee-Bissau",
+  "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon", "Niger", "Guinee-Bissau",
   "Tchad", "Centrafrique", "Guinee Equatoriale",
 ];
 const OPERATOR_TYPES = ["Mobile Money", "Virement bancaire", "Carte bancaire", "Cryptomonnaie", "Autre"];

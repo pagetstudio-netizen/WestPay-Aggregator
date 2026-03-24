@@ -58,6 +58,7 @@ const COUNTRY_DIAL_CODES: Record<string, string> = {
   "Togo": "228", "Benin": "229", "Cote d'Ivoire": "225",
   "Senegal": "221", "Mali": "223", "Burkina Faso": "226",
   "Cameroun": "237", "Congo Brazzaville": "242", "Gabon": "241",
+  "Congo RDC": "243",
 };
 
 const COUNTRY_ALIASES: Record<string, string> = {
@@ -73,6 +74,9 @@ const COUNTRY_ALIASES: Record<string, string> = {
   "cameroun": "Cameroun", "cameroon": "Cameroun",
   "congo brazzaville": "Congo Brazzaville", "congo": "Congo Brazzaville",
   "gabon": "Gabon",
+  "congo rdc": "Congo RDC", "rdc": "Congo RDC", "drc": "Congo RDC",
+  "republique democratique du congo": "Congo RDC", "république démocratique du congo": "Congo RDC",
+  "democratic republic of congo": "Congo RDC", "democratic republic of the congo": "Congo RDC",
   // Codes API (préfixe des clés WestPay : TGO-xxx, BEN-xxx, etc.)
   "tgo": "Togo",
   "ben": "Benin",
@@ -93,6 +97,7 @@ const COUNTRY_ALIASES: Record<string, string> = {
   "cm": "Cameroun",
   "cg": "Congo Brazzaville",
   "ga": "Gabon",
+  "cd": "Congo RDC", "cod": "Congo RDC",
 };
 
 function normalizeCountry(country: string): string {
@@ -1485,7 +1490,7 @@ export async function registerRoutes(
             await storage.updateWithdrawalStatus(
               withdrawal.id,
               "approved",
-              `Confirmé par OmniPay${wdFees !== undefined ? ` - Frais: ${wdFees} F` : ""}`,
+              `Retrait confirmé${wdFees !== undefined ? ` - Frais: ${wdFees} F` : ""}`,
               payload.reference,
               wdFees,
             );
@@ -1498,7 +1503,7 @@ export async function registerRoutes(
             await storage.updateWithdrawalStatus(
               withdrawal.id,
               "failed",
-              `Echec OmniPay: ${payload.message || "Echec opérateur"}`,
+              `Retrait échoué: ${payload.message || "Echec opérateur"}`,
               payload.reference,
             );
             await storage.incrementMerchantCountryBalance(withdrawal.merchantCountryId, withdrawal.amount);
@@ -2654,12 +2659,12 @@ export async function registerRoutes(
         });
         if (result.success === 1) {
           const omnipayRef = result.reference || reference;
-          await storage.updateWithdrawalStatus(w.id, "pending", `Initié chez OmniPay - en attente de confirmation - Frais prévus: ${withdrawalFee} F`, omnipayRef, withdrawalFee);
+          await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - Frais prévus: ${withdrawalFee} F`, omnipayRef, withdrawalFee);
           console.log(`[WITHDRAWAL AUTO] Initié chez OmniPay ref=${omnipayRef} - en attente du callback`);
           return res.json({ ...w, status: "pending", omnipayRef, fees: withdrawalFee, netAmount, autoProcessed: true });
         } else {
           const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Echec de traitement";
-          await storage.updateWithdrawalStatus(w.id, "failed", `Echec de traitement (code ${result.code}): ${errMsg}`, reference);
+          await storage.updateWithdrawalStatus(w.id, "failed", `Retrait non abouti: ${errMsg}`, reference);
           notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
           notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
           await storage.incrementMerchantCountryBalance(mc.id, amount);
@@ -2667,7 +2672,7 @@ export async function registerRoutes(
         }
       } catch (omnipayErr: any) {
         console.error("[WITHDRAWAL AUTO] Erreur OmniPay:", omnipayErr.message);
-        await storage.updateWithdrawalStatus(w.id, "failed", `Erreur technique: ${omnipayErr.message}`, reference);
+        await storage.updateWithdrawalStatus(w.id, "failed", `Erreur technique lors du traitement`, reference);
         notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
         notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
         await storage.incrementMerchantCountryBalance(mc.id, amount);
@@ -2746,7 +2751,7 @@ export async function registerRoutes(
       }
 
       if (sentToOmnipay) {
-        await storage.updateWithdrawalStatus(id, "pending", `Initié chez OmniPay par admin - en attente de confirmation${note ? ` - Note: ${note}` : ""}`, omnipayRef, fees);
+        await storage.updateWithdrawalStatus(id, "pending", `En cours de traitement - en attente de confirmation${note ? ` - Note: ${note}` : ""}`, omnipayRef, fees);
         console.log(`[ADMIN APPROVE WD] Retrait #${id} en attente confirmation OmniPay - ref=${omnipayRef}`);
         res.json({ success: true, omnipayRef, fees, pendingOmnipay: true });
       } else {
