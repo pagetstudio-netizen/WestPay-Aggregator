@@ -152,12 +152,12 @@ function OverviewPanel({ token }: { token: string | null }) {
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-xs font-bold text-white/80 uppercase tracking-widest">{c.country}</p>
                   {c.active ? (
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-white/20 text-white">
-                      {t("active") || "Actif"}
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500 text-white shadow-sm">
+                      Actif
                     </span>
                   ) : (
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-black/30 text-white/80">
-                      {t("inactive") || "Désactivé"}
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-500 text-white shadow-sm">
+                      Désactivé
                     </span>
                   )}
                 </div>
