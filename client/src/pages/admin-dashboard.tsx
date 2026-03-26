@@ -550,6 +550,8 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
   const [profileEmail, setProfileEmail] = useState("");
   const [profilePassword, setProfilePassword] = useState("");
   const [profileWebsite, setProfileWebsite] = useState("");
+  const [profileSlug, setProfileSlug] = useState("");
+  const [slugError, setSlugError] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
   const [balanceEdits, setBalanceEdits] = useState<Record<number, string>>({});
 
@@ -558,6 +560,8 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
       setProfileName(merchant.name || "");
       setProfileEmail(merchant.email || "");
       setProfileWebsite(merchant.website || "");
+      setProfileSlug(merchant.slug || "");
+      setSlugError("");
       setWebhookUrl(merchant.webhookUrl || "");
     }
   }, [merchant]);
@@ -587,6 +591,29 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
       toast({ title: "Profil mis à jour" });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const slugMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/admin/merchants/${merchantId}/slug`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ slug: profileSlug }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
+      refetch();
+      setProfileSlug(data.slug);
+      setSlugError("");
+      toast({ title: "Slug mis à jour" });
+    },
+    onError: (err: any) => {
+      setSlugError(err.message);
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    },
   });
 
   const webhookMutation = useMutation({
@@ -654,9 +681,35 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
             {subTab === "profile" && (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div className="bg-muted rounded px-3 py-2"><p className="text-muted-foreground">Slug</p><p className="font-mono font-medium">/{merchant?.slug}</p></div>
+                  <div className="bg-muted rounded px-3 py-2"><p className="text-muted-foreground">Slug actuel</p><p className="font-mono font-medium">/{merchant?.slug}</p></div>
                   <div className="bg-muted rounded px-3 py-2"><p className="text-muted-foreground">Volume total</p><p className="font-semibold">{(data?.totalRevenue || 0).toLocaleString()} F CFA</p></div>
                 </div>
+
+                <div className="rounded-lg border p-3 space-y-2">
+                  <Label className="text-sm font-semibold">Modifier le slug</Label>
+                  <p className="text-xs text-muted-foreground">Le slug est utilisé dans les liens de paiement. Seuls les lettres minuscules, chiffres et tirets sont acceptés.</p>
+                  <div className="flex gap-2">
+                    <div className="flex-1 space-y-1">
+                      <Input
+                        value={profileSlug}
+                        onChange={e => { setProfileSlug(e.target.value); setSlugError(""); }}
+                        placeholder="ex: mon-marchand"
+                        className={slugError ? "border-destructive" : ""}
+                        data-testid="input-edit-merchant-slug"
+                      />
+                      {slugError && <p className="text-xs text-destructive">{slugError}</p>}
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={() => slugMutation.mutate()}
+                      disabled={slugMutation.isPending || profileSlug === merchant?.slug}
+                      data-testid="button-save-merchant-slug"
+                    >
+                      {slugMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Modifier"}
+                    </Button>
+                  </div>
+                </div>
+
                 <div className="space-y-2">
                   <Label>Nom du marchand</Label>
                   <Input value={profileName} onChange={e => setProfileName(e.target.value)} placeholder="Nom" data-testid="input-edit-merchant-name" />

@@ -408,6 +408,31 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/admin/merchants/:id/slug", authMiddleware("admin"), async (req, res) => {
+    try {
+      const merchantId = parseInt(req.params.id);
+      const { slug } = req.body;
+      if (!slug || typeof slug !== "string") return res.status(400).json({ message: "Slug requis" });
+      const trimmed = slug.trim().toLowerCase();
+      if (!/^[a-z0-9-]+$/.test(trimmed)) return res.status(400).json({ message: "Slug invalide : uniquement des lettres minuscules, chiffres et tirets" });
+      if (trimmed.length < 2) return res.status(400).json({ message: "Slug trop court (minimum 2 caractères)" });
+      const merchant = await storage.getMerchantById(merchantId);
+      if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
+      const existing = await storage.getMerchantBySlug(trimmed);
+      if (existing && existing.id !== merchantId) return res.status(400).json({ message: "Ce slug est déjà utilisé par un autre marchand" });
+      await storage.updateMerchant(merchantId, { slug: trimmed });
+      await storage.createApiLog({
+        merchantId,
+        action: "slug_updated",
+        ip: req.ip || "",
+        description: `Slug modifié de "${merchant.slug}" vers "${trimmed}" par l'administrateur`,
+      });
+      res.json({ success: true, slug: trimmed });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.post("/api/admin/update-merchant", authMiddleware("admin"), async (req, res) => {
     try {
       const { id, ...data } = req.body;
