@@ -769,9 +769,29 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
                       <div className="flex items-center gap-2">
                         <Globe className="w-4 h-4 text-muted-foreground" />
                         <span className="font-medium text-sm">{w.country}</span>
-                        <Badge variant={w.active ? "default" : "secondary"} className="text-xs">{w.active ? "Actif" : "Inactif"}</Badge>
+                        <Badge variant={w.active ? "default" : "secondary"} className={`text-xs ${w.active ? "bg-emerald-600 text-white" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}>{w.active ? "Actif" : "Désactivé"}</Badge>
                       </div>
-                      <Switch checked={w.active} onCheckedChange={(v) => toggleWalletActive(w.id, merchantId, v)} data-testid={`switch-wallet-active-${w.id}`} />
+                      {w.active ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs border-red-300 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20"
+                          onClick={() => toggleWalletActive(w.id, merchantId, false)}
+                          data-testid={`button-deactivate-wallet-${w.id}`}
+                        >
+                          Désactiver
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs border-emerald-300 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
+                          onClick={() => toggleWalletActive(w.id, merchantId, true)}
+                          data-testid={`button-activate-wallet-${w.id}`}
+                        >
+                          Activer
+                        </Button>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="flex-1 relative">

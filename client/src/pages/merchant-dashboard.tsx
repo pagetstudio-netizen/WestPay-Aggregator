@@ -145,15 +145,28 @@ function OverviewPanel({ token }: { token: string | null }) {
             {countries.map((c, idx) => (
               <div
                 key={c.id}
-                className="rounded-xl p-5"
+                className={`rounded-xl p-5 transition-opacity ${!c.active ? "opacity-60" : ""}`}
                 style={{ background: COUNTRY_COLORS[idx % COUNTRY_COLORS.length] }}
                 data-testid={`text-balance-${c.country}`}
               >
-                <p className="text-xs font-bold text-white/80 uppercase tracking-widest mb-2">{c.country}</p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-bold text-white/80 uppercase tracking-widest">{c.country}</p>
+                  {c.active ? (
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-white/20 text-white">
+                      {t("active") || "Actif"}
+                    </span>
+                  ) : (
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-black/30 text-white/80">
+                      {t("inactive") || "Désactivé"}
+                    </span>
+                  )}
+                </div>
                 <p className="text-3xl font-bold text-white leading-none">
-                  {c.balance.toLocaleString("fr-FR")}<span className="text-xl font-semibold ml-2 text-white/90">FCFA</span>
+                  {(c.balance ?? 0).toLocaleString("fr-FR")}<span className="text-xl font-semibold ml-2 text-white/90">FCFA</span>
                 </p>
-                {!c.active && <p className="text-xs text-white/60 mt-1">{t("inactive")}</p>}
+                {!c.active && (
+                  <p className="text-xs text-white/60 mt-2">Ce pays est désactivé — non visible sur la page de paiement</p>
+                )}
               </div>
             ))}
           </div>
