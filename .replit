@@ -45,5 +45,5 @@ waitForPort = 5000
 [userenv]
 
 [userenv.shared]
-OMNIPAY_API_KEY = "omnipay_api_key_f131615fca72e9bd11fc26d124676027a1d94ecd"
-OMNIPAY_CALLBACK_KEY = "omnipay_ck_6abdedc286d5d8a819791a0bd9b0da15efe5e2ad"
+OMNIPAY_API_KEY = "omnipay_api_key_07eee5343c379e1f296b760d11a0d2c4b913cd98"
+OMNIPAY_CALLBACK_KEY = "omnipay_ck_c2140d316db2ba922e7aa76f6131ec2ca37cec6b"
