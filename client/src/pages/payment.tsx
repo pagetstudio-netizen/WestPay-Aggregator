@@ -67,7 +67,7 @@ export default function PaymentPage() {
   const [omnipayFees, setOmnipayFees] = useState(0);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [dynamicMethods, setDynamicMethods] = useState<string[] | null>(null);
-  const [cryptoAggregators, setCryptoAggregators] = useState<Array<{ id: number; name: string; currency: string }>>([]);
+  const [cryptoEnabled, setCryptoEnabled] = useState(false);
   const [isCryptoLoading, setIsCryptoLoading] = useState(false);
 
   useEffect(() => {
@@ -90,12 +90,12 @@ export default function PaymentPage() {
   }, [selectedCountry]);
 
   useEffect(() => {
-    if (!merchantSlug || !selectedCountry) return;
-    fetch(`/api/public/crypto-aggregators?merchant=${encodeURIComponent(merchantSlug)}&country=${encodeURIComponent(selectedCountry)}`)
-      .then(r => r.ok ? r.json() : [])
-      .then(d => setCryptoAggregators(Array.isArray(d) ? d : []))
-      .catch(() => setCryptoAggregators([]));
-  }, [merchantSlug, selectedCountry]);
+    if (!merchantSlug) return;
+    fetch(`/api/public/crypto/check-merchant/${encodeURIComponent(merchantSlug)}`)
+      .then(r => r.ok ? r.json() : { enabled: false })
+      .then(d => setCryptoEnabled(!!d.enabled))
+      .catch(() => setCryptoEnabled(false));
+  }, [merchantSlug]);
 
   const fetchMerchantInfo = async () => {
     setIsLoading(true);
@@ -162,7 +162,7 @@ export default function PaymentPage() {
     };
   }, []);
 
-  const isCryptoMethod = selectedMethod.startsWith("crypto:");
+  const isCryptoMethod = selectedMethod === "crypto";
 
   const handleStep1Next = async () => {
     if (!selectedMethod) {
@@ -171,7 +171,6 @@ export default function PaymentPage() {
     }
 
     if (isCryptoMethod) {
-      const aggregatorId = selectedMethod.replace("crypto:", "");
       setIsCryptoLoading(true);
       try {
         const res = await fetch("/api/payment/crypto/initiate", {
@@ -179,9 +178,8 @@ export default function PaymentPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             merchantSlug,
-            aggregatorId: Number(aggregatorId),
-            country: selectedCountry,
-            amountFcfa: amount,
+            amount,
+            currency: "XOF",
             returnUrl: redirectUrl || undefined,
           }),
         });
@@ -545,47 +543,42 @@ export default function PaymentPage() {
                     );
                   })}
 
-                  {cryptoAggregators.map((agg) => {
-                    const cryptoMethodKey = `crypto:${agg.id}`;
-                    const isSelected = selectedMethod === cryptoMethodKey;
-                    return (
+                  {cryptoEnabled && (
+                    <div
+                      onClick={() => handleSelectMethod("crypto")}
+                      onTouchEnd={(e) => { e.preventDefault(); handleSelectMethod("crypto"); }}
+                      className="pay-method-option flex items-center gap-3 p-3 border rounded-md cursor-pointer"
+                      style={{
+                        borderColor: isCryptoMethod ? "#f59e0b" : "#e5e7eb",
+                        backgroundColor: isCryptoMethod ? "#fffbeb" : "#ffffff",
+                      }}
+                      role="radio"
+                      aria-checked={isCryptoMethod}
+                      tabIndex={0}
+                      onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); handleSelectMethod("crypto"); } }}
+                      data-testid="radio-method-crypto"
+                    >
                       <div
-                        key={cryptoMethodKey}
-                        onClick={() => handleSelectMethod(cryptoMethodKey)}
-                        onTouchEnd={(e) => { e.preventDefault(); handleSelectMethod(cryptoMethodKey); }}
-                        className="pay-method-option flex items-center gap-3 p-3 border rounded-md cursor-pointer"
-                        style={{
-                          borderColor: isSelected ? "#f59e0b" : "#e5e7eb",
-                          backgroundColor: isSelected ? "#fffbeb" : "#ffffff",
-                        }}
-                        role="radio"
-                        aria-checked={isSelected}
-                        tabIndex={0}
-                        onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); handleSelectMethod(cryptoMethodKey); } }}
-                        data-testid={`radio-method-crypto-${agg.id}`}
+                        className="w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0"
+                        style={{ borderColor: isCryptoMethod ? "#f59e0b" : "#d1d5db" }}
                       >
-                        <div
-                          className="w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0"
-                          style={{ borderColor: isSelected ? "#f59e0b" : "#d1d5db" }}
-                        >
-                          {isSelected && (
-                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: "#f59e0b" }} />
-                          )}
-                        </div>
-                        <Bitcoin className="w-4 h-4 shrink-0" style={{ color: "#f59e0b" }} />
-                        <div className="flex-1 min-w-0">
-                          <span className="text-sm font-medium block" style={{ color: "#1f2937" }}>
-                            Crypto (via OxaPay)
-                          </span>
-                          <span className="text-xs" style={{ color: "#9ca3af" }}>
-                            Paiement en crypto-monnaie — {agg.name}
-                          </span>
-                        </div>
+                        {isCryptoMethod && (
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: "#f59e0b" }} />
+                        )}
                       </div>
-                    );
-                  })}
+                      <Bitcoin className="w-4 h-4 shrink-0" style={{ color: "#f59e0b" }} />
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm font-medium block" style={{ color: "#1f2937" }}>
+                          Crypto (via OxaPay)
+                        </span>
+                        <span className="text-xs" style={{ color: "#9ca3af" }}>
+                          USDT · BTC · ETH · LTC · TRX et plus
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                {availableMethods.length === 0 && cryptoAggregators.length === 0 && (
+                {availableMethods.length === 0 && !cryptoEnabled && (
                   <p className="text-sm mt-2" style={{ color: "#6b7280" }}>Aucune methode disponible pour ce pays.</p>
                 )}
               </div>

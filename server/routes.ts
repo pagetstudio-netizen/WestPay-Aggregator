@@ -23,6 +23,7 @@ import {
   createInvoice as oxapayCreateInvoice,
   getStatus as oxapayGetStatus,
   verifyWebhook as oxapayVerifyWebhook,
+  getCurrencies as oxapayGetCurrencies,
   generateOxaPayReference,
   type OxaPayWebhookPayload,
 } from "./oxapay";
@@ -195,26 +196,26 @@ async function apiKeyAuthMiddleware(req: Request, res: Response, next: NextFunct
   return res.status(401).json({ message: "Non autorise. Fournissez un Bearer token JWT ou un header X-API-KEY valide." });
 }
 
-async function creditMerchantForCryptoTx(cryptoTx: { id: number; merchantId: number; amount: number; country: string | null }): Promise<void> {
+async function creditMerchantForCryptoTx(cryptoTx: { id: number; merchantId: number; payCurrency: string | null; payAmount: string | null }): Promise<void> {
+  if (!cryptoTx.payCurrency || !cryptoTx.payAmount) {
+    console.warn(`[OXAPAY CREDIT] Transaction #${cryptoTx.id} sans payCurrency/payAmount — crédit impossible`);
+    return;
+  }
+  const payAmountNum = parseFloat(cryptoTx.payAmount);
+  if (isNaN(payAmountNum) || payAmountNum <= 0) {
+    console.warn(`[OXAPAY CREDIT] Transaction #${cryptoTx.id} payAmount invalide (${cryptoTx.payAmount}) — crédit ignoré`);
+    return;
+  }
   const credited = await storage.markCryptoTransactionCredited(cryptoTx.id);
   if (!credited) {
     console.log(`[OXAPAY CREDIT] Transaction #${cryptoTx.id} déjà créditée — ignoré`);
     return;
   }
-  if (!cryptoTx.country) {
-    console.warn(`[OXAPAY CREDIT] Transaction #${cryptoTx.id} sans pays défini — crédit impossible`);
-    return;
-  }
-  const merchantCountries = await storage.getMerchantCountries(cryptoTx.merchantId);
-  const targetMC = merchantCountries.find(mc => mc.country.toLowerCase() === cryptoTx.country!.toLowerCase() && mc.active !== false);
-  if (targetMC) {
-    const merchant = await storage.getMerchantById(cryptoTx.merchantId);
-    const netAmount = merchant?.feeExempt ? cryptoTx.amount : Math.floor(cryptoTx.amount * 0.97);
-    await storage.incrementMerchantCountryBalance(targetMC.id, netAmount);
-    console.log(`[OXAPAY CREDIT] Crédit marchand #${cryptoTx.merchantId} — pays: ${cryptoTx.country} — merchantCountry #${targetMC.id} (${targetMC.country}) — Brut: ${cryptoTx.amount} XOF — Net: ${netAmount} XOF — tx #${cryptoTx.id}`);
-  } else {
-    console.warn(`[OXAPAY CREDIT] MerchantCountry "${cryptoTx.country}" introuvable ou inactive pour marchand #${cryptoTx.merchantId} — crédit refusé`);
-  }
+  const merchant = await storage.getMerchantById(cryptoTx.merchantId);
+  const FEE_RATE = 0.03;
+  const netAmount = merchant?.feeExempt ? payAmountNum : payAmountNum * (1 - FEE_RATE);
+  await storage.incrementCryptoBalance(cryptoTx.merchantId, cryptoTx.payCurrency, netAmount);
+  console.log(`[OXAPAY CREDIT] Crédit marchand #${cryptoTx.merchantId} — ${cryptoTx.payCurrency} — Brut: ${payAmountNum} — Net: ${netAmount.toFixed(8)} — tx #${cryptoTx.id}`);
 }
 
 export async function registerRoutes(
@@ -1215,33 +1216,48 @@ export async function registerRoutes(
   });
 
   // ==================== PAYMENT PAGE (public) ====================
-  // ─── Crypto : agrégateurs disponibles pour un marchand/pays (public) ──────
+  // ─── Crypto : vérification activation crypto pour un marchand (public) ──────
 
-  app.get("/api/public/crypto-aggregators", async (req, res) => {
+  app.get("/api/public/crypto/check-merchant/:merchantSlug", async (req, res) => {
     try {
-      const { merchant: merchantSlug, country } = req.query as { merchant?: string; country?: string };
-      if (!merchantSlug) {
-        return res.status(400).json({ message: "Parametre merchant requis" });
-      }
+      const { merchantSlug } = req.params;
       const merchant = await storage.getMerchantBySlug(merchantSlug);
       if (!merchant || merchant.suspended) {
-        return res.json([]);
+        return res.json({ enabled: false });
       }
+      const aggs = await storage.getCryptoAggregatorsByMerchant(merchant.id);
+      const enabled = aggs.length > 0;
+      if (!enabled) return res.json({ enabled: false });
+      const agg = aggs[0];
+      const currencies = await oxapayGetCurrencies(agg.apiKey);
+      res.json({
+        enabled: true,
+        merchantId: merchant.id,
+        aggregatorId: agg.id,
+        currencies: currencies.map(c => c.symbol),
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── Crypto : cryptos disponibles (public) ───────────────────────────────
+
+  app.get("/api/public/crypto-currencies", async (req, res) => {
+    try {
       const allAggs = await storage.getCryptoAggregators();
-      const activeAggs = allAggs.filter(a => a.active);
-      const result = [];
-      for (const agg of activeAggs) {
-        const aggMerchants = await storage.getCryptoAggregatorMerchants(agg.id);
-        const assigned = aggMerchants.find(m => m.merchantId === merchant.id && m.active);
-        if (!assigned) continue;
-        if (country) {
-          const aggCountries = await storage.getCryptoAggregatorCountries(agg.id);
-          const countryActive = aggCountries.find(c => c.country.toLowerCase() === (country as string).toLowerCase() && c.active);
-          if (!countryActive) continue;
-        }
-        result.push({ id: agg.id, name: agg.name, currency: "USDT" });
+      const activeAgg = allAggs.find(a => a.active);
+      if (!activeAgg) {
+        return res.json([
+          { symbol: "USDT", name: "Tether USD" },
+          { symbol: "BTC", name: "Bitcoin" },
+          { symbol: "ETH", name: "Ethereum" },
+          { symbol: "LTC", name: "Litecoin" },
+          { symbol: "TRX", name: "Tron" },
+        ]);
       }
-      res.json(result);
+      const currencies = await oxapayGetCurrencies(activeAgg.apiKey);
+      res.json(currencies);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -3068,91 +3084,87 @@ export async function registerRoutes(
 
   app.post("/api/payment/crypto/initiate", async (req, res) => {
     try {
-      const { merchantSlug, aggregatorId, country, amountFcfa, returnUrl } = req.body;
-      if (!merchantSlug || !aggregatorId || !amountFcfa || !country) {
-        return res.status(400).json({ message: "merchantSlug, aggregatorId, amountFcfa et country sont requis" });
+      const { merchantSlug, amount, currency, description, orderId, returnUrl, amountFcfa } = req.body;
+      if (!merchantSlug) {
+        return res.status(400).json({ message: "merchantSlug est requis" });
       }
-      const amountFcfaNum = Number(amountFcfa);
-      if (isNaN(amountFcfaNum) || amountFcfaNum <= 0) {
-        return res.status(400).json({ message: "Montant FCFA invalide" });
+      const rawAmount = amount || amountFcfa;
+      const rawCurrency = currency || "XOF";
+      if (!rawAmount) {
+        return res.status(400).json({ message: "amount est requis" });
+      }
+      const amountNum = Number(rawAmount);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        return res.status(400).json({ message: "Montant invalide" });
       }
       const merchant = await storage.getMerchantBySlug(merchantSlug);
       if (!merchant || merchant.suspended) {
         return res.status(404).json({ message: "Marchand introuvable ou suspendu" });
       }
-      const agg = await storage.getCryptoAggregatorById(Number(aggregatorId));
-      if (!agg || !agg.active) {
-        return res.status(404).json({ message: "Agrégateur crypto introuvable ou inactif" });
+      const aggs = await storage.getCryptoAggregatorsByMerchant(merchant.id);
+      if (aggs.length === 0) {
+        return res.status(403).json({ message: "Le paiement crypto n'est pas activé pour ce marchand" });
       }
-      const aggMerchants = await storage.getCryptoAggregatorMerchants(agg.id);
-      const assigned = aggMerchants.find(m => m.merchantId === merchant.id && m.active);
-      if (!assigned) {
-        return res.status(403).json({ message: "Cet agrégateur n'est pas disponible pour ce marchand" });
-      }
-      const aggCountries = await storage.getCryptoAggregatorCountries(agg.id);
-      const countryActive = aggCountries.find(c => c.country.toLowerCase() === country.toLowerCase() && c.active);
-      if (!countryActive) {
-        return res.status(403).json({ message: "Paiement crypto non disponible pour ce pays" });
-      }
-      const merchantCountriesAll = await storage.getMerchantCountries(merchant.id);
-      const merchantCountryActive = merchantCountriesAll.find(mc => mc.country.toLowerCase() === country.toLowerCase() && mc.active !== false);
-      if (!merchantCountryActive) {
-        return res.status(403).json({ message: "Ce pays n'est pas activé pour ce marchand" });
-      }
+      const agg = aggs[0];
       const XOF_PER_USD = parseInt(process.env.XOF_PER_USD || "600", 10);
-      const amountUsd = parseFloat((amountFcfaNum / XOF_PER_USD).toFixed(2));
+      const isXof = rawCurrency.toUpperCase() === "XOF" || rawCurrency.toUpperCase() === "FCFA";
+      const invoiceAmount = isXof ? parseFloat((amountNum / XOF_PER_USD).toFixed(2)) : amountNum;
+      const invoiceCurrency = isXof ? "USD" : rawCurrency.toUpperCase();
       const callbackUrl = `${process.env.APP_URL || "https://westpay.cloud"}/api/oxapay/callback`;
       const invoiceResult = await oxapayCreateInvoice(agg.apiKey, {
-        amount: amountUsd,
-        currency: "USD",
+        amount: invoiceAmount,
+        currency: invoiceCurrency,
         lifeTime: 30,
         feePaidByPayer: 0,
         callbackUrl,
         ...(returnUrl && { returnUrl }),
-        description: `Paiement WestPay — ${merchant.name} — ${amountFcfaNum} XOF`,
+        ...(description && { description }),
+        ...(orderId && { orderId }),
       });
       if (invoiceResult.result !== 100 || !invoiceResult.trackId) {
         return res.status(502).json({ message: invoiceResult.message || "Échec de création de l'invoice OxaPay" });
       }
       let walletAddress: string | undefined;
-      let cryptoAmount: string | undefined;
       let payCurrency: string | undefined;
+      let payAmount: string | undefined;
       let network: string | undefined;
       try {
         const oxaStatus = await oxapayGetStatus(agg.apiKey, invoiceResult.trackId);
         if (oxaStatus.result === 100) {
           walletAddress = oxaStatus.address;
-          cryptoAmount = oxaStatus.payAmount !== undefined ? String(oxaStatus.payAmount) : undefined;
+          payAmount = oxaStatus.payAmount !== undefined ? String(oxaStatus.payAmount) : undefined;
           payCurrency = oxaStatus.payCurrency;
           network = oxaStatus.network;
         }
       } catch {
       }
-
-      const cryptoTx = await storage.createCryptoTransaction({
+      await storage.createCryptoTransaction({
         aggregatorId: agg.id,
         merchantId: merchant.id,
         trackId: invoiceResult.trackId,
-        amount: amountFcfaNum,
-        currency: "XOF",
-        country: country as string,
+        amount: String(amountNum),
+        currency: rawCurrency.toUpperCase(),
         status: "pending",
         callbackUrl,
+        ...(returnUrl && { returnUrl }),
+        ...(description && { description }),
+        ...(orderId && { orderId }),
         ...(walletAddress && { walletAddress }),
-        ...(cryptoAmount && { cryptoAmount }),
+        ...(payAmount && { payAmount }),
+        ...(payCurrency && { payCurrency }),
+        ...(network && { network }),
       });
       res.json({
         success: true,
         trackId: invoiceResult.trackId,
         payLink: invoiceResult.payLink,
         expiredAt: invoiceResult.expiredAt,
-        expiresAt: invoiceResult.expiredAt,
         walletAddress: walletAddress || null,
-        cryptoAmount: cryptoAmount || null,
-        currency: payCurrency || "USDT",
+        payAmount: payAmount || null,
+        payCurrency: payCurrency || null,
         network: network || null,
-        amountFcfa: amountFcfaNum,
-        amountUsd,
+        amount: amountNum,
+        currency: rawCurrency.toUpperCase(),
         paymentUrl: `${process.env.APP_URL || "https://westpay.cloud"}/pay/crypto/${invoiceResult.trackId}`,
       });
     } catch (err: any) {
@@ -3176,16 +3188,25 @@ export async function registerRoutes(
       const oxaStatus = await oxapayGetStatus(agg.apiKey, trackId);
       if (oxaStatus.result === 100) {
         const newStatus = oxaStatus.status || cryptoTx.status;
+        const updatedPayAmount = oxaStatus.payAmount !== undefined ? String(oxaStatus.payAmount) : (cryptoTx.payAmount || undefined);
+        const updatedPayCurrency = oxaStatus.payCurrency || cryptoTx.payCurrency || undefined;
         if (newStatus !== cryptoTx.status) {
-          await storage.updateCryptoTransactionStatus(
-            cryptoTx.id,
-            newStatus,
-            oxaStatus.payAmount !== undefined ? String(oxaStatus.payAmount) : undefined,
-            oxaStatus.address,
-          );
+          await storage.updateCryptoTransactionStatus(cryptoTx.id, {
+            status: newStatus,
+            payAmount: updatedPayAmount,
+            payCurrency: updatedPayCurrency,
+            walletAddress: oxaStatus.address || undefined,
+            network: oxaStatus.network || undefined,
+            txHash: oxaStatus.txHash || undefined,
+          });
           if (newStatus === "paid") {
-            console.log(`[OXAPAY STATUS] Transaction ${trackId} confirmée via polling — tentative crédit`);
-            await creditMerchantForCryptoTx(cryptoTx);
+            console.log(`[OXAPAY STATUS] Transaction ${trackId} payée via polling — tentative crédit`);
+            await creditMerchantForCryptoTx({
+              id: cryptoTx.id,
+              merchantId: cryptoTx.merchantId,
+              payCurrency: updatedPayCurrency || null,
+              payAmount: updatedPayAmount || null,
+            });
           }
         }
         res.json({
@@ -3193,11 +3214,11 @@ export async function registerRoutes(
           status: newStatus,
           amount: cryptoTx.amount,
           currency: cryptoTx.currency,
-          payAmount: oxaStatus.payAmount,
-          payCurrency: oxaStatus.payCurrency,
-          address: oxaStatus.address,
-          network: oxaStatus.network,
-          txHash: oxaStatus.txHash,
+          payAmount: updatedPayAmount || null,
+          payCurrency: updatedPayCurrency || null,
+          address: oxaStatus.address || cryptoTx.walletAddress,
+          network: oxaStatus.network || cryptoTx.network,
+          txHash: oxaStatus.txHash || cryptoTx.txHash,
           expiredAt: oxaStatus.expiredAt,
           createdAt: cryptoTx.createdAt,
         });
@@ -3207,7 +3228,11 @@ export async function registerRoutes(
           status: cryptoTx.status,
           amount: cryptoTx.amount,
           currency: cryptoTx.currency,
+          payAmount: cryptoTx.payAmount,
+          payCurrency: cryptoTx.payCurrency,
           address: cryptoTx.walletAddress,
+          network: cryptoTx.network,
+          txHash: cryptoTx.txHash,
           createdAt: cryptoTx.createdAt,
         });
       }
@@ -3232,8 +3257,11 @@ export async function registerRoutes(
         status: cryptoTx.status,
         amount: cryptoTx.amount,
         currency: cryptoTx.currency,
-        cryptoAmount: cryptoTx.cryptoAmount,
+        payAmount: cryptoTx.payAmount,
+        payCurrency: cryptoTx.payCurrency,
         walletAddress: cryptoTx.walletAddress,
+        network: cryptoTx.network,
+        txHash: cryptoTx.txHash,
         aggregatorName: agg?.name || "OxaPay",
         merchantName: merchant?.name || "",
         createdAt: cryptoTx.createdAt,
@@ -3248,37 +3276,24 @@ export async function registerRoutes(
   app.post("/api/merchant/crypto/invoice", apiKeyAuthMiddleware, async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
-      const { aggregatorId, amount, currency, country, description, orderId, callbackUrl, returnUrl } = req.body;
-      if (!aggregatorId || !amount || !currency) {
-        return res.status(400).json({ message: "aggregatorId, amount et currency sont requis" });
+      const { amount, currency, description, orderId, callbackUrl, returnUrl } = req.body;
+      if (!amount || !currency) {
+        return res.status(400).json({ message: "amount et currency sont requis" });
       }
       const amountNum = Number(amount);
       if (isNaN(amountNum) || amountNum <= 0) {
         return res.status(400).json({ message: "Montant invalide" });
       }
-      const agg = await storage.getCryptoAggregatorById(Number(aggregatorId));
-      if (!agg || !agg.active) {
-        return res.status(404).json({ message: "Agrégateur crypto introuvable ou inactif" });
+      const merchantAggs = await storage.getCryptoAggregatorsByMerchant(merchantId);
+      if (merchantAggs.length === 0) {
+        return res.status(403).json({ message: "Le paiement crypto n'est pas activé pour votre compte" });
       }
-      const merchants = await storage.getCryptoAggregatorMerchants(agg.id);
-      const assigned = merchants.find(m => m.merchantId === merchantId && m.active);
-      if (!assigned) {
-        return res.status(403).json({ message: "Cet agrégateur ne vous est pas assigné" });
-      }
-      if (country) {
-        const aggCountries = await storage.getCryptoAggregatorCountries(agg.id);
-        const countryActive = aggCountries.find(c => c.country.toLowerCase() === country.toLowerCase() && c.active);
-        if (!countryActive) {
-          return res.status(403).json({ message: "Paiement crypto non disponible pour ce pays" });
-        }
-      }
+      const agg = merchantAggs[0];
       const invoiceCallbackUrl = callbackUrl || `${process.env.APP_URL || "https://westpay.cloud"}/api/oxapay/callback`;
       const XOF_PER_USD = parseInt(process.env.XOF_PER_USD || "600", 10);
       const isXof = currency.toUpperCase() === "XOF" || currency.toUpperCase() === "FCFA";
       const invoiceAmount = isXof ? parseFloat((amountNum / XOF_PER_USD).toFixed(2)) : amountNum;
       const invoiceCurrency = isXof ? "USD" : currency.toUpperCase();
-      const storedAmount = isXof ? amountNum : amountNum;
-      const storedCurrency = isXof ? "XOF" : currency.toUpperCase();
       const invoiceResult = await oxapayCreateInvoice(agg.apiKey, {
         amount: invoiceAmount,
         currency: invoiceCurrency,
@@ -3296,11 +3311,13 @@ export async function registerRoutes(
         aggregatorId: agg.id,
         merchantId,
         trackId: invoiceResult.trackId,
-        amount: storedAmount,
-        currency: storedCurrency,
-        ...(country && { country }),
+        amount: String(amountNum),
+        currency: currency.toUpperCase(),
         status: "pending",
         callbackUrl: invoiceCallbackUrl,
+        ...(returnUrl && { returnUrl }),
+        ...(description && { description }),
+        ...(orderId && { orderId }),
       });
       res.json({
         success: true,
@@ -3328,6 +3345,34 @@ export async function registerRoutes(
       const merchantId = (req as any).user.id;
       const txs = await storage.getCryptoTransactions(merchantId);
       res.json(txs);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── Crypto : soldes marchand par devise ─────────────────────────────────
+
+  app.get("/api/merchant/crypto/balances", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const balances = await storage.getCryptoBalances(merchantId);
+      res.json(balances);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── Crypto : cryptos disponibles (marchand connecté) ────────────────────
+
+  app.get("/api/merchant/crypto/currencies", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const aggs = await storage.getCryptoAggregatorsByMerchant(merchantId);
+      if (aggs.length === 0) {
+        return res.json([]);
+      }
+      const currencies = await oxapayGetCurrencies(aggs[0].apiKey);
+      res.json(currencies);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -3369,20 +3414,28 @@ export async function registerRoutes(
         return res.status(401).json({ message: "Signature HMAC invalide" });
       }
       if (status) {
+        const cbPayAmount = payload.payAmount !== undefined ? String(payload.payAmount) : (cryptoTx.payAmount || undefined);
+        const cbPayCurrency = payload.payCurrency || cryptoTx.payCurrency || undefined;
         if (status !== cryptoTx.status) {
-          await storage.updateCryptoTransactionStatus(
-            cryptoTx.id,
+          await storage.updateCryptoTransactionStatus(cryptoTx.id, {
             status,
-            payload.payAmount !== undefined ? String(payload.payAmount) : undefined,
-            undefined,
-          );
+            payAmount: cbPayAmount,
+            payCurrency: cbPayCurrency,
+            network: payload.network || undefined,
+            txHash: payload.txHash || undefined,
+          });
           console.log(`[OXAPAY CALLBACK] Transaction ${trackId} mise à jour: ${cryptoTx.status} → ${status}`);
         } else {
           console.log(`[OXAPAY CALLBACK] Statut inchangé pour ${trackId} (${status})`);
         }
         if (status === "paid") {
           console.log(`[OXAPAY CALLBACK] Transaction ${trackId} payée — tentative crédit`);
-          await creditMerchantForCryptoTx(cryptoTx);
+          await creditMerchantForCryptoTx({
+            id: cryptoTx.id,
+            merchantId: cryptoTx.merchantId,
+            payCurrency: cbPayCurrency || null,
+            payAmount: cbPayAmount || null,
+          });
         }
       }
       res.status(200).json({ ok: true });

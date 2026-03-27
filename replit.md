@@ -89,22 +89,34 @@ admins, merchants, merchant_countries, transactions, sms_logs, numbers, settings
 - `pending_payments.omnipay_payment_url` - Wave payment URL
 
 ## OxaPay Crypto Aggregator (Tasks #3 + #4 — COMPLETED)
-- Admin-only configuration; merchants only see it if assigned
-- New "Crypto" sidebar tab in admin dashboard
-- Admin can create, configure, enable/disable aggregators
-- Per-aggregator country activation and merchant assignment
-- SDK module: `server/oxapay.ts` (createInvoice, getStatus, generatePayout, verifyWebhook)
-- New DB tables: crypto_aggregators, crypto_aggregator_countries, crypto_aggregator_merchants, crypto_transactions
-- Admin API routes: GET/POST/PATCH/DELETE /api/admin/crypto-aggregators, PUT countries/merchants
-- Merchant read route: GET /api/merchant/crypto-aggregators (active aggregators for that merchant)
-- Merchant invoice creation: POST /api/merchant/crypto/invoice (Bearer token or X-API-KEY)
-- Merchant transactions: GET /api/merchant/crypto/transactions
-- Public status: GET /api/crypto/status/:trackId (polls OxaPay, updates DB)
-- Webhook callback: POST /api/oxapay/callback (HMAC verification, status update)
-- Admin transactions: GET /api/admin/crypto/transactions
-- Merchant dashboard: "Crypto" tab shows assigned aggregators + recent transactions + API doc
-- Public payment page: /pay/crypto/:trackId (QR code, address, countdown timer, auto-polling every 10s)
+- **GLOBAL crypto** — no country restriction; admin activates per merchant only
+- Admin-only configuration in "Crypto" sidebar tab
+- Admin can create/configure/enable-disable OxaPay aggregators and assign merchants
+- Dynamic currency list from OxaPay API (15min cache), fallback to [USDT,BTC,ETH,LTC,TRX,BNB,DOGE]
+- SDK module: `server/oxapay.ts` (createInvoice, getStatus, generatePayout, verifyWebhook, getCurrencies)
+- DB tables: crypto_aggregators, crypto_aggregator_countries, crypto_aggregator_merchants, crypto_transactions, crypto_balances
+- **Credit flow**: When `paid`, credits `payAmount` (in `payCurrency`) to `crypto_balances` table (net = 97% unless feeExempt)
+- **Dual credit paths**: polling (`GET /api/payment/crypto/:trackId/status`) AND callback both call `creditMerchantForCryptoTx()`
+- **Admin routes**: GET/POST/PATCH/DELETE /api/admin/crypto-aggregators, PUT countries/merchants
+- **Merchant routes**:
+  - GET /api/merchant/crypto-aggregators (assigned aggregators)
+  - POST /api/merchant/crypto/invoice (create invoice via API key, no country needed)
+  - GET /api/merchant/crypto/transactions
+  - GET /api/merchant/crypto/balances (per-currency balances)
+  - GET /api/merchant/crypto/currencies (available cryptos)
+- **Public routes**:
+  - GET /api/public/crypto/check-merchant/:merchantSlug (is crypto enabled for merchant?)
+  - GET /api/public/crypto-currencies (global currency list)
+  - GET /api/public/crypto-payment/:trackId (public tx info)
+  - GET /api/payment/crypto/:trackId/status (polling status)
+  - POST /api/payment/crypto/initiate (public: start payment, no country)
+  - POST /api/oxapay/callback (HMAC-verified webhook from OxaPay)
+  - GET /api/admin/crypto/transactions
+- **Merchant dashboard CryptoPanel**: activation status, per-currency balance cards, API integration docs with copy buttons, recent transactions table (payAmount/payCurrency)
+- **Payment page**: shows "Crypto (via OxaPay)" option when enabled (no country check)
+- Public payment page: /pay/crypto/:trackId (QR code, wallet address, countdown, auto-polling 10s)
 - Payment URL format: https://westpay.cloud/pay/crypto/{trackId}
+- Merchant API contract: POST /api/merchant/crypto/invoice { amount, currency, description?, orderId?, returnUrl? }
 
 ## OmniPay Payment Flow
 1. Customer enters phone number and name on payment page

@@ -2,7 +2,7 @@ import {
   admins, merchants, merchantCountries, transactions, smsLogs, numbers, settings, loginLogs,
   merchantPins, apiLogs, pendingPayments, webhookLogs, telegramActivationCodes, paymentLinks,
   walletTransfers, walletTransferCountries, withdrawals, withdrawalOperators, statsBaselines,
-  cryptoAggregators, cryptoAggregatorCountries, cryptoAggregatorMerchants, cryptoTransactions,
+  cryptoAggregators, cryptoAggregatorCountries, cryptoAggregatorMerchants, cryptoTransactions, cryptoBalances,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
@@ -19,6 +19,7 @@ import {
   type CryptoAggregatorCountry, type InsertCryptoAggregatorCountry,
   type CryptoAggregatorMerchant, type InsertCryptoAggregatorMerchant,
   type CryptoTransaction, type InsertCryptoTransaction,
+  type CryptoBalance, type InsertCryptoBalance,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and, gte, lt, inArray, isNull } from "drizzle-orm";
@@ -159,9 +160,19 @@ export interface IStorage {
 
   createCryptoTransaction(data: InsertCryptoTransaction): Promise<CryptoTransaction>;
   getCryptoTransactionByTrackId(trackId: string): Promise<CryptoTransaction | undefined>;
-  updateCryptoTransactionStatus(id: number, status: string, cryptoAmount?: string, walletAddress?: string): Promise<void>;
+  updateCryptoTransactionStatus(id: number, updates: {
+    status: string;
+    payAmount?: string;
+    payCurrency?: string;
+    walletAddress?: string;
+    network?: string;
+    txHash?: string;
+  }): Promise<void>;
   markCryptoTransactionCredited(id: number): Promise<boolean>;
   getCryptoTransactions(merchantId?: number): Promise<CryptoTransaction[]>;
+
+  getCryptoBalances(merchantId: number): Promise<CryptoBalance[]>;
+  incrementCryptoBalance(merchantId: number, currency: string, amount: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -891,10 +902,20 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async updateCryptoTransactionStatus(id: number, status: string, cryptoAmount?: string, walletAddress?: string): Promise<void> {
-    const data: any = { status };
-    if (cryptoAmount !== undefined) data.cryptoAmount = cryptoAmount;
-    if (walletAddress !== undefined) data.walletAddress = walletAddress;
+  async updateCryptoTransactionStatus(id: number, updates: {
+    status: string;
+    payAmount?: string;
+    payCurrency?: string;
+    walletAddress?: string;
+    network?: string;
+    txHash?: string;
+  }): Promise<void> {
+    const data: any = { status: updates.status };
+    if (updates.payAmount !== undefined) data.payAmount = updates.payAmount;
+    if (updates.payCurrency !== undefined) data.payCurrency = updates.payCurrency;
+    if (updates.walletAddress !== undefined) data.walletAddress = updates.walletAddress;
+    if (updates.network !== undefined) data.network = updates.network;
+    if (updates.txHash !== undefined) data.txHash = updates.txHash;
     await db.update(cryptoTransactions).set(data).where(eq(cryptoTransactions.id, id));
   }
 
@@ -917,6 +938,27 @@ export class DatabaseStorage implements IStorage {
       return db.select().from(cryptoTransactions).where(eq(cryptoTransactions.merchantId, merchantId)).orderBy(desc(cryptoTransactions.createdAt));
     }
     return db.select().from(cryptoTransactions).orderBy(desc(cryptoTransactions.createdAt));
+  }
+
+  async getCryptoBalances(merchantId: number): Promise<CryptoBalance[]> {
+    return db.select().from(cryptoBalances).where(eq(cryptoBalances.merchantId, merchantId));
+  }
+
+  async incrementCryptoBalance(merchantId: number, currency: string, amount: number): Promise<void> {
+    const [existing] = await db.select().from(cryptoBalances)
+      .where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
+    if (existing) {
+      const newBalance = (parseFloat(existing.balance) + amount).toFixed(8);
+      await db.update(cryptoBalances)
+        .set({ balance: newBalance, updatedAt: new Date() })
+        .where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
+    } else {
+      await db.insert(cryptoBalances).values({
+        merchantId,
+        currency,
+        balance: amount.toFixed(8),
+      });
+    }
   }
 }
 

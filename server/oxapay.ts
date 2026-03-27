@@ -180,3 +180,51 @@ export function generateOxaPayReference(): string {
   const random = crypto.randomBytes(4).toString("hex").toUpperCase();
   return `OXA${timestamp}${random}`;
 }
+
+export interface OxaPayCurrency {
+  symbol: string;
+  name?: string;
+  networks?: string[];
+  minAmount?: number;
+  maxAmount?: number;
+}
+
+let currenciesCache: { data: OxaPayCurrency[]; fetchedAt: number } | null = null;
+const CURRENCIES_CACHE_TTL_MS = 15 * 60 * 1000;
+
+export async function getCurrencies(merchantApiKey: string): Promise<OxaPayCurrency[]> {
+  if (currenciesCache && Date.now() - currenciesCache.fetchedAt < CURRENCIES_CACHE_TTL_MS) {
+    return currenciesCache.data;
+  }
+  try {
+    const result = await oxapayRequest<{ result: number; currencies?: any[] }>(
+      merchantApiKey,
+      "/merchants/allowedCoins",
+      {},
+    );
+    if (result.result === 100 && Array.isArray(result.currencies) && result.currencies.length > 0) {
+      const parsed: OxaPayCurrency[] = result.currencies.map((c: any) => ({
+        symbol: c.symbol || c.currency || String(c),
+        name: c.name || c.symbol || String(c),
+        networks: c.networks || [],
+        minAmount: c.minAmount,
+        maxAmount: c.maxAmount,
+      }));
+      currenciesCache = { data: parsed, fetchedAt: Date.now() };
+      return parsed;
+    }
+  } catch (e) {
+    console.warn("[OXAPAY] getCurrencies échoué, fallback liste statique");
+  }
+  const fallback: OxaPayCurrency[] = [
+    { symbol: "USDT", name: "Tether USD" },
+    { symbol: "BTC", name: "Bitcoin" },
+    { symbol: "ETH", name: "Ethereum" },
+    { symbol: "LTC", name: "Litecoin" },
+    { symbol: "TRX", name: "Tron" },
+    { symbol: "BNB", name: "BNB" },
+    { symbol: "DOGE", name: "Dogecoin" },
+  ];
+  if (!currenciesCache) currenciesCache = { data: fallback, fetchedAt: Date.now() };
+  return fallback;
+}

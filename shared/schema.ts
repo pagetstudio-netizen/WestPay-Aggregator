@@ -250,15 +250,28 @@ export const cryptoTransactions = pgTable("crypto_transactions", {
   aggregatorId: integer("aggregator_id").notNull().references(() => cryptoAggregators.id, { onDelete: "cascade" }),
   merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),
   trackId: text("track_id").notNull().unique(),
-  amount: integer("amount").notNull(),
-  currency: text("currency").notNull().default("USDT"),
-  country: text("country"),
-  cryptoAmount: text("crypto_amount"),
+  amount: text("amount").notNull(),
+  currency: text("currency").notNull().default("USD"),
+  payCurrency: text("pay_currency"),
+  payAmount: text("pay_amount"),
   status: text("status").notNull().default("pending"),
   walletAddress: text("wallet_address"),
+  network: text("network"),
+  txHash: text("tx_hash"),
+  orderId: text("order_id"),
+  description: text("description"),
   callbackUrl: text("callback_url"),
+  returnUrl: text("return_url"),
   creditedAt: timestamp("credited_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const cryptoBalances = pgTable("crypto_balances", {
+  id: serial("id").primaryKey(),
+  merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),
+  currency: text("currency").notNull(),
+  balance: text("balance").notNull().default("0"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 export const walletTransfers = pgTable("wallet_transfers", {
@@ -359,3 +372,7 @@ export type InsertCryptoAggregatorMerchant = z.infer<typeof insertCryptoAggregat
 export const insertCryptoTransactionSchema = createInsertSchema(cryptoTransactions).omit({ id: true, createdAt: true });
 export type CryptoTransaction = typeof cryptoTransactions.$inferSelect;
 export type InsertCryptoTransaction = z.infer<typeof insertCryptoTransactionSchema>;
+
+export const insertCryptoBalanceSchema = createInsertSchema(cryptoBalances).omit({ id: true, updatedAt: true });
+export type CryptoBalance = typeof cryptoBalances.$inferSelect;
+export type InsertCryptoBalance = z.infer<typeof insertCryptoBalanceSchema>;
