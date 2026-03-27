@@ -2008,7 +2008,7 @@ function CryptoPanel({ token }: { token: string | null }) {
             <li><strong>1.</strong> Appelez <code className="font-mono bg-white/60 px-1 rounded">POST /api/merchant/crypto/invoice</code> avec votre clé API (header <code className="font-mono bg-white/60 px-1 rounded">X-API-KEY</code>)</li>
             <li><strong>2.</strong> Redirigez l'utilisateur vers le <code className="font-mono bg-white/60 px-1 rounded">paymentUrl</code> retourné (ou <code className="font-mono bg-white/60 px-1 rounded">payLink</code> OxaPay direct)</li>
             <li><strong>3.</strong> Recevez le callback webhook sur votre URL configurée</li>
-            <li><strong>4.</strong> Vérifiez le statut via <code className="font-mono bg-white/60 px-1 rounded">GET /api/crypto/status/:trackId</code></li>
+            <li><strong>4.</strong> Vérifiez le statut via <code className="font-mono bg-white/60 px-1 rounded">GET /api/payment/crypto/:trackId/status</code></li>
           </ol>
         </div>
       )}
@@ -2148,12 +2148,15 @@ function NavItem({
 }
 
 function MerchantSidebarContent({
-  user, activeTab, collapsed, onTabChange, onLogout, t
+  user, activeTab, collapsed, onTabChange, onLogout, t, hasCrypto
 }: {
   user: any; activeTab: MerchantTab; collapsed: boolean;
   onTabChange: (tab: MerchantTab) => void; onLogout: () => void;
   t: (key: string) => string;
+  hasCrypto: boolean;
 }) {
+  const visibleNavItems = NAV_ITEMS.filter(item => item.key !== "crypto" || hasCrypto);
+
   return (
     <div className="flex flex-col h-full select-none">
       <div className="px-3 py-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
@@ -2174,7 +2177,7 @@ function MerchantSidebarContent({
       </div>
 
       <div className="flex-1 overflow-y-auto py-2 px-2 space-y-0.5">
-        {NAV_ITEMS.map(item => (
+        {visibleNavItems.map(item => (
           <NavItem
             key={item.key}
             icon={item.icon}
@@ -2226,11 +2229,31 @@ export default function MerchantDashboard() {
   const { t } = useLanguage();
   const { toast } = useToast();
 
+  const { data: cryptoAggs = [] } = useQuery({
+    queryKey: ["/api/merchant/crypto-aggregators"],
+    queryFn: async () => {
+      if (!token) return [];
+      const res = await fetch("/api/merchant/crypto-aggregators", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!token,
+  });
+  const hasCrypto = (cryptoAggs as any[]).length > 0;
+
   useEffect(() => {
     if (!authLoading && (!user || user.role !== "merchant")) {
       setLocation("/merchant-login");
     }
   }, [authLoading, user, setLocation]);
+
+  useEffect(() => {
+    if (!hasCrypto && activeTab === "crypto") {
+      setActiveTab("overview");
+    }
+  }, [hasCrypto, activeTab]);
 
   if (authLoading) return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: "#e8eaed" }}>
@@ -2246,7 +2269,8 @@ export default function MerchantDashboard() {
   const handleLogout = () => { logout(); setLocation("/merchant-login"); };
   const handleTabChange = (tab: MerchantTab) => { setActiveTab(tab); setMobileOpen(false); };
 
-  const currentItem = NAV_ITEMS.find(n => n.key === activeTab);
+  const visibleNavItems = NAV_ITEMS.filter(item => item.key !== "crypto" || hasCrypto);
+  const currentItem = visibleNavItems.find(n => n.key === activeTab);
 
   return (
     <div className="flex h-screen w-full overflow-hidden" style={{ background: "#e8eaed" }}>
@@ -2267,6 +2291,7 @@ export default function MerchantDashboard() {
           onTabChange={handleTabChange}
           onLogout={handleLogout}
           t={t}
+          hasCrypto={hasCrypto}
         />
       </aside>
 
@@ -2296,6 +2321,7 @@ export default function MerchantDashboard() {
           onTabChange={handleTabChange}
           onLogout={handleLogout}
           t={t}
+          hasCrypto={hasCrypto}
         />
       </aside>
 

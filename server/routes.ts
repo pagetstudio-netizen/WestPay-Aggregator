@@ -1193,6 +1193,38 @@ export async function registerRoutes(
   });
 
   // ==================== PAYMENT PAGE (public) ====================
+  // ─── Crypto : agrégateurs disponibles pour un marchand/pays (public) ──────
+
+  app.get("/api/public/crypto-aggregators", async (req, res) => {
+    try {
+      const { merchant: merchantSlug, country } = req.query as { merchant?: string; country?: string };
+      if (!merchantSlug) {
+        return res.status(400).json({ message: "Parametre merchant requis" });
+      }
+      const merchant = await storage.getMerchantBySlug(merchantSlug);
+      if (!merchant || merchant.suspended) {
+        return res.json([]);
+      }
+      const allAggs = await storage.getCryptoAggregators();
+      const activeAggs = allAggs.filter(a => a.active);
+      const result = [];
+      for (const agg of activeAggs) {
+        const aggMerchants = await storage.getCryptoAggregatorMerchants(agg.id);
+        const assigned = aggMerchants.find(m => m.merchantId === merchant.id && m.active);
+        if (!assigned) continue;
+        if (country) {
+          const aggCountries = await storage.getCryptoAggregatorCountries(agg.id);
+          const countryActive = aggCountries.find(c => c.country.toLowerCase() === (country as string).toLowerCase() && c.active);
+          if (!countryActive) continue;
+        }
+        result.push({ id: agg.id, name: agg.name, currency: "USDT" });
+      }
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/public/payment-methods/:country", async (req, res) => {
     try {
       const { country } = req.params;
@@ -3010,12 +3042,160 @@ export async function registerRoutes(
     }
   });
 
-  // ─── Crypto : créer une invoice OxaPay (marchands) ───────────────────────
+  // ─── Crypto : initiation paiement public (page de paiement WestPay) ─────
+
+  app.post("/api/payment/crypto/initiate", async (req, res) => {
+    try {
+      const { merchantSlug, aggregatorId, country, amount, currency, returnUrl } = req.body;
+      if (!merchantSlug || !aggregatorId || !amount || !currency) {
+        return res.status(400).json({ message: "merchantSlug, aggregatorId, amount et currency sont requis" });
+      }
+      const amountNum = Number(amount);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        return res.status(400).json({ message: "Montant invalide" });
+      }
+      const merchant = await storage.getMerchantBySlug(merchantSlug);
+      if (!merchant || merchant.suspended) {
+        return res.status(404).json({ message: "Marchand introuvable ou suspendu" });
+      }
+      const agg = await storage.getCryptoAggregatorById(Number(aggregatorId));
+      if (!agg || !agg.active) {
+        return res.status(404).json({ message: "Agrégateur crypto introuvable ou inactif" });
+      }
+      const aggMerchants = await storage.getCryptoAggregatorMerchants(agg.id);
+      const assigned = aggMerchants.find(m => m.merchantId === merchant.id && m.active);
+      if (!assigned) {
+        return res.status(403).json({ message: "Cet agrégateur n'est pas disponible pour ce marchand" });
+      }
+      if (country) {
+        const aggCountries = await storage.getCryptoAggregatorCountries(agg.id);
+        const countryActive = aggCountries.find(c => c.country.toLowerCase() === country.toLowerCase() && c.active);
+        if (!countryActive) {
+          return res.status(403).json({ message: "Paiement crypto non disponible pour ce pays" });
+        }
+      }
+      const callbackUrl = `${process.env.APP_URL || "https://westpay.cloud"}/api/oxapay/callback`;
+      const invoiceResult = await oxapayCreateInvoice(agg.apiKey, {
+        amount: amountNum,
+        currency: currency.toUpperCase(),
+        lifeTime: 30,
+        feePaidByPayer: 0,
+        callbackUrl,
+        ...(returnUrl && { returnUrl }),
+        description: `Paiement WestPay — ${merchant.name}`,
+      });
+      if (invoiceResult.result !== 100 || !invoiceResult.trackId) {
+        return res.status(502).json({ message: invoiceResult.message || "Échec de création de l'invoice OxaPay" });
+      }
+      const cryptoTx = await storage.createCryptoTransaction({
+        aggregatorId: agg.id,
+        merchantId: merchant.id,
+        trackId: invoiceResult.trackId,
+        amount: amountNum,
+        currency: currency.toUpperCase(),
+        status: "new",
+        callbackUrl,
+      });
+      res.json({
+        success: true,
+        trackId: invoiceResult.trackId,
+        payLink: invoiceResult.payLink,
+        expiredAt: invoiceResult.expiredAt,
+        paymentUrl: `${process.env.APP_URL || "https://westpay.cloud"}/pay/crypto/${invoiceResult.trackId}`,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── Crypto : statut polling (page de paiement publique) ─────────────────
+
+  app.get("/api/payment/crypto/:trackId/status", async (req, res) => {
+    try {
+      const { trackId } = req.params;
+      const cryptoTx = await storage.getCryptoTransactionByTrackId(trackId);
+      if (!cryptoTx) {
+        return res.status(404).json({ message: "Transaction introuvable" });
+      }
+      const agg = await storage.getCryptoAggregatorById(cryptoTx.aggregatorId);
+      if (!agg) {
+        return res.status(404).json({ message: "Agrégateur introuvable" });
+      }
+      const oxaStatus = await oxapayGetStatus(agg.apiKey, trackId);
+      if (oxaStatus.result === 100) {
+        const newStatus = oxaStatus.status || cryptoTx.status;
+        if (newStatus !== cryptoTx.status) {
+          await storage.updateCryptoTransactionStatus(
+            cryptoTx.id,
+            newStatus,
+            oxaStatus.payAmount !== undefined ? String(oxaStatus.payAmount) : undefined,
+            oxaStatus.address,
+          );
+          if (newStatus === "paid") {
+            console.log(`[OXAPAY STATUS] Transaction ${trackId} confirmée via polling`);
+          }
+        }
+        res.json({
+          trackId,
+          status: newStatus,
+          amount: cryptoTx.amount,
+          currency: cryptoTx.currency,
+          payAmount: oxaStatus.payAmount,
+          payCurrency: oxaStatus.payCurrency,
+          address: oxaStatus.address,
+          network: oxaStatus.network,
+          txHash: oxaStatus.txHash,
+          expiredAt: oxaStatus.expiredAt,
+          createdAt: cryptoTx.createdAt,
+        });
+      } else {
+        res.json({
+          trackId,
+          status: cryptoTx.status,
+          amount: cryptoTx.amount,
+          currency: cryptoTx.currency,
+          address: cryptoTx.walletAddress,
+          createdAt: cryptoTx.createdAt,
+        });
+      }
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── Crypto : infos publiques d'une transaction (page de paiement) ────────
+
+  app.get("/api/public/crypto-payment/:trackId", async (req, res) => {
+    try {
+      const { trackId } = req.params;
+      const cryptoTx = await storage.getCryptoTransactionByTrackId(trackId);
+      if (!cryptoTx) {
+        return res.status(404).json({ message: "Transaction introuvable" });
+      }
+      const agg = await storage.getCryptoAggregatorById(cryptoTx.aggregatorId);
+      const merchant = await storage.getMerchantById(cryptoTx.merchantId);
+      res.json({
+        trackId,
+        status: cryptoTx.status,
+        amount: cryptoTx.amount,
+        currency: cryptoTx.currency,
+        cryptoAmount: cryptoTx.cryptoAmount,
+        walletAddress: cryptoTx.walletAddress,
+        aggregatorName: agg?.name || "OxaPay",
+        merchantName: merchant?.name || "",
+        createdAt: cryptoTx.createdAt,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── Crypto : créer une invoice OxaPay (marchands — API directe) ─────────
 
   app.post("/api/merchant/crypto/invoice", apiKeyAuthMiddleware, async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
-      const { aggregatorId, amount, currency, description, orderId, callbackUrl, returnUrl } = req.body;
+      const { aggregatorId, amount, currency, country, description, orderId, callbackUrl, returnUrl } = req.body;
       if (!aggregatorId || !amount || !currency) {
         return res.status(400).json({ message: "aggregatorId, amount et currency sont requis" });
       }
@@ -3032,7 +3212,13 @@ export async function registerRoutes(
       if (!assigned) {
         return res.status(403).json({ message: "Cet agrégateur ne vous est pas assigné" });
       }
-      const internalRef = generateOxaPayReference();
+      if (country) {
+        const aggCountries = await storage.getCryptoAggregatorCountries(agg.id);
+        const countryActive = aggCountries.find(c => c.country.toLowerCase() === country.toLowerCase() && c.active);
+        if (!countryActive) {
+          return res.status(403).json({ message: "Paiement crypto non disponible pour ce pays" });
+        }
+      }
       const invoiceCallbackUrl = callbackUrl || `${process.env.APP_URL || "https://westpay.cloud"}/api/oxapay/callback`;
       const invoiceResult = await oxapayCreateInvoice(agg.apiKey, {
         amount: amountNum,
@@ -3087,55 +3273,10 @@ export async function registerRoutes(
     }
   });
 
-  // ─── Crypto : statut public (sans auth) ────────────────────────────────
+  // ─── Crypto : statut legacy (gardé pour rétrocompatibilité) ──────────────
 
   app.get("/api/crypto/status/:trackId", async (req, res) => {
-    try {
-      const { trackId } = req.params;
-      const cryptoTx = await storage.getCryptoTransactionByTrackId(trackId);
-      if (!cryptoTx) {
-        return res.status(404).json({ message: "Transaction introuvable" });
-      }
-      const agg = await storage.getCryptoAggregatorById(cryptoTx.aggregatorId);
-      if (!agg) {
-        return res.status(404).json({ message: "Agrégateur introuvable" });
-      }
-      const oxaStatus = await oxapayGetStatus(agg.apiKey, trackId);
-      if (oxaStatus.result === 100) {
-        const newStatus = oxaStatus.status || cryptoTx.status;
-        if (newStatus !== cryptoTx.status) {
-          await storage.updateCryptoTransactionStatus(
-            cryptoTx.id,
-            newStatus,
-            oxaStatus.payAmount !== undefined ? String(oxaStatus.payAmount) : undefined,
-            oxaStatus.address,
-          );
-        }
-        res.json({
-          trackId,
-          status: newStatus,
-          amount: cryptoTx.amount,
-          currency: cryptoTx.currency,
-          payAmount: oxaStatus.payAmount,
-          payCurrency: oxaStatus.payCurrency,
-          address: oxaStatus.address,
-          network: oxaStatus.network,
-          txHash: oxaStatus.txHash,
-          expiredAt: oxaStatus.expiredAt,
-          createdAt: cryptoTx.createdAt,
-        });
-      } else {
-        res.json({
-          trackId,
-          status: cryptoTx.status,
-          amount: cryptoTx.amount,
-          currency: cryptoTx.currency,
-          createdAt: cryptoTx.createdAt,
-        });
-      }
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
+    res.redirect(301, `/api/payment/crypto/${req.params.trackId}/status`);
   });
 
   // ─── Crypto : webhook OxaPay (callback) ─────────────────────────────────
@@ -3161,6 +3302,7 @@ export async function registerRoutes(
           return res.status(401).json({ message: "Signature invalide" });
         }
       }
+      const alreadyPaid = cryptoTx.status === "paid";
       if (status && status !== cryptoTx.status) {
         await storage.updateCryptoTransactionStatus(
           cryptoTx.id,
@@ -3169,6 +3311,9 @@ export async function registerRoutes(
           undefined,
         );
         console.log(`[OXAPAY CALLBACK] Transaction ${trackId} mise à jour: ${cryptoTx.status} → ${status}`);
+        if (status === "paid" && !alreadyPaid) {
+          console.log(`[OXAPAY CALLBACK] Paiement crypto confirmé pour marchand ${cryptoTx.merchantId} — trackId ${trackId} — montant ${cryptoTx.amount} ${cryptoTx.currency}`);
+        }
       }
       res.status(200).json({ ok: true });
     } catch (err: any) {

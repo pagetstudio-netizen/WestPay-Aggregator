@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, ChevronRight, Check, Phone, ExternalLink } from "lucide-react";
+import { Loader2, ChevronRight, Check, Phone, ExternalLink, Bitcoin } from "lucide-react";
 import HelpButton from "@/components/HelpButton";
 
 type MerchantInfo = {
@@ -67,6 +67,8 @@ export default function PaymentPage() {
   const [omnipayFees, setOmnipayFees] = useState(0);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [dynamicMethods, setDynamicMethods] = useState<string[] | null>(null);
+  const [cryptoAggregators, setCryptoAggregators] = useState<Array<{ id: number; name: string; currency: string }>>([]);
+  const [isCryptoLoading, setIsCryptoLoading] = useState(false);
 
   useEffect(() => {
     if (!merchantSlug) {
@@ -86,6 +88,14 @@ export default function PaymentPage() {
     setSelectedMethod("");
     setOtpCode("");
   }, [selectedCountry]);
+
+  useEffect(() => {
+    if (!merchantSlug || !selectedCountry) return;
+    fetch(`/api/public/crypto-aggregators?merchant=${encodeURIComponent(merchantSlug)}&country=${encodeURIComponent(selectedCountry)}`)
+      .then(r => r.ok ? r.json() : [])
+      .then(d => setCryptoAggregators(Array.isArray(d) ? d : []))
+      .catch(() => setCryptoAggregators([]));
+  }, [merchantSlug, selectedCountry]);
 
   const fetchMerchantInfo = async () => {
     setIsLoading(true);
@@ -152,13 +162,43 @@ export default function PaymentPage() {
     };
   }, []);
 
+  const isCryptoMethod = selectedMethod.startsWith("crypto:");
+
   const handleStep1Next = async () => {
-    if (!payerPhone.trim()) {
-      toast({ title: "Veuillez entrer votre numero de telephone", variant: "destructive" });
-      return;
-    }
     if (!selectedMethod) {
       toast({ title: "Veuillez choisir une methode de paiement", variant: "destructive" });
+      return;
+    }
+
+    if (isCryptoMethod) {
+      const aggregatorId = selectedMethod.replace("crypto:", "");
+      setIsCryptoLoading(true);
+      try {
+        const res = await fetch("/api/payment/crypto/initiate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            merchantSlug,
+            aggregatorId: Number(aggregatorId),
+            country: selectedCountry,
+            amount,
+            currency: "USDT",
+            returnUrl: redirectUrl || undefined,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message);
+        window.location.replace(`/pay/crypto/${data.trackId}`);
+      } catch (err: any) {
+        toast({ title: "Erreur crypto", description: err.message, variant: "destructive" });
+      } finally {
+        setIsCryptoLoading(false);
+      }
+      return;
+    }
+
+    if (!payerPhone.trim()) {
+      toast({ title: "Veuillez entrer votre numero de telephone", variant: "destructive" });
       return;
     }
     if (needsManualOtp && !otpCode.trim()) {
@@ -432,25 +472,27 @@ export default function PaymentPage() {
 
           {step === 1 && (
             <div className="space-y-3" data-testid="step-1-content">
-              <div>
-                <label className="block text-sm font-medium mb-1" style={{ color: "#374151" }}>
-                  Numero de telephone mobile:
-                </label>
-                <div className="flex items-center border rounded-md overflow-hidden" style={{ borderColor: "#d1d5db" }}>
-                  <span className="px-3 py-2 text-sm font-semibold" style={{ color: "#00b050", backgroundColor: "#f9fafb" }}>
-                    {dialCode}
-                  </span>
-                  <input
-                    type="tel"
-                    value={payerPhone}
-                    onChange={(e) => setPayerPhone(e.target.value)}
-                    placeholder="Ex: 90123456"
-                    className="flex-1 py-2 px-3 text-sm outline-none"
-                    style={{ borderLeft: "1px solid #d1d5db" }}
-                    data-testid="input-payer-phone"
-                  />
+              {!isCryptoMethod && (
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: "#374151" }}>
+                    Numero de telephone mobile:
+                  </label>
+                  <div className="flex items-center border rounded-md overflow-hidden" style={{ borderColor: "#d1d5db" }}>
+                    <span className="px-3 py-2 text-sm font-semibold" style={{ color: "#00b050", backgroundColor: "#f9fafb" }}>
+                      {dialCode}
+                    </span>
+                    <input
+                      type="tel"
+                      value={payerPhone}
+                      onChange={(e) => setPayerPhone(e.target.value)}
+                      placeholder="Ex: 90123456"
+                      className="flex-1 py-2 px-3 text-sm outline-none"
+                      style={{ borderLeft: "1px solid #d1d5db" }}
+                      data-testid="input-payer-phone"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
               {merchantInfo.countries.length > 1 && (
                 <div>
@@ -503,13 +545,65 @@ export default function PaymentPage() {
                       </div>
                     );
                   })}
+
+                  {cryptoAggregators.map((agg) => {
+                    const cryptoMethodKey = `crypto:${agg.id}`;
+                    const isSelected = selectedMethod === cryptoMethodKey;
+                    return (
+                      <div
+                        key={cryptoMethodKey}
+                        onClick={() => handleSelectMethod(cryptoMethodKey)}
+                        onTouchEnd={(e) => { e.preventDefault(); handleSelectMethod(cryptoMethodKey); }}
+                        className="pay-method-option flex items-center gap-3 p-3 border rounded-md cursor-pointer"
+                        style={{
+                          borderColor: isSelected ? "#f59e0b" : "#e5e7eb",
+                          backgroundColor: isSelected ? "#fffbeb" : "#ffffff",
+                        }}
+                        role="radio"
+                        aria-checked={isSelected}
+                        tabIndex={0}
+                        onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); handleSelectMethod(cryptoMethodKey); } }}
+                        data-testid={`radio-method-crypto-${agg.id}`}
+                      >
+                        <div
+                          className="w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0"
+                          style={{ borderColor: isSelected ? "#f59e0b" : "#d1d5db" }}
+                        >
+                          {isSelected && (
+                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: "#f59e0b" }} />
+                          )}
+                        </div>
+                        <Bitcoin className="w-4 h-4 shrink-0" style={{ color: "#f59e0b" }} />
+                        <div className="flex-1 min-w-0">
+                          <span className="text-sm font-medium block" style={{ color: "#1f2937" }}>
+                            Crypto (via OxaPay)
+                          </span>
+                          <span className="text-xs" style={{ color: "#9ca3af" }}>
+                            Paiement en crypto-monnaie — {agg.name}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                {availableMethods.length === 0 && (
+                {availableMethods.length === 0 && cryptoAggregators.length === 0 && (
                   <p className="text-sm mt-2" style={{ color: "#6b7280" }}>Aucune methode disponible pour ce pays.</p>
                 )}
               </div>
 
-              {needsManualOtp && (
+              {isCryptoMethod && (
+                <div
+                  className="p-3 rounded-md text-xs space-y-1"
+                  style={{ backgroundColor: "#fffbeb", border: "1px solid #fde68a", color: "#92400e" }}
+                  data-testid="crypto-info-block"
+                >
+                  <p className="font-semibold" style={{ color: "#78350f" }}>Paiement en crypto-monnaie</p>
+                  <p>Vous allez etre redirige vers une page de paiement securisee ou vous pourrez scanner un QR code ou copier l'adresse de paiement.</p>
+                  <p>Equivalence FCFA → crypto calculee en temps reel par OxaPay.</p>
+                </div>
+              )}
+
+              {needsManualOtp && !isCryptoMethod && (
                 <div
                   className="p-3 rounded-md space-y-2"
                   style={{ backgroundColor: "#fff7ed", border: "1px solid #fed7aa" }}
@@ -539,12 +633,19 @@ export default function PaymentPage() {
                 <button
                   type="button"
                   onClick={handleStep1Next}
-                  disabled={isSubmitting || !payerPhone.trim() || !selectedMethod || (needsManualOtp && !otpCode.trim())}
+                  disabled={
+                    isSubmitting ||
+                    isCryptoLoading ||
+                    !selectedMethod ||
+                    (!isCryptoMethod && !payerPhone.trim()) ||
+                    (needsManualOtp && !isCryptoMethod && !otpCode.trim())
+                  }
                   className="pay-btn pay-btn-green"
                   data-testid="button-step1-next"
                 >
-                  {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  Payer maintenant <ChevronRight className="w-4 h-4" />
+                  {(isSubmitting || isCryptoLoading) ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  {isCryptoMethod ? "Payer en crypto" : "Payer maintenant"}
+                  <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
             </div>
