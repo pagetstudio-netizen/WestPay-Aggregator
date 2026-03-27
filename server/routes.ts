@@ -3087,6 +3087,21 @@ export async function registerRoutes(
       if (invoiceResult.result !== 100 || !invoiceResult.trackId) {
         return res.status(502).json({ message: invoiceResult.message || "Échec de création de l'invoice OxaPay" });
       }
+      let walletAddress: string | undefined;
+      let cryptoAmount: string | undefined;
+      let payCurrency: string | undefined;
+      let network: string | undefined;
+      try {
+        const oxaStatus = await oxapayGetStatus(agg.apiKey, invoiceResult.trackId);
+        if (oxaStatus.result === 100) {
+          walletAddress = oxaStatus.address;
+          cryptoAmount = oxaStatus.payAmount !== undefined ? String(oxaStatus.payAmount) : undefined;
+          payCurrency = oxaStatus.payCurrency;
+          network = oxaStatus.network;
+        }
+      } catch {
+      }
+
       const cryptoTx = await storage.createCryptoTransaction({
         aggregatorId: agg.id,
         merchantId: merchant.id,
@@ -3095,12 +3110,19 @@ export async function registerRoutes(
         currency: currency.toUpperCase(),
         status: "new",
         callbackUrl,
+        ...(walletAddress && { walletAddress }),
+        ...(cryptoAmount && { cryptoAmount }),
       });
       res.json({
         success: true,
         trackId: invoiceResult.trackId,
         payLink: invoiceResult.payLink,
         expiredAt: invoiceResult.expiredAt,
+        expiresAt: invoiceResult.expiredAt,
+        walletAddress: walletAddress || null,
+        cryptoAmount: cryptoAmount || null,
+        currency: payCurrency || currency.toUpperCase(),
+        network: network || null,
         paymentUrl: `${process.env.APP_URL || "https://westpay.cloud"}/pay/crypto/${invoiceResult.trackId}`,
       });
     } catch (err: any) {
@@ -3295,12 +3317,18 @@ export async function registerRoutes(
         return res.status(200).json({ ok: true });
       }
       const agg = await storage.getCryptoAggregatorById(cryptoTx.aggregatorId);
-      if (agg?.callbackKey) {
+      if (!agg) {
+        console.warn(`[OXAPAY CALLBACK] Agrégateur introuvable pour tx ${trackId}`);
+        return res.status(200).json({ ok: true });
+      }
+      if (agg.callbackKey) {
         const valid = oxapayVerifyWebhook(agg.callbackKey, payload);
         if (!valid) {
           console.warn(`[OXAPAY CALLBACK] Signature HMAC invalide pour trackId=${trackId}`);
           return res.status(401).json({ message: "Signature invalide" });
         }
+      } else {
+        console.warn(`[OXAPAY CALLBACK] Aucune callbackKey configurée pour agrégateur ${agg.id} — validation HMAC ignorée`);
       }
       const alreadyPaid = cryptoTx.status === "paid";
       if (status && status !== cryptoTx.status) {
@@ -3312,7 +3340,17 @@ export async function registerRoutes(
         );
         console.log(`[OXAPAY CALLBACK] Transaction ${trackId} mise à jour: ${cryptoTx.status} → ${status}`);
         if (status === "paid" && !alreadyPaid) {
-          console.log(`[OXAPAY CALLBACK] Paiement crypto confirmé pour marchand ${cryptoTx.merchantId} — trackId ${trackId} — montant ${cryptoTx.amount} ${cryptoTx.currency}`);
+          const amount = cryptoTx.amount;
+          const merchantCountries = await storage.getMerchantCountries(cryptoTx.merchantId);
+          const activeMC = merchantCountries.find(mc => mc.active !== false);
+          if (activeMC) {
+            const merchant = await storage.getMerchantById(cryptoTx.merchantId);
+            const netAmount = merchant?.feeExempt ? amount : Math.floor(amount * 0.97);
+            await storage.incrementMerchantCountryBalance(activeMC.id, netAmount);
+            console.log(`[OXAPAY CALLBACK] Crédit marchand #${cryptoTx.merchantId} — merchantCountry #${activeMC.id} — Brut: ${amount} FCFA — Net: ${netAmount} FCFA — trackId: ${trackId}`);
+          } else {
+            console.warn(`[OXAPAY CALLBACK] Aucune merchantCountry active trouvée pour marchand #${cryptoTx.merchantId} — crédit impossible`);
+          }
         }
       }
       res.status(200).json({ ok: true });
