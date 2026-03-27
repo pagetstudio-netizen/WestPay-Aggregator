@@ -254,9 +254,10 @@ export const cryptoTransactions = pgTable("crypto_transactions", {
   currency: text("currency").notNull().default("USDT"),
   country: text("country"),
   cryptoAmount: text("crypto_amount"),
-  status: text("status").notNull().default("new"),
+  status: text("status").notNull().default("pending"),
   walletAddress: text("wallet_address"),
   callbackUrl: text("callback_url"),
+  creditedAt: timestamp("credited_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

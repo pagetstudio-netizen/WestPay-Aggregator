@@ -21,7 +21,7 @@ import {
   type CryptoTransaction, type InsertCryptoTransaction,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, sql, and, gte, lt, inArray } from "drizzle-orm";
+import { eq, desc, sql, and, gte, lt, inArray, isNull } from "drizzle-orm";
 
 export interface IStorage {
   getAdminByEmail(email: string): Promise<Admin | undefined>;
@@ -160,6 +160,7 @@ export interface IStorage {
   createCryptoTransaction(data: InsertCryptoTransaction): Promise<CryptoTransaction>;
   getCryptoTransactionByTrackId(trackId: string): Promise<CryptoTransaction | undefined>;
   updateCryptoTransactionStatus(id: number, status: string, cryptoAmount?: string, walletAddress?: string): Promise<void>;
+  markCryptoTransactionCredited(id: number): Promise<boolean>;
   getCryptoTransactions(merchantId?: number): Promise<CryptoTransaction[]>;
 }
 
@@ -895,6 +896,20 @@ export class DatabaseStorage implements IStorage {
     if (cryptoAmount !== undefined) data.cryptoAmount = cryptoAmount;
     if (walletAddress !== undefined) data.walletAddress = walletAddress;
     await db.update(cryptoTransactions).set(data).where(eq(cryptoTransactions.id, id));
+  }
+
+  async markCryptoTransactionCredited(id: number): Promise<boolean> {
+    const result = await db
+      .update(cryptoTransactions)
+      .set({ creditedAt: new Date() })
+      .where(
+        and(
+          eq(cryptoTransactions.id, id),
+          isNull(cryptoTransactions.creditedAt),
+        ),
+      )
+      .returning({ id: cryptoTransactions.id });
+    return result.length > 0;
   }
 
   async getCryptoTransactions(merchantId?: number): Promise<CryptoTransaction[]> {

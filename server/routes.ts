@@ -195,6 +195,30 @@ async function apiKeyAuthMiddleware(req: Request, res: Response, next: NextFunct
   return res.status(401).json({ message: "Non autorise. Fournissez un Bearer token JWT ou un header X-API-KEY valide." });
 }
 
+async function creditMerchantForCryptoTx(cryptoTx: { id: number; merchantId: number; amount: number; country: string | null }): Promise<void> {
+  const credited = await storage.markCryptoTransactionCredited(cryptoTx.id);
+  if (!credited) {
+    console.log(`[OXAPAY CREDIT] Transaction #${cryptoTx.id} déjà créditée — ignoré`);
+    return;
+  }
+  const merchantCountries = await storage.getMerchantCountries(cryptoTx.merchantId);
+  let targetMC: (typeof merchantCountries)[number] | undefined;
+  if (cryptoTx.country) {
+    targetMC = merchantCountries.find(mc => mc.country.toLowerCase() === cryptoTx.country!.toLowerCase() && mc.active !== false);
+  }
+  if (!targetMC) {
+    targetMC = merchantCountries.find(mc => mc.active !== false);
+  }
+  if (targetMC) {
+    const merchant = await storage.getMerchantById(cryptoTx.merchantId);
+    const netAmount = merchant?.feeExempt ? cryptoTx.amount : Math.floor(cryptoTx.amount * 0.97);
+    await storage.incrementMerchantCountryBalance(targetMC.id, netAmount);
+    console.log(`[OXAPAY CREDIT] Crédit marchand #${cryptoTx.merchantId} — pays: ${cryptoTx.country || "non défini"} — merchantCountry #${targetMC.id} (${targetMC.country}) — Brut: ${cryptoTx.amount} XOF — Net: ${netAmount} XOF — tx #${cryptoTx.id}`);
+  } else {
+    console.warn(`[OXAPAY CREDIT] Aucune merchantCountry active pour marchand #${cryptoTx.merchantId} — crédit impossible`);
+  }
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -3159,7 +3183,8 @@ export async function registerRoutes(
             oxaStatus.address,
           );
           if (newStatus === "paid") {
-            console.log(`[OXAPAY STATUS] Transaction ${trackId} confirmée via polling`);
+            console.log(`[OXAPAY STATUS] Transaction ${trackId} confirmée via polling — tentative crédit`);
+            await creditMerchantForCryptoTx(cryptoTx);
           }
         }
         res.json({
@@ -3342,40 +3367,22 @@ export async function registerRoutes(
         console.warn(`[OXAPAY CALLBACK] Signature HMAC invalide pour trackId=${trackId} — agrégateur ${agg.id}`);
         return res.status(401).json({ message: "Signature HMAC invalide" });
       }
-      if (status && status !== cryptoTx.status) {
-        await storage.updateCryptoTransactionStatus(
-          cryptoTx.id,
-          status,
-          payload.payAmount !== undefined ? String(payload.payAmount) : undefined,
-          undefined,
-        );
-        console.log(`[OXAPAY CALLBACK] Transaction ${trackId} mise à jour: ${cryptoTx.status} → ${status}`);
-        if (status === "paid") {
-          const freshTx = await storage.getCryptoTransactionByTrackId(trackId);
-          if (!freshTx || freshTx.status !== "paid") {
-            console.warn(`[OXAPAY CALLBACK] Race condition détectée pour ${trackId} — crédit ignoré`);
-          } else {
-            const amount = cryptoTx.amount;
-            const merchantCountries = await storage.getMerchantCountries(cryptoTx.merchantId);
-            let targetMC = undefined;
-            if (cryptoTx.country) {
-              targetMC = merchantCountries.find(mc => mc.country.toLowerCase() === cryptoTx.country!.toLowerCase() && mc.active !== false);
-            }
-            if (!targetMC) {
-              targetMC = merchantCountries.find(mc => mc.active !== false);
-            }
-            if (targetMC) {
-              const merchant = await storage.getMerchantById(cryptoTx.merchantId);
-              const netAmount = merchant?.feeExempt ? amount : Math.floor(amount * 0.97);
-              await storage.incrementMerchantCountryBalance(targetMC.id, netAmount);
-              console.log(`[OXAPAY CALLBACK] Crédit marchand #${cryptoTx.merchantId} — pays: ${cryptoTx.country || "non défini"} — merchantCountry #${targetMC.id} (${targetMC.country}) — Brut: ${amount} XOF — Net: ${netAmount} XOF — trackId: ${trackId}`);
-            } else {
-              console.warn(`[OXAPAY CALLBACK] Aucune merchantCountry active trouvée pour marchand #${cryptoTx.merchantId} — crédit impossible`);
-            }
-          }
+      if (status) {
+        if (status !== cryptoTx.status) {
+          await storage.updateCryptoTransactionStatus(
+            cryptoTx.id,
+            status,
+            payload.payAmount !== undefined ? String(payload.payAmount) : undefined,
+            undefined,
+          );
+          console.log(`[OXAPAY CALLBACK] Transaction ${trackId} mise à jour: ${cryptoTx.status} → ${status}`);
+        } else {
+          console.log(`[OXAPAY CALLBACK] Statut inchangé pour ${trackId} (${status})`);
         }
-      } else if (status === cryptoTx.status) {
-        console.log(`[OXAPAY CALLBACK] Statut inchangé pour ${trackId} (${status}) — pas de mise à jour`);
+        if (status === "paid") {
+          console.log(`[OXAPAY CALLBACK] Transaction ${trackId} payée — tentative crédit`);
+          await creditMerchantForCryptoTx(cryptoTx);
+        }
       }
       res.status(200).json({ ok: true });
     } catch (err: any) {
