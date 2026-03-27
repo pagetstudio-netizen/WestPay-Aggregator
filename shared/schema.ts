@@ -252,6 +252,7 @@ export const cryptoTransactions = pgTable("crypto_transactions", {
   trackId: text("track_id").notNull().unique(),
   amount: integer("amount").notNull(),
   currency: text("currency").notNull().default("USDT"),
+  country: text("country"),
   cryptoAmount: text("crypto_amount"),
   status: text("status").notNull().default("new"),
   walletAddress: text("wallet_address"),

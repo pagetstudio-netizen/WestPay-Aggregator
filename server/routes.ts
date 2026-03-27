@@ -3047,8 +3047,8 @@ export async function registerRoutes(
   app.post("/api/payment/crypto/initiate", async (req, res) => {
     try {
       const { merchantSlug, aggregatorId, country, amountFcfa, returnUrl } = req.body;
-      if (!merchantSlug || !aggregatorId || !amountFcfa) {
-        return res.status(400).json({ message: "merchantSlug, aggregatorId et amountFcfa sont requis" });
+      if (!merchantSlug || !aggregatorId || !amountFcfa || !country) {
+        return res.status(400).json({ message: "merchantSlug, aggregatorId, amountFcfa et country sont requis" });
       }
       const amountFcfaNum = Number(amountFcfa);
       if (isNaN(amountFcfaNum) || amountFcfaNum <= 0) {
@@ -3110,6 +3110,7 @@ export async function registerRoutes(
         trackId: invoiceResult.trackId,
         amount: amountFcfaNum,
         currency: "XOF",
+        country: country as string,
         status: "new",
         callbackUrl,
         ...(walletAddress && { walletAddress }),
@@ -3246,9 +3247,15 @@ export async function registerRoutes(
         }
       }
       const invoiceCallbackUrl = callbackUrl || `${process.env.APP_URL || "https://westpay.cloud"}/api/oxapay/callback`;
+      const XOF_PER_USD = 600;
+      const isXof = currency.toUpperCase() === "XOF" || currency.toUpperCase() === "FCFA";
+      const invoiceAmount = isXof ? parseFloat((amountNum / XOF_PER_USD).toFixed(2)) : amountNum;
+      const invoiceCurrency = isXof ? "USD" : currency.toUpperCase();
+      const storedAmount = isXof ? amountNum : amountNum;
+      const storedCurrency = isXof ? "XOF" : currency.toUpperCase();
       const invoiceResult = await oxapayCreateInvoice(agg.apiKey, {
-        amount: amountNum,
-        currency: currency.toUpperCase(),
+        amount: invoiceAmount,
+        currency: invoiceCurrency,
         lifeTime: 30,
         feePaidByPayer: 0,
         callbackUrl: invoiceCallbackUrl,
@@ -3263,8 +3270,9 @@ export async function registerRoutes(
         aggregatorId: agg.id,
         merchantId,
         trackId: invoiceResult.trackId,
-        amount: amountNum,
-        currency: currency.toUpperCase(),
+        amount: storedAmount,
+        currency: storedCurrency,
+        ...(country && { country }),
         status: "new",
         callbackUrl: invoiceCallbackUrl,
       });
@@ -3346,12 +3354,18 @@ export async function registerRoutes(
         if (status === "paid" && !alreadyPaid) {
           const amount = cryptoTx.amount;
           const merchantCountries = await storage.getMerchantCountries(cryptoTx.merchantId);
-          const activeMC = merchantCountries.find(mc => mc.active !== false);
-          if (activeMC) {
+          let targetMC = undefined;
+          if (cryptoTx.country) {
+            targetMC = merchantCountries.find(mc => mc.country.toLowerCase() === cryptoTx.country!.toLowerCase() && mc.active !== false);
+          }
+          if (!targetMC) {
+            targetMC = merchantCountries.find(mc => mc.active !== false);
+          }
+          if (targetMC) {
             const merchant = await storage.getMerchantById(cryptoTx.merchantId);
             const netAmount = merchant?.feeExempt ? amount : Math.floor(amount * 0.97);
-            await storage.incrementMerchantCountryBalance(activeMC.id, netAmount);
-            console.log(`[OXAPAY CALLBACK] Crédit marchand #${cryptoTx.merchantId} — merchantCountry #${activeMC.id} — Brut: ${amount} FCFA — Net: ${netAmount} FCFA — trackId: ${trackId}`);
+            await storage.incrementMerchantCountryBalance(targetMC.id, netAmount);
+            console.log(`[OXAPAY CALLBACK] Crédit marchand #${cryptoTx.merchantId} — pays: ${cryptoTx.country || "non défini"} — merchantCountry #${targetMC.id} (${targetMC.country}) — Brut: ${amount} XOF — Net: ${netAmount} XOF — trackId: ${trackId}`);
           } else {
             console.warn(`[OXAPAY CALLBACK] Aucune merchantCountry active trouvée pour marchand #${cryptoTx.merchantId} — crédit impossible`);
           }

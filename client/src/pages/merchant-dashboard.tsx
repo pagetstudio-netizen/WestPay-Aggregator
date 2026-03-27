@@ -1996,7 +1996,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                       <span className="font-mono" style={{ color: "#78909c", fontSize: "10px" }}>Header : X-API-KEY: &lt;votre_clé_api&gt;</span>
                     </p>
                     <p className="text-xs" style={{ color: "#78909c" }}>
-                      Corps : <span className="font-mono" style={{ fontSize: "10px" }}>&#123; aggregatorId: {agg.id}, amountFcfa: &lt;montant_XOF&gt; &#125;</span>
+                      Corps : <span className="font-mono" style={{ fontSize: "10px" }}>&#123; aggregatorId: {agg.id}, amount: &lt;montant&gt;, currency: "XOF" &#125;</span>
                     </p>
                   </div>
                 </div>
