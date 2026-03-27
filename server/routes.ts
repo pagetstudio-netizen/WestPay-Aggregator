@@ -3046,13 +3046,13 @@ export async function registerRoutes(
 
   app.post("/api/payment/crypto/initiate", async (req, res) => {
     try {
-      const { merchantSlug, aggregatorId, country, amount, currency, returnUrl } = req.body;
-      if (!merchantSlug || !aggregatorId || !amount || !currency) {
-        return res.status(400).json({ message: "merchantSlug, aggregatorId, amount et currency sont requis" });
+      const { merchantSlug, aggregatorId, country, amountFcfa, returnUrl } = req.body;
+      if (!merchantSlug || !aggregatorId || !amountFcfa) {
+        return res.status(400).json({ message: "merchantSlug, aggregatorId et amountFcfa sont requis" });
       }
-      const amountNum = Number(amount);
-      if (isNaN(amountNum) || amountNum <= 0) {
-        return res.status(400).json({ message: "Montant invalide" });
+      const amountFcfaNum = Number(amountFcfa);
+      if (isNaN(amountFcfaNum) || amountFcfaNum <= 0) {
+        return res.status(400).json({ message: "Montant FCFA invalide" });
       }
       const merchant = await storage.getMerchantBySlug(merchantSlug);
       if (!merchant || merchant.suspended) {
@@ -3074,15 +3074,17 @@ export async function registerRoutes(
           return res.status(403).json({ message: "Paiement crypto non disponible pour ce pays" });
         }
       }
+      const XOF_PER_USD = 600;
+      const amountUsd = parseFloat((amountFcfaNum / XOF_PER_USD).toFixed(2));
       const callbackUrl = `${process.env.APP_URL || "https://westpay.cloud"}/api/oxapay/callback`;
       const invoiceResult = await oxapayCreateInvoice(agg.apiKey, {
-        amount: amountNum,
-        currency: currency.toUpperCase(),
+        amount: amountUsd,
+        currency: "USD",
         lifeTime: 30,
         feePaidByPayer: 0,
         callbackUrl,
         ...(returnUrl && { returnUrl }),
-        description: `Paiement WestPay — ${merchant.name}`,
+        description: `Paiement WestPay — ${merchant.name} — ${amountFcfaNum} XOF`,
       });
       if (invoiceResult.result !== 100 || !invoiceResult.trackId) {
         return res.status(502).json({ message: invoiceResult.message || "Échec de création de l'invoice OxaPay" });
@@ -3106,8 +3108,8 @@ export async function registerRoutes(
         aggregatorId: agg.id,
         merchantId: merchant.id,
         trackId: invoiceResult.trackId,
-        amount: amountNum,
-        currency: currency.toUpperCase(),
+        amount: amountFcfaNum,
+        currency: "XOF",
         status: "new",
         callbackUrl,
         ...(walletAddress && { walletAddress }),
@@ -3121,8 +3123,10 @@ export async function registerRoutes(
         expiresAt: invoiceResult.expiredAt,
         walletAddress: walletAddress || null,
         cryptoAmount: cryptoAmount || null,
-        currency: payCurrency || currency.toUpperCase(),
+        currency: payCurrency || "USDT",
         network: network || null,
+        amountFcfa: amountFcfaNum,
+        amountUsd,
         paymentUrl: `${process.env.APP_URL || "https://westpay.cloud"}/pay/crypto/${invoiceResult.trackId}`,
       });
     } catch (err: any) {
@@ -3321,14 +3325,14 @@ export async function registerRoutes(
         console.warn(`[OXAPAY CALLBACK] Agrégateur introuvable pour tx ${trackId}`);
         return res.status(200).json({ ok: true });
       }
-      if (agg.callbackKey) {
-        const valid = oxapayVerifyWebhook(agg.callbackKey, payload);
-        if (!valid) {
-          console.warn(`[OXAPAY CALLBACK] Signature HMAC invalide pour trackId=${trackId}`);
-          return res.status(401).json({ message: "Signature invalide" });
-        }
-      } else {
-        console.warn(`[OXAPAY CALLBACK] Aucune callbackKey configurée pour agrégateur ${agg.id} — validation HMAC ignorée`);
+      if (!agg.callbackKey) {
+        console.error(`[OXAPAY CALLBACK] SÉCURITÉ : aucune callbackKey configurée pour agrégateur ${agg.id} (${agg.name}) — callback rejeté`);
+        return res.status(403).json({ message: "Callback rejeté : callbackKey non configurée pour cet agrégateur" });
+      }
+      const valid = oxapayVerifyWebhook(agg.callbackKey, payload);
+      if (!valid) {
+        console.warn(`[OXAPAY CALLBACK] Signature HMAC invalide pour trackId=${trackId} — agrégateur ${agg.id}`);
+        return res.status(401).json({ message: "Signature HMAC invalide" });
       }
       const alreadyPaid = cryptoTx.status === "paid";
       if (status && status !== cryptoTx.status) {

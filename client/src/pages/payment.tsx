@@ -181,8 +181,7 @@ export default function PaymentPage() {
             merchantSlug,
             aggregatorId: Number(aggregatorId),
             country: selectedCountry,
-            amount,
-            currency: "USDT",
+            amountFcfa: amount,
             returnUrl: redirectUrl || undefined,
           }),
         });

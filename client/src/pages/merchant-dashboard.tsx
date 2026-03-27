@@ -1879,7 +1879,7 @@ function LanguageDropdown() {
   );
 }
 
-function CryptoPanel({ token }: { token: string | null }) {
+function CryptoPanel({ token, user }: { token: string | null; user: any }) {
   const { data: aggregators = [], isLoading: aggLoading } = useMerchantFetch(
     "/api/merchant/crypto-aggregators",
     ["/api/merchant/crypto-aggregators"],
@@ -1975,19 +1975,30 @@ function CryptoPanel({ token }: { token: string | null }) {
                   </div>
                 )}
                 <div
-                  className="rounded-lg p-3 space-y-1.5"
+                  className="rounded-lg p-3 space-y-2"
                   style={{ background: "#f8fafc", border: "1px solid #e2e8f0" }}
                 >
                   <p className="text-xs font-bold" style={{ color: "#546e7a" }}>Intégration API</p>
-                  <code
-                    className="block text-xs break-all"
-                    style={{ color: "#1565c0", fontFamily: "monospace" }}
-                  >
-                    POST /api/merchant/crypto/invoice
-                  </code>
-                  <p className="text-xs" style={{ color: "#78909c" }}>
-                    Corps : <span className="font-mono">&#123; aggregatorId: {agg.id}, amount, currency &#125;</span>
-                  </p>
+                  <div className="space-y-1.5">
+                    <p className="text-xs" style={{ color: "#78909c" }}>
+                      <span className="font-semibold" style={{ color: "#546e7a" }}>ID marchand :</span>{" "}
+                      <code className="font-mono" style={{ color: "#1565c0" }}>{user?.id || "—"}</code>
+                    </p>
+                    <p className="text-xs" style={{ color: "#78909c" }}>
+                      <span className="font-semibold" style={{ color: "#546e7a" }}>URL webhook OxaPay :</span>
+                    </p>
+                    <code className="block text-xs break-all px-2 py-1 rounded" style={{ color: "#1565c0", fontFamily: "monospace", background: "#e3f2fd" }}>
+                      https://westpay.cloud/api/oxapay/callback
+                    </code>
+                    <p className="text-xs mt-1" style={{ color: "#78909c" }}>
+                      Endpoint pour vos invoices :<br />
+                      <code className="font-mono" style={{ color: "#1565c0" }}>POST /api/merchant/crypto/invoice</code><br />
+                      <span className="font-mono" style={{ color: "#78909c", fontSize: "10px" }}>Header : X-API-KEY: &lt;votre_clé_api&gt;</span>
+                    </p>
+                    <p className="text-xs" style={{ color: "#78909c" }}>
+                      Corps : <span className="font-mono" style={{ fontSize: "10px" }}>&#123; aggregatorId: {agg.id}, amountFcfa: &lt;montant_XOF&gt; &#125;</span>
+                    </p>
+                  </div>
                 </div>
               </div>
             ))}
@@ -2395,7 +2406,7 @@ export default function MerchantDashboard() {
           {activeTab === "apikeys"       && <ApiKeysPanel token={token} />}
           {activeTab === "webhook"       && <WebhookPanel token={token} />}
           {activeTab === "settings"      && <MerchantSettingsPanel token={token} />}
-          {activeTab === "crypto"        && <CryptoPanel token={token} />}
+          {activeTab === "crypto"        && <CryptoPanel token={token} user={user} />}
         </main>
       </div>
     </div>
