@@ -201,21 +201,19 @@ async function creditMerchantForCryptoTx(cryptoTx: { id: number; merchantId: num
     console.log(`[OXAPAY CREDIT] Transaction #${cryptoTx.id} déjà créditée — ignoré`);
     return;
   }
+  if (!cryptoTx.country) {
+    console.warn(`[OXAPAY CREDIT] Transaction #${cryptoTx.id} sans pays défini — crédit impossible`);
+    return;
+  }
   const merchantCountries = await storage.getMerchantCountries(cryptoTx.merchantId);
-  let targetMC: (typeof merchantCountries)[number] | undefined;
-  if (cryptoTx.country) {
-    targetMC = merchantCountries.find(mc => mc.country.toLowerCase() === cryptoTx.country!.toLowerCase() && mc.active !== false);
-  }
-  if (!targetMC) {
-    targetMC = merchantCountries.find(mc => mc.active !== false);
-  }
+  const targetMC = merchantCountries.find(mc => mc.country.toLowerCase() === cryptoTx.country!.toLowerCase() && mc.active !== false);
   if (targetMC) {
     const merchant = await storage.getMerchantById(cryptoTx.merchantId);
     const netAmount = merchant?.feeExempt ? cryptoTx.amount : Math.floor(cryptoTx.amount * 0.97);
     await storage.incrementMerchantCountryBalance(targetMC.id, netAmount);
-    console.log(`[OXAPAY CREDIT] Crédit marchand #${cryptoTx.merchantId} — pays: ${cryptoTx.country || "non défini"} — merchantCountry #${targetMC.id} (${targetMC.country}) — Brut: ${cryptoTx.amount} XOF — Net: ${netAmount} XOF — tx #${cryptoTx.id}`);
+    console.log(`[OXAPAY CREDIT] Crédit marchand #${cryptoTx.merchantId} — pays: ${cryptoTx.country} — merchantCountry #${targetMC.id} (${targetMC.country}) — Brut: ${cryptoTx.amount} XOF — Net: ${netAmount} XOF — tx #${cryptoTx.id}`);
   } else {
-    console.warn(`[OXAPAY CREDIT] Aucune merchantCountry active pour marchand #${cryptoTx.merchantId} — crédit impossible`);
+    console.warn(`[OXAPAY CREDIT] MerchantCountry "${cryptoTx.country}" introuvable ou inactive pour marchand #${cryptoTx.merchantId} — crédit refusé`);
   }
 }
 
@@ -3091,12 +3089,15 @@ export async function registerRoutes(
       if (!assigned) {
         return res.status(403).json({ message: "Cet agrégateur n'est pas disponible pour ce marchand" });
       }
-      if (country) {
-        const aggCountries = await storage.getCryptoAggregatorCountries(agg.id);
-        const countryActive = aggCountries.find(c => c.country.toLowerCase() === country.toLowerCase() && c.active);
-        if (!countryActive) {
-          return res.status(403).json({ message: "Paiement crypto non disponible pour ce pays" });
-        }
+      const aggCountries = await storage.getCryptoAggregatorCountries(agg.id);
+      const countryActive = aggCountries.find(c => c.country.toLowerCase() === country.toLowerCase() && c.active);
+      if (!countryActive) {
+        return res.status(403).json({ message: "Paiement crypto non disponible pour ce pays" });
+      }
+      const merchantCountriesAll = await storage.getMerchantCountries(merchant.id);
+      const merchantCountryActive = merchantCountriesAll.find(mc => mc.country.toLowerCase() === country.toLowerCase() && mc.active !== false);
+      if (!merchantCountryActive) {
+        return res.status(403).json({ message: "Ce pays n'est pas activé pour ce marchand" });
       }
       const XOF_PER_USD = parseInt(process.env.XOF_PER_USD || "600", 10);
       const amountUsd = parseFloat((amountFcfaNum / XOF_PER_USD).toFixed(2));
