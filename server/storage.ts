@@ -2,6 +2,7 @@ import {
   admins, merchants, merchantCountries, transactions, smsLogs, numbers, settings, loginLogs,
   merchantPins, apiLogs, pendingPayments, webhookLogs, telegramActivationCodes, paymentLinks,
   walletTransfers, walletTransferCountries, withdrawals, withdrawalOperators, statsBaselines,
+  cryptoAggregators, cryptoAggregatorCountries, cryptoAggregatorMerchants, cryptoTransactions,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
@@ -14,6 +15,10 @@ import {
   type WalletTransferCountry, type InsertWalletTransferCountry,
   type Withdrawal, type InsertWithdrawal,
   type WithdrawalOperator, type InsertWithdrawalOperator,
+  type CryptoAggregator, type InsertCryptoAggregator,
+  type CryptoAggregatorCountry, type InsertCryptoAggregatorCountry,
+  type CryptoAggregatorMerchant, type InsertCryptoAggregatorMerchant,
+  type CryptoTransaction, type InsertCryptoTransaction,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and, gte, lt, inArray } from "drizzle-orm";
@@ -138,6 +143,24 @@ export interface IStorage {
   createWithdrawalOperator(data: InsertWithdrawalOperator): Promise<WithdrawalOperator>;
   updateWithdrawalOperator(id: number, data: Partial<InsertWithdrawalOperator>): Promise<WithdrawalOperator>;
   deleteWithdrawalOperator(id: number): Promise<void>;
+
+  getCryptoAggregators(): Promise<CryptoAggregator[]>;
+  getCryptoAggregatorById(id: number): Promise<CryptoAggregator | undefined>;
+  createCryptoAggregator(data: InsertCryptoAggregator): Promise<CryptoAggregator>;
+  updateCryptoAggregator(id: number, data: Partial<CryptoAggregator>): Promise<void>;
+  deleteCryptoAggregator(id: number): Promise<void>;
+
+  getCryptoAggregatorCountries(aggregatorId: number): Promise<CryptoAggregatorCountry[]>;
+  upsertCryptoAggregatorCountry(aggregatorId: number, country: string, active: boolean): Promise<void>;
+
+  getCryptoAggregatorMerchants(aggregatorId: number): Promise<CryptoAggregatorMerchant[]>;
+  getCryptoAggregatorsByMerchant(merchantId: number): Promise<(CryptoAggregator & { countries: string[] })[]>;
+  upsertCryptoAggregatorMerchant(aggregatorId: number, merchantId: number, active: boolean): Promise<void>;
+
+  createCryptoTransaction(data: InsertCryptoTransaction): Promise<CryptoTransaction>;
+  getCryptoTransactionByTrackId(trackId: string): Promise<CryptoTransaction | undefined>;
+  updateCryptoTransactionStatus(id: number, status: string, cryptoAmount?: string, walletAddress?: string): Promise<void>;
+  getCryptoTransactions(merchantId?: number): Promise<CryptoTransaction[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -786,6 +809,99 @@ export class DatabaseStorage implements IStorage {
 
   async deleteWithdrawalOperator(id: number): Promise<void> {
     await db.delete(withdrawalOperators).where(eq(withdrawalOperators.id, id));
+  }
+
+  async getCryptoAggregators(): Promise<CryptoAggregator[]> {
+    return db.select().from(cryptoAggregators).orderBy(desc(cryptoAggregators.createdAt));
+  }
+
+  async getCryptoAggregatorById(id: number): Promise<CryptoAggregator | undefined> {
+    const [row] = await db.select().from(cryptoAggregators).where(eq(cryptoAggregators.id, id));
+    return row;
+  }
+
+  async createCryptoAggregator(data: InsertCryptoAggregator): Promise<CryptoAggregator> {
+    const [created] = await db.insert(cryptoAggregators).values(data).returning();
+    return created;
+  }
+
+  async updateCryptoAggregator(id: number, data: Partial<CryptoAggregator>): Promise<void> {
+    await db.update(cryptoAggregators).set(data).where(eq(cryptoAggregators.id, id));
+  }
+
+  async deleteCryptoAggregator(id: number): Promise<void> {
+    await db.delete(cryptoAggregators).where(eq(cryptoAggregators.id, id));
+  }
+
+  async getCryptoAggregatorCountries(aggregatorId: number): Promise<CryptoAggregatorCountry[]> {
+    return db.select().from(cryptoAggregatorCountries).where(eq(cryptoAggregatorCountries.aggregatorId, aggregatorId));
+  }
+
+  async upsertCryptoAggregatorCountry(aggregatorId: number, country: string, active: boolean): Promise<void> {
+    const [existing] = await db.select().from(cryptoAggregatorCountries)
+      .where(and(eq(cryptoAggregatorCountries.aggregatorId, aggregatorId), eq(cryptoAggregatorCountries.country, country)));
+    if (existing) {
+      await db.update(cryptoAggregatorCountries).set({ active })
+        .where(and(eq(cryptoAggregatorCountries.aggregatorId, aggregatorId), eq(cryptoAggregatorCountries.country, country)));
+    } else {
+      await db.insert(cryptoAggregatorCountries).values({ aggregatorId, country, active });
+    }
+  }
+
+  async getCryptoAggregatorMerchants(aggregatorId: number): Promise<CryptoAggregatorMerchant[]> {
+    return db.select().from(cryptoAggregatorMerchants).where(eq(cryptoAggregatorMerchants.aggregatorId, aggregatorId));
+  }
+
+  async getCryptoAggregatorsByMerchant(merchantId: number): Promise<(CryptoAggregator & { countries: string[] })[]> {
+    const rows = await db.select({
+      aggregator: cryptoAggregators,
+      cam: cryptoAggregatorMerchants,
+    }).from(cryptoAggregatorMerchants)
+      .innerJoin(cryptoAggregators, eq(cryptoAggregatorMerchants.aggregatorId, cryptoAggregators.id))
+      .where(and(eq(cryptoAggregatorMerchants.merchantId, merchantId), eq(cryptoAggregatorMerchants.active, true), eq(cryptoAggregators.active, true)));
+
+    const result: (CryptoAggregator & { countries: string[] })[] = [];
+    for (const row of rows) {
+      const countryRows = await db.select().from(cryptoAggregatorCountries)
+        .where(and(eq(cryptoAggregatorCountries.aggregatorId, row.aggregator.id), eq(cryptoAggregatorCountries.active, true)));
+      result.push({ ...row.aggregator, countries: countryRows.map(c => c.country) });
+    }
+    return result;
+  }
+
+  async upsertCryptoAggregatorMerchant(aggregatorId: number, merchantId: number, active: boolean): Promise<void> {
+    const [existing] = await db.select().from(cryptoAggregatorMerchants)
+      .where(and(eq(cryptoAggregatorMerchants.aggregatorId, aggregatorId), eq(cryptoAggregatorMerchants.merchantId, merchantId)));
+    if (existing) {
+      await db.update(cryptoAggregatorMerchants).set({ active })
+        .where(and(eq(cryptoAggregatorMerchants.aggregatorId, aggregatorId), eq(cryptoAggregatorMerchants.merchantId, merchantId)));
+    } else {
+      await db.insert(cryptoAggregatorMerchants).values({ aggregatorId, merchantId, active });
+    }
+  }
+
+  async createCryptoTransaction(data: InsertCryptoTransaction): Promise<CryptoTransaction> {
+    const [created] = await db.insert(cryptoTransactions).values(data).returning();
+    return created;
+  }
+
+  async getCryptoTransactionByTrackId(trackId: string): Promise<CryptoTransaction | undefined> {
+    const [row] = await db.select().from(cryptoTransactions).where(eq(cryptoTransactions.trackId, trackId));
+    return row;
+  }
+
+  async updateCryptoTransactionStatus(id: number, status: string, cryptoAmount?: string, walletAddress?: string): Promise<void> {
+    const data: any = { status };
+    if (cryptoAmount !== undefined) data.cryptoAmount = cryptoAmount;
+    if (walletAddress !== undefined) data.walletAddress = walletAddress;
+    await db.update(cryptoTransactions).set(data).where(eq(cryptoTransactions.id, id));
+  }
+
+  async getCryptoTransactions(merchantId?: number): Promise<CryptoTransaction[]> {
+    if (merchantId) {
+      return db.select().from(cryptoTransactions).where(eq(cryptoTransactions.merchantId, merchantId)).orderBy(desc(cryptoTransactions.createdAt));
+    }
+    return db.select().from(cryptoTransactions).orderBy(desc(cryptoTransactions.createdAt));
   }
 }
 

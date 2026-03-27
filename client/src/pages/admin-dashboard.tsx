@@ -26,12 +26,12 @@ import {
   MessageSquare, Key, DollarSign, Hash, Calendar, Search, Clock,
   RefreshCw, Lock, BookOpen, FileText, Webhook, Zap, ToggleLeft, ToggleRight, Link2,
   Link, BarChart3, TrendingUp, Eye, ToggleLeft as Toggle, ExternalLink, Filter,
-  Check, ChevronsUpDown, ArrowUpRight, Edit3, Wallet, AlertTriangle, RotateCcw
+  Check, ChevronsUpDown, ArrowUpRight, Edit3, Wallet, AlertTriangle, RotateCcw, Bitcoin
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
 
-type AdminTab = "overview" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "virements" | "reversements" | "settings";
+type AdminTab = "overview" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "cryptoagg" | "virements" | "reversements" | "settings";
 
 function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: { staleTime?: number; refetchOnWindowFocus?: boolean }) {
   const { token, logout } = useAuth();
@@ -3604,6 +3604,454 @@ function AdminAccountsCard({ token, currentUserId }: { token: string | null; cur
   );
 }
 
+const SUPPORTED_COUNTRIES = [
+  "Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali",
+  "Burkina Faso", "Cameroun", "Congo Brazzaville", "Gabon", "Congo RDC",
+];
+
+type CryptoAggType = {
+  id: number;
+  name: string;
+  type: string;
+  apiKey: string;
+  payoutApiKey?: string | null;
+  callbackKey?: string | null;
+  active: boolean;
+  createdAt: string;
+  countries: { id: number; aggregatorId: number; country: string; active: boolean }[];
+  assignedMerchants: { id: number; aggregatorId: number; merchantId: number; active: boolean }[];
+};
+
+function CryptoAggPanel() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+
+  const { data: aggregators = [], isLoading, refetch } = useAdminFetch(
+    "/api/admin/crypto-aggregators",
+    ["/api/admin/crypto-aggregators"]
+  );
+  const { data: allMerchants = [] } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
+  const [selectedAgg, setSelectedAgg] = useState<CryptoAggType | null>(null);
+  const [configTab, setConfigTab] = useState<"general" | "countries" | "merchants">("general");
+
+  const [newName, setNewName] = useState("");
+  const [newType, setNewType] = useState("oxapay");
+  const [newApiKey, setNewApiKey] = useState("");
+  const [newPayoutKey, setNewPayoutKey] = useState("");
+  const [newCallbackKey, setNewCallbackKey] = useState("");
+
+  const [editName, setEditName] = useState("");
+  const [editApiKey, setEditApiKey] = useState("");
+  const [editPayoutKey, setEditPayoutKey] = useState("");
+  const [editCallbackKey, setEditCallbackKey] = useState("");
+
+  const adminFetch = async (url: string, opts: RequestInit = {}) => {
+    const res = await fetch(url, {
+      ...opts,
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(opts.headers || {}) },
+    });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+    return res.json();
+  };
+
+  const createMutation = useMutation({
+    mutationFn: async () => adminFetch("/api/admin/crypto-aggregators", {
+      method: "POST",
+      body: JSON.stringify({ name: newName, type: newType, apiKey: newApiKey, payoutApiKey: newPayoutKey, callbackKey: newCallbackKey }),
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/crypto-aggregators"] });
+      toast({ title: "Agrégateur créé" });
+      setAddOpen(false);
+      setNewName(""); setNewApiKey(""); setNewPayoutKey(""); setNewCallbackKey("");
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async (data: { id: number; [key: string]: any }) => {
+      const { id, ...rest } = data;
+      return adminFetch(`/api/admin/crypto-aggregators/${id}`, { method: "PATCH", body: JSON.stringify(rest) });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/crypto-aggregators"] });
+      toast({ title: "Configuration sauvegardée" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => adminFetch(`/api/admin/crypto-aggregators/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/crypto-aggregators"] });
+      toast({ title: "Agrégateur supprimé" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const countryMutation = useMutation({
+    mutationFn: async ({ id, country, active }: { id: number; country: string; active: boolean }) =>
+      adminFetch(`/api/admin/crypto-aggregators/${id}/countries`, { method: "PUT", body: JSON.stringify({ country, active }) }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/crypto-aggregators"] });
+      refetch().then((r) => {
+        if (selectedAgg && r.data) {
+          const updated = (r.data as CryptoAggType[]).find(a => a.id === selectedAgg.id);
+          if (updated) setSelectedAgg(updated);
+        }
+      });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const merchantMutation = useMutation({
+    mutationFn: async ({ id, merchantId, active }: { id: number; merchantId: number; active: boolean }) =>
+      adminFetch(`/api/admin/crypto-aggregators/${id}/merchants`, { method: "PUT", body: JSON.stringify({ merchantId, active }) }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/crypto-aggregators"] });
+      refetch().then((r) => {
+        if (selectedAgg && r.data) {
+          const updated = (r.data as CryptoAggType[]).find(a => a.id === selectedAgg.id);
+          if (updated) setSelectedAgg(updated);
+        }
+      });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const openConfig = (agg: CryptoAggType) => {
+    setSelectedAgg(agg);
+    setEditName(agg.name);
+    setEditApiKey(agg.apiKey);
+    setEditPayoutKey(agg.payoutApiKey || "");
+    setEditCallbackKey(agg.callbackKey || "");
+    setConfigTab("general");
+    setConfigOpen(true);
+  };
+
+  const isCountryActive = (agg: CryptoAggType, country: string) => {
+    const c = agg.countries.find(x => x.country === country);
+    return c?.active ?? false;
+  };
+
+  const isMerchantAssigned = (agg: CryptoAggType, merchantId: number) => {
+    const m = agg.assignedMerchants.find(x => x.merchantId === merchantId);
+    return m?.active ?? false;
+  };
+
+  if (isLoading) return <LoadingSkeleton />;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+          <Bitcoin className="w-5 h-5 text-orange-500" />
+          Agrégateurs Crypto
+        </h2>
+        <Dialog open={addOpen} onOpenChange={setAddOpen}>
+          <DialogTrigger asChild>
+            <Button size="sm" className="gap-1.5" data-testid="button-add-crypto-aggregator">
+              <Plus className="w-4 h-4" /> Ajouter un agrégateur
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Nouvel agrégateur crypto</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 pt-2">
+              <div className="space-y-2">
+                <Label>Nom</Label>
+                <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="ex: OxaPay Principal" data-testid="input-agg-name" />
+              </div>
+              <div className="space-y-2">
+                <Label>Type</Label>
+                <Select value={newType} onValueChange={setNewType}>
+                  <SelectTrigger data-testid="select-agg-type"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="oxapay">OxaPay</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Clé API (Merchant Key)</Label>
+                <Input value={newApiKey} onChange={e => setNewApiKey(e.target.value)} placeholder="Clé API marchande" data-testid="input-agg-apikey" />
+              </div>
+              <div className="space-y-2">
+                <Label>Clé Payout (optionnel)</Label>
+                <Input value={newPayoutKey} onChange={e => setNewPayoutKey(e.target.value)} placeholder="Clé payout OxaPay" data-testid="input-agg-payoutkey" />
+              </div>
+              <div className="space-y-2">
+                <Label>Clé Callback / Webhook (optionnel)</Label>
+                <Input value={newCallbackKey} onChange={e => setNewCallbackKey(e.target.value)} placeholder="Clé HMAC webhook" data-testid="input-agg-callbackkey" />
+              </div>
+              <Button
+                className="w-full"
+                onClick={() => createMutation.mutate()}
+                disabled={createMutation.isPending || !newName.trim() || !newApiKey.trim()}
+                data-testid="button-create-aggregator"
+              >
+                {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
+                Créer l'agrégateur
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {(aggregators as CryptoAggType[]).length === 0 ? (
+        <Card className="p-12 flex flex-col items-center justify-center gap-3 text-center">
+          <Bitcoin className="w-12 h-12 text-muted-foreground/30" />
+          <p className="text-muted-foreground font-medium">Aucun agrégateur crypto configuré</p>
+          <p className="text-xs text-muted-foreground">Ajoutez un agrégateur OxaPay pour accepter les paiements en crypto.</p>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {(aggregators as CryptoAggType[]).map(agg => (
+            <Card key={agg.id} className="overflow-hidden" data-testid={`card-aggregator-${agg.id}`}>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center shrink-0">
+                      <Bitcoin className="w-5 h-5 text-orange-600" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-sm text-foreground truncate" data-testid={`text-agg-name-${agg.id}`}>{agg.name}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs text-muted-foreground capitalize">{agg.type}</span>
+                        <span className="text-xs text-muted-foreground">•</span>
+                        <span className="text-xs text-muted-foreground">
+                          {agg.countries.filter(c => c.active).length} pays
+                        </span>
+                        <span className="text-xs text-muted-foreground">•</span>
+                        <span className="text-xs text-muted-foreground">
+                          {agg.assignedMerchants.filter(m => m.active).length} marchands
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Badge
+                      variant={agg.active ? "default" : "secondary"}
+                      className={agg.active ? "bg-emerald-500 text-white" : ""}
+                      data-testid={`badge-agg-status-${agg.id}`}
+                    >
+                      {agg.active ? "Actif" : "Inactif"}
+                    </Badge>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openConfig(agg)}
+                      data-testid={`button-config-agg-${agg.id}`}
+                    >
+                      <Settings className="w-3.5 h-3.5 mr-1.5" /> Configurer
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => {
+                        if (confirm(`Supprimer l'agrégateur "${agg.name}" ?`)) deleteMutation.mutate(agg.id);
+                      }}
+                      data-testid={`button-delete-agg-${agg.id}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <Dialog open={configOpen} onOpenChange={setConfigOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Bitcoin className="w-4 h-4 text-orange-500" />
+              {selectedAgg?.name}
+            </DialogTitle>
+          </DialogHeader>
+          {selectedAgg && (
+            <div className="space-y-4 pt-2">
+              <div className="flex gap-1 border-b">
+                {(["general", "countries", "merchants"] as const).map(tab => (
+                  <button
+                    key={tab}
+                    onClick={() => setConfigTab(tab)}
+                    className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${configTab === tab ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                    data-testid={`tab-config-${tab}`}
+                  >
+                    {tab === "general" ? "Général" : tab === "countries" ? "Pays" : "Marchands"}
+                  </button>
+                ))}
+              </div>
+
+              {configTab === "general" && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-4 p-3 rounded-lg border">
+                    <div>
+                      <p className="text-sm font-medium">Statut global</p>
+                      <p className="text-xs text-muted-foreground">Activer ou désactiver cet agrégateur</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant={selectedAgg.active ? "outline" : "default"}
+                        className={!selectedAgg.active ? "bg-emerald-600 hover:bg-emerald-700 text-white" : ""}
+                        onClick={() => {
+                          updateMutation.mutate({ id: selectedAgg.id, active: true });
+                          setSelectedAgg({ ...selectedAgg, active: true });
+                        }}
+                        disabled={selectedAgg.active || updateMutation.isPending}
+                        data-testid="button-agg-activate"
+                      >
+                        <CheckCircle className="w-3.5 h-3.5 mr-1" /> Activer
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={!selectedAgg.active ? "outline" : "destructive"}
+                        onClick={() => {
+                          updateMutation.mutate({ id: selectedAgg.id, active: false });
+                          setSelectedAgg({ ...selectedAgg, active: false });
+                        }}
+                        disabled={!selectedAgg.active || updateMutation.isPending}
+                        data-testid="button-agg-deactivate"
+                      >
+                        <XCircle className="w-3.5 h-3.5 mr-1" /> Désactiver
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label>Nom</Label>
+                      <Input value={editName} onChange={e => setEditName(e.target.value)} data-testid="input-edit-name" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Clé API (Merchant Key)</Label>
+                      <Input value={editApiKey} onChange={e => setEditApiKey(e.target.value)} data-testid="input-edit-apikey" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Clé Payout (optionnel)</Label>
+                      <Input value={editPayoutKey} onChange={e => setEditPayoutKey(e.target.value)} data-testid="input-edit-payoutkey" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Clé Callback / Webhook (optionnel)</Label>
+                      <Input value={editCallbackKey} onChange={e => setEditCallbackKey(e.target.value)} data-testid="input-edit-callbackkey" />
+                    </div>
+                    <Button
+                      onClick={() => updateMutation.mutate({
+                        id: selectedAgg.id,
+                        name: editName,
+                        apiKey: editApiKey,
+                        payoutApiKey: editPayoutKey,
+                        callbackKey: editCallbackKey,
+                      })}
+                      disabled={updateMutation.isPending}
+                      data-testid="button-save-general"
+                    >
+                      {updateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Key className="w-4 h-4 mr-2" />}
+                      Sauvegarder
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {configTab === "countries" && (
+                <div className="space-y-3">
+                  <p className="text-xs text-muted-foreground">Activez les pays où les paiements crypto sont disponibles pour cet agrégateur.</p>
+                  <div className="divide-y rounded-lg border overflow-hidden">
+                    {SUPPORTED_COUNTRIES.map(country => {
+                      const isActive = isCountryActive(selectedAgg, country);
+                      return (
+                        <div key={country} className="flex items-center justify-between gap-4 px-4 py-3">
+                          <span className="text-sm font-medium">{country}</span>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant={isActive ? "default" : "outline"}
+                              className={isActive ? "bg-emerald-600 hover:bg-emerald-700 text-white h-7 text-xs" : "h-7 text-xs"}
+                              onClick={() => countryMutation.mutate({ id: selectedAgg.id, country, active: true })}
+                              disabled={isActive || countryMutation.isPending}
+                              data-testid={`button-country-activate-${country.replace(/\s/g, "-")}`}
+                            >
+                              Activer
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant={!isActive ? "secondary" : "outline"}
+                              className="h-7 text-xs"
+                              onClick={() => countryMutation.mutate({ id: selectedAgg.id, country, active: false })}
+                              disabled={!isActive || countryMutation.isPending}
+                              data-testid={`button-country-deactivate-${country.replace(/\s/g, "-")}`}
+                            >
+                              Désactiver
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {configTab === "merchants" && (
+                <div className="space-y-3">
+                  <p className="text-xs text-muted-foreground">Assignez les marchands qui peuvent utiliser cet agrégateur.</p>
+                  <div className="divide-y rounded-lg border overflow-hidden">
+                    {(allMerchants as any[]).map((m: any) => {
+                      const isAssigned = isMerchantAssigned(selectedAgg, m.id);
+                      return (
+                        <div key={m.id} className="flex items-center justify-between gap-4 px-4 py-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{m.name}</p>
+                            <p className="text-xs text-muted-foreground truncate">{m.email}</p>
+                          </div>
+                          <div className="flex gap-2 shrink-0">
+                            <Button
+                              size="sm"
+                              variant={isAssigned ? "default" : "outline"}
+                              className={isAssigned ? "bg-emerald-600 hover:bg-emerald-700 text-white h-7 text-xs" : "h-7 text-xs"}
+                              onClick={() => merchantMutation.mutate({ id: selectedAgg.id, merchantId: m.id, active: true })}
+                              disabled={isAssigned || merchantMutation.isPending}
+                              data-testid={`button-merchant-assign-${m.id}`}
+                            >
+                              Assigner
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant={!isAssigned ? "secondary" : "outline"}
+                              className="h-7 text-xs"
+                              onClick={() => merchantMutation.mutate({ id: selectedAgg.id, merchantId: m.id, active: false })}
+                              disabled={!isAssigned || merchantMutation.isPending}
+                              data-testid={`button-merchant-unassign-${m.id}`}
+                            >
+                              Retirer
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {(allMerchants as any[]).length === 0 && (
+                      <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                        Aucun marchand disponible
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 function LoadingSkeleton() {
   return (
     <div className="space-y-4">
@@ -3639,6 +4087,7 @@ export default function AdminDashboard() {
     { title: "SMS recus", icon: MessageSquare, tab: "sms" },
     { title: "API & PIN", icon: Key, tab: "apikeys" },
     { title: "Paiement", icon: Zap, tab: "omnipay" },
+    { title: "Crypto", icon: Bitcoin, tab: "cryptoagg" },
     { title: "Virements", icon: ArrowUpRight, tab: "virements" },
     { title: "Reversements", icon: Download, tab: "reversements" },
     { title: "Parametres", icon: Settings, tab: "settings" },
@@ -3715,6 +4164,7 @@ export default function AdminDashboard() {
             {activeTab === "sms" && <SmsPanel />}
             {activeTab === "apikeys" && <ApiKeysManagementPanel />}
             {activeTab === "omnipay" && <OmniPayPanel />}
+            {activeTab === "cryptoagg" && <CryptoAggPanel />}
             {activeTab === "virements" && <AdminWalletTransfersPanel />}
             {activeTab === "reversements" && <AdminWithdrawalsPanel />}
             {activeTab === "settings" && <SettingsPanel />}

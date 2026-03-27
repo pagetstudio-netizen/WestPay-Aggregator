@@ -220,6 +220,45 @@ export const statsBaselines = pgTable("stats_baselines", {
   withdrawalsTotal: integer("withdrawals_total").default(0).notNull(),
 });
 
+export const cryptoAggregators = pgTable("crypto_aggregators", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  type: text("type").notNull().default("oxapay"),
+  apiKey: text("api_key").notNull(),
+  payoutApiKey: text("payout_api_key"),
+  callbackKey: text("callback_key"),
+  active: boolean("active").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const cryptoAggregatorCountries = pgTable("crypto_aggregator_countries", {
+  id: serial("id").primaryKey(),
+  aggregatorId: integer("aggregator_id").notNull().references(() => cryptoAggregators.id, { onDelete: "cascade" }),
+  country: text("country").notNull(),
+  active: boolean("active").default(false).notNull(),
+});
+
+export const cryptoAggregatorMerchants = pgTable("crypto_aggregator_merchants", {
+  id: serial("id").primaryKey(),
+  aggregatorId: integer("aggregator_id").notNull().references(() => cryptoAggregators.id, { onDelete: "cascade" }),
+  merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),
+  active: boolean("active").default(true).notNull(),
+});
+
+export const cryptoTransactions = pgTable("crypto_transactions", {
+  id: serial("id").primaryKey(),
+  aggregatorId: integer("aggregator_id").notNull().references(() => cryptoAggregators.id, { onDelete: "cascade" }),
+  merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),
+  trackId: text("track_id").notNull().unique(),
+  amount: integer("amount").notNull(),
+  currency: text("currency").notNull().default("USDT"),
+  cryptoAmount: text("crypto_amount"),
+  status: text("status").notNull().default("new"),
+  walletAddress: text("wallet_address"),
+  callbackUrl: text("callback_url"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const walletTransfers = pgTable("wallet_transfers", {
   id: serial("id").primaryKey(),
   merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),
@@ -302,3 +341,19 @@ export type InsertWithdrawal = z.infer<typeof insertWithdrawalSchema>;
 export const insertWithdrawalOperatorSchema = createInsertSchema(withdrawalOperators).omit({ id: true, createdAt: true });
 export type WithdrawalOperator = typeof withdrawalOperators.$inferSelect;
 export type InsertWithdrawalOperator = z.infer<typeof insertWithdrawalOperatorSchema>;
+
+export const insertCryptoAggregatorSchema = createInsertSchema(cryptoAggregators).omit({ id: true, createdAt: true });
+export type CryptoAggregator = typeof cryptoAggregators.$inferSelect;
+export type InsertCryptoAggregator = z.infer<typeof insertCryptoAggregatorSchema>;
+
+export const insertCryptoAggregatorCountrySchema = createInsertSchema(cryptoAggregatorCountries).omit({ id: true });
+export type CryptoAggregatorCountry = typeof cryptoAggregatorCountries.$inferSelect;
+export type InsertCryptoAggregatorCountry = z.infer<typeof insertCryptoAggregatorCountrySchema>;
+
+export const insertCryptoAggregatorMerchantSchema = createInsertSchema(cryptoAggregatorMerchants).omit({ id: true });
+export type CryptoAggregatorMerchant = typeof cryptoAggregatorMerchants.$inferSelect;
+export type InsertCryptoAggregatorMerchant = z.infer<typeof insertCryptoAggregatorMerchantSchema>;
+
+export const insertCryptoTransactionSchema = createInsertSchema(cryptoTransactions).omit({ id: true, createdAt: true });
+export type CryptoTransaction = typeof cryptoTransactions.$inferSelect;
+export type InsertCryptoTransaction = z.infer<typeof insertCryptoTransactionSchema>;

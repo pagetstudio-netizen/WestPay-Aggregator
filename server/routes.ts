@@ -2901,5 +2901,107 @@ export async function registerRoutes(
     }
   });
 
+  // ─── Agrégateurs Crypto ──────────────────────────────────────────────────
+
+  app.get("/api/admin/crypto-aggregators", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const aggs = await storage.getCryptoAggregators();
+      const result = await Promise.all(aggs.map(async (agg) => {
+        const countries = await storage.getCryptoAggregatorCountries(agg.id);
+        const merchants = await storage.getCryptoAggregatorMerchants(agg.id);
+        return { ...agg, countries, assignedMerchants: merchants };
+      }));
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/crypto-aggregators", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { name, type, apiKey, payoutApiKey, callbackKey } = req.body;
+      if (!name || !apiKey) return res.status(400).json({ message: "Nom et clé API requis" });
+      const agg = await storage.createCryptoAggregator({
+        name: name.trim(),
+        type: type || "oxapay",
+        apiKey: apiKey.trim(),
+        payoutApiKey: payoutApiKey?.trim() || null,
+        callbackKey: callbackKey?.trim() || null,
+        active: false,
+      });
+      res.json(agg);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.patch("/api/admin/crypto-aggregators/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { name, apiKey, payoutApiKey, callbackKey, active } = req.body;
+      const updateData: any = {};
+      if (name !== undefined) updateData.name = name.trim();
+      if (apiKey !== undefined) updateData.apiKey = apiKey.trim();
+      if (payoutApiKey !== undefined) updateData.payoutApiKey = payoutApiKey?.trim() || null;
+      if (callbackKey !== undefined) updateData.callbackKey = callbackKey?.trim() || null;
+      if (active !== undefined) updateData.active = !!active;
+      await storage.updateCryptoAggregator(id, updateData);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/admin/crypto-aggregators/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      await storage.deleteCryptoAggregator(id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/admin/crypto-aggregators/:id/countries", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { country, active } = req.body;
+      if (!country || typeof active !== "boolean") return res.status(400).json({ message: "country et active requis" });
+      await storage.upsertCryptoAggregatorCountry(id, country, active);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/admin/crypto-aggregators/:id/merchants", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { merchantId, active } = req.body;
+      if (!merchantId || typeof active !== "boolean") return res.status(400).json({ message: "merchantId et active requis" });
+      await storage.upsertCryptoAggregatorMerchant(id, Number(merchantId), active);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── Route marchands : lecture des agrégateurs crypto assignés ──────────
+
+  app.get("/api/merchant/crypto-aggregators", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const aggs = await storage.getCryptoAggregatorsByMerchant(merchantId);
+      res.json(aggs.map(a => ({
+        id: a.id,
+        name: a.name,
+        type: a.type,
+        countries: a.countries,
+      })));
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   return httpServer;
 }

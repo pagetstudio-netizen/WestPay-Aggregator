@@ -78,7 +78,7 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 - Admin can view webhook URLs for each merchant in the merchants panel
 
 ## Database Tables
-admins, merchants, merchant_countries, transactions, sms_logs, numbers, settings, login_logs, merchant_pins, api_logs, pending_payments, webhook_logs
+admins, merchants, merchant_countries, transactions, sms_logs, numbers, settings, login_logs, merchant_pins, api_logs, pending_payments, webhook_logs, payment_links, wallet_transfers, wallet_transfer_countries, withdrawals, withdrawal_operators, stats_baselines, telegram_activation_codes, crypto_aggregators, crypto_aggregator_countries, crypto_aggregator_merchants, crypto_transactions
 
 ### Key Column Additions (OmniPay)
 - `merchant_countries.omnipay_enabled` - boolean, enables OmniPay per country (default: true)
@@ -87,6 +87,17 @@ admins, merchants, merchant_countries, transactions, sms_logs, numbers, settings
 - `pending_payments.omnipay_reference` - WestPay-generated reference for OmniPay
 - `pending_payments.omnipay_tx_id` - OmniPay transaction ID
 - `pending_payments.omnipay_payment_url` - Wave payment URL
+
+## OxaPay Crypto Aggregator (Task #3 — Admin Backend)
+- Admin-only configuration; merchants only see it if assigned
+- New "Crypto" sidebar tab in admin dashboard
+- Admin can create, configure, enable/disable aggregators
+- Per-aggregator country activation and merchant assignment
+- SDK module: `server/oxapay.ts` (createInvoice, getInvoiceStatus, verifyWebhookSignature)
+- New DB tables: crypto_aggregators, crypto_aggregator_countries, crypto_aggregator_merchants, crypto_transactions
+- Admin API routes: GET/POST/PATCH/DELETE /api/admin/crypto-aggregators, PUT countries/merchants
+- Merchant read route: GET /api/merchant/crypto-aggregators (active aggregators for that merchant)
+- Task #4 (merchant UI + payment page) still pending
 
 ## OmniPay Payment Flow
 1. Customer enters phone number and name on payment page
