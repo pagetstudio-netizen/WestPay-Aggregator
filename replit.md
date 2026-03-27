@@ -88,16 +88,23 @@ admins, merchants, merchant_countries, transactions, sms_logs, numbers, settings
 - `pending_payments.omnipay_tx_id` - OmniPay transaction ID
 - `pending_payments.omnipay_payment_url` - Wave payment URL
 
-## OxaPay Crypto Aggregator (Task #3 — Admin Backend)
+## OxaPay Crypto Aggregator (Tasks #3 + #4 — COMPLETED)
 - Admin-only configuration; merchants only see it if assigned
 - New "Crypto" sidebar tab in admin dashboard
 - Admin can create, configure, enable/disable aggregators
 - Per-aggregator country activation and merchant assignment
-- SDK module: `server/oxapay.ts` (createInvoice, getInvoiceStatus, verifyWebhookSignature)
+- SDK module: `server/oxapay.ts` (createInvoice, getStatus, generatePayout, verifyWebhook)
 - New DB tables: crypto_aggregators, crypto_aggregator_countries, crypto_aggregator_merchants, crypto_transactions
 - Admin API routes: GET/POST/PATCH/DELETE /api/admin/crypto-aggregators, PUT countries/merchants
 - Merchant read route: GET /api/merchant/crypto-aggregators (active aggregators for that merchant)
-- Task #4 (merchant UI + payment page) still pending
+- Merchant invoice creation: POST /api/merchant/crypto/invoice (Bearer token or X-API-KEY)
+- Merchant transactions: GET /api/merchant/crypto/transactions
+- Public status: GET /api/crypto/status/:trackId (polls OxaPay, updates DB)
+- Webhook callback: POST /api/oxapay/callback (HMAC verification, status update)
+- Admin transactions: GET /api/admin/crypto/transactions
+- Merchant dashboard: "Crypto" tab shows assigned aggregators + recent transactions + API doc
+- Public payment page: /pay/crypto/:trackId (QR code, address, countdown timer, auto-polling every 10s)
+- Payment URL format: https://westpay.cloud/pay/crypto/{trackId}
 
 ## OmniPay Payment Flow
 1. Customer enters phone number and name on payment page

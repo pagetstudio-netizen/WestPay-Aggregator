@@ -19,6 +19,13 @@ import {
   OMNIPAY_ERRORS,
   type OmniPayCallbackPayload,
 } from "./omnipay";
+import {
+  createInvoice as oxapayCreateInvoice,
+  getStatus as oxapayGetStatus,
+  verifyWebhook as oxapayVerifyWebhook,
+  generateOxaPayReference,
+  type OxaPayWebhookPayload,
+} from "./oxapay";
 
 const JWT_SECRET = process.env.SESSION_SECRET || "westpay-secret-key-change-me";
 
@@ -2998,6 +3005,184 @@ export async function registerRoutes(
         type: a.type,
         countries: a.countries,
       })));
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── Crypto : créer une invoice OxaPay (marchands) ───────────────────────
+
+  app.post("/api/merchant/crypto/invoice", apiKeyAuthMiddleware, async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const { aggregatorId, amount, currency, description, orderId, callbackUrl, returnUrl } = req.body;
+      if (!aggregatorId || !amount || !currency) {
+        return res.status(400).json({ message: "aggregatorId, amount et currency sont requis" });
+      }
+      const amountNum = Number(amount);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        return res.status(400).json({ message: "Montant invalide" });
+      }
+      const agg = await storage.getCryptoAggregatorById(Number(aggregatorId));
+      if (!agg || !agg.active) {
+        return res.status(404).json({ message: "Agrégateur crypto introuvable ou inactif" });
+      }
+      const merchants = await storage.getCryptoAggregatorMerchants(agg.id);
+      const assigned = merchants.find(m => m.merchantId === merchantId && m.active);
+      if (!assigned) {
+        return res.status(403).json({ message: "Cet agrégateur ne vous est pas assigné" });
+      }
+      const internalRef = generateOxaPayReference();
+      const invoiceCallbackUrl = callbackUrl || `${process.env.APP_URL || "https://westpay.cloud"}/api/oxapay/callback`;
+      const invoiceResult = await oxapayCreateInvoice(agg.apiKey, {
+        amount: amountNum,
+        currency: currency.toUpperCase(),
+        lifeTime: 30,
+        feePaidByPayer: 0,
+        callbackUrl: invoiceCallbackUrl,
+        ...(returnUrl && { returnUrl }),
+        ...(description && { description }),
+        ...(orderId && { orderId }),
+      });
+      if (invoiceResult.result !== 100 || !invoiceResult.trackId) {
+        return res.status(502).json({ message: invoiceResult.message || "Échec de création de l'invoice OxaPay" });
+      }
+      const cryptoTx = await storage.createCryptoTransaction({
+        aggregatorId: agg.id,
+        merchantId,
+        trackId: invoiceResult.trackId,
+        amount: amountNum,
+        currency: currency.toUpperCase(),
+        status: "new",
+        callbackUrl: invoiceCallbackUrl,
+      });
+      res.json({
+        success: true,
+        trackId: invoiceResult.trackId,
+        payLink: invoiceResult.payLink,
+        expiredAt: invoiceResult.expiredAt,
+        paymentUrl: `${process.env.APP_URL || "https://westpay.cloud"}/pay/crypto/${invoiceResult.trackId}`,
+        transaction: {
+          id: cryptoTx.id,
+          trackId: cryptoTx.trackId,
+          amount: cryptoTx.amount,
+          currency: cryptoTx.currency,
+          status: cryptoTx.status,
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── Crypto : transactions marchand ─────────────────────────────────────
+
+  app.get("/api/merchant/crypto/transactions", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const txs = await storage.getCryptoTransactions(merchantId);
+      res.json(txs);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── Crypto : statut public (sans auth) ────────────────────────────────
+
+  app.get("/api/crypto/status/:trackId", async (req, res) => {
+    try {
+      const { trackId } = req.params;
+      const cryptoTx = await storage.getCryptoTransactionByTrackId(trackId);
+      if (!cryptoTx) {
+        return res.status(404).json({ message: "Transaction introuvable" });
+      }
+      const agg = await storage.getCryptoAggregatorById(cryptoTx.aggregatorId);
+      if (!agg) {
+        return res.status(404).json({ message: "Agrégateur introuvable" });
+      }
+      const oxaStatus = await oxapayGetStatus(agg.apiKey, trackId);
+      if (oxaStatus.result === 100) {
+        const newStatus = oxaStatus.status || cryptoTx.status;
+        if (newStatus !== cryptoTx.status) {
+          await storage.updateCryptoTransactionStatus(
+            cryptoTx.id,
+            newStatus,
+            oxaStatus.payAmount !== undefined ? String(oxaStatus.payAmount) : undefined,
+            oxaStatus.address,
+          );
+        }
+        res.json({
+          trackId,
+          status: newStatus,
+          amount: cryptoTx.amount,
+          currency: cryptoTx.currency,
+          payAmount: oxaStatus.payAmount,
+          payCurrency: oxaStatus.payCurrency,
+          address: oxaStatus.address,
+          network: oxaStatus.network,
+          txHash: oxaStatus.txHash,
+          expiredAt: oxaStatus.expiredAt,
+          createdAt: cryptoTx.createdAt,
+        });
+      } else {
+        res.json({
+          trackId,
+          status: cryptoTx.status,
+          amount: cryptoTx.amount,
+          currency: cryptoTx.currency,
+          createdAt: cryptoTx.createdAt,
+        });
+      }
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── Crypto : webhook OxaPay (callback) ─────────────────────────────────
+
+  app.post("/api/oxapay/callback", async (req, res) => {
+    try {
+      const payload: OxaPayWebhookPayload = req.body;
+      console.log("[OXAPAY CALLBACK]", JSON.stringify(payload));
+      const { trackId, status } = payload;
+      if (!trackId) {
+        return res.status(400).json({ message: "trackId manquant" });
+      }
+      const cryptoTx = await storage.getCryptoTransactionByTrackId(trackId);
+      if (!cryptoTx) {
+        console.warn(`[OXAPAY CALLBACK] Transaction inconnue: ${trackId}`);
+        return res.status(200).json({ ok: true });
+      }
+      const agg = await storage.getCryptoAggregatorById(cryptoTx.aggregatorId);
+      if (agg?.callbackKey) {
+        const valid = oxapayVerifyWebhook(agg.callbackKey, payload);
+        if (!valid) {
+          console.warn(`[OXAPAY CALLBACK] Signature HMAC invalide pour trackId=${trackId}`);
+          return res.status(401).json({ message: "Signature invalide" });
+        }
+      }
+      if (status && status !== cryptoTx.status) {
+        await storage.updateCryptoTransactionStatus(
+          cryptoTx.id,
+          status,
+          payload.payAmount !== undefined ? String(payload.payAmount) : undefined,
+          undefined,
+        );
+        console.log(`[OXAPAY CALLBACK] Transaction ${trackId} mise à jour: ${cryptoTx.status} → ${status}`);
+      }
+      res.status(200).json({ ok: true });
+    } catch (err: any) {
+      console.error("[OXAPAY CALLBACK ERROR]", err.message);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── Crypto : transactions admin ─────────────────────────────────────────
+
+  app.get("/api/admin/crypto/transactions", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const txs = await storage.getCryptoTransactions();
+      res.json(txs);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

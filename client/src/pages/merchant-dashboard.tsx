@@ -21,13 +21,13 @@ import {
   Copy, Globe, DollarSign, Hash, TrendingUp, Search, RefreshCw, BookOpen, Lock, ExternalLink,
   Webhook, Send, CheckCircle2, XCircle, Clock, ArrowUpRight, Zap, Link, QrCode,
   Trash2, Plus, ToggleLeft, ToggleRight, Edit3, BarChart3, MessageCircle, Phone, Receipt, User, Calendar, CreditCard, Filter,
-  Bell, Mail, HelpCircle, Power, Menu, X, ChevronLeft, ChevronRight
+  Bell, Mail, HelpCircle, Power, Menu, X, ChevronLeft, ChevronRight, Bitcoin
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry, Withdrawal } from "@shared/schema";
 import { useLanguage, LANGUAGES } from "@/lib/language";
 
-type MerchantTab = "overview" | "apikeys" | "webhook" | "virements" | "reversements" | "settings" | "paymentlinks" | "transactions";
+type MerchantTab = "overview" | "apikeys" | "webhook" | "virements" | "reversements" | "settings" | "paymentlinks" | "transactions" | "crypto";
 
 function useMerchantFetch(url: string, key: string[], token: string | null) {
   return useQuery({
@@ -1879,12 +1879,231 @@ function LanguageDropdown() {
   );
 }
 
+function CryptoPanel({ token }: { token: string | null }) {
+  const { data: aggregators = [], isLoading: aggLoading } = useMerchantFetch(
+    "/api/merchant/crypto-aggregators",
+    ["/api/merchant/crypto-aggregators"],
+    token
+  );
+  const { data: cryptoTxs = [], isLoading: txLoading } = useMerchantFetch(
+    "/api/merchant/crypto/transactions",
+    ["/api/merchant/crypto/transactions"],
+    token
+  );
+
+  const aggs = aggregators as { id: number; name: string; type: string; countries: string[] }[];
+  const txs = (cryptoTxs as any[]).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
+    new:        { bg: "#e3f2fd", color: "#1976d2", label: "Nouveau" },
+    waiting:    { bg: "#e3f2fd", color: "#1976d2", label: "En attente" },
+    confirming: { bg: "#fff3e0", color: "#fb8c00", label: "Confirmation" },
+    paying:     { bg: "#e8f5e9", color: "#43a047", label: "Reçu" },
+    paid:       { bg: "#e8f5e9", color: "#2e7d32", label: "Confirmé" },
+    expired:    { bg: "#f5f5f5", color: "#757575", label: "Expiré" },
+    failed:     { bg: "#ffebee", color: "#c62828", label: "Échoué" },
+    refunded:   { bg: "#efebe9", color: "#6d4c41", label: "Remboursé" },
+  };
+
+  if (aggLoading) return <MerchantLoadingSkeleton />;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-bold mb-1" style={{ color: "#1a237e" }}>Paiements Crypto</h2>
+        <p className="text-sm" style={{ color: "#546e7a" }}>
+          Acceptez des paiements en cryptomonnaies via OxaPay. Les agrégateurs disponibles ci-dessous ont été activés par l'administrateur.
+        </p>
+      </div>
+
+      {/* Agrégateurs assignés */}
+      <div>
+        <h3 className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#90a4ae" }}>
+          Agrégateurs disponibles
+        </h3>
+        {aggs.length === 0 ? (
+          <div
+            className="rounded-xl p-6 text-center"
+            style={{ background: "#fff", border: "1px solid #e2e8f0" }}
+          >
+            <Bitcoin className="w-10 h-10 mx-auto mb-3" style={{ color: "#e2e8f0" }} />
+            <p className="text-sm font-medium" style={{ color: "#546e7a" }}>
+              Aucun agrégateur crypto ne vous est assigné.
+            </p>
+            <p className="text-xs mt-1" style={{ color: "#90a4ae" }}>
+              Contactez l'administrateur pour activer les paiements crypto.
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {aggs.map((agg) => (
+              <div
+                key={agg.id}
+                className="rounded-xl p-4"
+                style={{ background: "#fff", border: "1px solid #e2e8f0" }}
+                data-testid={`card-crypto-agg-${agg.id}`}
+              >
+                <div className="flex items-center gap-3 mb-3">
+                  <div
+                    className="w-10 h-10 rounded-xl flex items-center justify-center"
+                    style={{ background: "#fff8e1" }}
+                  >
+                    <Bitcoin className="w-5 h-5" style={{ color: "#f59e0b" }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-sm" style={{ color: "#1a237e" }}>{agg.name}</p>
+                    <p className="text-xs uppercase font-semibold" style={{ color: "#90a4ae" }}>{agg.type}</p>
+                  </div>
+                  <span
+                    className="text-xs font-bold px-2 py-0.5 rounded-full"
+                    style={{ background: "#e8f5e9", color: "#2e7d32" }}
+                  >
+                    Actif
+                  </span>
+                </div>
+                {agg.countries.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-3">
+                    {agg.countries.map(c => (
+                      <span
+                        key={c}
+                        className="text-xs px-2 py-0.5 rounded-full font-medium"
+                        style={{ background: "#e3f2fd", color: "#1976d2" }}
+                      >
+                        {c}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div
+                  className="rounded-lg p-3 space-y-1.5"
+                  style={{ background: "#f8fafc", border: "1px solid #e2e8f0" }}
+                >
+                  <p className="text-xs font-bold" style={{ color: "#546e7a" }}>Intégration API</p>
+                  <code
+                    className="block text-xs break-all"
+                    style={{ color: "#1565c0", fontFamily: "monospace" }}
+                  >
+                    POST /api/merchant/crypto/invoice
+                  </code>
+                  <p className="text-xs" style={{ color: "#78909c" }}>
+                    Corps : <span className="font-mono">&#123; aggregatorId: {agg.id}, amount, currency &#125;</span>
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Section documentation intégration */}
+      {aggs.length > 0 && (
+        <div
+          className="rounded-xl p-4"
+          style={{ background: "#e8f5e9", border: "1px solid #a5d6a7" }}
+        >
+          <p className="text-xs font-bold mb-2" style={{ color: "#2e7d32" }}>
+            Comment intégrer les paiements crypto ?
+          </p>
+          <ol className="text-xs space-y-1.5" style={{ color: "#388e3c" }}>
+            <li><strong>1.</strong> Appelez <code className="font-mono bg-white/60 px-1 rounded">POST /api/merchant/crypto/invoice</code> avec votre clé API (header <code className="font-mono bg-white/60 px-1 rounded">X-API-KEY</code>)</li>
+            <li><strong>2.</strong> Redirigez l'utilisateur vers le <code className="font-mono bg-white/60 px-1 rounded">paymentUrl</code> retourné (ou <code className="font-mono bg-white/60 px-1 rounded">payLink</code> OxaPay direct)</li>
+            <li><strong>3.</strong> Recevez le callback webhook sur votre URL configurée</li>
+            <li><strong>4.</strong> Vérifiez le statut via <code className="font-mono bg-white/60 px-1 rounded">GET /api/crypto/status/:trackId</code></li>
+          </ol>
+        </div>
+      )}
+
+      {/* Transactions crypto récentes */}
+      <div>
+        <h3 className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#90a4ae" }}>
+          Transactions récentes
+        </h3>
+        {txLoading ? (
+          <MerchantLoadingSkeleton />
+        ) : txs.length === 0 ? (
+          <div
+            className="rounded-xl p-6 text-center"
+            style={{ background: "#fff", border: "1px solid #e2e8f0" }}
+          >
+            <p className="text-sm font-medium" style={{ color: "#546e7a" }}>Aucune transaction crypto pour le moment.</p>
+          </div>
+        ) : (
+          <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #e2e8f0" }}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr style={{ background: "#f8fafc" }}>
+                    <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Track ID</th>
+                    <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Montant</th>
+                    <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Statut</th>
+                    <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Date</th>
+                    <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Page</th>
+                  </tr>
+                </thead>
+                <tbody style={{ background: "#fff" }}>
+                  {txs.map((tx: any, idx: number) => {
+                    const s = STATUS_STYLES[tx.status] || STATUS_STYLES["new"];
+                    return (
+                      <tr
+                        key={tx.id}
+                        style={{ borderTop: idx > 0 ? "1px solid #f0f4f8" : "none" }}
+                        data-testid={`row-crypto-tx-${tx.id}`}
+                      >
+                        <td className="px-4 py-3 font-mono" style={{ color: "#1565c0" }}>
+                          {tx.trackId.substring(0, 12)}...
+                        </td>
+                        <td className="px-4 py-3 font-semibold" style={{ color: "#1a237e" }}>
+                          {tx.amount} {tx.currency}
+                          {tx.cryptoAmount && (
+                            <span className="block font-normal" style={{ color: "#90a4ae" }}>
+                              {tx.cryptoAmount} crypto
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className="px-2 py-0.5 rounded-full font-bold"
+                            style={{ background: s.bg, color: s.color }}
+                          >
+                            {s.label}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3" style={{ color: "#546e7a" }}>
+                          {new Date(tx.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                        </td>
+                        <td className="px-4 py-3">
+                          <a
+                            href={`/pay/crypto/${tx.trackId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 font-semibold hover:underline"
+                            style={{ color: "#1976d2" }}
+                            data-testid={`link-crypto-payment-${tx.id}`}
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            Voir
+                          </a>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const NAV_ITEMS: { key: MerchantTab; icon: any; color: string }[] = [
   { key: "overview",      icon: BarChart3,    color: "#1976d2" },
   { key: "transactions",  icon: Receipt,      color: "#26a69a" },
   { key: "virements",     icon: ArrowRightLeft, color: "#7e57c2" },
   { key: "reversements",  icon: Download,     color: "#fb8c00" },
   { key: "paymentlinks",  icon: Link,         color: "#e57373" },
+  { key: "crypto",        icon: Bitcoin,      color: "#f59e0b" },
   { key: "apikeys",       icon: Key,          color: "#039be5" },
   { key: "webhook",       icon: Webhook,      color: "#43a047" },
   { key: "settings",      icon: Settings,     color: "#6d4c41" },
@@ -1959,7 +2178,14 @@ function MerchantSidebarContent({
           <NavItem
             key={item.key}
             icon={item.icon}
-            label={t(item.key === "virements" ? "transfers" : item.key === "reversements" ? "withdrawals" : item.key === "paymentlinks" ? "paymentlinks" : item.key === "apikeys" ? "apikeys" : item.key)}
+            label={
+              item.key === "virements" ? t("transfers") :
+              item.key === "reversements" ? t("withdrawals") :
+              item.key === "paymentlinks" ? t("paymentlinks") :
+              item.key === "apikeys" ? t("apikeys") :
+              item.key === "crypto" ? "Crypto" :
+              t(item.key)
+            }
             color={item.color}
             active={activeTab === item.key}
             collapsed={collapsed}
@@ -2105,7 +2331,7 @@ export default function MerchantDashboard() {
                   <currentItem.icon className="w-3.5 h-3.5" style={{ color: currentItem.color }} />
                 </div>
                 <span className="text-sm font-semibold text-white/80 hidden sm:block">
-                  {t(activeTab === "virements" ? "transfers" : activeTab === "reversements" ? "withdrawals" : activeTab === "paymentlinks" ? "paymentlinks" : activeTab === "apikeys" ? "apikeys" : activeTab)}
+                  {activeTab === "virements" ? t("transfers") : activeTab === "reversements" ? t("withdrawals") : activeTab === "paymentlinks" ? t("paymentlinks") : activeTab === "apikeys" ? t("apikeys") : activeTab === "crypto" ? "Paiements Crypto" : t(activeTab)}
                 </span>
               </div>
             )}
@@ -2143,6 +2369,7 @@ export default function MerchantDashboard() {
           {activeTab === "apikeys"       && <ApiKeysPanel token={token} />}
           {activeTab === "webhook"       && <WebhookPanel token={token} />}
           {activeTab === "settings"      && <MerchantSettingsPanel token={token} />}
+          {activeTab === "crypto"        && <CryptoPanel token={token} />}
         </main>
       </div>
     </div>
