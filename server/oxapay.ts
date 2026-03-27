@@ -3,7 +3,6 @@ import crypto from "crypto";
 const OXAPAY_BASE_URL = "https://api.oxapay.com/v1";
 
 export interface OxaPayInvoiceRequest {
-  merchant: string;
   amount: number;
   currency: string;
   lifeTime?: number;
@@ -41,6 +40,22 @@ export interface OxaPayStatusResponse {
   expiredAt?: string;
 }
 
+export interface OxaPayPayoutRequest {
+  address: string;
+  amount: number;
+  currency: string;
+  callbackUrl?: string;
+  description?: string;
+  orderId?: string;
+}
+
+export interface OxaPayPayoutResponse {
+  result: number;
+  message?: string;
+  trackId?: string;
+  status?: string;
+}
+
 export interface OxaPayWebhookPayload {
   trackId?: string;
   status?: string;
@@ -66,14 +81,17 @@ export const OXAPAY_STATUS = {
   REFUNDED: "refunded",
 } as const;
 
-async function oxapayRequest<T>(endpoint: string, payload: Record<string, any>): Promise<T> {
+async function oxapayRequest<T>(apiKey: string, endpoint: string, payload: Record<string, any>): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
 
   try {
     const response = await fetch(`${OXAPAY_BASE_URL}${endpoint}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "merchant_api_key": apiKey,
+      },
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
@@ -90,21 +108,20 @@ async function oxapayRequest<T>(endpoint: string, payload: Record<string, any>):
   }
 }
 
-export async function createInvoice(params: OxaPayInvoiceRequest): Promise<OxaPayInvoiceResponse> {
-  console.log(`[OXAPAY] Création invoice: ${params.amount} ${params.currency} - Merchant: ${params.merchant.substring(0, 8)}...`);
+export async function createInvoice(merchantApiKey: string, params: OxaPayInvoiceRequest): Promise<OxaPayInvoiceResponse> {
+  console.log(`[OXAPAY] Création invoice: ${params.amount} ${params.currency}`);
 
-  const result = await oxapayRequest<OxaPayInvoiceResponse>("/merchants/request", {
-    merchant: params.merchant,
+  const result = await oxapayRequest<OxaPayInvoiceResponse>(merchantApiKey, "/merchants/request", {
     amount: params.amount,
     currency: params.currency,
     lifeTime: params.lifeTime ?? 30,
     feePaidByPayer: params.feePaidByPayer ?? 0,
     underPaidCover: params.underPaidCover ?? 0,
-    callbackUrl: params.callbackUrl,
-    returnUrl: params.returnUrl,
-    description: params.description,
-    orderId: params.orderId,
-    email: params.email,
+    ...(params.callbackUrl && { callbackUrl: params.callbackUrl }),
+    ...(params.returnUrl && { returnUrl: params.returnUrl }),
+    ...(params.description && { description: params.description }),
+    ...(params.orderId && { orderId: params.orderId }),
+    ...(params.email && { email: params.email }),
   });
 
   if (result.result === 100) {
@@ -116,16 +133,34 @@ export async function createInvoice(params: OxaPayInvoiceRequest): Promise<OxaPa
   return result;
 }
 
-export async function getInvoiceStatus(apiKey: string, trackId: string): Promise<OxaPayStatusResponse> {
+export async function getStatus(merchantApiKey: string, trackId: string): Promise<OxaPayStatusResponse> {
   console.log(`[OXAPAY] Vérification statut - TrackId: ${trackId}`);
-  const result = await oxapayRequest<OxaPayStatusResponse>("/merchants/inquiry", {
-    merchant: apiKey,
-    trackId,
-  });
+  const result = await oxapayRequest<OxaPayStatusResponse>(merchantApiKey, "/merchants/inquiry", { trackId });
   return result;
 }
 
-export function verifyWebhookSignature(callbackKey: string, payload: OxaPayWebhookPayload): boolean {
+export async function generatePayout(payoutApiKey: string, params: OxaPayPayoutRequest): Promise<OxaPayPayoutResponse> {
+  console.log(`[OXAPAY] Payout vers ${params.address}: ${params.amount} ${params.currency}`);
+
+  const result = await oxapayRequest<OxaPayPayoutResponse>(payoutApiKey, "/merchants/payout", {
+    address: params.address,
+    amount: params.amount,
+    currency: params.currency,
+    ...(params.callbackUrl && { callbackUrl: params.callbackUrl }),
+    ...(params.description && { description: params.description }),
+    ...(params.orderId && { orderId: params.orderId }),
+  });
+
+  if (result.result === 100) {
+    console.log(`[OXAPAY] Payout initié - TrackId: ${result.trackId}`);
+  } else {
+    console.error(`[OXAPAY] Échec payout - Code: ${result.result} - ${result.message}`);
+  }
+
+  return result;
+}
+
+export function verifyWebhook(callbackKey: string, payload: OxaPayWebhookPayload): boolean {
   if (!payload.hmac) return false;
 
   const { hmac, ...rest } = payload;
