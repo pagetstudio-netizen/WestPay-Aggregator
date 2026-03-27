@@ -3098,7 +3098,7 @@ export async function registerRoutes(
           return res.status(403).json({ message: "Paiement crypto non disponible pour ce pays" });
         }
       }
-      const XOF_PER_USD = 600;
+      const XOF_PER_USD = parseInt(process.env.XOF_PER_USD || "600", 10);
       const amountUsd = parseFloat((amountFcfaNum / XOF_PER_USD).toFixed(2));
       const callbackUrl = `${process.env.APP_URL || "https://westpay.cloud"}/api/oxapay/callback`;
       const invoiceResult = await oxapayCreateInvoice(agg.apiKey, {
@@ -3135,7 +3135,7 @@ export async function registerRoutes(
         amount: amountFcfaNum,
         currency: "XOF",
         country: country as string,
-        status: "new",
+        status: "pending",
         callbackUrl,
         ...(walletAddress && { walletAddress }),
         ...(cryptoAmount && { cryptoAmount }),
@@ -3272,7 +3272,7 @@ export async function registerRoutes(
         }
       }
       const invoiceCallbackUrl = callbackUrl || `${process.env.APP_URL || "https://westpay.cloud"}/api/oxapay/callback`;
-      const XOF_PER_USD = 600;
+      const XOF_PER_USD = parseInt(process.env.XOF_PER_USD || "600", 10);
       const isXof = currency.toUpperCase() === "XOF" || currency.toUpperCase() === "FCFA";
       const invoiceAmount = isXof ? parseFloat((amountNum / XOF_PER_USD).toFixed(2)) : amountNum;
       const invoiceCurrency = isXof ? "USD" : currency.toUpperCase();
@@ -3298,7 +3298,7 @@ export async function registerRoutes(
         amount: storedAmount,
         currency: storedCurrency,
         ...(country && { country }),
-        status: "new",
+        status: "pending",
         callbackUrl: invoiceCallbackUrl,
       });
       res.json({
