@@ -3819,7 +3819,7 @@ function CryptoAggPanel() {
                     </div>
                     <div className="min-w-0">
                       <p className="font-semibold text-sm text-foreground truncate" data-testid={`text-agg-name-${agg.id}`}>{agg.name}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         <span className="text-xs text-muted-foreground capitalize">{agg.type}</span>
                         <span className="text-xs text-muted-foreground">•</span>
                         <span className="text-xs text-muted-foreground">
@@ -3828,6 +3828,10 @@ function CryptoAggPanel() {
                         <span className="text-xs text-muted-foreground">•</span>
                         <span className="text-xs text-muted-foreground">
                           {agg.assignedMerchants.filter(m => m.active).length} marchands
+                        </span>
+                        <span className="text-xs text-muted-foreground">•</span>
+                        <span className="text-xs text-muted-foreground" data-testid={`text-agg-date-${agg.id}`}>
+                          {new Date(agg.createdAt).toLocaleDateString("fr-FR")}
                         </span>
                       </div>
                     </div>
