@@ -3342,7 +3342,6 @@ export async function registerRoutes(
         console.warn(`[OXAPAY CALLBACK] Signature HMAC invalide pour trackId=${trackId} — agrégateur ${agg.id}`);
         return res.status(401).json({ message: "Signature HMAC invalide" });
       }
-      const alreadyPaid = cryptoTx.status === "paid";
       if (status && status !== cryptoTx.status) {
         await storage.updateCryptoTransactionStatus(
           cryptoTx.id,
@@ -3351,25 +3350,32 @@ export async function registerRoutes(
           undefined,
         );
         console.log(`[OXAPAY CALLBACK] Transaction ${trackId} mise à jour: ${cryptoTx.status} → ${status}`);
-        if (status === "paid" && !alreadyPaid) {
-          const amount = cryptoTx.amount;
-          const merchantCountries = await storage.getMerchantCountries(cryptoTx.merchantId);
-          let targetMC = undefined;
-          if (cryptoTx.country) {
-            targetMC = merchantCountries.find(mc => mc.country.toLowerCase() === cryptoTx.country!.toLowerCase() && mc.active !== false);
-          }
-          if (!targetMC) {
-            targetMC = merchantCountries.find(mc => mc.active !== false);
-          }
-          if (targetMC) {
-            const merchant = await storage.getMerchantById(cryptoTx.merchantId);
-            const netAmount = merchant?.feeExempt ? amount : Math.floor(amount * 0.97);
-            await storage.incrementMerchantCountryBalance(targetMC.id, netAmount);
-            console.log(`[OXAPAY CALLBACK] Crédit marchand #${cryptoTx.merchantId} — pays: ${cryptoTx.country || "non défini"} — merchantCountry #${targetMC.id} (${targetMC.country}) — Brut: ${amount} XOF — Net: ${netAmount} XOF — trackId: ${trackId}`);
+        if (status === "paid") {
+          const freshTx = await storage.getCryptoTransactionByTrackId(trackId);
+          if (!freshTx || freshTx.status !== "paid") {
+            console.warn(`[OXAPAY CALLBACK] Race condition détectée pour ${trackId} — crédit ignoré`);
           } else {
-            console.warn(`[OXAPAY CALLBACK] Aucune merchantCountry active trouvée pour marchand #${cryptoTx.merchantId} — crédit impossible`);
+            const amount = cryptoTx.amount;
+            const merchantCountries = await storage.getMerchantCountries(cryptoTx.merchantId);
+            let targetMC = undefined;
+            if (cryptoTx.country) {
+              targetMC = merchantCountries.find(mc => mc.country.toLowerCase() === cryptoTx.country!.toLowerCase() && mc.active !== false);
+            }
+            if (!targetMC) {
+              targetMC = merchantCountries.find(mc => mc.active !== false);
+            }
+            if (targetMC) {
+              const merchant = await storage.getMerchantById(cryptoTx.merchantId);
+              const netAmount = merchant?.feeExempt ? amount : Math.floor(amount * 0.97);
+              await storage.incrementMerchantCountryBalance(targetMC.id, netAmount);
+              console.log(`[OXAPAY CALLBACK] Crédit marchand #${cryptoTx.merchantId} — pays: ${cryptoTx.country || "non défini"} — merchantCountry #${targetMC.id} (${targetMC.country}) — Brut: ${amount} XOF — Net: ${netAmount} XOF — trackId: ${trackId}`);
+            } else {
+              console.warn(`[OXAPAY CALLBACK] Aucune merchantCountry active trouvée pour marchand #${cryptoTx.merchantId} — crédit impossible`);
+            }
           }
         }
+      } else if (status === cryptoTx.status) {
+        console.log(`[OXAPAY CALLBACK] Statut inchangé pour ${trackId} (${status}) — pas de mise à jour`);
       }
       res.status(200).json({ ok: true });
     } catch (err: any) {

@@ -1988,7 +1988,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                       <span className="font-semibold" style={{ color: "#546e7a" }}>URL webhook OxaPay :</span>
                     </p>
                     <code className="block text-xs break-all px-2 py-1 rounded" style={{ color: "#1565c0", fontFamily: "monospace", background: "#e3f2fd" }}>
-                      https://westpay.cloud/api/oxapay/callback
+                      {window.location.origin}/api/oxapay/callback
                     </code>
                     <p className="text-xs mt-1" style={{ color: "#78909c" }}>
                       Endpoint pour vos invoices :<br />
