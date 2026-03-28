@@ -42,10 +42,13 @@ export default function PaymentPage() {
   const merchantSlug = urlParams.get("merchant") || slugFromPath || "";
   const amountParam = urlParams.get("amount");
   const countryParam = urlParams.get("country") || "";
-  const redirectUrl = urlParams.get("redirect") || "";
+  const redirectUrlParam = urlParams.get("redirect") || "";
   const omnipayStatusParam = urlParams.get("omnipay_status") || "";
+  const refParam = urlParams.get("ref") || "";
 
-  const amount = amountParam ? parseInt(amountParam, 10) : 0;
+  const [amount, setAmount] = useState(amountParam ? parseInt(amountParam, 10) : 0);
+  const [redirectUrl, setRedirectUrl] = useState(redirectUrlParam);
+  const redirectUrlRef = useRef(redirectUrlParam);
 
   const [step, setStep] = useState(omnipayStatusParam === "complete" ? 3 : 1);
   const [merchantInfo, setMerchantInfo] = useState<MerchantInfo | null>(null);
@@ -71,6 +74,18 @@ export default function PaymentPage() {
   const [isCryptoLoading, setIsCryptoLoading] = useState(false);
 
   useEffect(() => {
+    if (omnipayStatusParam === "complete" && refParam) {
+      setIsLoading(false);
+      fetch(`/api/payment/by-ref/${encodeURIComponent(refParam)}`)
+        .then(r => r.json())
+        .then(d => {
+          if (d.amount) setAmount(d.amount);
+          if (d.redirectUrl) { setRedirectUrl(d.redirectUrl); redirectUrlRef.current = d.redirectUrl; }
+          if (d.omnipayReference) setOmnipayReference(d.omnipayReference);
+        })
+        .catch(() => {});
+      return;
+    }
     if (!merchantSlug) {
       setLoadError("Lien de paiement invalide. Parametre 'merchant' manquant.");
       setIsLoading(false);
@@ -269,8 +284,9 @@ export default function PaymentPage() {
       setRedirectCountdown((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          if (redirectUrl) {
-            safeRedirect(redirectUrl, {
+          const currentRedirectUrl = redirectUrlRef.current;
+          if (currentRedirectUrl) {
+            safeRedirect(currentRedirectUrl, {
               status: "success",
               amount: String(amount),
               ref: omnipayReference || "",

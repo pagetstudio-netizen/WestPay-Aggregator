@@ -1362,7 +1362,7 @@ export async function registerRoutes(
         const omnipayOperator = toOmnipayOperatorCode(operator) || (paymentMethod.toLowerCase().includes("wave") ? "wave" : paymentMethod.toLowerCase().includes("mixx") || paymentMethod.toLowerCase().includes("yas") ? "mixx" : undefined);
 
         const callbackBaseUrl = process.env.NODE_ENV === "production" ? "https://westpay.cloud" : `${req.protocol}://${req.get("host")}`;
-        const returnUrl = `${callbackBaseUrl}/pay?merchant=${encodeURIComponent(merchantSlug)}&amount=${parsedAmount}&country=${encodeURIComponent(country)}&omnipay_status=complete${redirectUrl ? "&redirect=" + encodeURIComponent(redirectUrl) : ""}`;
+        const returnUrl = `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
 
         const autoOtp = otp || String(Math.floor(1000 + Math.random() * 9000));
 
@@ -1483,6 +1483,28 @@ export async function registerRoutes(
       });
     } catch (err: any) {
       res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // ─── Récupérer un paiement en attente par référence OmniPay (public) ──────
+
+  app.get("/api/payment/by-ref/:reference", async (req, res) => {
+    try {
+      const { reference } = req.params;
+      const pending = await storage.getPendingPaymentByOmnipayReference(reference);
+      if (!pending) return res.status(404).json({ message: "Paiement introuvable" });
+      const merchant = await storage.getMerchantById(pending.merchantId);
+      res.json({
+        merchantSlug: merchant?.slug || "",
+        merchantName: merchant?.name || "",
+        amount: pending.amount,
+        country: pending.country,
+        redirectUrl: pending.redirectUrl || null,
+        status: pending.status,
+        omnipayReference: pending.omnipayReference,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
     }
   });
 

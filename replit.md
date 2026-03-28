@@ -52,7 +52,7 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 - Payment flow: USSD push sent to customer phone automatically
 - Customer validates on phone, OmniPay sends callback to `/api/omnipay/callback`
 - System verifies HMAC-SHA3-512 signature, credits merchant balance, creates transaction
-- Wave operator: redirects customer to payment_url for validation
+- Wave operator: redirects customer to payment_url for validation; return_url uses simple format `/pay?ref={reference}&omnipay_status=complete` (no country/amount/redirect params to avoid URL complexity issues with OmniPay operators)
 - Merchants can transfer money to customers via OmniPay ("Transfers" tab)
 - Transactions tagged with provider field: "omnipay"
 - OmniPay references prefixed: OP- (payments), TR- (transfers), WP (internal refs)
