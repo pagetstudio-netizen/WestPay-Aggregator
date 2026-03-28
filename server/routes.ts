@@ -179,6 +179,28 @@ async function apiKeyAuthMiddleware(req: Request, res: Response, next: NextFunct
         (req as any).apiKeyMerchantCountry = mc;
         return next();
       }
+    } catch {}
+  }
+
+  const auth = req.headers.authorization;
+  if (auth && auth.startsWith("Bearer ")) {
+    try {
+      const decoded = jwt.verify(auth.split(" ")[1], JWT_SECRET) as any;
+      if (decoded.role === "merchant") {
+        (req as any).user = decoded;
+        return next();
+      }
+    } catch {}
+  }
+
+  return res.status(401).json({ message: "Non autorise. Fournissez un Bearer token JWT ou un header X-API-KEY valide." });
+}
+
+async function cryptoApiKeyAuthMiddleware(req: Request, res: Response, next: NextFunction) {
+  const apiKey = (req.headers["x-api-key"] as string) || "";
+
+  if (apiKey) {
+    try {
       const merchantByCryptoKey = await storage.getMerchantByCryptoApiKey(apiKey);
       if (merchantByCryptoKey) {
         (req as any).user = { id: merchantByCryptoKey.id, role: "merchant" };
@@ -198,7 +220,7 @@ async function apiKeyAuthMiddleware(req: Request, res: Response, next: NextFunct
     } catch {}
   }
 
-  return res.status(401).json({ message: "Non autorise. Fournissez un Bearer token JWT ou un header X-API-KEY valide." });
+  return res.status(401).json({ message: "Non autorise. Fournissez un Bearer token JWT ou un header X-API-KEY crypto (WP-CRYPTO-...) valide." });
 }
 
 async function creditMerchantForCryptoTx(cryptoTx: { id: number; merchantId: number; payCurrency: string | null; payAmount: string | null }): Promise<void> {
@@ -3300,7 +3322,7 @@ export async function registerRoutes(
 
   // ─── Crypto : créer une invoice OxaPay (marchands — API directe) ─────────
 
-  app.post("/api/merchant/crypto/invoice", apiKeyAuthMiddleware, async (req, res) => {
+  app.post("/api/merchant/crypto/invoice", cryptoApiKeyAuthMiddleware, async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
       const { amount, currency, description, orderId, callbackUrl, returnUrl } = req.body;
@@ -3367,7 +3389,7 @@ export async function registerRoutes(
 
   // ─── Crypto : transactions marchand ─────────────────────────────────────
 
-  app.get("/api/merchant/crypto/transactions", apiKeyAuthMiddleware, async (req, res) => {
+  app.get("/api/merchant/crypto/transactions", cryptoApiKeyAuthMiddleware, async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
       const txs = await storage.getCryptoTransactions(merchantId);
@@ -3379,7 +3401,7 @@ export async function registerRoutes(
 
   // ─── Crypto : soldes marchand par devise ─────────────────────────────────
 
-  app.get("/api/merchant/crypto/balances", apiKeyAuthMiddleware, async (req, res) => {
+  app.get("/api/merchant/crypto/balances", cryptoApiKeyAuthMiddleware, async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
       const balances = await storage.getCryptoBalances(merchantId);
@@ -3391,7 +3413,7 @@ export async function registerRoutes(
 
   // ─── Crypto : cryptos disponibles (marchand connecté) ────────────────────
 
-  app.get("/api/merchant/crypto/currencies", apiKeyAuthMiddleware, async (req, res) => {
+  app.get("/api/merchant/crypto/currencies", cryptoApiKeyAuthMiddleware, async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
       const aggs = await storage.getCryptoAggregatorsByMerchant(merchantId);
@@ -3407,7 +3429,7 @@ export async function registerRoutes(
 
   // ─── Crypto : clé API globale marchand ───────────────────────────────────
 
-  app.get("/api/merchant/crypto/api-key", apiKeyAuthMiddleware, async (req, res) => {
+  app.get("/api/merchant/crypto/api-key", cryptoApiKeyAuthMiddleware, async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
       const merchant = await storage.getMerchantById(merchantId);
@@ -3418,7 +3440,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/merchant/crypto/regenerate-api-key", apiKeyAuthMiddleware, async (req, res) => {
+  app.post("/api/merchant/crypto/regenerate-api-key", cryptoApiKeyAuthMiddleware, async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
       const aggs = await storage.getCryptoAggregatorsByMerchant(merchantId);
