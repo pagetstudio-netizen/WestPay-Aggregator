@@ -82,6 +82,13 @@ export default function PaymentPage() {
           if (d.amount) setAmount(d.amount);
           if (d.redirectUrl) { setRedirectUrl(d.redirectUrl); redirectUrlRef.current = d.redirectUrl; }
           if (d.omnipayReference) setOmnipayReference(d.omnipayReference);
+          if (d.merchantSlug || d.merchantName) {
+            setMerchantInfo({
+              name: d.merchantName || d.merchantSlug || "",
+              slug: d.merchantSlug || "",
+              countries: d.country ? [d.country] : [],
+            });
+          }
         })
         .catch(() => {});
       return;
@@ -312,7 +319,7 @@ export default function PaymentPage() {
     );
   }
 
-  if (loadError || !merchantInfo) {
+  if ((loadError || !merchantInfo) && step !== 3) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "#00b050" }}>
         <div className="bg-white rounded-md p-6 max-w-sm w-full text-center space-y-3" style={{ color: "#1f2937" }}>
