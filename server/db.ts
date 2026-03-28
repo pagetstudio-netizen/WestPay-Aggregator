@@ -36,6 +36,7 @@ export async function runMigrations() {
       webhook_url text,
       webhook_secret text,
       telegram_chat_id text,
+      crypto_api_key text,
       created_at timestamp DEFAULT now() NOT NULL
     )`);
 
@@ -310,6 +311,7 @@ export async function runMigrations() {
 
     await client.query(`ALTER TABLE merchants ADD COLUMN IF NOT EXISTS fee_exempt boolean NOT NULL DEFAULT false`);
     await client.query(`ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS omnipay_code text`);
+    await client.query(`ALTER TABLE merchants ADD COLUMN IF NOT EXISTS crypto_api_key text`);
 
     await client.query(`
       UPDATE withdrawal_operators SET omnipay_code = CASE
