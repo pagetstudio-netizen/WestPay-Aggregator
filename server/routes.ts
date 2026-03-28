@@ -2791,9 +2791,9 @@ export async function registerRoutes(
 
       const withdrawalFee = merchant.feeExempt ? 0 : calcWithdrawalFee(amount);
       const netAmount = amount - withdrawalFee;
+      const reference = `WD-${w.id}-${Date.now()}`;
 
       try {
-        const reference = `WD-${w.id}-${Date.now()}`;
         const nameParts = merchant.name.trim().split(/\s+/);
         const wdFirstName = nameParts[0] || merchant.name;
         const wdLastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : nameParts[0] || merchant.name;
