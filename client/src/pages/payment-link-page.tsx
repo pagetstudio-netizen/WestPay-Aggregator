@@ -135,6 +135,8 @@ export default function PaymentLinkPage() {
   const availableMethods = dynamicMethods ?? (PAYMENT_METHODS[selectedCountry] || []);
   const dialCode = DIAL_CODES[selectedCountry] || "+";
   const needsManualOtp = selectedCountry === "Burkina Faso" && selectedMethod === "Orange Money";
+  const orangeUssdCode = selectedCountry === "Cote d'Ivoire" ? "*144#" : selectedCountry === "Mali" ? "#144#" : null;
+  const needsOrangeInstruction = selectedMethod === "Orange Money" && (selectedCountry === "Cote d'Ivoire" || selectedCountry === "Mali");
   const handleSelectMethod = useCallback((m: string) => { setSelectedMethod(m); setOtpCode(""); }, []);
 
   const startPolling = (pId: number) => {
@@ -366,6 +368,23 @@ export default function PaymentLinkPage() {
                 </div>
               )}
 
+              {needsOrangeInstruction && (
+                <div className="rounded-md p-3 space-y-2" style={{ backgroundColor: "#fff7ed", border: "1px solid #fdba74" }} data-testid="orange-instruction-plp">
+                  <p className="text-sm font-semibold" style={{ color: "#c2410c" }}>Orange Money — Instructions de validation</p>
+                  <p className="text-xs" style={{ color: "#9a3412" }}>
+                    Veuillez valider le paiement sur votre téléphone Orange Money.
+                  </p>
+                  <p className="text-xs" style={{ color: "#9a3412" }}>
+                    Si vous ne recevez pas de notification, composez{" "}
+                    <span className="font-mono font-bold">{orangeUssdCode}</span>{" "}
+                    sur votre téléphone.
+                  </p>
+                  <p className="text-xs" style={{ color: "#9a3412" }}>
+                    Ensuite, accédez au menu <strong>Paiement</strong> ou <strong>Transactions</strong>, puis validez l'opération en entrant votre code secret.
+                  </p>
+                </div>
+              )}
+
               <div className="flex items-center justify-end pt-1">
                 <button type="button" onClick={handlePay}
                   disabled={isSubmitting || !payerPhone.trim() || !selectedMethod || (link.amountType === "flexible" && !customAmount) || (needsManualOtp && !otpCode.trim())}
@@ -409,8 +428,22 @@ export default function PaymentLinkPage() {
                     </div>
                     <p className="text-sm mt-4 font-medium" style={{ color: "#374151" }}>Validez le paiement sur votre téléphone</p>
                     <p className="text-xs mt-1" style={{ color: "#6b7280" }}>Composez votre code secret pour confirmer la transaction de {formatAmount(fixedAmount)} F CFA</p>
-                    
                   </div>
+
+                  {needsOrangeInstruction && (
+                    <div className="rounded-md p-3 space-y-1 text-left" style={{ backgroundColor: "#fff7ed", border: "1px solid #fdba74" }} data-testid="orange-instruction-step2-plp">
+                      <p className="text-xs font-semibold" style={{ color: "#c2410c" }}>Orange Money — Comment valider ?</p>
+                      <p className="text-xs" style={{ color: "#9a3412" }}>
+                        Si vous ne recevez pas de notification, composez{" "}
+                        <span className="font-mono font-bold">{orangeUssdCode}</span>{" "}
+                        sur votre téléphone.
+                      </p>
+                      <p className="text-xs" style={{ color: "#9a3412" }}>
+                        Accédez au menu <strong>Paiement</strong> ou <strong>Transactions</strong>, puis validez en entrant votre code secret.
+                      </p>
+                    </div>
+                  )}
+
                   {omnipayPolling && (
                     <div className="flex items-center justify-center gap-2" style={{ color: "#6b7280" }}>
                       <Loader2 className="w-4 h-4 animate-spin" />
