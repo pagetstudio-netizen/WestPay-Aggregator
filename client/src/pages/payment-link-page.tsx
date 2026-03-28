@@ -384,6 +384,13 @@ export default function PaymentLinkPage() {
                     <span className="font-mono font-bold">{orangeUssdCode}</span>{" "}
                     sur votre téléphone, puis accédez au <strong>{orangeMenuHint}</strong>.
                   </p>
+                  {selectedCountry === "Cote d'Ivoire" && (
+                    <p className="text-xs" style={{ color: "#9a3412" }}>
+                      Ou composez directement{" "}
+                      <span className="font-mono font-bold">#144*82#</span>{" "}
+                      pour générer un code de validation.
+                    </p>
+                  )}
                   <p className="text-xs" style={{ color: "#9a3412" }}>
                     Validez l'opération en entrant votre code secret.
                   </p>
@@ -443,6 +450,13 @@ export default function PaymentLinkPage() {
                         <span className="font-mono font-bold">{orangeUssdCode}</span>{" "}
                         sur votre téléphone, puis accédez au <strong>{orangeMenuHint}</strong>.
                       </p>
+                      {selectedCountry === "Cote d'Ivoire" && (
+                        <p className="text-xs" style={{ color: "#9a3412" }}>
+                          Ou composez directement{" "}
+                          <span className="font-mono font-bold">#144*82#</span>{" "}
+                          pour générer un code de validation.
+                        </p>
+                      )}
                       <p className="text-xs" style={{ color: "#9a3412" }}>
                         Validez en entrant votre code secret.
                       </p>

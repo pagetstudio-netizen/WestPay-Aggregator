@@ -668,6 +668,13 @@ export default function PaymentPage() {
                     <span className="font-bold font-mono">{orangeUssdCode}</span>{" "}
                     sur votre telephone, puis accedez au <strong>{orangeMenuHint}</strong>.
                   </p>
+                  {selectedCountry === "Cote d'Ivoire" && (
+                    <p className="text-xs" style={{ color: "#92400e" }}>
+                      Ou composez directement{" "}
+                      <span className="font-bold font-mono">#144*82#</span>{" "}
+                      pour generer un code de validation.
+                    </p>
+                  )}
                   <p className="text-xs" style={{ color: "#92400e" }}>
                     Validez l'operation en entrant votre code secret.
                   </p>
@@ -776,6 +783,13 @@ export default function PaymentPage() {
                         <span className="font-bold font-mono">{orangeUssdCode}</span>{" "}
                         sur votre telephone, puis accedez au <strong>{orangeMenuHint}</strong>.
                       </p>
+                      {selectedCountry === "Cote d'Ivoire" && (
+                        <p className="text-xs" style={{ color: "#92400e" }}>
+                          Ou composez directement{" "}
+                          <span className="font-bold font-mono">#144*82#</span>{" "}
+                          pour generer un code de validation.
+                        </p>
+                      )}
                       <p className="text-xs" style={{ color: "#92400e" }}>
                         Validez en entrant votre code secret.
                       </p>
