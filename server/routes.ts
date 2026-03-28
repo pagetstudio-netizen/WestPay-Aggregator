@@ -3367,7 +3367,7 @@ export async function registerRoutes(
 
   // ─── Crypto : transactions marchand ─────────────────────────────────────
 
-  app.get("/api/merchant/crypto/transactions", authMiddleware("merchant"), async (req, res) => {
+  app.get("/api/merchant/crypto/transactions", apiKeyAuthMiddleware, async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
       const txs = await storage.getCryptoTransactions(merchantId);
@@ -3379,7 +3379,7 @@ export async function registerRoutes(
 
   // ─── Crypto : soldes marchand par devise ─────────────────────────────────
 
-  app.get("/api/merchant/crypto/balances", authMiddleware("merchant"), async (req, res) => {
+  app.get("/api/merchant/crypto/balances", apiKeyAuthMiddleware, async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
       const balances = await storage.getCryptoBalances(merchantId);
@@ -3391,7 +3391,7 @@ export async function registerRoutes(
 
   // ─── Crypto : cryptos disponibles (marchand connecté) ────────────────────
 
-  app.get("/api/merchant/crypto/currencies", authMiddleware("merchant"), async (req, res) => {
+  app.get("/api/merchant/crypto/currencies", apiKeyAuthMiddleware, async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
       const aggs = await storage.getCryptoAggregatorsByMerchant(merchantId);

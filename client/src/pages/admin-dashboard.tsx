@@ -3643,6 +3643,8 @@ function CryptoAggPanel() {
   const [newPayoutKey, setNewPayoutKey] = useState("");
   const [newCallbackKey, setNewCallbackKey] = useState("");
 
+  const [regenCryptoKeys, setRegenCryptoKeys] = useState<Record<number, string>>({});
+
   const [editName, setEditName] = useState("");
   const [editApiKey, setEditApiKey] = useState("");
   const [editPayoutKey, setEditPayoutKey] = useState("");
@@ -3718,6 +3720,23 @@ function CryptoAggPanel() {
           if (updated) setSelectedAgg(updated);
         }
       });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const regenCryptoKeyMutation = useMutation({
+    mutationFn: async (merchantId: number) => {
+      const res = await fetch(`/api/admin/merchant/${merchantId}/crypto/regenerate-key`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error((await res.json()).message);
+      return { merchantId, ...(await res.json()) };
+    },
+    onSuccess: (data: any) => {
+      setRegenCryptoKeys(prev => ({ ...prev, [data.merchantId]: data.cryptoApiKey }));
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
+      toast({ title: "Clé crypto régénérée" });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
@@ -4009,34 +4028,55 @@ function CryptoAggPanel() {
                   <div className="divide-y rounded-lg border overflow-hidden">
                     {(allMerchants as any[]).map((m: any) => {
                       const isAssigned = isMerchantAssigned(selectedAgg, m.id);
+                      const displayKey = regenCryptoKeys[m.id] ?? m.cryptoApiKey;
                       return (
-                        <div key={m.id} className="flex items-center justify-between gap-4 px-4 py-3">
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium truncate">{m.name}</p>
-                            <p className="text-xs text-muted-foreground truncate">{m.email}</p>
+                        <div key={m.id} className="px-4 py-3 space-y-2">
+                          <div className="flex items-center justify-between gap-4">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium truncate">{m.name}</p>
+                              <p className="text-xs text-muted-foreground truncate">{m.email}</p>
+                            </div>
+                            <div className="flex gap-2 shrink-0">
+                              <Button
+                                size="sm"
+                                variant={isAssigned ? "default" : "outline"}
+                                className={isAssigned ? "bg-emerald-600 hover:bg-emerald-700 text-white h-7 text-xs" : "h-7 text-xs"}
+                                onClick={() => merchantMutation.mutate({ id: selectedAgg.id, merchantId: m.id, active: true })}
+                                disabled={isAssigned || merchantMutation.isPending}
+                                data-testid={`button-merchant-assign-${m.id}`}
+                              >
+                                Assigner
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant={!isAssigned ? "secondary" : "outline"}
+                                className="h-7 text-xs"
+                                onClick={() => merchantMutation.mutate({ id: selectedAgg.id, merchantId: m.id, active: false })}
+                                disabled={!isAssigned || merchantMutation.isPending}
+                                data-testid={`button-merchant-unassign-${m.id}`}
+                              >
+                                Retirer
+                              </Button>
+                            </div>
                           </div>
-                          <div className="flex gap-2 shrink-0">
-                            <Button
-                              size="sm"
-                              variant={isAssigned ? "default" : "outline"}
-                              className={isAssigned ? "bg-emerald-600 hover:bg-emerald-700 text-white h-7 text-xs" : "h-7 text-xs"}
-                              onClick={() => merchantMutation.mutate({ id: selectedAgg.id, merchantId: m.id, active: true })}
-                              disabled={isAssigned || merchantMutation.isPending}
-                              data-testid={`button-merchant-assign-${m.id}`}
-                            >
-                              Assigner
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant={!isAssigned ? "secondary" : "outline"}
-                              className="h-7 text-xs"
-                              onClick={() => merchantMutation.mutate({ id: selectedAgg.id, merchantId: m.id, active: false })}
-                              disabled={!isAssigned || merchantMutation.isPending}
-                              data-testid={`button-merchant-unassign-${m.id}`}
-                            >
-                              Retirer
-                            </Button>
-                          </div>
+                          {isAssigned && (
+                            <div className="flex items-center gap-2 bg-muted/50 rounded px-2 py-1.5">
+                              <Key className="w-3 h-3 text-muted-foreground shrink-0" />
+                              <code className="text-xs font-mono text-foreground flex-1 truncate" data-testid={`text-crypto-key-${m.id}`}>
+                                {displayKey || "—"}
+                              </code>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 px-2 text-xs shrink-0"
+                                onClick={() => regenCryptoKeyMutation.mutate(m.id)}
+                                disabled={regenCryptoKeyMutation.isPending}
+                                data-testid={`button-regen-crypto-key-${m.id}`}
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
