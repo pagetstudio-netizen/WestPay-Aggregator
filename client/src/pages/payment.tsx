@@ -148,7 +148,12 @@ export default function PaymentPage() {
 
   const availableMethods = dynamicMethods ?? (PAYMENT_METHODS[selectedCountry] || []);
   const needsManualOtp = selectedCountry === "Burkina Faso" && selectedMethod === "Orange Money";
-  const orangeUssdCode = selectedCountry === "Cote d'Ivoire" ? "*144#" : selectedCountry === "Mali" ? "#144#" : null;
+  const orangeUssdCode = selectedCountry === "Cote d'Ivoire" ? "#144#" : selectedCountry === "Mali" ? "#144#" : null;
+  const orangeMenuHint = selectedCountry === "Cote d'Ivoire"
+    ? "menu Paiement (option 4)"
+    : selectedCountry === "Mali"
+    ? "menu Paiement marchand (option 2)"
+    : null;
   const needsOrangeInstruction = selectedMethod === "Orange Money" && (selectedCountry === "Cote d'Ivoire" || selectedCountry === "Mali");
 
   const handleSelectMethod = useCallback((method: string) => {
@@ -661,10 +666,10 @@ export default function PaymentPage() {
                   <p className="text-xs" style={{ color: "#92400e" }}>
                     Si vous ne recevez pas de notification, composez{" "}
                     <span className="font-bold font-mono">{orangeUssdCode}</span>{" "}
-                    sur votre telephone.
+                    sur votre telephone, puis accedez au <strong>{orangeMenuHint}</strong>.
                   </p>
                   <p className="text-xs" style={{ color: "#92400e" }}>
-                    Ensuite, accedez au menu <strong>Paiement</strong> ou <strong>Transactions</strong>, puis validez l'operation en entrant votre code secret.
+                    Validez l'operation en entrant votre code secret.
                   </p>
                 </div>
               )}
@@ -769,10 +774,10 @@ export default function PaymentPage() {
                       <p className="text-xs" style={{ color: "#92400e" }}>
                         Si vous ne recevez pas de notification, composez{" "}
                         <span className="font-bold font-mono">{orangeUssdCode}</span>{" "}
-                        sur votre telephone.
+                        sur votre telephone, puis accedez au <strong>{orangeMenuHint}</strong>.
                       </p>
                       <p className="text-xs" style={{ color: "#92400e" }}>
-                        Accedez au menu <strong>Paiement</strong> ou <strong>Transactions</strong>, puis validez en entrant votre code secret.
+                        Validez en entrant votre code secret.
                       </p>
                     </div>
                   )}

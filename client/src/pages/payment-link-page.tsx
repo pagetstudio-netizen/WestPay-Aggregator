@@ -135,7 +135,12 @@ export default function PaymentLinkPage() {
   const availableMethods = dynamicMethods ?? (PAYMENT_METHODS[selectedCountry] || []);
   const dialCode = DIAL_CODES[selectedCountry] || "+";
   const needsManualOtp = selectedCountry === "Burkina Faso" && selectedMethod === "Orange Money";
-  const orangeUssdCode = selectedCountry === "Cote d'Ivoire" ? "*144#" : selectedCountry === "Mali" ? "#144#" : null;
+  const orangeUssdCode = selectedCountry === "Cote d'Ivoire" ? "#144#" : selectedCountry === "Mali" ? "#144#" : null;
+  const orangeMenuHint = selectedCountry === "Cote d'Ivoire"
+    ? "menu Paiement (option 4)"
+    : selectedCountry === "Mali"
+    ? "menu Paiement marchand (option 2)"
+    : null;
   const needsOrangeInstruction = selectedMethod === "Orange Money" && (selectedCountry === "Cote d'Ivoire" || selectedCountry === "Mali");
   const handleSelectMethod = useCallback((m: string) => { setSelectedMethod(m); setOtpCode(""); }, []);
 
@@ -377,10 +382,10 @@ export default function PaymentLinkPage() {
                   <p className="text-xs" style={{ color: "#9a3412" }}>
                     Si vous ne recevez pas de notification, composez{" "}
                     <span className="font-mono font-bold">{orangeUssdCode}</span>{" "}
-                    sur votre téléphone.
+                    sur votre téléphone, puis accédez au <strong>{orangeMenuHint}</strong>.
                   </p>
                   <p className="text-xs" style={{ color: "#9a3412" }}>
-                    Ensuite, accédez au menu <strong>Paiement</strong> ou <strong>Transactions</strong>, puis validez l'opération en entrant votre code secret.
+                    Validez l'opération en entrant votre code secret.
                   </p>
                 </div>
               )}
@@ -436,10 +441,10 @@ export default function PaymentLinkPage() {
                       <p className="text-xs" style={{ color: "#9a3412" }}>
                         Si vous ne recevez pas de notification, composez{" "}
                         <span className="font-mono font-bold">{orangeUssdCode}</span>{" "}
-                        sur votre téléphone.
+                        sur votre téléphone, puis accédez au <strong>{orangeMenuHint}</strong>.
                       </p>
                       <p className="text-xs" style={{ color: "#9a3412" }}>
-                        Accédez au menu <strong>Paiement</strong> ou <strong>Transactions</strong>, puis validez en entrant votre code secret.
+                        Validez en entrant votre code secret.
                       </p>
                     </div>
                   )}
