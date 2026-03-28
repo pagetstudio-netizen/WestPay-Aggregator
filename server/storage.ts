@@ -157,6 +157,8 @@ export interface IStorage {
   getCryptoAggregatorMerchants(aggregatorId: number): Promise<CryptoAggregatorMerchant[]>;
   getCryptoAggregatorsByMerchant(merchantId: number): Promise<(CryptoAggregator & { countries: string[] })[]>;
   upsertCryptoAggregatorMerchant(aggregatorId: number, merchantId: number, active: boolean): Promise<void>;
+  getMerchantByCryptoApiKey(apiKey: string): Promise<Merchant | undefined>;
+  updateMerchantCryptoApiKey(merchantId: number, apiKey: string): Promise<void>;
 
   createCryptoTransaction(data: InsertCryptoTransaction): Promise<CryptoTransaction>;
   getCryptoTransactionByTrackId(trackId: string): Promise<CryptoTransaction | undefined>;
@@ -890,6 +892,23 @@ export class DatabaseStorage implements IStorage {
     } else {
       await db.insert(cryptoAggregatorMerchants).values({ aggregatorId, merchantId, active });
     }
+    if (active) {
+      const [merchant] = await db.select().from(merchants).where(eq(merchants.id, merchantId));
+      if (merchant && !merchant.cryptoApiKey) {
+        const { randomBytes } = await import("crypto");
+        const newKey = "WP-CRYPTO-" + randomBytes(20).toString("hex").toUpperCase();
+        await db.update(merchants).set({ cryptoApiKey: newKey }).where(eq(merchants.id, merchantId));
+      }
+    }
+  }
+
+  async getMerchantByCryptoApiKey(apiKey: string): Promise<Merchant | undefined> {
+    const [merchant] = await db.select().from(merchants).where(eq(merchants.cryptoApiKey, apiKey));
+    return merchant;
+  }
+
+  async updateMerchantCryptoApiKey(merchantId: number, apiKey: string): Promise<void> {
+    await db.update(merchants).set({ cryptoApiKey: apiKey }).where(eq(merchants.id, merchantId));
   }
 
   async createCryptoTransaction(data: InsertCryptoTransaction): Promise<CryptoTransaction> {

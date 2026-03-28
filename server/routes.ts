@@ -179,6 +179,11 @@ async function apiKeyAuthMiddleware(req: Request, res: Response, next: NextFunct
         (req as any).apiKeyMerchantCountry = mc;
         return next();
       }
+      const merchantByCryptoKey = await storage.getMerchantByCryptoApiKey(apiKey);
+      if (merchantByCryptoKey) {
+        (req as any).user = { id: merchantByCryptoKey.id, role: "merchant" };
+        return next();
+      }
     } catch {}
   }
 
@@ -3373,6 +3378,49 @@ export async function registerRoutes(
       }
       const currencies = await oxapayGetCurrencies(aggs[0].apiKey);
       res.json(currencies);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── Crypto : clé API globale marchand ───────────────────────────────────
+
+  app.get("/api/merchant/crypto/api-key", apiKeyAuthMiddleware, async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const merchant = await storage.getMerchantById(merchantId);
+      if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
+      res.json({ cryptoApiKey: merchant.cryptoApiKey || null });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/merchant/crypto/regenerate-api-key", apiKeyAuthMiddleware, async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const aggs = await storage.getCryptoAggregatorsByMerchant(merchantId);
+      if (aggs.length === 0) {
+        return res.status(403).json({ message: "Le paiement crypto n'est pas activé pour votre compte" });
+      }
+      const newKey = "WP-CRYPTO-" + crypto.randomBytes(20).toString("hex").toUpperCase();
+      await storage.updateMerchantCryptoApiKey(merchantId, newKey);
+      res.json({ cryptoApiKey: newKey, message: "Clé API crypto régénérée avec succès" });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── Crypto : régénération clé API crypto (admin) ────────────────────────
+
+  app.put("/api/admin/merchant/:id/crypto/regenerate-key", authMiddleware("admin"), async (req, res) => {
+    try {
+      const merchantId = Number(req.params.id);
+      const merchant = await storage.getMerchantById(merchantId);
+      if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
+      const newKey = "WP-CRYPTO-" + crypto.randomBytes(20).toString("hex").toUpperCase();
+      await storage.updateMerchantCryptoApiKey(merchantId, newKey);
+      res.json({ cryptoApiKey: newKey, message: "Clé API crypto régénérée" });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

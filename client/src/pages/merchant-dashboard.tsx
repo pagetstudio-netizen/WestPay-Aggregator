@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth";
 import { useLocation } from "wouter";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -1880,6 +1880,7 @@ function LanguageDropdown() {
 }
 
 function CryptoPanel({ token, user }: { token: string | null; user: any }) {
+  const queryClient = useQueryClient();
   const { data: aggs = [], isLoading: aggLoading } = useMerchantFetch(
     "/api/merchant/crypto-aggregators",
     ["/api/merchant/crypto-aggregators"],
@@ -1895,11 +1896,35 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
     ["/api/merchant/crypto/balances"],
     token
   );
+  const { data: cryptoKeyData } = useMerchantFetch(
+    "/api/merchant/crypto/api-key",
+    ["/api/merchant/crypto/api-key"],
+    token
+  );
 
   const aggList = aggs as { id: number; name: string; type: string; countries: string[] }[];
   const balances = cryptoBalances as { currency: string; balance: string }[];
   const txs = (cryptoTxs as any[]).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const isEnabled = aggList.length > 0;
+  const cryptoApiKey = (cryptoKeyData as any)?.cryptoApiKey || null;
+  const [isRegenerating, setIsRegenerating] = useState(false);
+
+  const handleRegenerateKey = async () => {
+    if (!confirm("Régénérer la clé API crypto ? L'ancienne clé sera immédiatement invalidée.")) return;
+    setIsRegenerating(true);
+    try {
+      const res = await fetch("/api/merchant/crypto/regenerate-api-key", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Échec de la régénération");
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/crypto/api-key"] });
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
 
   const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
     new:        { bg: "#e3f2fd", color: "#1976d2", label: "Nouveau" },
@@ -1976,6 +2001,57 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
             )}
           </div>
 
+          {/* Clé API Crypto */}
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#90a4ae" }}>
+              Clé API Crypto
+            </h3>
+            <div className="rounded-xl p-4 space-y-3" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
+              <p className="text-xs" style={{ color: "#546e7a" }}>
+                Cette clé API est dédiée aux paiements crypto. Elle est globale (non liée à un pays) et peut être utilisée sans aucune configuration mobile money.
+              </p>
+              {cryptoApiKey ? (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <code
+                      className="flex-1 text-xs px-3 py-2 rounded-lg font-mono break-all"
+                      style={{ background: "#f1f5f9", color: "#1565c0", border: "1px solid #e2e8f0" }}
+                      data-testid="text-crypto-api-key"
+                    >
+                      {cryptoApiKey}
+                    </code>
+                    <button
+                      onClick={() => copyToClipboard(cryptoApiKey, "crypto-key")}
+                      className="shrink-0 px-3 py-2 rounded-lg text-xs font-semibold"
+                      style={{ background: copiedKey === "crypto-key" ? "#e8f5e9" : "#e3f2fd", color: copiedKey === "crypto-key" ? "#2e7d32" : "#1565c0" }}
+                      data-testid="btn-copy-crypto-key"
+                    >
+                      {copiedKey === "crypto-key" ? "Copié !" : "Copier"}
+                    </button>
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      onClick={handleRegenerateKey}
+                      disabled={isRegenerating}
+                      className="text-xs px-3 py-1.5 rounded-lg font-semibold"
+                      style={{ background: "#fff8e1", color: "#f59e0b", border: "1px solid #fde68a" }}
+                      data-testid="btn-regenerate-crypto-key"
+                    >
+                      {isRegenerating ? "Régénération..." : "Régénérer la clé"}
+                    </button>
+                  </div>
+                  <p className="text-xs" style={{ color: "#b0bec5" }}>
+                    Utilisez ce header dans vos requêtes : <code className="font-mono" style={{ color: "#546e7a" }}>X-API-KEY: {cryptoApiKey}</code>
+                  </p>
+                </div>
+              ) : (
+                <div className="p-3 rounded-lg text-xs" style={{ background: "#f8fafc", color: "#90a4ae" }}>
+                  Aucune clé API crypto générée. Contactez l'administrateur.
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Documentation API */}
           <div>
             <h3 className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#90a4ae" }}>
@@ -1985,7 +2061,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
               <div className="flex items-start gap-3 p-3 rounded-lg" style={{ background: "#e8f5e9", border: "1px solid #a5d6a7" }}>
                 <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ background: "#2e7d32", color: "#fff", fontSize: 11, fontWeight: 700 }}>✓</div>
                 <p className="text-xs" style={{ color: "#2e7d32" }}>
-                  <strong>Crypto activé sur votre compte.</strong> Utiliser votre clé API (onglet Clés API) pour créer des invoices.
+                  <strong>Crypto activé sur votre compte.</strong> Utilisez votre clé API Crypto (section ci-dessus) pour créer des invoices.
                 </p>
               </div>
 
