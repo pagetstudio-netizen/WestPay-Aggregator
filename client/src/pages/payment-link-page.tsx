@@ -134,14 +134,11 @@ export default function PaymentLinkPage() {
 
   const availableMethods = dynamicMethods ?? (PAYMENT_METHODS[selectedCountry] || []);
   const dialCode = DIAL_CODES[selectedCountry] || "+";
-  const needsManualOtp = selectedCountry === "Burkina Faso" && selectedMethod === "Orange Money";
-  const orangeUssdCode = selectedCountry === "Cote d'Ivoire" ? "#144#" : selectedCountry === "Mali" ? "#144#" : null;
-  const orangeMenuHint = selectedCountry === "Cote d'Ivoire"
-    ? "menu Paiement (option 4)"
-    : selectedCountry === "Mali"
-    ? "menu Paiement marchand (option 2)"
-    : null;
-  const needsOrangeInstruction = selectedMethod === "Orange Money" && (selectedCountry === "Cote d'Ivoire" || selectedCountry === "Mali");
+  const needsManualOtp = selectedMethod === "Orange Money" && (selectedCountry === "Burkina Faso" || selectedCountry === "Cote d'Ivoire");
+  const otpUssdDisplay = selectedCountry === "Burkina Faso" ? "*144*4*6*montant#" : "#144*82#";
+  const orangeUssdCode = selectedCountry === "Mali" ? "#144#" : null;
+  const orangeMenuHint = selectedCountry === "Mali" ? "menu Paiement marchand (option 2)" : null;
+  const needsOrangeInstruction = selectedMethod === "Orange Money" && selectedCountry === "Mali";
   const handleSelectMethod = useCallback((m: string) => { setSelectedMethod(m); setOtpCode(""); }, []);
 
   const startPolling = (pId: number) => {
@@ -354,10 +351,13 @@ export default function PaymentLinkPage() {
               </div>
 
               {needsManualOtp && (
-                <div className="rounded-md p-3 space-y-2" style={{ backgroundColor: "#fff7ed", border: "1px solid #fdba74" }}>
-                  <p className="text-sm font-semibold" style={{ color: "#c2410c" }}>Code OTP requis — Orange Money Burkina Faso</p>
+                <div className="rounded-md p-3 space-y-2" style={{ backgroundColor: "#fff7ed", border: "1px solid #fdba74" }} data-testid="otp-orange-block">
+                  <p className="text-sm font-semibold" style={{ color: "#c2410c" }}>Orange Money — Code OTP requis</p>
                   <p className="text-xs" style={{ color: "#9a3412" }}>
-                    Composez <span className="font-mono font-bold">*144*4*6*{data?.link.amountType === "fixed" ? data.link.amount : (customAmount || "montant")}#</span> sur votre téléphone pour générer votre code OTP, puis saisissez-le ci-dessous.
+                    {selectedCountry === "Burkina Faso"
+                      ? <>Composez <span className="font-mono font-bold">*144*4*6*{data?.link.amountType === "fixed" ? data.link.amount : (customAmount || "montant")}#</span> sur votre téléphone pour générer votre code OTP, puis saisissez-le ci-dessous.</>
+                      : <>Composez <span className="font-mono font-bold">#144*82#</span> sur votre téléphone pour générer votre code OTP, puis saisissez-le ci-dessous.</>
+                    }
                   </p>
                   <input
                     type="text"
@@ -384,13 +384,6 @@ export default function PaymentLinkPage() {
                     <span className="font-mono font-bold">{orangeUssdCode}</span>{" "}
                     sur votre téléphone, puis accédez au <strong>{orangeMenuHint}</strong>.
                   </p>
-                  {selectedCountry === "Cote d'Ivoire" && (
-                    <p className="text-xs" style={{ color: "#9a3412" }}>
-                      Ou composez directement{" "}
-                      <span className="font-mono font-bold">#144*82#</span>{" "}
-                      pour générer un code de validation.
-                    </p>
-                  )}
                   <p className="text-xs" style={{ color: "#9a3412" }}>
                     Validez l'opération en entrant votre code secret.
                   </p>
@@ -450,13 +443,6 @@ export default function PaymentLinkPage() {
                         <span className="font-mono font-bold">{orangeUssdCode}</span>{" "}
                         sur votre téléphone, puis accédez au <strong>{orangeMenuHint}</strong>.
                       </p>
-                      {selectedCountry === "Cote d'Ivoire" && (
-                        <p className="text-xs" style={{ color: "#9a3412" }}>
-                          Ou composez directement{" "}
-                          <span className="font-mono font-bold">#144*82#</span>{" "}
-                          pour générer un code de validation.
-                        </p>
-                      )}
                       <p className="text-xs" style={{ color: "#9a3412" }}>
                         Validez en entrant votre code secret.
                       </p>
