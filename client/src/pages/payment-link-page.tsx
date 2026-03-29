@@ -354,10 +354,13 @@ export default function PaymentLinkPage() {
                 <div className="rounded-md p-3 space-y-2" style={{ backgroundColor: "#fff7ed", border: "1px solid #fdba74" }} data-testid="otp-orange-block">
                   <p className="text-sm font-semibold" style={{ color: "#c2410c" }}>Orange Money — Code OTP requis</p>
                   <p className="text-xs" style={{ color: "#9a3412" }}>
-                    {selectedCountry === "Burkina Faso"
-                      ? <>Composez <span className="font-mono font-bold">*144*4*6*{data?.link.amountType === "fixed" ? data.link.amount : (customAmount || "montant")}#</span> sur votre téléphone pour générer votre code OTP, puis saisissez-le ci-dessous.</>
-                      : <>Composez <span className="font-mono font-bold">#144*82#</span> sur votre téléphone pour générer votre code OTP, puis saisissez-le ci-dessous.</>
-                    }
+                    Composez{" "}
+                    <span className="font-mono font-bold">
+                      {selectedCountry === "Burkina Faso"
+                        ? `*144*4*6*${data?.link.amountType === "fixed" ? data.link.amount : (customAmount || "montant")}#`
+                        : otpUssdDisplay}
+                    </span>{" "}
+                    sur votre téléphone pour générer votre code OTP, puis saisissez-le ci-dessous.
                   </p>
                   <input
                     type="text"
