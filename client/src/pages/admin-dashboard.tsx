@@ -1419,7 +1419,7 @@ function TransactionsPanel() {
                           {tx.omnipayReference && (
                             <div className="flex items-center gap-1 mt-1">
                               <p className="text-xs text-muted-foreground font-mono truncate max-w-[200px]" title={tx.omnipayReference}>Réf: {tx.omnipayReference}</p>
-                              <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={() => copyToClipboard(tx.omnipayReference, "Référence OmniPay")} title="Copier la référence" data-testid={`button-copy-ref-${tx.id}`}>
+                              <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={() => copyToClipboard(tx.omnipayReference, "Référence Westpay")} title="Copier la référence" data-testid={`button-copy-ref-${tx.id}`}>
                                 <Copy className="w-3 h-3" />
                               </Button>
                             </div>
@@ -2297,7 +2297,7 @@ function OmniPayPanel() {
         <CardContent>
           <form onSubmit={(e) => { e.preventDefault(); saveMutation.mutate(); }} className="space-y-4">
             <div className="space-y-2">
-              <Label>Cle API OmniPay (apikey)</Label>
+              <Label>Cle API Westpay (apikey)</Label>
               <Input
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
@@ -2947,7 +2947,7 @@ function AdminWithdrawalsPanel() {
     onSuccess: (data, vars) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawals"] });
       const msg = vars.action === "approve"
-        ? data.omnipayRef ? `Approuvé via OmniPay (Réf: ${data.omnipayRef})` : "Reversement approuvé"
+        ? data.omnipayRef ? `Approuvé par Westpay (Réf: ${data.omnipayRef})` : "Reversement approuvé"
         : "Reversement rejeté (solde restitué)";
       toast({ title: msg });
       setNoteDialogOpen(false);
@@ -3035,7 +3035,7 @@ function AdminWithdrawalsPanel() {
                           <div className="flex gap-2 shrink-0">
                             <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-8"
                               onClick={() => openAction(wd, "approve")} data-testid={`button-approve-wd-${wd.id}`}>
-                              <CheckCircle className="w-3 h-3" />Valider via OmniPay
+                              <CheckCircle className="w-3 h-3" />Valider le reversement
                             </Button>
                             <Button size="sm" variant="destructive" className="gap-1 h-8"
                               onClick={() => openAction(wd, "reject")} data-testid={`button-reject-wd-${wd.id}`}>
@@ -3061,7 +3061,7 @@ function AdminWithdrawalsPanel() {
           <div className="flex gap-2 flex-wrap">
             <div className="relative flex-1 min-w-40">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input className="pl-10" placeholder="Marchand, pays, numéro, réf OmniPay..." value={searchWd} onChange={e => setSearchWd(e.target.value)} data-testid="input-search-wd" />
+              <Input className="pl-10" placeholder="Marchand, pays, numéro, réf Westpay..." value={searchWd} onChange={e => setSearchWd(e.target.value)} data-testid="input-search-wd" />
             </div>
             <div className="relative flex-1 min-w-40">
               <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -3142,7 +3142,7 @@ function AdminWithdrawalsPanel() {
                           </div>
                           {wd.omnipayRef && (
                             <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className="text-xs text-muted-foreground">Réf OmniPay :</span>
+                              <span className="text-xs text-muted-foreground">Réf Westpay :</span>
                               <code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded text-foreground">{wd.omnipayRef}</code>
                               <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => { navigator.clipboard.writeText(wd.omnipayRef!); }} title="Copier la référence" data-testid={`button-copy-ref-${wd.id}`}>
                                 <Copy className="w-3 h-3" />
@@ -3182,7 +3182,7 @@ function AdminWithdrawalsPanel() {
               <div className="rounded border p-3 space-y-2 text-sm">
                 <div className="flex justify-between"><span className="text-muted-foreground">Montant demandé</span><span className="font-semibold">{selectedWd.amount.toLocaleString("fr-FR")} FCFA</span></div>
                 {(selectedWd.fees || 0) > 0 && <>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Frais OmniPay</span><span className="text-orange-500">- {(selectedWd.fees || 0).toLocaleString("fr-FR")} FCFA</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Frais de traitement</span><span className="text-orange-500">- {(selectedWd.fees || 0).toLocaleString("fr-FR")} FCFA</span></div>
                   <div className="flex justify-between border-t pt-2"><span className="font-medium">Net envoyé</span><span className="font-bold text-green-600">{(selectedWd.amount - (selectedWd.fees || 0)).toLocaleString("fr-FR")} FCFA</span></div>
                 </>}
               </div>
@@ -3194,7 +3194,7 @@ function AdminWithdrawalsPanel() {
                 {selectedWd.processedAt && <div className="flex gap-2"><span className="text-muted-foreground w-32 shrink-0">Traité le :</span><span>{new Date(selectedWd.processedAt).toLocaleString("fr-FR", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span></div>}
                 {selectedWd.omnipayRef && (
                   <div className="flex gap-2 items-center">
-                    <span className="text-muted-foreground w-32 shrink-0">Réf OmniPay :</span>
+                    <span className="text-muted-foreground w-32 shrink-0">Réf Westpay :</span>
                     <code className="font-mono text-xs bg-muted px-2 py-1 rounded flex-1 break-all">{selectedWd.omnipayRef}</code>
                     <Button variant="outline" size="sm" className="h-7 text-xs shrink-0" onClick={() => { navigator.clipboard.writeText(selectedWd.omnipayRef!); }} data-testid="button-copy-omnipayref-dialog">
                       <Copy className="w-3 h-3 mr-1" />Copier
@@ -3207,7 +3207,7 @@ function AdminWithdrawalsPanel() {
                 <div className="flex gap-2 pt-2">
                   <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 flex-1"
                     onClick={() => { setDetailDialogOpen(false); openAction(selectedWd, "approve"); }}>
-                    <CheckCircle className="w-3 h-3" />Valider via OmniPay
+                    <CheckCircle className="w-3 h-3" />Valider le reversement
                   </Button>
                   <Button size="sm" variant="destructive" className="gap-1 flex-1"
                     onClick={() => { setDetailDialogOpen(false); openAction(selectedWd, "reject"); }}>
@@ -3223,7 +3223,7 @@ function AdminWithdrawalsPanel() {
       <Dialog open={noteDialogOpen} onOpenChange={setNoteDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{wdAction === "approve" ? "Valider via OmniPay" : "Rejeter le reversement"}</DialogTitle>
+            <DialogTitle>{wdAction === "approve" ? "Valider le reversement" : "Rejeter le reversement"}</DialogTitle>
           </DialogHeader>
           {selectedWd && (
             <div className="space-y-4">
@@ -3237,7 +3237,7 @@ function AdminWithdrawalsPanel() {
                 <p><span className="text-muted-foreground">Date :</span> {new Date(selectedWd.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
               </div>
               {wdAction === "approve" && (
-                <p className="text-xs text-green-700 bg-green-50 dark:bg-green-950 dark:text-green-300 p-2 rounded">Le paiement sera traité via OmniPay si le wallet OmniPay est activé.</p>
+                <p className="text-xs text-green-700 bg-green-50 dark:bg-green-950 dark:text-green-300 p-2 rounded">Le paiement sera traité automatiquement par Westpay.</p>
               )}
               {wdAction === "reject" && (
                 <p className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-950 p-2 rounded">Le solde sera restitué au marchand en cas de rejet.</p>
