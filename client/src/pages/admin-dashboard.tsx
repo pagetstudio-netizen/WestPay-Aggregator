@@ -1273,8 +1273,8 @@ function TransactionsPanel() {
     const matchStatus =
       statusFilter === "all" ||
       (statusFilter === "confirmed" && ["confirmed", "approved", "success", "completed"].includes(t.status)) ||
-      (statusFilter === "failed" && ["failed", "rejected"].includes(t.status)) ||
-      (statusFilter === "pending" && t.status === "pending");
+      (statusFilter === "failed" && ["failed", "rejected", "omnipay_failed"].includes(t.status)) ||
+      (statusFilter === "pending" && ["pending", "omnipay_pending", "submitted"].includes(t.status));
     const matchType =
       typeFilter === "all" ||
       t.type === typeFilter;
@@ -1302,14 +1302,17 @@ function TransactionsPanel() {
   const getTypeBadge = (type: string) => {
     if (type === "withdrawal") return <Badge className="text-xs bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400">Retrait</Badge>;
     if (type === "transfer") return <Badge className="text-xs bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400">Transfert</Badge>;
+    if (type === "pending") return <Badge className="text-xs bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400">En cours</Badge>;
     return <Badge className="text-xs bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400">Paiement</Badge>;
   };
 
   const getStatusBadge = (status: string) => {
     if (["confirmed", "approved", "success", "completed"].includes(status))
       return <Badge variant="default" className="text-xs">{status === "approved" ? "Approuvé" : "Confirmé"}</Badge>;
-    if (["failed", "rejected"].includes(status))
+    if (["failed", "rejected", "omnipay_failed"].includes(status))
       return <Badge variant="destructive" className="text-xs">{status === "rejected" ? "Rejeté" : "Échoué"}</Badge>;
+    if (["omnipay_pending", "submitted"].includes(status))
+      return <Badge className="text-xs bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400">En cours</Badge>;
     return <Badge variant="secondary" className="text-xs">En attente</Badge>;
   };
 
@@ -1358,6 +1361,7 @@ function TransactionsPanel() {
           <SelectContent>
             <SelectItem value="all">Tous types</SelectItem>
             <SelectItem value="payment">Paiements</SelectItem>
+            <SelectItem value="pending">En cours</SelectItem>
             <SelectItem value="withdrawal">Retraits</SelectItem>
             <SelectItem value="transfer">Transferts</SelectItem>
           </SelectContent>
@@ -1393,9 +1397,10 @@ function TransactionsPanel() {
             <Card><CardContent className="p-6 text-center text-muted-foreground text-sm">Aucune transaction pour cette période</CardContent></Card>
           ) : (
             filtered.map((tx: any) => {
-              const isFailed = ["failed", "rejected"].includes(tx.status);
+              const isFailed = ["failed", "rejected", "omnipay_failed"].includes(tx.status);
+              const isPendingInProgress = tx.type === "pending" || ["omnipay_pending", "submitted"].includes(tx.status);
               return (
-                <Card key={tx.id} className={isFailed ? "border-destructive/40 bg-destructive/5 dark:bg-destructive/10" : ""}>
+                <Card key={tx.id} className={isFailed ? "border-destructive/40 bg-destructive/5 dark:bg-destructive/10" : isPendingInProgress ? "border-yellow-300 dark:border-yellow-700" : ""}>
                   <CardContent className="p-4">
                     <div className="space-y-2">
                       <div className="flex items-start justify-between gap-2 flex-wrap">
@@ -1416,7 +1421,18 @@ function TransactionsPanel() {
                             {tx.payerNumber && <p className="text-xs text-muted-foreground">📞 {tx.payerNumber}</p>}
                             {tx.operator && <p className="text-xs text-muted-foreground">📱 {tx.operator}</p>}
                           </div>
-                          {tx.omnipayReference && (
+                          {tx.omnipayReference && isPendingInProgress && (
+                            <div className="mt-2 flex items-center gap-2 rounded-md border border-yellow-300 bg-yellow-50 dark:bg-yellow-900/20 dark:border-yellow-700 px-3 py-2">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-semibold text-yellow-700 dark:text-yellow-400 mb-0.5">Référence à fournir à OmniPay</p>
+                                <code className="text-xs font-mono text-yellow-900 dark:text-yellow-200 break-all">{tx.omnipayReference}</code>
+                              </div>
+                              <Button size="sm" variant="outline" className="shrink-0 h-7 text-xs border-yellow-400 text-yellow-700 hover:bg-yellow-100 dark:text-yellow-300" onClick={() => copyToClipboard(tx.omnipayReference, "Référence OmniPay")} data-testid={`button-copy-ref-${tx.id}`}>
+                                <Copy className="w-3 h-3 mr-1" />Copier
+                              </Button>
+                            </div>
+                          )}
+                          {tx.omnipayReference && !isPendingInProgress && (
                             <div className="flex items-center gap-1 mt-1">
                               <p className="text-xs text-muted-foreground font-mono truncate max-w-[200px]" title={tx.omnipayReference}>Réf: {tx.omnipayReference}</p>
                               <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={() => copyToClipboard(tx.omnipayReference, "Référence Westpay")} title="Copier la référence" data-testid={`button-copy-ref-${tx.id}`}>

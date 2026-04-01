@@ -632,11 +632,12 @@ export async function registerRoutes(
         }
       }
 
-      const [txs, wds, wts, merchantsList] = await Promise.all([
+      const [txs, wds, wts, merchantsList, pendingPays] = await Promise.all([
         storage.getTransactions(),
         storage.getWithdrawals(),
         storage.getWalletTransfers(),
         storage.getMerchants(),
+        storage.getPendingPayments(),
       ]);
 
       const merchantMap = new Map(merchantsList.map(m => [m.id, m.name]));
@@ -695,7 +696,25 @@ export async function registerRoutes(
         createdAt: t.createdAt,
       }));
 
-      let all = [...payments, ...withdrawalItems, ...transferItems];
+      const pendingItems = pendingPays.map(p => ({
+        id: `pp-${p.id}`,
+        rowId: p.id,
+        type: "pending" as const,
+        txId: p.txId || `PP-${p.id}`,
+        amount: p.amount,
+        status: p.status,
+        country: p.country,
+        merchantId: p.merchantId,
+        merchantName: merchantMap.get(p.merchantId) || `Marchand #${p.merchantId}`,
+        payerNumber: p.payerPhone,
+        operator: p.paymentMethod,
+        provider: null,
+        omnipayReference: p.omnipayReference,
+        errorMessage: null,
+        createdAt: p.createdAt,
+      }));
+
+      let all = [...payments, ...withdrawalItems, ...transferItems, ...pendingItems];
 
       if (dateFrom) {
         all = all.filter(t => new Date(t.createdAt!) >= dateFrom!);
