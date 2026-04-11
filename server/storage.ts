@@ -280,11 +280,42 @@ export class DatabaseStorage implements IStorage {
     await db.update(merchantCountries).set({ active }).where(eq(merchantCountries.id, id));
   }
 
-  async getTransactions(merchantId?: number): Promise<Transaction[]> {
-    if (merchantId) {
-      return db.select().from(transactions).where(eq(transactions.merchantId, merchantId)).orderBy(desc(transactions.createdAt));
-    }
-    return db.select().from(transactions).orderBy(desc(transactions.createdAt));
+  async getTransactions(merchantId?: number, opts?: { dateFrom?: Date; dateTo?: Date; limit?: number }): Promise<Transaction[]> {
+    const conditions = [];
+    if (merchantId) conditions.push(eq(transactions.merchantId, merchantId));
+    if (opts?.dateFrom) conditions.push(gte(transactions.createdAt, opts.dateFrom));
+    if (opts?.dateTo) conditions.push(lt(transactions.createdAt, opts.dateTo));
+    let q = db.select().from(transactions);
+    if (conditions.length > 0) q = (q as any).where(and(...conditions));
+    q = (q as any).orderBy(desc(transactions.createdAt));
+    if (opts?.limit) q = (q as any).limit(opts.limit);
+    return q as any;
+  }
+
+  async getMerchantsWithStats(): Promise<(Merchant & { hasPin: boolean; linkCount: number; txCount: number; totalRevenue: number })[]> {
+    const [merchantsList, pinRows, linkRows, txRows] = await Promise.all([
+      db.select().from(merchants).orderBy(desc(merchants.createdAt)),
+      db.select({ merchantId: merchantPins.merchantId }).from(merchantPins),
+      db.select({
+        merchantId: paymentLinks.merchantId,
+        cnt: sql<string>`count(*)`,
+      }).from(paymentLinks).groupBy(paymentLinks.merchantId),
+      db.select({
+        merchantId: transactions.merchantId,
+        cnt: sql<string>`count(*)`,
+        revenue: sql<string>`coalesce(sum(case when status = any(array['confirmed','success','completed']::text[]) then amount else 0 end), 0)`,
+      }).from(transactions).groupBy(transactions.merchantId),
+    ]);
+    const pinSet = new Set(pinRows.map(p => p.merchantId));
+    const linkMap = new Map(linkRows.map(r => [r.merchantId, Number(r.cnt)]));
+    const txMap = new Map(txRows.map(r => [r.merchantId, { count: Number(r.cnt), revenue: Number(r.revenue) }]));
+    return merchantsList.map(m => ({
+      ...m,
+      hasPin: pinSet.has(m.id),
+      linkCount: linkMap.get(m.id) ?? 0,
+      txCount: txMap.get(m.id)?.count ?? 0,
+      totalRevenue: txMap.get(m.id)?.revenue ?? 0,
+    }));
   }
 
   async getTransactionByTxId(txId: string): Promise<Transaction | undefined> {

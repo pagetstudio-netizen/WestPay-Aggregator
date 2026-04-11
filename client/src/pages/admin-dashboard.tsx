@@ -50,8 +50,8 @@ function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: {
       if (!res.ok) throw new Error("Erreur de chargement");
       return res.json();
     },
-    staleTime: opts?.staleTime,
-    refetchOnWindowFocus: opts?.refetchOnWindowFocus,
+    staleTime: opts?.staleTime ?? 30_000,
+    refetchOnWindowFocus: opts?.refetchOnWindowFocus ?? false,
   });
 }
 

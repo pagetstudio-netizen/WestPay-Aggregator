@@ -431,15 +431,7 @@ export async function registerRoutes(
 
   app.get("/api/admin/merchants", authMiddleware("admin"), async (_req, res) => {
     try {
-      const merchantsList = await storage.getMerchants();
-      const result = [];
-      for (const m of merchantsList) {
-        const pin = await storage.getMerchantPin(m.id);
-        const links = await storage.getPaymentLinks(m.id);
-        const txs = await storage.getTransactions(m.id);
-        const totalRevenue = txs.filter(t => t.status === "confirmed").reduce((s, t) => s + t.amount, 0);
-        result.push({ ...m, hasPin: !!pin, linkCount: links.length, txCount: txs.length, totalRevenue });
-      }
+      const result = await (storage as any).getMerchantsWithStats();
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -663,8 +655,11 @@ export async function registerRoutes(
         }
       }
 
+      const hasDateFilter = !!dateFrom || !!dateTo;
+      const txLimit = hasDateFilter ? undefined : 400;
+
       const [txs, wds, wts, merchantsList, pendingPays] = await Promise.all([
-        storage.getTransactions(),
+        storage.getTransactions(undefined, { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined, limit: txLimit }),
         storage.getWithdrawals(),
         storage.getWalletTransfers(),
         storage.getMerchants(),
