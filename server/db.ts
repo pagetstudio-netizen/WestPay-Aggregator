@@ -296,6 +296,8 @@ export async function runMigrations() {
       { name: "Moov Money", type: "Mobile Money", country: "Gabon", dailyLimit: 1000000, gateway: "OmniPay" },
       { name: "Orange Money", type: "Mobile Money", country: "Congo RDC", dailyLimit: 500000, gateway: "OmniPay" },
       { name: "M-Pesa", type: "Mobile Money", country: "Congo RDC", dailyLimit: 500000, gateway: "OmniPay" },
+      { name: "MTN Mobile Money", type: "Mobile Money", country: "Guinee", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "Orange Money", type: "Mobile Money", country: "Guinee", dailyLimit: 1000000, gateway: "OmniPay" },
     ];
 
     for (const op of defaultOperators) {

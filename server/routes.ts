@@ -64,11 +64,18 @@ async function getMbiyoWebhookSecret(): Promise<string | undefined> {
 
 const COLLECTION_FEE_RATE = 0.055;
 const WITHDRAWAL_FEE_RATE = 0.045;
-function calcMerchantCredit(grossAmount: number): number {
-  return Math.floor(grossAmount * (1 - COLLECTION_FEE_RATE));
+const EXTRA_FEE_COUNTRIES = new Set(["Congo Brazzaville", "Congo RDC"]);
+function getCollectionFeeRate(country?: string | null): number {
+  return country && EXTRA_FEE_COUNTRIES.has(country) ? COLLECTION_FEE_RATE + 0.01 : COLLECTION_FEE_RATE;
 }
-function calcWithdrawalFee(amount: number): number {
-  return Math.floor(amount * WITHDRAWAL_FEE_RATE);
+function getWithdrawalFeeRate(country?: string | null): number {
+  return country && EXTRA_FEE_COUNTRIES.has(country) ? WITHDRAWAL_FEE_RATE + 0.01 : WITHDRAWAL_FEE_RATE;
+}
+function calcMerchantCredit(grossAmount: number, country?: string | null): number {
+  return Math.floor(grossAmount * (1 - getCollectionFeeRate(country)));
+}
+function calcWithdrawalFee(amount: number, country?: string | null): number {
+  return Math.floor(amount * getWithdrawalFeeRate(country));
 }
 
 function toOmnipayOperatorCode(operatorName: string | null | undefined): string | undefined {
@@ -86,7 +93,7 @@ const COUNTRY_DIAL_CODES: Record<string, string> = {
   "Togo": "228", "Benin": "229", "Cote d'Ivoire": "225",
   "Senegal": "221", "Mali": "223", "Burkina Faso": "226",
   "Cameroun": "237", "Congo Brazzaville": "242", "Gabon": "241",
-  "Congo RDC": "243",
+  "Congo RDC": "243", "Guinee": "224",
 };
 
 const COUNTRY_ALIASES: Record<string, string> = {
@@ -105,6 +112,7 @@ const COUNTRY_ALIASES: Record<string, string> = {
   "congo rdc": "Congo RDC", "rdc": "Congo RDC", "drc": "Congo RDC",
   "republique democratique du congo": "Congo RDC", "république démocratique du congo": "Congo RDC",
   "democratic republic of congo": "Congo RDC", "democratic republic of the congo": "Congo RDC",
+  "guinee": "Guinee", "guinée": "Guinee", "guinea": "Guinee", "republic of guinea": "Guinee",
   // Codes API (préfixe des clés WestPay : TGO-xxx, BEN-xxx, etc.)
   "tgo": "Togo",
   "ben": "Benin",
@@ -115,6 +123,7 @@ const COUNTRY_ALIASES: Record<string, string> = {
   "cmr": "Cameroun",
   "cog": "Congo Brazzaville",
   "gab": "Gabon",
+  "gin": "Guinee",
   // Codes ISO 3166-1 alpha-2
   "tg": "Togo",
   "bj": "Benin",
@@ -126,6 +135,7 @@ const COUNTRY_ALIASES: Record<string, string> = {
   "cg": "Congo Brazzaville",
   "ga": "Gabon",
   "cd": "Congo RDC", "cod": "Congo RDC",
+  "gn": "Guinee",
 };
 
 function normalizeCountry(country: string): string {
@@ -159,6 +169,7 @@ function generateSecureApiKey(country: string): string {
     "Togo": "TGO", "Benin": "BEN", "Cote d'Ivoire": "CIV",
     "Senegal": "SEN", "Mali": "MLI", "Burkina Faso": "BFA",
     "Cameroun": "CMR", "Congo Brazzaville": "COG", "Gabon": "GAB",
+    "Congo RDC": "COD", "Guinee": "GIN",
   };
   const prefix = prefixes[country] || country.substring(0, 3).toUpperCase();
   const randomPart = crypto.randomBytes(20).toString("hex").toUpperCase();
@@ -1404,6 +1415,7 @@ export async function registerRoutes(
         "Togo": "228", "Benin": "229", "Cote d'Ivoire": "225",
         "Senegal": "221", "Mali": "223", "Burkina Faso": "226",
         "Cameroun": "237", "Congo Brazzaville": "242", "Gabon": "241",
+        "Congo RDC": "243", "Guinee": "224",
       };
       const dialCode = dialCodes[country] || "";
       const cleanPhone = payerPhone.replace(/[\s\-\(\)\+]/g, "");
@@ -1821,7 +1833,7 @@ export async function registerRoutes(
           const existingTx = await storage.getTransactionByTxId(txId);
           if (!existingTx) {
             const payerFullName = [payload.first_name, payload.last_name].filter(Boolean).join(" ") || pending.payerName || null;
-            const merchantCredit1 = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount);
+            const merchantCredit1 = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount, pending.country);
             await storage.createTransaction({
               merchantId: pending.merchantId,
               country: pending.country,
@@ -2028,7 +2040,7 @@ export async function registerRoutes(
         await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
 
         const merchant = await storage.getMerchantById(pending.merchantId);
-        const credit = calcMerchantCredit(pending.amount);
+        const credit = calcMerchantCredit(pending.amount, pending.country);
         await storage.updateMerchantBalance(pending.merchantId, credit);
 
         const txRef = payload.transaction_id || payload.order_id;
@@ -2523,7 +2535,7 @@ export async function registerRoutes(
         }
 
         const smsM2 = await storage.getMerchantById(found.merchantId);
-        const merchantCredit2 = smsM2?.feeExempt ? amount : calcMerchantCredit(amount);
+        const merchantCredit2 = smsM2?.feeExempt ? amount : calcMerchantCredit(amount, found.country);
         await storage.createTransaction({
           merchantId: found.merchantId,
           country: found.country,
@@ -2623,7 +2635,7 @@ export async function registerRoutes(
       }
 
       const smsM3 = await storage.getMerchantById(simNumber.merchantId);
-      const merchantCredit3 = smsM3?.feeExempt ? amount : calcMerchantCredit(amount);
+      const merchantCredit3 = smsM3?.feeExempt ? amount : calcMerchantCredit(amount, simNumber.country);
       await storage.createTransaction({
         merchantId: simNumber.merchantId,
         country: simNumber.country,
@@ -3130,7 +3142,7 @@ export async function registerRoutes(
       notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "pending", mode: "auto" }).catch(() => {});
       notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "pending" }).catch(() => {});
 
-      const withdrawalFee = merchant.feeExempt ? 0 : calcWithdrawalFee(amount);
+      const withdrawalFee = merchant.feeExempt ? 0 : calcWithdrawalFee(amount, mc.country);
       const netAmount = amount - withdrawalFee;
       const reference = mbiyoGenerateRef();
 

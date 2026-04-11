@@ -15,6 +15,7 @@ const COUNTRIES_FR: Record<string, string> = {
   "cote d'ivoire": "🇨🇮 Côte d'Ivoire",
   "mali": "🇲🇱 Mali",
   "senegal": "🇸🇳 Sénégal",
+  "guinee": "🇬🇳 Guinée",
 };
 
 function countryLabel(code: string): string {

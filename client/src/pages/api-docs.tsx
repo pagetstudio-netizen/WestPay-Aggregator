@@ -527,7 +527,9 @@ Content-Type: application/json`} />
                         ["Mali", "+223", "Orange Money"],
                         ["Cameroun", "+237", "MTN Mobile Money, Orange Money"],
                         ["Congo Brazzaville", "+242", "MTN Mobile Money"],
+                        ["Congo RDC", "+243", "Orange Money, M-Pesa"],
                         ["Gabon", "+241", "Airtel Money, Moov Money"],
+                        ["Guinée", "+224", "MTN Mobile Money, Orange Money"],
                       ].map(([pays, code, ops]) => (
                         <tr key={pays} className="border-b last:border-0">
                           <td className="p-2">{pays}</td><td className="p-2 font-mono">{code}</td><td className="p-2">{ops}</td>

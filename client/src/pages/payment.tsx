@@ -19,6 +19,7 @@ const PAYMENT_METHODS: Record<string, string[]> = {
   "Cote d'Ivoire": ["Moov Money", "MTN Mobile Money", "Orange Money", "Wave"],
   "Mali": ["Orange Money"],
   "Senegal": ["Mixx by Yas", "Orange Money", "Wave"],
+  "Guinee": ["MTN Mobile Money", "Orange Money"],
 };
 
 const DIAL_CODES: Record<string, string> = {
@@ -31,6 +32,7 @@ const DIAL_CODES: Record<string, string> = {
   "Cote d'Ivoire": "+225",
   "Mali": "+223",
   "Senegal": "+221",
+  "Guinee": "+224",
 };
 
 export default function PaymentPage() {
