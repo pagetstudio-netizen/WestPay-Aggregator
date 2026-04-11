@@ -1416,7 +1416,8 @@ export async function registerRoutes(
       const cleanPhone = payerPhone.replace(/[\s\-\(\)\+]/g, "");
       const msisdn = cleanPhone.startsWith(dialCode) ? cleanPhone : `${dialCode}${cleanPhone}`;
 
-      const useMbiyo = merchantCountry.payinGateway === "mbiyo";
+      const operatorRecord = await storage.getWithdrawalOperatorByNameAndCountry(paymentMethod, country);
+      const useMbiyo = operatorRecord?.gateway?.toLowerCase() === "mbiyo";
 
       if (useMbiyo) {
         const mbiyoApiKey = await getMbiyoApiKey();
@@ -3118,7 +3119,8 @@ export async function registerRoutes(
       const merchant = await storage.getMerchantById(merchantId);
       if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
 
-      const useMbiyoPayout = mc.payinGateway === "mbiyo";
+      const payoutOpRecord = operator ? await storage.getWithdrawalOperatorByNameAndCountry(operator, mc.country) : null;
+      const useMbiyoPayout = payoutOpRecord?.gateway?.toLowerCase() === "mbiyo";
 
       const w = await storage.createWithdrawal({
         merchantId,
@@ -3272,7 +3274,7 @@ export async function registerRoutes(
       let omnipayRef: string | undefined;
       let fees: number | undefined;
       let sentToProvider = false;
-      const useMbiyoPayout = (w.gateway === "mbiyo") || (mc?.payinGateway === "mbiyo");
+      const useMbiyoPayout = w.gateway === "mbiyo";
 
       if (useMbiyoPayout) {
         const mbiyoApiKey = await getMbiyoApiKey();

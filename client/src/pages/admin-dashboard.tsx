@@ -1529,22 +1529,6 @@ function CountriesPanel() {
     onError: () => toast({ title: "Erreur", description: "Impossible de modifier", variant: "destructive" }),
   });
 
-  const updateGatewayMutation = useMutation({
-    mutationFn: async ({ id, payinGateway }: { id: number; payinGateway: string }) => {
-      const res = await fetch(`/api/admin/merchant-countries/${id}/gateway`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ payinGateway }),
-      });
-      if (!res.ok) throw new Error("Erreur");
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/countries"] });
-      toast({ title: "Gateway mis à jour" });
-    },
-    onError: () => toast({ title: "Erreur", description: "Impossible de modifier le gateway", variant: "destructive" }),
-  });
 
   if (isLoading) return <LoadingSkeleton />;
 
@@ -1720,19 +1704,6 @@ function CountriesPanel() {
                         <Zap className="w-3 h-3 mr-1" />
                         {mc.omnipayEnabled ? "Paiement actif" : "Paiement inactif"}
                       </Button>
-                      <Select
-                        value={mc.payinGateway || "omnipay"}
-                        onValueChange={(v) => updateGatewayMutation.mutate({ id: mc.id, payinGateway: v })}
-                        disabled={updateGatewayMutation.isPending}
-                      >
-                        <SelectTrigger className="h-8 w-28 text-xs" data-testid={`select-gateway-${mc.id}`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="omnipay">OmniPay</SelectItem>
-                          <SelectItem value="mbiyo">Mbiyo</SelectItem>
-                        </SelectContent>
-                      </Select>
                       {editingBalance !== mc.id && (
                         <Button
                           variant="outline"
@@ -2934,7 +2905,7 @@ const COUNTRIES_LIST = [
   "Tchad", "Centrafrique", "Guinee Equatoriale",
 ];
 const OPERATOR_TYPES = ["Mobile Money", "Virement bancaire", "Carte bancaire", "Cryptomonnaie", "Autre"];
-const GATEWAYS = ["OmniPay", "WiniPayer", "MaishaPay", "Manuel"];
+const GATEWAYS = ["OmniPay", "Mbiyo", "WiniPayer", "MaishaPay", "Manuel"];
 
 function WithdrawalOperatorsPanel() {
   const { token } = useAuth();
@@ -3099,6 +3070,7 @@ function WithdrawalOperatorsPanel() {
                 <SelectTrigger data-testid="select-op-gateway"><SelectValue /></SelectTrigger>
                 <SelectContent>{GATEWAYS.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}</SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">La passerelle sélectionnée sera utilisée pour tous les paiements et retraits via cet opérateur, pour tous les marchands de ce pays.</p>
             </div>
             <div className="flex items-center gap-3">
               <Switch checked={form.active} onCheckedChange={v => setForm(f => ({ ...f, active: v }))} data-testid="switch-op-active-form" />
