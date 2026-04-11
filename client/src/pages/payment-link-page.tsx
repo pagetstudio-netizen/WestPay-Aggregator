@@ -95,7 +95,7 @@ export default function PaymentLinkPage() {
     if (!selectedCountry) return;
     fetch(`/api/public/payment-methods/${encodeURIComponent(selectedCountry)}?type=link`)
       .then(r => r.json())
-      .then(d => { if (Array.isArray(d.methods) && d.methods.length > 0) setDynamicMethods(d.methods); else setDynamicMethods(null); })
+      .then(d => { setDynamicMethods(Array.isArray(d.methods) ? d.methods : null); })
       .catch(() => setDynamicMethods(null));
     setSelectedMethod("");
     setOtpCode("");
