@@ -29,6 +29,7 @@ import {
 } from "./oxapay";
 import {
   initiatePayin as mbiyoInitiatePayin,
+  initiatePayout as mbiyoInitiatePayout,
   getTransactionStatus as mbiyoGetStatus,
   verifyWebhookSignature as mbiyoVerifySignature,
   generateReference as mbiyoGenerateRef,
@@ -36,6 +37,7 @@ import {
   mbiyoCurrency,
   mbiyoNetwork,
   type MbiyoWebhookPayload,
+  type MbiyoPayoutWebhookPayload,
 } from "./mbiyo";
 
 const JWT_SECRET = process.env.SESSION_SECRET || "westpay-secret-key-change-me";
@@ -2101,6 +2103,65 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/mbiyo/payout-callback", async (req, res) => {
+    try {
+      const rawBody = JSON.stringify(req.body);
+      const signature = req.headers["signature"] as string || "";
+      const webhookSecret = await getMbiyoWebhookSecret();
+
+      if (webhookSecret) {
+        const isValid = mbiyoVerifySignature(webhookSecret, signature, rawBody);
+        if (!isValid) {
+          console.error("[MBIYO PAYOUT CALLBACK] Signature invalide");
+          return res.status(401).json({ message: "Signature invalide" });
+        }
+      }
+
+      const payload = req.body as MbiyoPayoutWebhookPayload;
+      console.log(`[MBIYO PAYOUT CALLBACK] Recu: event=${payload.event} order_id=${payload.order_id} status=${payload.status}`);
+
+      if (!payload.order_id) {
+        return res.status(400).json({ message: "order_id manquant" });
+      }
+
+      const withdrawal = await storage.getWithdrawalByOmnipayRef(payload.order_id);
+      if (!withdrawal) {
+        console.warn(`[MBIYO PAYOUT CALLBACK] Retrait non trouve: ${payload.order_id}`);
+        return res.status(200).json({ received: true });
+      }
+
+      if (withdrawal.status === "approved" || withdrawal.status === "rejected" || withdrawal.status === "failed") {
+        return res.json({ status: "already_processed" });
+      }
+
+      const wdMerchant = await storage.getMerchantById(withdrawal.merchantId);
+      const wdFees = payload.fee || 0;
+
+      if (payload.status === "successful") {
+        await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Transfert Mbiyo confirme`, payload.order_id, wdFees);
+        notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: withdrawal.withdrawalMode }).catch(() => {});
+        notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
+        console.log(`[MBIYO PAYOUT CALLBACK] Retrait #${withdrawal.id} approuvé - ref=${payload.order_id}`);
+        return res.json({ status: "approved" });
+      } else if (payload.status === "failed" || payload.status === "cancelled") {
+        await storage.updateWithdrawalStatus(withdrawal.id, "failed", `Transfert Mbiyo echoue - statut: ${payload.status}`, payload.order_id);
+        const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
+        if (mc) {
+          await storage.incrementMerchantCountryBalance(mc.id, withdrawal.amount);
+        }
+        notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed", mode: withdrawal.withdrawalMode }).catch(() => {});
+        notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed" }).catch(() => {});
+        console.log(`[MBIYO PAYOUT CALLBACK] Retrait #${withdrawal.id} echoue - ref=${payload.order_id}`);
+        return res.json({ status: "failed" });
+      }
+
+      res.json({ received: true });
+    } catch (err: any) {
+      console.error("[MBIYO PAYOUT CALLBACK] Erreur:", err.message);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/admin/mbiyo/settings", authMiddleware("admin"), async (_req, res) => {
     try {
       const apiKey = await getMbiyoApiKey();
@@ -3050,10 +3111,7 @@ export async function registerRoutes(
       const merchant = await storage.getMerchantById(merchantId);
       if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
 
-      const apiKeyToUse = await getOmnipayPayoutApiKey();
-      if (!apiKeyToUse) {
-        return res.status(500).json({ message: "Cle API retrait non configuree. Contactez l'administrateur." });
-      }
+      const useMbiyoPayout = mc.payinGateway === "mbiyo";
 
       const w = await storage.createWithdrawal({
         merchantId,
@@ -3065,6 +3123,7 @@ export async function registerRoutes(
         status: "pending",
         withdrawalMode: "auto",
         adminNote: null,
+        gateway: useMbiyoPayout ? "mbiyo" : "omnipay",
       });
       await storage.decrementMerchantCountryBalance(mc.id, amount);
 
@@ -3073,43 +3132,100 @@ export async function registerRoutes(
 
       const withdrawalFee = merchant.feeExempt ? 0 : calcWithdrawalFee(amount);
       const netAmount = amount - withdrawalFee;
-      const reference = `WD-${w.id}-${Date.now()}`;
+      const reference = mbiyoGenerateRef();
 
-      try {
-        const nameParts = merchant.name.trim().split(/\s+/);
-        const wdFirstName = nameParts[0] || merchant.name;
-        const wdLastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : nameParts[0] || merchant.name;
-        const omnipayOperatorCode = await resolveOmnipayOperatorCode(operator, mc.country);
-        const msisdnFull = prependDialCode(phone, mc.country);
-        const result = await omnipayInitiateTransfer({
-          apikey: apiKeyToUse,
-          msisdn: msisdnFull,
-          amount: netAmount,
-          reference,
-          first_name: wdFirstName,
-          last_name: wdLastName,
-          operator: omnipayOperatorCode,
-        });
-        if (result.success === 1) {
-          const omnipayRef = result.reference || reference;
-          await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - Frais prévus: ${withdrawalFee} F`, omnipayRef, withdrawalFee);
-          console.log(`[WITHDRAWAL AUTO] Initié chez OmniPay ref=${omnipayRef} - en attente du callback`);
-          return res.json({ ...w, status: "pending", omnipayRef, fees: withdrawalFee, netAmount, autoProcessed: true });
-        } else {
-          const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Echec de traitement";
-          await storage.updateWithdrawalStatus(w.id, "failed", `Retrait non abouti: ${errMsg}`, reference);
+      if (useMbiyoPayout) {
+        const mbiyoApiKey = await getMbiyoApiKey();
+        if (!mbiyoApiKey) {
+          await storage.updateWithdrawalStatus(w.id, "failed", "Cle API Mbiyo non configuree", reference);
+          await storage.incrementMerchantCountryBalance(mc.id, amount);
+          return res.status(500).json({ message: "Cle API retrait Mbiyo non configuree. Contactez l'administrateur." });
+        }
+        try {
+          const msisdnFull = prependDialCode(phone, mc.country);
+          const countryCode = mbiyoCountryCode(mc.country);
+          const currency = mbiyoCurrency(mc.country);
+          const network = mbiyoNetwork(operator || "");
+          const callbackBaseUrl = process.env.NODE_ENV === "production" ? "https://westpay.cloud" : `${req.protocol}://${req.get("host")}`;
+          const callbackUrl = `${callbackBaseUrl}/api/mbiyo/payout-callback`;
+
+          const result = await mbiyoInitiatePayout({
+            apiKey: mbiyoApiKey,
+            amount: netAmount,
+            currency,
+            orderId: reference,
+            callbackUrl,
+            network,
+            phoneNumber: msisdnFull,
+            countryCode,
+            beneficiary: merchant.name,
+          });
+
+          if (result.status === "success" && result.data) {
+            const mbiyoRef = result.data.transaction_id || reference;
+            const mbiyoFee = result.data.fee || withdrawalFee;
+            await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement Mbiyo - TxID: ${mbiyoRef}`, reference, mbiyoFee);
+            console.log(`[WITHDRAWAL MBIYO] Initié - TxID: ${mbiyoRef} ref=${reference}`);
+            return res.json({ ...w, status: "pending", omnipayRef: reference, fees: mbiyoFee, netAmount, autoProcessed: true, gateway: "mbiyo" });
+          } else {
+            const errMsg = result.message || "Echec du transfert Mbiyo";
+            await storage.updateWithdrawalStatus(w.id, "failed", `Retrait Mbiyo non abouti: ${errMsg}`, reference);
+            notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
+            notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
+            await storage.incrementMerchantCountryBalance(mc.id, amount);
+            return res.status(400).json({ message: errMsg });
+          }
+        } catch (mbiyoErr: any) {
+          console.error("[WITHDRAWAL MBIYO] Erreur:", mbiyoErr.message);
+          await storage.updateWithdrawalStatus(w.id, "failed", `Erreur technique Mbiyo lors du traitement`, reference);
           notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
           notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
           await storage.incrementMerchantCountryBalance(mc.id, amount);
-          return res.status(400).json({ message: errMsg, omnipayError: true, code: result.code });
+          return res.status(500).json({ message: "Erreur Mbiyo lors du traitement du retrait. Votre solde a été restitué." });
         }
-      } catch (omnipayErr: any) {
-        console.error("[WITHDRAWAL AUTO] Erreur OmniPay:", omnipayErr.message);
-        await storage.updateWithdrawalStatus(w.id, "failed", `Erreur technique lors du traitement`, reference);
-        notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
-        notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
-        await storage.incrementMerchantCountryBalance(mc.id, amount);
-        return res.status(500).json({ message: "Erreur lors du traitement du retrait. Votre solde a été restitué." });
+      } else {
+        const apiKeyToUse = await getOmnipayPayoutApiKey();
+        if (!apiKeyToUse) {
+          await storage.updateWithdrawalStatus(w.id, "failed", "Cle API retrait non configuree", reference);
+          await storage.incrementMerchantCountryBalance(mc.id, amount);
+          return res.status(500).json({ message: "Cle API retrait non configuree. Contactez l'administrateur." });
+        }
+        try {
+          const nameParts = merchant.name.trim().split(/\s+/);
+          const wdFirstName = nameParts[0] || merchant.name;
+          const wdLastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : nameParts[0] || merchant.name;
+          const omnipayOperatorCode = await resolveOmnipayOperatorCode(operator, mc.country);
+          const msisdnFull = prependDialCode(phone, mc.country);
+          const result = await omnipayInitiateTransfer({
+            apikey: apiKeyToUse,
+            msisdn: msisdnFull,
+            amount: netAmount,
+            reference,
+            first_name: wdFirstName,
+            last_name: wdLastName,
+            operator: omnipayOperatorCode,
+          });
+          if (result.success === 1) {
+            const omnipayRef = result.reference || reference;
+            await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - Frais prévus: ${withdrawalFee} F`, omnipayRef, withdrawalFee);
+            console.log(`[WITHDRAWAL AUTO] Initié chez OmniPay ref=${omnipayRef} - en attente du callback`);
+            return res.json({ ...w, status: "pending", omnipayRef, fees: withdrawalFee, netAmount, autoProcessed: true });
+          } else {
+            const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Echec de traitement";
+            await storage.updateWithdrawalStatus(w.id, "failed", `Retrait non abouti: ${errMsg}`, reference);
+            notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
+            notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
+            await storage.incrementMerchantCountryBalance(mc.id, amount);
+            return res.status(400).json({ message: errMsg, omnipayError: true, code: result.code });
+          }
+        } catch (omnipayErr: any) {
+          console.error("[WITHDRAWAL AUTO] Erreur OmniPay:", omnipayErr.message);
+          await storage.updateWithdrawalStatus(w.id, "failed", `Erreur technique lors du traitement`, reference);
+          notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
+          notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
+          await storage.incrementMerchantCountryBalance(mc.id, amount);
+          return res.status(500).json({ message: "Erreur lors du traitement du retrait. Votre solde a été restitué." });
+        }
       }
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -3148,44 +3264,82 @@ export async function registerRoutes(
       const merchant = await storage.getMerchantById(w.merchantId);
       let omnipayRef: string | undefined;
       let fees: number | undefined;
-      let sentToOmnipay = false;
+      let sentToProvider = false;
+      const useMbiyoPayout = (w.gateway === "mbiyo") || (mc?.payinGateway === "mbiyo");
 
-      const omnipayApiKey = await getOmnipayPayoutApiKey();
-      if (mc && mc.omnipayEnabled && omnipayApiKey && merchant) {
-        try {
-          const reference = `WD-${w.id}-${Date.now()}`;
-          const mNameParts = merchant.name.trim().split(/\s+/);
-          const mFirstName = mNameParts[0] || merchant.name;
-          const mLastName = mNameParts.length > 1 ? mNameParts.slice(1).join(" ") : mNameParts[0] || merchant.name;
-          const adminOmnipayCode = await resolveOmnipayOperatorCode(w.operator, w.country);
-          const wdMsisdn = prependDialCode(w.phone, w.country);
-          console.log(`[ADMIN APPROVE WD] Transfert: ${w.amount} vers ${wdMsisdn}, operateur: ${adminOmnipayCode || "(auto)"}, ref: ${reference}`);
-          const result = await omnipayInitiateTransfer({
-            apikey: omnipayApiKey,
-            msisdn: wdMsisdn,
-            amount: w.amount,
-            reference,
-            first_name: mFirstName,
-            last_name: mLastName,
-            operator: adminOmnipayCode,
-          });
-          if (result.success === 1) {
-            omnipayRef = result.reference || reference;
-            fees = result.fees || 0;
-            sentToOmnipay = true;
-            console.log(`[ADMIN APPROVE WD] Initié chez OmniPay - ID: ${result.id}, Ref: ${omnipayRef} - en attente callback`);
-          } else {
-            const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Echec inconnu";
-            console.error(`[ADMIN APPROVE WD] OmniPay echec (code ${result.code}): ${errMsg}`);
+      if (useMbiyoPayout) {
+        const mbiyoApiKey = await getMbiyoApiKey();
+        if (mc && mbiyoApiKey && merchant) {
+          try {
+            const reference = mbiyoGenerateRef();
+            const msisdnFull = prependDialCode(w.phone, w.country);
+            const countryCode = mbiyoCountryCode(w.country);
+            const currency = mbiyoCurrency(w.country);
+            const network = mbiyoNetwork(w.operator || "");
+            const callbackBaseUrl = process.env.NODE_ENV === "production" ? "https://westpay.cloud" : `${req.protocol}://${req.get("host")}`;
+            const callbackUrl = `${callbackBaseUrl}/api/mbiyo/payout-callback`;
+            console.log(`[ADMIN APPROVE WD MBIYO] Transfert: ${w.amount} vers ${msisdnFull}, ref: ${reference}`);
+            const result = await mbiyoInitiatePayout({
+              apiKey: mbiyoApiKey,
+              amount: w.amount,
+              currency,
+              orderId: reference,
+              callbackUrl,
+              network,
+              phoneNumber: msisdnFull,
+              countryCode,
+              beneficiary: merchant.name,
+            });
+            if (result.status === "success" && result.data) {
+              omnipayRef = reference;
+              fees = result.data.fee || 0;
+              sentToProvider = true;
+              console.log(`[ADMIN APPROVE WD MBIYO] Initié - TxID: ${result.data.transaction_id}, Ref: ${reference} - en attente callback`);
+            } else {
+              console.error(`[ADMIN APPROVE WD MBIYO] Echec: ${result.message}`);
+            }
+          } catch (mbiyoErr: any) {
+            console.error("[ADMIN APPROVE WD MBIYO] Erreur:", mbiyoErr.message);
           }
-        } catch (omnipayErr: any) {
-          console.error("[ADMIN APPROVE WD] OmniPay erreur:", omnipayErr.message);
+        }
+      } else {
+        const omnipayApiKey = await getOmnipayPayoutApiKey();
+        if (mc && mc.omnipayEnabled && omnipayApiKey && merchant) {
+          try {
+            const reference = `WD-${w.id}-${Date.now()}`;
+            const mNameParts = merchant.name.trim().split(/\s+/);
+            const mFirstName = mNameParts[0] || merchant.name;
+            const mLastName = mNameParts.length > 1 ? mNameParts.slice(1).join(" ") : mNameParts[0] || merchant.name;
+            const adminOmnipayCode = await resolveOmnipayOperatorCode(w.operator, w.country);
+            const wdMsisdn = prependDialCode(w.phone, w.country);
+            console.log(`[ADMIN APPROVE WD] Transfert: ${w.amount} vers ${wdMsisdn}, operateur: ${adminOmnipayCode || "(auto)"}, ref: ${reference}`);
+            const result = await omnipayInitiateTransfer({
+              apikey: omnipayApiKey,
+              msisdn: wdMsisdn,
+              amount: w.amount,
+              reference,
+              first_name: mFirstName,
+              last_name: mLastName,
+              operator: adminOmnipayCode,
+            });
+            if (result.success === 1) {
+              omnipayRef = result.reference || reference;
+              fees = result.fees || 0;
+              sentToProvider = true;
+              console.log(`[ADMIN APPROVE WD] Initié chez OmniPay - ID: ${result.id}, Ref: ${omnipayRef} - en attente callback`);
+            } else {
+              const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Echec inconnu";
+              console.error(`[ADMIN APPROVE WD] OmniPay echec (code ${result.code}): ${errMsg}`);
+            }
+          } catch (omnipayErr: any) {
+            console.error("[ADMIN APPROVE WD] OmniPay erreur:", omnipayErr.message);
+          }
         }
       }
 
-      if (sentToOmnipay) {
+      if (sentToProvider) {
         await storage.updateWithdrawalStatus(id, "pending", `En cours de traitement - en attente de confirmation${note ? ` - Note: ${note}` : ""}`, omnipayRef, fees);
-        console.log(`[ADMIN APPROVE WD] Retrait #${id} en attente confirmation OmniPay - ref=${omnipayRef}`);
+        console.log(`[ADMIN APPROVE WD] Retrait #${id} en attente confirmation ${useMbiyoPayout ? "Mbiyo" : "OmniPay"} - ref=${omnipayRef}`);
         res.json({ success: true, omnipayRef, fees, pendingOmnipay: true });
       } else {
         await storage.updateWithdrawalStatus(id, "approved", note, omnipayRef, fees);

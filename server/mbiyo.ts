@@ -206,3 +206,105 @@ export function verifyWebhookSignature(secret: string, signature: string, rawBod
     .digest("hex");
   return computed === signature;
 }
+
+// ==================== PAYOUT (Send) ====================
+
+export interface MbiyoPayoutRequest {
+  apiKey: string;
+  amount: number;
+  currency: string;
+  orderId: string;
+  callbackUrl: string;
+  network: string;
+  phoneNumber: string;
+  countryCode: string;
+  beneficiary?: string;
+}
+
+export interface MbiyoPayoutResponse {
+  status: string;
+  message: string;
+  data?: {
+    transaction_id: string;
+    amount: number;
+    fee: number;
+    charged_amount: number;
+    currency: string;
+    order_id: string;
+    status: string;
+    payment_method: string;
+    created_at: string;
+    metadata?: {
+      phone_number: string;
+      network: string;
+      country_code: string;
+      beneficiary?: string;
+    };
+  };
+}
+
+export interface MbiyoPayoutWebhookPayload {
+  event: string;
+  transaction_id: string;
+  order_id: string;
+  status: string;
+  amount: number;
+  fee: number;
+  currency: string;
+  metadata?: {
+    phone_number?: string;
+    network?: string;
+    country_code?: string;
+    beneficiary?: string;
+  };
+}
+
+export async function initiatePayout(params: MbiyoPayoutRequest): Promise<MbiyoPayoutResponse> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+
+  const body: Record<string, any> = {
+    amount: params.amount,
+    currency: params.currency,
+    payment_method: "mobile_money",
+    order_id: params.orderId,
+    callback_url: params.callbackUrl,
+    metadata: {
+      network: params.network,
+      phone_number: params.phoneNumber,
+      country_code: params.countryCode,
+      beneficiary: params.beneficiary || "Marchand WestPay",
+    },
+  };
+
+  console.log(`[MBIYO PAYOUT] Demande de transfert: ${params.amount} ${params.currency} - Ref: ${params.orderId} - Tel: ${params.phoneNumber}`);
+
+  try {
+    const response = await fetch(`${MBIYO_BASE_URL}/merchant/payout`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${params.apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    const data = await response.json() as MbiyoPayoutResponse;
+
+    if (data.status === "success") {
+      console.log(`[MBIYO PAYOUT] Transfert initie - TxID: ${data.data?.transaction_id}`);
+    } else {
+      console.error(`[MBIYO PAYOUT] Echec transfert: ${data.message}`);
+    }
+
+    return data;
+  } catch (err: any) {
+    clearTimeout(timeout);
+    if (err.name === "AbortError") {
+      throw new Error("Mbiyo Payout: Timeout de connexion (30s)");
+    }
+    throw new Error(`Mbiyo Payout: ${err.message}`);
+  }
+}

@@ -2407,7 +2407,8 @@ function MbiyoPanel() {
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
-  const callbackUrl = "https://westpay.cloud/api/mbiyo/callback";
+  const payinCallbackUrl = "https://westpay.cloud/api/mbiyo/callback";
+  const payoutCallbackUrl = "https://westpay.cloud/api/mbiyo/payout-callback";
 
   if (settingsLoading) return <LoadingSkeleton />;
 
@@ -2415,7 +2416,7 @@ function MbiyoPanel() {
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-foreground">Configuration Mbiyo</h2>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
@@ -2430,7 +2431,7 @@ function MbiyoPanel() {
               </Badge>
             </div>
             <p className="text-xs text-muted-foreground">
-              Mbiyo est un prestataire de paiement mobile africain (mbiyo.africa). Activez-le par pays dans l'onglet Pays.
+              Mbiyo (mbiyo.africa) — paiements mobiles entrants et sortants. Activez-le par pays dans l'onglet Pays.
             </p>
           </CardContent>
         </Card>
@@ -2438,22 +2439,48 @@ function MbiyoPanel() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <Link2 className="w-4 h-4" />URL de webhook
+              <Link2 className="w-4 h-4" />Webhook Payin
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Configurez cette URL comme URL de callback dans votre tableau de bord Mbiyo.
+              URL de callback pour les paiements entrants (collecte).
             </p>
             <div className="flex items-center gap-2">
               <code className="text-xs bg-muted px-3 py-2 rounded-md font-mono flex-1 break-all text-foreground" data-testid="text-mbiyo-callback-url">
-                {callbackUrl}
+                {payinCallbackUrl}
               </code>
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => { navigator.clipboard.writeText(callbackUrl); toast({ title: "URL copiee" }); }}
+                onClick={() => { navigator.clipboard.writeText(payinCallbackUrl); toast({ title: "URL copiee" }); }}
                 data-testid="button-copy-mbiyo-callback-url"
+              >
+                <Copy className="w-3 h-3" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Link2 className="w-4 h-4" />Webhook Payout
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              URL de callback pour les reversements sortants (retraits marchands).
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="text-xs bg-muted px-3 py-2 rounded-md font-mono flex-1 break-all text-foreground" data-testid="text-mbiyo-payout-callback-url">
+                {payoutCallbackUrl}
+              </code>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => { navigator.clipboard.writeText(payoutCallbackUrl); toast({ title: "URL copiee" }); }}
+                data-testid="button-copy-mbiyo-payout-callback-url"
               >
                 <Copy className="w-3 h-3" />
               </Button>
