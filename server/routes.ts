@@ -27,6 +27,16 @@ import {
   generateOxaPayReference,
   type OxaPayWebhookPayload,
 } from "./oxapay";
+import {
+  initiatePayin as mbiyoInitiatePayin,
+  getTransactionStatus as mbiyoGetStatus,
+  verifyWebhookSignature as mbiyoVerifySignature,
+  generateReference as mbiyoGenerateRef,
+  mbiyoCountryCode,
+  mbiyoCurrency,
+  mbiyoNetwork,
+  type MbiyoWebhookPayload,
+} from "./mbiyo";
 
 const JWT_SECRET = process.env.SESSION_SECRET || "westpay-secret-key-change-me";
 
@@ -40,6 +50,14 @@ async function getOmnipayPayoutApiKey(): Promise<string | undefined> {
 
 async function getOmnipayCallbackKey(): Promise<string | undefined> {
   return process.env.OMNIPAY_CALLBACK_KEY || await storage.getSetting("omnipay_callback_key");
+}
+
+async function getMbiyoApiKey(): Promise<string | undefined> {
+  return process.env.MBIYO_API_KEY || await storage.getSetting("mbiyo_api_key");
+}
+
+async function getMbiyoWebhookSecret(): Promise<string | undefined> {
+  return process.env.MBIYO_WEBHOOK_SECRET || await storage.getSetting("mbiyo_webhook_secret");
 }
 
 const COLLECTION_FEE_RATE = 0.055;
@@ -1375,36 +1393,116 @@ export async function registerRoutes(
 
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
-      const omnipayApiKey = await getOmnipayApiKey();
-      if (!omnipayApiKey) {
-        return res.status(500).json({ message: "Systeme de paiement non configure. Contactez l'administrateur." });
-      }
-
       if (!payerPhone) {
         return res.status(400).json({ message: "Numero de telephone requis" });
       }
 
-      {
+      const callbackBaseUrl = process.env.NODE_ENV === "production" ? "https://westpay.cloud" : `${req.protocol}://${req.get("host")}`;
+      const dialCodes: Record<string, string> = {
+        "Togo": "228", "Benin": "229", "Cote d'Ivoire": "225",
+        "Senegal": "221", "Mali": "223", "Burkina Faso": "226",
+        "Cameroun": "237", "Congo Brazzaville": "242", "Gabon": "241",
+      };
+      const dialCode = dialCodes[country] || "";
+      const cleanPhone = payerPhone.replace(/[\s\-\(\)\+]/g, "");
+      const msisdn = cleanPhone.startsWith(dialCode) ? cleanPhone : `${dialCode}${cleanPhone}`;
+
+      const useMbiyo = merchantCountry.payinGateway === "mbiyo";
+
+      if (useMbiyo) {
+        const mbiyoApiKey = await getMbiyoApiKey();
+        if (!mbiyoApiKey) {
+          return res.status(500).json({ message: "Systeme de paiement Mbiyo non configure. Contactez l'administrateur." });
+        }
+
+        const reference = mbiyoGenerateRef();
+        const countryCode = mbiyoCountryCode(country);
+        const currency = mbiyoCurrency(country);
+        const network = mbiyoNetwork(operator || paymentMethod);
+        const callbackUrl = `${callbackBaseUrl}/api/mbiyo/callback`;
+        const returnUrl = `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
+
+        try {
+          const mbiyoResult = await mbiyoInitiatePayin({
+            apiKey: mbiyoApiKey,
+            amount: parsedAmount,
+            currency,
+            orderId: reference,
+            callbackUrl,
+            network,
+            phoneNumber: msisdn,
+            countryCode,
+            otp: otp || undefined,
+          });
+
+          if (mbiyoResult.status !== "success" || !mbiyoResult.data) {
+            const errorMsg = mbiyoResult.message || "Erreur de paiement Mbiyo";
+            storage.createTransaction({
+              merchantId: merchant.id,
+              country,
+              txId: reference,
+              amount: parsedAmount,
+              payerNumber: msisdn || null,
+              payerName: payerName || null,
+              status: "failed",
+              provider: "mbiyo",
+              omnipayTxId: null,
+              operator: operator || network || null,
+              omnipayReference: reference,
+              errorMessage: errorMsg,
+            }).catch(() => {});
+            return res.status(400).json({ message: errorMsg });
+          }
+
+          const paymentUrl = mbiyoResult.data.redirect_url || null;
+          const pending = await storage.createPendingPayment({
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerPhone: payerPhone || null,
+            payerName: payerName || null,
+            paymentMethod,
+            txId: null,
+            status: "omnipay_pending",
+            redirectUrl: redirectUrl || null,
+            omnipayReference: reference,
+            omnipayTxId: mbiyoResult.data.transaction_id,
+            omnipayPaymentUrl: paymentUrl,
+            gateway: "mbiyo",
+            expiresAt,
+          });
+
+          await storage.createApiLog({
+            merchantId: merchant.id,
+            action: "mbiyo_payment_initiated",
+            ip: req.ip || "",
+            description: `Paiement Mbiyo initie - Ref: ${reference} - TxID: ${mbiyoResult.data.transaction_id} - Montant: ${parsedAmount}`,
+          });
+
+          res.json({
+            success: true,
+            paymentId: pending.id,
+            omnipay: true,
+            omnipayReference: reference,
+            paymentUrl: paymentUrl || (network === "wave" ? returnUrl : null),
+            fees: mbiyoResult.data.fee || 0,
+          });
+        } catch (mbiyoErr: any) {
+          console.error("[MBIYO] Erreur initiation:", mbiyoErr.message);
+          return res.status(500).json({ message: "Erreur de connexion au service de paiement Mbiyo. Veuillez reessayer." });
+        }
+      } else {
+        const omnipayApiKey = await getOmnipayApiKey();
+        if (!omnipayApiKey) {
+          return res.status(500).json({ message: "Systeme de paiement non configure. Contactez l'administrateur." });
+        }
 
         const reference = omnipayGenerateRef();
         const nameParts = (payerName || "Client WestPay").split(" ");
         const fName = firstName || nameParts[0] || "Client";
         const lName = lastName || nameParts.slice(1).join(" ") || "WestPay";
-
-        const dialCodes: Record<string, string> = {
-          "Togo": "228", "Benin": "229", "Cote d'Ivoire": "225",
-          "Senegal": "221", "Mali": "223", "Burkina Faso": "226",
-          "Cameroun": "237", "Congo Brazzaville": "242", "Gabon": "241",
-        };
-        const dialCode = dialCodes[country] || "";
-        const cleanPhone = payerPhone.replace(/[\s\-\(\)\+]/g, "");
-        const msisdn = cleanPhone.startsWith(dialCode) ? cleanPhone : `${dialCode}${cleanPhone}`;
-
         const omnipayOperator = toOmnipayOperatorCode(operator) || (paymentMethod.toLowerCase().includes("wave") ? "wave" : paymentMethod.toLowerCase().includes("mixx") || paymentMethod.toLowerCase().includes("yas") ? "mixx" : undefined);
-
-        const callbackBaseUrl = process.env.NODE_ENV === "production" ? "https://westpay.cloud" : `${req.protocol}://${req.get("host")}`;
         const returnUrl = `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
-
         const autoOtp = otp || String(Math.floor(1000 + Math.random() * 9000));
 
         try {
@@ -1452,6 +1550,7 @@ export async function registerRoutes(
             omnipayReference: reference,
             omnipayTxId: omnipayResult.id ? String(omnipayResult.id) : null,
             omnipayPaymentUrl: omnipayResult.payment_url || null,
+            gateway: "omnipay",
             expiresAt,
           });
 
@@ -1832,14 +1931,26 @@ export async function registerRoutes(
       }
 
       if (pending.omnipayReference) {
-        const omnipayApiKey = await getOmnipayApiKey();
-        if (omnipayApiKey) {
-          try {
-            const statusResult = await omnipayGetStatus(omnipayApiKey, pending.omnipayReference);
-            if (statusResult.success === 1) {
-              return res.json({ status: "pending", paymentId: pending.id, omnipayStatus: statusResult.status });
-            }
-          } catch {
+        if (pending.gateway === "mbiyo" && pending.omnipayTxId) {
+          const mbiyoApiKey = await getMbiyoApiKey();
+          if (mbiyoApiKey) {
+            try {
+              const statusResult = await mbiyoGetStatus(mbiyoApiKey, pending.omnipayTxId);
+              if (statusResult.status === "success" && statusResult.data) {
+                const s = statusResult.data.status;
+                return res.json({ status: s === "successful" ? "confirmed" : s === "failed" || s === "cancelled" ? "failed" : "pending", paymentId: pending.id });
+              }
+            } catch {}
+          }
+        } else {
+          const omnipayApiKey = await getOmnipayApiKey();
+          if (omnipayApiKey) {
+            try {
+              const statusResult = await omnipayGetStatus(omnipayApiKey, pending.omnipayReference);
+              if (statusResult.success === 1) {
+                return res.json({ status: "pending", paymentId: pending.id, omnipayStatus: statusResult.status });
+              }
+            } catch {}
           }
         }
       }
@@ -1872,6 +1983,158 @@ export async function registerRoutes(
       if (apiKey !== undefined) await storage.setSetting("omnipay_api_key", apiKey);
       if (callbackKey !== undefined) await storage.setSetting("omnipay_callback_key", callbackKey);
       if (payoutApiKey !== undefined) await storage.setSetting("omnipay_payout_api_key", payoutApiKey);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ==================== MBIYO ROUTES ====================
+
+  app.post("/api/mbiyo/callback", async (req, res) => {
+    try {
+      const rawBody = JSON.stringify(req.body);
+      const signature = req.headers["signature"] as string || "";
+      const webhookSecret = await getMbiyoWebhookSecret();
+
+      if (webhookSecret) {
+        const isValid = mbiyoVerifySignature(webhookSecret, signature, rawBody);
+        if (!isValid) {
+          console.error("[MBIYO CALLBACK] Signature invalide");
+          return res.status(401).json({ message: "Signature invalide" });
+        }
+      }
+
+      const payload = req.body as MbiyoWebhookPayload;
+      console.log(`[MBIYO CALLBACK] Recu: order_id=${payload.order_id} status=${payload.status}`);
+
+      if (!payload.order_id) {
+        return res.status(400).json({ message: "order_id manquant" });
+      }
+
+      const pending = await storage.getPendingPaymentByOmnipayReference(payload.order_id);
+      if (!pending) {
+        console.warn(`[MBIYO CALLBACK] Paiement non trouve: ${payload.order_id}`);
+        return res.status(200).json({ received: true });
+      }
+
+      if (pending.status === "omnipay_confirmed" || pending.status === "omnipay_failed") {
+        return res.json({ status: "already_processed" });
+      }
+
+      if (payload.status === "successful") {
+        await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
+
+        const merchant = await storage.getMerchantById(pending.merchantId);
+        const credit = calcMerchantCredit(pending.amount);
+        await storage.updateMerchantBalance(pending.merchantId, credit);
+
+        const txRef = payload.transaction_id || payload.order_id;
+        const tx = await storage.createTransaction({
+          merchantId: pending.merchantId,
+          country: pending.country,
+          txId: txRef,
+          amount: pending.amount,
+          payerNumber: pending.payerPhone || null,
+          payerName: pending.payerName || null,
+          status: "completed",
+          provider: "mbiyo",
+          omnipayTxId: payload.transaction_id || null,
+          operator: pending.paymentMethod || null,
+          omnipayReference: payload.order_id,
+          errorMessage: null,
+        });
+
+        if (merchant) {
+          if (merchant.webhookUrl) {
+            try {
+              const fetch = (await import("node-fetch")).default;
+              const webhookPayload = {
+                event: "payment.success",
+                txId: tx.txId,
+                amount: tx.amount,
+                country: tx.country,
+                payerNumber: tx.payerNumber,
+                payerName: tx.payerName,
+                status: "completed",
+                reference: payload.order_id,
+                provider: "mbiyo",
+              };
+              const hmac = crypto.createHmac("sha256", merchant.apiKey || "").update(JSON.stringify(webhookPayload)).digest("hex");
+              await fetch(merchant.webhookUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Signature": hmac },
+                body: JSON.stringify(webhookPayload),
+              });
+            } catch {}
+          }
+          notifyMerchantPayment(merchant, pending.amount, pending.payerPhone || "", pending.payerName || "").catch(() => {});
+          notifyAdminPayment(merchant, pending.amount, pending.payerPhone || "", tx.txId || "", "Mbiyo").catch(() => {});
+        }
+
+        console.log(`[MBIYO CALLBACK] Paiement confirme: ${payload.order_id}`);
+        return res.json({ status: "confirmed" });
+      } else if (payload.status === "failed" || payload.status === "cancelled") {
+        await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+        storage.createTransaction({
+          merchantId: pending.merchantId,
+          country: pending.country,
+          txId: payload.order_id,
+          amount: pending.amount,
+          payerNumber: pending.payerPhone || null,
+          payerName: pending.payerName || null,
+          status: "failed",
+          provider: "mbiyo",
+          omnipayTxId: payload.transaction_id || null,
+          operator: pending.paymentMethod || null,
+          omnipayReference: payload.order_id,
+          errorMessage: "Paiement refusé ou annulé",
+        }).catch(() => {});
+        console.log(`[MBIYO CALLBACK] Paiement echoue: ${payload.order_id}`);
+        return res.json({ status: "failed" });
+      }
+
+      res.json({ received: true });
+    } catch (err: any) {
+      console.error("[MBIYO CALLBACK] Erreur:", err.message);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/mbiyo/settings", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const apiKey = await getMbiyoApiKey();
+      const webhookSecret = await getMbiyoWebhookSecret();
+      res.json({
+        apiKey: apiKey || "",
+        webhookSecret: webhookSecret || "",
+        configured: !!apiKey,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/mbiyo/settings", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { apiKey, webhookSecret } = req.body;
+      if (apiKey !== undefined) await storage.setSetting("mbiyo_api_key", apiKey);
+      if (webhookSecret !== undefined) await storage.setSetting("mbiyo_webhook_secret", webhookSecret);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Update merchant country payin gateway
+  app.patch("/api/admin/merchant-countries/:id/gateway", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { payinGateway } = req.body;
+      if (!["omnipay", "mbiyo"].includes(payinGateway)) {
+        return res.status(400).json({ message: "Gateway invalide. Valeurs acceptees: omnipay, mbiyo" });
+      }
+      await storage.updateMerchantCountryPayinGateway(id, payinGateway);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });

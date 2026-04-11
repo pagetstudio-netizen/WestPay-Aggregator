@@ -46,6 +46,7 @@ export const merchantCountries = pgTable("merchant_countries", {
   balance: integer("balance").default(0).notNull(),
   active: boolean("active").default(true).notNull(),
   omnipayEnabled: boolean("omnipay_enabled").default(false).notNull(),
+  payinGateway: text("payin_gateway").default("omnipay").notNull(),
 });
 
 export const transactions = pgTable("transactions", {
@@ -133,6 +134,7 @@ export const pendingPayments = pgTable("pending_payments", {
   omnipayReference: text("omnipay_reference"),
   omnipayTxId: text("omnipay_tx_id"),
   omnipayPaymentUrl: text("omnipay_payment_url"),
+  gateway: text("gateway").default("omnipay").notNull(),
   expiresAt: timestamp("expires_at").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

@@ -31,7 +31,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
 
-type AdminTab = "overview" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "cryptoagg" | "virements" | "reversements" | "settings";
+type AdminTab = "overview" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "cryptoagg" | "virements" | "reversements" | "settings";
 
 function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: { staleTime?: number; refetchOnWindowFocus?: boolean }) {
   const { token, logout } = useAuth();
@@ -1529,6 +1529,23 @@ function CountriesPanel() {
     onError: () => toast({ title: "Erreur", description: "Impossible de modifier", variant: "destructive" }),
   });
 
+  const updateGatewayMutation = useMutation({
+    mutationFn: async ({ id, payinGateway }: { id: number; payinGateway: string }) => {
+      const res = await fetch(`/api/admin/merchant-countries/${id}/gateway`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ payinGateway }),
+      });
+      if (!res.ok) throw new Error("Erreur");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/countries"] });
+      toast({ title: "Gateway mis à jour" });
+    },
+    onError: () => toast({ title: "Erreur", description: "Impossible de modifier le gateway", variant: "destructive" }),
+  });
+
   if (isLoading) return <LoadingSkeleton />;
 
   const availableCountries = ["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon"];
@@ -1703,6 +1720,19 @@ function CountriesPanel() {
                         <Zap className="w-3 h-3 mr-1" />
                         {mc.omnipayEnabled ? "Paiement actif" : "Paiement inactif"}
                       </Button>
+                      <Select
+                        value={mc.payinGateway || "omnipay"}
+                        onValueChange={(v) => updateGatewayMutation.mutate({ id: mc.id, payinGateway: v })}
+                        disabled={updateGatewayMutation.isPending}
+                      >
+                        <SelectTrigger className="h-8 w-28 text-xs" data-testid={`select-gateway-${mc.id}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="omnipay">OmniPay</SelectItem>
+                          <SelectItem value="mbiyo">Mbiyo</SelectItem>
+                        </SelectContent>
+                      </Select>
                       {editingBalance !== mc.id && (
                         <Button
                           variant="outline"
@@ -2333,6 +2363,134 @@ function OmniPayPanel() {
               <p className="text-xs text-muted-foreground">Cle utilisee pour verifier la signature HMAC-SHA3-512 des callbacks.</p>
             </div>
             <Button type="submit" disabled={saveMutation.isPending} data-testid="button-save-omnipay">
+              {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
+              Sauvegarder la configuration
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function MbiyoPanel() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const [apiKey, setApiKey] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  const { data: mbiyoSettings, isLoading: settingsLoading } = useAdminFetch("/api/admin/mbiyo/settings", ["/api/admin/mbiyo/settings"]);
+
+  useEffect(() => {
+    if (mbiyoSettings && !isInitialized) {
+      setApiKey(mbiyoSettings.apiKey || "");
+      setWebhookSecret(mbiyoSettings.webhookSecret || "");
+      setIsInitialized(true);
+    }
+  }, [mbiyoSettings, isInitialized]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/mbiyo/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ apiKey, webhookSecret }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/mbiyo/settings"] });
+      toast({ title: "Configuration Mbiyo sauvegardee" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const callbackUrl = "https://westpay.cloud/api/mbiyo/callback";
+
+  if (settingsLoading) return <LoadingSkeleton />;
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold text-foreground">Configuration Mbiyo</h2>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Zap className="w-4 h-4" />Statut
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-sm text-muted-foreground">Configuration</span>
+              <Badge variant={mbiyoSettings?.configured ? "default" : "destructive"} data-testid="badge-mbiyo-status">
+                {mbiyoSettings?.configured ? "Configure" : "Non configure"}
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Mbiyo est un prestataire de paiement mobile africain (mbiyo.africa). Activez-le par pays dans l'onglet Pays.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Link2 className="w-4 h-4" />URL de webhook
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Configurez cette URL comme URL de callback dans votre tableau de bord Mbiyo.
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="text-xs bg-muted px-3 py-2 rounded-md font-mono flex-1 break-all text-foreground" data-testid="text-mbiyo-callback-url">
+                {callbackUrl}
+              </code>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => { navigator.clipboard.writeText(callbackUrl); toast({ title: "URL copiee" }); }}
+                data-testid="button-copy-mbiyo-callback-url"
+              >
+                <Copy className="w-3 h-3" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Key className="w-4 h-4" />Cles API
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={(e) => { e.preventDefault(); saveMutation.mutate(); }} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Cle API Mbiyo (Bearer token)</Label>
+              <Input
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="mbiyo_api_key_..."
+                data-testid="input-mbiyo-apikey"
+              />
+              <p className="text-xs text-muted-foreground">Cle Bearer utilisee pour authentifier les requetes vers l'API Mbiyo.</p>
+            </div>
+            <div className="space-y-2">
+              <Label>Secret webhook (Signature HMAC-SHA256)</Label>
+              <Input
+                value={webhookSecret}
+                onChange={(e) => setWebhookSecret(e.target.value)}
+                placeholder="Votre secret webhook Mbiyo"
+                data-testid="input-mbiyo-webhook-secret"
+              />
+              <p className="text-xs text-muted-foreground">Secret utilise pour verifier la signature HMAC-SHA256 des webhooks entrants.</p>
+            </div>
+            <Button type="submit" disabled={saveMutation.isPending} data-testid="button-save-mbiyo">
               {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
               Sauvegarder la configuration
             </Button>
@@ -4147,6 +4305,7 @@ export default function AdminDashboard() {
     { title: "SMS recus", icon: MessageSquare, tab: "sms" },
     { title: "API & PIN", icon: Key, tab: "apikeys" },
     { title: "Paiement", icon: Zap, tab: "omnipay" },
+    { title: "Mbiyo", icon: Globe, tab: "mbiyo" },
     { title: "Crypto", icon: Bitcoin, tab: "cryptoagg" },
     { title: "Virements", icon: ArrowUpRight, tab: "virements" },
     { title: "Reversements", icon: Download, tab: "reversements" },
@@ -4224,6 +4383,7 @@ export default function AdminDashboard() {
             {activeTab === "sms" && <SmsPanel />}
             {activeTab === "apikeys" && <ApiKeysManagementPanel />}
             {activeTab === "omnipay" && <OmniPayPanel />}
+            {activeTab === "mbiyo" && <MbiyoPanel />}
             {activeTab === "cryptoagg" && <CryptoAggPanel />}
             {activeTab === "virements" && <AdminWalletTransfersPanel />}
             {activeTab === "reversements" && <AdminWithdrawalsPanel />}

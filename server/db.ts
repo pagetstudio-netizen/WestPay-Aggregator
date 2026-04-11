@@ -312,6 +312,8 @@ export async function runMigrations() {
     await client.query(`ALTER TABLE merchants ADD COLUMN IF NOT EXISTS fee_exempt boolean NOT NULL DEFAULT false`);
     await client.query(`ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS omnipay_code text`);
     await client.query(`ALTER TABLE merchants ADD COLUMN IF NOT EXISTS crypto_api_key text`);
+    await client.query(`ALTER TABLE merchant_countries ADD COLUMN IF NOT EXISTS payin_gateway text NOT NULL DEFAULT 'omnipay'`);
+    await client.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS gateway text NOT NULL DEFAULT 'omnipay'`);
     await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS merchants_crypto_api_key_idx ON merchants(crypto_api_key) WHERE crypto_api_key IS NOT NULL`);
 
     await client.query(`
