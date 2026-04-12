@@ -2229,6 +2229,52 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/admin/mbiyo/confirm-payment", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { reference, txId } = req.body;
+      if (!reference) return res.status(400).json({ message: "reference requis" });
+
+      const pending = await storage.getPendingPaymentByOmnipayReference(reference);
+      if (!pending) return res.status(404).json({ message: `Paiement introuvable pour la référence: ${reference}` });
+
+      if (pending.status === "omnipay_confirmed") {
+        return res.status(400).json({ message: "Ce paiement est déjà confirmé" });
+      }
+
+      await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
+
+      const merchant = await storage.getMerchantById(pending.merchantId);
+      const credit = calcMerchantCredit(pending.amount, pending.country);
+      await storage.updateMerchantBalance(pending.merchantId, credit);
+
+      const tx = await storage.createTransaction({
+        merchantId: pending.merchantId,
+        country: pending.country,
+        txId: txId || reference,
+        amount: pending.amount,
+        payerNumber: pending.payerPhone || null,
+        payerName: pending.payerName || null,
+        status: "completed",
+        provider: "mbiyo",
+        omnipayTxId: txId || null,
+        operator: pending.paymentMethod || null,
+        omnipayReference: reference,
+        errorMessage: null,
+      });
+
+      if (merchant) {
+        notifyMerchantPayment(merchant, pending.amount, pending.payerPhone || "", pending.payerName || "").catch(() => {});
+        notifyAdminPayment(merchant, pending.amount, pending.payerPhone || "", tx.txId || "", "Mbiyo (Manuel)").catch(() => {});
+      }
+
+      console.log(`[MBIYO ADMIN] Paiement confirmé manuellement: ${reference} — Crédit: ${credit} — Marchand: ${merchant?.name}`);
+      res.json({ success: true, credit, txId: tx.txId, merchantName: merchant?.name });
+    } catch (err: any) {
+      console.error("[MBIYO ADMIN] Erreur confirmation manuelle:", err.message);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // Update merchant country payin gateway
   app.patch("/api/admin/merchant-countries/:id/gateway", authMiddleware("admin"), async (req, res) => {
     try {

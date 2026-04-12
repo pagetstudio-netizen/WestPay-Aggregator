@@ -2495,7 +2495,79 @@ function MbiyoPanel() {
           </form>
         </CardContent>
       </Card>
+
+      <MbiyoManualConfirmCard token={token} />
     </div>
+  );
+}
+
+function MbiyoManualConfirmCard({ token }: { token: string | null }) {
+  const { toast } = useToast();
+  const [reference, setReference] = useState("");
+  const [txId, setTxId] = useState("");
+
+  const confirmMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/mbiyo/confirm-payment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ reference: reference.trim(), txId: txId.trim() || undefined }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.message || "Erreur");
+      return d;
+    },
+    onSuccess: (data) => {
+      toast({ title: "Paiement confirme", description: `Marchand ${data.merchantName} credite de ${data.credit}` });
+      setReference("");
+      setTxId("");
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/transactions"] });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  return (
+    <Card className="border-orange-200 dark:border-orange-800">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <CheckCircle className="w-4 h-4 text-orange-500" />Confirmation manuelle d'un paiement Mbiyo
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-xs text-muted-foreground mb-4">
+          Utiliser uniquement si le paiement est confirmé chez Mbiyo mais reste "en attente" sur WestPay (webhook non reçu). Cela crédite le solde du marchand manuellement.
+        </p>
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <Label>Référence WestPay (obligatoire)</Label>
+            <Input
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              placeholder="ex: MBMNWCI3HTD5F1DC30"
+              data-testid="input-mbiyo-manual-reference"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label>ID Transaction Mbiyo (optionnel)</Label>
+            <Input
+              value={txId}
+              onChange={(e) => setTxId(e.target.value)}
+              placeholder="ex: txn_xxxxxxxx"
+              data-testid="input-mbiyo-manual-txid"
+            />
+          </div>
+          <Button
+            onClick={() => confirmMutation.mutate()}
+            disabled={!reference.trim() || confirmMutation.isPending}
+            className="bg-orange-500 hover:bg-orange-600 text-white"
+            data-testid="button-mbiyo-manual-confirm"
+          >
+            {confirmMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
+            Confirmer et créditer le marchand
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
