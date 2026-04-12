@@ -2003,14 +2003,25 @@ export async function registerRoutes(
 
   app.post("/api/mbiyo/callback", async (req, res) => {
     try {
-      const rawBody = JSON.stringify(req.body);
-      const signature = req.headers["signature"] as string || "";
+      const rawBody = (req as any).rawBody?.toString() || JSON.stringify(req.body);
+      const signature = (
+        req.headers["x-signature"] ||
+        req.headers["signature"] ||
+        req.headers["x-mbiyo-signature"] ||
+        req.headers["x-webhook-signature"] ||
+        ""
+      ) as string;
       const webhookSecret = await getMbiyoWebhookSecret();
+
+      console.log(`[MBIYO CALLBACK] Headers: ${JSON.stringify(req.headers)}`);
+      console.log(`[MBIYO CALLBACK] Body: ${rawBody}`);
+      console.log(`[MBIYO CALLBACK] Signature recue: ${signature}`);
 
       if (webhookSecret) {
         const isValid = mbiyoVerifySignature(webhookSecret, signature, rawBody);
         if (!isValid) {
-          console.error("[MBIYO CALLBACK] Signature invalide");
+          const expected = require("crypto").createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
+          console.error(`[MBIYO CALLBACK] Signature invalide — recue: ${signature} — attendue: ${expected}`);
           return res.status(401).json({ message: "Signature invalide" });
         }
       }
@@ -2032,7 +2043,11 @@ export async function registerRoutes(
         return res.json({ status: "already_processed" });
       }
 
-      if (payload.status === "successful") {
+      const statusLower = (payload.status || "").toLowerCase();
+      const isSuccess = ["successful", "success", "paid", "completed"].includes(statusLower);
+      const isFailure = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(statusLower);
+
+      if (isSuccess) {
         await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
 
         const merchant = await storage.getMerchantById(pending.merchantId);
@@ -2084,7 +2099,7 @@ export async function registerRoutes(
 
         console.log(`[MBIYO CALLBACK] Paiement confirme: ${payload.order_id}`);
         return res.json({ status: "confirmed" });
-      } else if (payload.status === "failed" || payload.status === "cancelled") {
+      } else if (isFailure) {
         await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
         storage.createTransaction({
           merchantId: pending.merchantId,
@@ -2113,14 +2128,25 @@ export async function registerRoutes(
 
   app.post("/api/mbiyo/payout-callback", async (req, res) => {
     try {
-      const rawBody = JSON.stringify(req.body);
-      const signature = req.headers["signature"] as string || "";
+      const rawBody = (req as any).rawBody?.toString() || JSON.stringify(req.body);
+      const signature = (
+        req.headers["x-signature"] ||
+        req.headers["signature"] ||
+        req.headers["x-mbiyo-signature"] ||
+        req.headers["x-webhook-signature"] ||
+        ""
+      ) as string;
       const webhookSecret = await getMbiyoWebhookSecret();
+
+      console.log(`[MBIYO PAYOUT CALLBACK] Headers: ${JSON.stringify(req.headers)}`);
+      console.log(`[MBIYO PAYOUT CALLBACK] Body: ${rawBody}`);
+      console.log(`[MBIYO PAYOUT CALLBACK] Signature recue: ${signature}`);
 
       if (webhookSecret) {
         const isValid = mbiyoVerifySignature(webhookSecret, signature, rawBody);
         if (!isValid) {
-          console.error("[MBIYO PAYOUT CALLBACK] Signature invalide");
+          const expected = require("crypto").createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
+          console.error(`[MBIYO PAYOUT CALLBACK] Signature invalide — recue: ${signature} — attendue: ${expected}`);
           return res.status(401).json({ message: "Signature invalide" });
         }
       }
@@ -2145,13 +2171,17 @@ export async function registerRoutes(
       const wdMerchant = await storage.getMerchantById(withdrawal.merchantId);
       const wdFees = payload.fee || 0;
 
-      if (payload.status === "successful") {
+      const wdStatusLower = (payload.status || "").toLowerCase();
+      const wdIsSuccess = ["successful", "success", "paid", "completed"].includes(wdStatusLower);
+      const wdIsFailure = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(wdStatusLower);
+
+      if (wdIsSuccess) {
         await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Transfert Mbiyo confirme`, payload.order_id, wdFees);
         notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: withdrawal.withdrawalMode }).catch(() => {});
         notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
         console.log(`[MBIYO PAYOUT CALLBACK] Retrait #${withdrawal.id} approuvé - ref=${payload.order_id}`);
         return res.json({ status: "approved" });
-      } else if (payload.status === "failed" || payload.status === "cancelled") {
+      } else if (wdIsFailure) {
         await storage.updateWithdrawalStatus(withdrawal.id, "failed", `Transfert Mbiyo echoue - statut: ${payload.status}`, payload.order_id);
         const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
         if (mc) {
