@@ -2003,7 +2003,7 @@ export async function registerRoutes(
 
   app.post("/api/mbiyo/callback", async (req, res) => {
     try {
-      const rawBody = (req as any).rawBody?.toString() || JSON.stringify(req.body);
+      const rawBody = (req.rawBody as Buffer)?.toString() || JSON.stringify(req.body);
       const signature = (
         req.headers["x-signature"] ||
         req.headers["signature"] ||
@@ -2015,15 +2015,17 @@ export async function registerRoutes(
 
       console.log(`[MBIYO CALLBACK] Headers: ${JSON.stringify(req.headers)}`);
       console.log(`[MBIYO CALLBACK] Body: ${rawBody}`);
-      console.log(`[MBIYO CALLBACK] Signature recue: ${signature}`);
 
       if (webhookSecret) {
+        const expected = crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
+        console.log(`[MBIYO CALLBACK] Signature recue: ${signature} — attendue: ${expected}`);
         const isValid = mbiyoVerifySignature(webhookSecret, signature, rawBody);
         if (!isValid) {
-          const expected = require("crypto").createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
           console.error(`[MBIYO CALLBACK] Signature invalide — recue: ${signature} — attendue: ${expected}`);
           return res.status(401).json({ message: "Signature invalide" });
         }
+      } else {
+        console.log(`[MBIYO CALLBACK] Signature recue: ${signature} (verification ignoree — secret non configure)`);
       }
 
       const payload = req.body as MbiyoWebhookPayload;
@@ -2128,7 +2130,7 @@ export async function registerRoutes(
 
   app.post("/api/mbiyo/payout-callback", async (req, res) => {
     try {
-      const rawBody = (req as any).rawBody?.toString() || JSON.stringify(req.body);
+      const rawBody = (req.rawBody as Buffer)?.toString() || JSON.stringify(req.body);
       const signature = (
         req.headers["x-signature"] ||
         req.headers["signature"] ||
@@ -2140,15 +2142,17 @@ export async function registerRoutes(
 
       console.log(`[MBIYO PAYOUT CALLBACK] Headers: ${JSON.stringify(req.headers)}`);
       console.log(`[MBIYO PAYOUT CALLBACK] Body: ${rawBody}`);
-      console.log(`[MBIYO PAYOUT CALLBACK] Signature recue: ${signature}`);
 
       if (webhookSecret) {
+        const expected = crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
+        console.log(`[MBIYO PAYOUT CALLBACK] Signature recue: ${signature} — attendue: ${expected}`);
         const isValid = mbiyoVerifySignature(webhookSecret, signature, rawBody);
         if (!isValid) {
-          const expected = require("crypto").createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
           console.error(`[MBIYO PAYOUT CALLBACK] Signature invalide — recue: ${signature} — attendue: ${expected}`);
           return res.status(401).json({ message: "Signature invalide" });
         }
+      } else {
+        console.log(`[MBIYO PAYOUT CALLBACK] Signature recue: ${signature} (verification ignoree — secret non configure)`);
       }
 
       const payload = req.body as MbiyoPayoutWebhookPayload;
