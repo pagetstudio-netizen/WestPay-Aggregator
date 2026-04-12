@@ -2077,9 +2077,28 @@ function ApiKeysManagementPanel() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <FileText className="w-4 h-4" />Journal d'activite API
-            </CardTitle>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <FileText className="w-4 h-4" />Journal d'activite API
+              </CardTitle>
+              {(apiLogs as any[]).length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs gap-1"
+                  data-testid="button-copy-all-logs"
+                  onClick={() => {
+                    const text = (apiLogs as any[]).slice(0, 20).map((log: any) =>
+                      `[${new Date(log.createdAt).toLocaleString("fr-FR")}] ${log.action} | ${log.description} | IP: ${log.ip || "-"}`
+                    ).join("\n");
+                    navigator.clipboard.writeText(text);
+                    toast({ title: "Requetes copiees", description: `${Math.min((apiLogs as any[]).length, 20)} entrees copiees` });
+                  }}
+                >
+                  <Copy className="w-3 h-3" />Copier tout
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             <ScrollArea className="h-64">
@@ -2088,14 +2107,27 @@ function ApiKeysManagementPanel() {
                   <p className="text-sm text-muted-foreground text-center py-4">Aucune activite enregistree</p>
                 ) : (
                   (apiLogs as any[]).slice(0, 20).map((log: any) => (
-                    <div key={log.id} className="flex items-start gap-2 p-2 rounded-md text-xs">
+                    <div key={log.id} className="flex items-start gap-2 p-2 rounded-md text-xs hover:bg-muted/50 group">
                       <Badge variant={log.action.includes("failed") ? "destructive" : "secondary"} className="text-xs shrink-0">
                         {log.action}
                       </Badge>
                       <div className="min-w-0 flex-1">
-                        <p className="text-muted-foreground truncate">{log.description}</p>
-                        <p className="text-muted-foreground/60">{new Date(log.createdAt).toLocaleString("fr-FR")}</p>
+                        <p className="text-muted-foreground break-all">{log.description}</p>
+                        <p className="text-muted-foreground/60">{new Date(log.createdAt).toLocaleString("fr-FR")}{log.ip ? ` — IP: ${log.ip}` : ""}</p>
                       </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100 shrink-0"
+                        data-testid={`button-copy-log-${log.id}`}
+                        onClick={() => {
+                          const text = `[${new Date(log.createdAt).toLocaleString("fr-FR")}] ${log.action} | ${log.description} | IP: ${log.ip || "-"}`;
+                          navigator.clipboard.writeText(text);
+                          toast({ title: "Requete copiee" });
+                        }}
+                      >
+                        <Copy className="w-3 h-3" />
+                      </Button>
                     </div>
                   ))
                 )}
