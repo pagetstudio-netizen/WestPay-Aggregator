@@ -319,6 +319,10 @@ export async function runMigrations() {
     await client.query(`ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS gateway text NOT NULL DEFAULT 'omnipay'`);
     await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS merchants_crypto_api_key_idx ON merchants(crypto_api_key) WHERE crypto_api_key IS NOT NULL`);
 
+    await client.query(`ALTER TABLE merchants ADD COLUMN IF NOT EXISTS sdk_enabled boolean NOT NULL DEFAULT false`);
+    await client.query(`ALTER TABLE merchants ADD COLUMN IF NOT EXISTS sdk_api_key text`);
+    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS merchants_sdk_api_key_idx ON merchants(sdk_api_key) WHERE sdk_api_key IS NOT NULL`);
+
     await client.query(`
       UPDATE withdrawal_operators SET omnipay_code = CASE
         WHEN LOWER(name) LIKE '%mtn%' THEN 'mtn'

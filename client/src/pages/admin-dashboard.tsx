@@ -31,7 +31,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
 
-type AdminTab = "overview" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "cryptoagg" | "virements" | "reversements" | "settings";
+type AdminTab = "overview" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "cryptoagg" | "virements" | "reversements" | "settings" | "sdk";
 
 function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: { staleTime?: number; refetchOnWindowFocus?: boolean }) {
   const { token, logout } = useAuth();
@@ -4384,6 +4384,135 @@ function LoadingSkeleton() {
   );
 }
 
+function SdkPanel() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const { data: sdkMerchants = [], isLoading, refetch } = useAdminFetch("/api/admin/sdk/merchants", ["/api/admin/sdk/merchants"]);
+  const [visibleKeys, setVisibleKeys] = useState<Record<number, boolean>>({});
+
+  const toggleSdk = async (id: number, enable: boolean) => {
+    const res = await fetch(`/api/admin/sdk/merchants/${id}/${enable ? "enable" : "disable"}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) { const d = await res.json(); toast({ title: "Erreur", description: d.message, variant: "destructive" }); return; }
+    const d = await res.json();
+    if (enable && d.sdkApiKey) toast({ title: "SDK activé", description: d.sdkApiKey });
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/sdk/merchants"] });
+    refetch();
+  };
+
+  const regenerateKey = async (id: number) => {
+    const res = await fetch(`/api/admin/sdk/merchants/${id}/regenerate`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) { const d = await res.json(); toast({ title: "Erreur", description: d.message, variant: "destructive" }); return; }
+    const d = await res.json();
+    toast({ title: "Clé régénérée", description: d.sdkApiKey });
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/sdk/merchants"] });
+    refetch();
+  };
+
+  const merchants = sdkMerchants as { id: number; name: string; email: string; sdkEnabled: boolean; sdkApiKey: string | null }[];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Gestion SDK API</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">Activation et gestion des clés SDK par marchand</p>
+        </div>
+        <Badge variant="secondary" className="text-xs gap-1"><Shield className="w-3 h-3" />Accès administrateur uniquement</Badge>
+      </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2"><Key className="w-4 h-4" />Marchands — Accès SDK</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="space-y-3">{[1,2,3].map(i => <Skeleton key={i} className="h-16 w-full" />)}</div>
+          ) : merchants.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">Aucun marchand</p>
+          ) : (
+            <div className="space-y-3">
+              {merchants.map(m => (
+                <div key={m.id} className="border rounded-lg p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{m.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">{m.email}</p>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <Badge variant={m.sdkEnabled ? "default" : "secondary"} className="text-xs">
+                        {m.sdkEnabled ? "SDK actif" : "Désactivé"}
+                      </Badge>
+                      <Switch
+                        checked={m.sdkEnabled}
+                        onCheckedChange={v => toggleSdk(m.id, v)}
+                        data-testid={`switch-sdk-${m.id}`}
+                      />
+                    </div>
+                  </div>
+                  {m.sdkEnabled && m.sdkApiKey && (
+                    <div className="bg-muted/50 rounded-md p-2 flex items-center gap-2">
+                      <code className="text-xs font-mono flex-1 min-w-0 text-foreground/80">
+                        {visibleKeys[m.id] ? m.sdkApiKey : m.sdkApiKey.slice(0, 12) + "••••••••••••••••••••••••••••••••••"}
+                      </code>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0"
+                        onClick={() => setVisibleKeys(v => ({ ...v, [m.id]: !v[m.id] }))}
+                        data-testid={`button-toggle-sdk-key-${m.id}`}>
+                        <Eye className="w-3 h-3" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0"
+                        onClick={() => { navigator.clipboard.writeText(m.sdkApiKey!); toast({ title: "Clé SDK copiée" }); }}
+                        data-testid={`button-copy-sdk-key-${m.id}`}>
+                        <Copy className="w-3 h-3" />
+                      </Button>
+                      <Button variant="outline" size="sm" className="h-6 text-xs gap-1 shrink-0"
+                        onClick={() => regenerateKey(m.id)}
+                        data-testid={`button-regen-sdk-key-${m.id}`}>
+                        <RefreshCw className="w-3 h-3" />Regén.
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2"><BookOpen className="w-4 h-4" />Endpoints SDK disponibles</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3 text-sm">
+            {[
+              { method: "POST", path: "/api/sdk/v1/payin", desc: "Initier un paiement entrant (Mobile Money via Mbiyo)" },
+              { method: "POST", path: "/api/sdk/v1/payout", desc: "Initier un retrait automatique (Mobile Money via Mbiyo)" },
+              { method: "GET", path: "/api/sdk/v1/transaction/:orderId", desc: "Consulter le statut d'une transaction" },
+              { method: "GET", path: "/api/sdk/v1/balance", desc: "Consulter les soldes par pays" },
+              { method: "GET", path: "/api/sdk/v1/ping", desc: "Vérifier la connexion SDK" },
+            ].map(ep => (
+              <div key={ep.path} className="flex items-start gap-3 p-2 rounded-md hover:bg-muted/50">
+                <Badge variant={ep.method === "POST" ? "default" : "secondary"} className="text-xs shrink-0 font-mono">{ep.method}</Badge>
+                <div className="min-w-0">
+                  <code className="text-xs font-mono text-foreground/80 block">{ep.path}</code>
+                  <p className="text-xs text-muted-foreground mt-0.5">{ep.desc}</p>
+                </div>
+              </div>
+            ))}
+            <p className="text-xs text-muted-foreground pt-2 border-t">Header requis: <code className="font-mono bg-muted px-1 rounded">X-SDK-Key: WP-SDK-...</code></p>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function AdminDashboard() {
   const { user, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
@@ -4413,6 +4542,7 @@ export default function AdminDashboard() {
     { title: "Virements", icon: ArrowUpRight, tab: "virements" },
     { title: "Reversements", icon: Download, tab: "reversements" },
     { title: "Parametres", icon: Settings, tab: "settings" },
+    { title: "SDK API", icon: BookOpen, tab: "sdk" },
   ];
 
   const style = {
@@ -4491,6 +4621,7 @@ export default function AdminDashboard() {
             {activeTab === "virements" && <AdminWalletTransfersPanel />}
             {activeTab === "reversements" && <AdminWithdrawalsPanel />}
             {activeTab === "settings" && <SettingsPanel />}
+            {activeTab === "sdk" && <SdkPanel />}
           </main>
         </div>
       </div>

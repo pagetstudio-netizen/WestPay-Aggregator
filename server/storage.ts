@@ -176,6 +176,10 @@ export interface IStorage {
 
   getCryptoBalances(merchantId: number): Promise<CryptoBalance[]>;
   incrementCryptoBalance(merchantId: number, currency: string, amount: number): Promise<void>;
+
+  getMerchantBySdkKey(sdkApiKey: string): Promise<Merchant | undefined>;
+  enableMerchantSdk(merchantId: number, sdkApiKey: string): Promise<void>;
+  disableMerchantSdk(merchantId: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1014,6 +1018,19 @@ export class DatabaseStorage implements IStorage {
         balance: amount.toFixed(8),
       });
     }
+  }
+
+  async getMerchantBySdkKey(sdkApiKey: string): Promise<Merchant | undefined> {
+    const [merchant] = await db.select().from(merchants).where(eq(merchants.sdkApiKey, sdkApiKey));
+    return merchant;
+  }
+
+  async enableMerchantSdk(merchantId: number, sdkApiKey: string): Promise<void> {
+    await db.update(merchants).set({ sdkEnabled: true, sdkApiKey }).where(eq(merchants.id, merchantId));
+  }
+
+  async disableMerchantSdk(merchantId: number): Promise<void> {
+    await db.update(merchants).set({ sdkEnabled: false, sdkApiKey: null }).where(eq(merchants.id, merchantId));
   }
 }
 

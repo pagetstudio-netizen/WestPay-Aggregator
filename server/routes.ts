@@ -4073,5 +4073,367 @@ export async function registerRoutes(
     }
   });
 
+  // ═══════════════════════════════════════════════════════════════
+  // ─── WestPay SDK API v1 ────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════
+
+  async function sdkAuthMiddleware(req: Request, res: Response, next: NextFunction) {
+    const sdkKey = req.headers["x-sdk-key"] as string | undefined;
+    if (!sdkKey) return res.status(401).json({ status: "error", message: "Clé SDK manquante. Fournissez X-SDK-Key dans les headers." });
+    const merchant = await storage.getMerchantBySdkKey(sdkKey);
+    if (!merchant || !merchant.sdkEnabled) return res.status(401).json({ status: "error", message: "Clé SDK invalide ou SDK désactivé pour ce compte." });
+    if (merchant.suspended) return res.status(403).json({ status: "error", message: "Compte marchand suspendu." });
+    (req as any).sdkMerchant = merchant;
+    next();
+  }
+
+  // Admin: lister marchands avec statut SDK
+  app.get("/api/admin/sdk/merchants", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const allMerchants = await storage.getMerchants();
+      const list = allMerchants.map(m => ({
+        id: m.id,
+        name: m.name,
+        email: m.email,
+        sdkEnabled: m.sdkEnabled,
+        sdkApiKey: m.sdkApiKey,
+      }));
+      res.json(list);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Admin: activer SDK pour un marchand
+  app.post("/api/admin/sdk/merchants/:id/enable", authMiddleware("admin"), async (req, res) => {
+    try {
+      const merchantId = parseInt(req.params.id);
+      const merchant = await storage.getMerchantById(merchantId);
+      if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
+      const sdkKey = "WP-SDK-" + crypto.randomBytes(24).toString("hex").toUpperCase();
+      await storage.enableMerchantSdk(merchantId, sdkKey);
+      res.json({ message: "SDK activé", sdkApiKey: sdkKey });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Admin: désactiver SDK pour un marchand
+  app.post("/api/admin/sdk/merchants/:id/disable", authMiddleware("admin"), async (req, res) => {
+    try {
+      const merchantId = parseInt(req.params.id);
+      await storage.disableMerchantSdk(merchantId);
+      res.json({ message: "SDK désactivé" });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Admin: régénérer clé SDK
+  app.post("/api/admin/sdk/merchants/:id/regenerate", authMiddleware("admin"), async (req, res) => {
+    try {
+      const merchantId = parseInt(req.params.id);
+      const merchant = await storage.getMerchantById(merchantId);
+      if (!merchant || !merchant.sdkEnabled) return res.status(400).json({ message: "SDK non activé pour ce marchand" });
+      const sdkKey = "WP-SDK-" + crypto.randomBytes(24).toString("hex").toUpperCase();
+      await storage.enableMerchantSdk(merchantId, sdkKey);
+      res.json({ message: "Clé SDK régénérée", sdkApiKey: sdkKey });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Merchant: récupérer statut SDK (onglet SDK dashboard)
+  app.get("/api/merchant/sdk/status", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const merchant = await storage.getMerchantById(merchantId);
+      if (!merchant) return res.status(404).json({ sdkEnabled: false });
+      res.json({ sdkEnabled: merchant.sdkEnabled, sdkApiKey: merchant.sdkEnabled ? merchant.sdkApiKey : null });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── SDK API v1 : Payin ────────────────────────────────────────
+
+  app.post("/api/sdk/v1/payin", sdkAuthMiddleware, async (req, res) => {
+    try {
+      const merchant = (req as any).sdkMerchant;
+      const { amount, currency, order_id, callback_url, metadata } = req.body;
+      if (!amount || !currency || !order_id || !callback_url || !metadata?.phone_number || !metadata?.network || !metadata?.country_code) {
+        return res.status(400).json({ status: "error", message: "Paramètres manquants: amount, currency, order_id, callback_url, metadata.phone_number, metadata.network, metadata.country_code requis." });
+      }
+      if (typeof amount !== "number" || amount <= 0) {
+        return res.status(400).json({ status: "error", message: "amount doit être un nombre positif." });
+      }
+      const mbiyoApiKey = await getMbiyoApiKey();
+      if (!mbiyoApiKey) return res.status(503).json({ status: "error", message: "Passerelle de paiement non configurée." });
+
+      const countryMap: Record<string, string> = {
+        "TG": "Togo", "BJ": "Benin", "CI": "Cote d'Ivoire", "SN": "Senegal",
+        "ML": "Mali", "BF": "Burkina Faso", "CM": "Cameroun", "CG": "Congo Brazzaville",
+        "CD": "Congo RDC", "GN": "Guinee", "GM": "Gambie",
+      };
+      const countryName = countryMap[metadata.country_code.toUpperCase()] || metadata.country_code;
+
+      const internalRef = mbiyoGenerateRef();
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+
+      await storage.createPendingPayment({
+        merchantId: merchant.id,
+        country: countryName,
+        amount,
+        payerPhone: metadata.phone_number,
+        payerName: metadata.customer_name || null,
+        paymentMethod: metadata.network,
+        txId: null,
+        status: "pending",
+        redirectUrl: callback_url,
+        omnipayReference: internalRef,
+        omnipayTxId: null,
+        omnipayPaymentUrl: null,
+        gateway: "mbiyo",
+        expiresAt,
+      });
+
+      const appUrl = process.env.APP_URL || "https://westpay.cloud";
+      const mbiyoResult = await mbiyoInitiatePayin({
+        apiKey: mbiyoApiKey,
+        amount,
+        currency: currency.toUpperCase(),
+        orderId: internalRef,
+        callbackUrl: `${appUrl}/api/mbiyo/callback`,
+        network: metadata.network,
+        phoneNumber: metadata.phone_number,
+        countryCode: metadata.country_code.toUpperCase(),
+      });
+
+      if (mbiyoResult.status !== "success" && mbiyoResult.status !== "pending") {
+        return res.status(422).json({ status: "error", message: mbiyoResult.message || "Echec initiation paiement", data: null });
+      }
+
+      await storage.createApiLog({ merchantId: merchant.id, action: "sdk_payin_initiated", ip: req.ip || "-", description: `SDK Payin — Ref: ${internalRef} — ${amount} ${currency} via ${metadata.network}/${metadata.country_code}` });
+
+      res.json({
+        status: "success",
+        message: "Paiement initié avec succès",
+        data: {
+          reference: internalRef,
+          transaction_id: mbiyoResult.data?.transaction_id || null,
+          amount,
+          currency: currency.toUpperCase(),
+          order_id,
+          status: "pending",
+          payment_method: "mobile_money",
+          network: metadata.network,
+          country_code: metadata.country_code,
+          redirect_url: mbiyoResult.data?.redirect_url || null,
+          instructions: mbiyoResult.data?.instructions || null,
+          created_at: new Date().toISOString(),
+        },
+      });
+    } catch (err: any) {
+      console.error("[SDK PAYIN ERROR]", err.message);
+      res.status(500).json({ status: "error", message: "Erreur interne du serveur", data: null });
+    }
+  });
+
+  // ─── SDK API v1 : Payout ───────────────────────────────────────
+
+  app.post("/api/sdk/v1/payout", sdkAuthMiddleware, async (req, res) => {
+    try {
+      const merchant = (req as any).sdkMerchant;
+      const { amount, currency, order_id, callback_url, metadata } = req.body;
+      if (!amount || !currency || !order_id || !callback_url || !metadata?.phone_number || !metadata?.network || !metadata?.country_code) {
+        return res.status(400).json({ status: "error", message: "Paramètres manquants: amount, currency, order_id, callback_url, metadata.phone_number, metadata.network, metadata.country_code requis." });
+      }
+      if (typeof amount !== "number" || amount <= 0) {
+        return res.status(400).json({ status: "error", message: "amount doit être un nombre positif." });
+      }
+
+      const countryMap: Record<string, string> = {
+        "TG": "Togo", "BJ": "Benin", "CI": "Cote d'Ivoire", "SN": "Senegal",
+        "ML": "Mali", "BF": "Burkina Faso", "CM": "Cameroun", "CG": "Congo Brazzaville",
+        "CD": "Congo RDC", "GN": "Guinee", "GM": "Gambie",
+      };
+      const countryName = countryMap[metadata.country_code.toUpperCase()] || metadata.country_code;
+
+      const feeRate = merchant.feeExempt ? 0 : getWithdrawalFeeRate(countryName);
+      const totalDeducted = Math.ceil(amount * (1 + feeRate));
+
+      const mc = await storage.findMerchantCountryBySimAndCountry(merchant.id, countryName);
+      if (!mc) return res.status(422).json({ status: "error", message: `Compte ${countryName} non trouvé pour ce marchand.` });
+      if (mc.balance < totalDeducted) {
+        return res.status(422).json({
+          status: "error",
+          message: "Solde insuffisant pour ce retrait.",
+          data: { required_amount: totalDeducted, available_balance: mc.balance, currency: currency.toUpperCase() },
+        });
+      }
+
+      const mbiyoApiKey = await getMbiyoApiKey();
+      if (!mbiyoApiKey) return res.status(503).json({ status: "error", message: "Passerelle de paiement non configurée." });
+
+      const internalRef = mbiyoGenerateRef();
+
+      await storage.updateMerchantCountryBalance(mc.id, mc.balance - totalDeducted);
+
+      const appUrl = process.env.APP_URL || "https://westpay.cloud";
+      const mbiyoResult = await mbiyoInitiatePayout({
+        apiKey: mbiyoApiKey,
+        amount,
+        currency: currency.toUpperCase(),
+        orderId: internalRef,
+        callbackUrl: `${appUrl}/api/mbiyo/payout-callback`,
+        network: metadata.network,
+        phoneNumber: metadata.phone_number,
+        countryCode: metadata.country_code.toUpperCase(),
+        beneficiary: metadata.beneficiary || "Marchand WestPay",
+      });
+
+      if (mbiyoResult.status !== "success" && mbiyoResult.status !== "pending") {
+        await storage.updateMerchantCountryBalance(mc.id, mc.balance);
+        return res.status(422).json({ status: "error", message: mbiyoResult.message || "Echec initiation du payout", data: null });
+      }
+
+      const fees = totalDeducted - amount;
+      await storage.createWithdrawal({
+        merchantId: merchant.id,
+        merchantCountryId: mc.id,
+        country: countryName,
+        amount,
+        phone: metadata.phone_number,
+        status: "processing",
+        withdrawalMode: "auto",
+        operator: metadata.network,
+        adminNote: null,
+        fees,
+        gateway: "mbiyo",
+        omnipayRef: internalRef,
+      });
+
+      await storage.createApiLog({ merchantId: merchant.id, action: "sdk_payout_initiated", ip: req.ip || "-", description: `SDK Payout — Ref: ${internalRef} — ${amount} ${currency} vers ${metadata.phone_number} via ${metadata.network}/${metadata.country_code}` });
+
+      res.json({
+        status: "success",
+        message: "Payout initié avec succès",
+        data: {
+          reference: internalRef,
+          transaction_id: mbiyoResult.data?.transaction_id || null,
+          amount,
+          fee: fees,
+          charged_amount: totalDeducted,
+          currency: currency.toUpperCase(),
+          order_id,
+          status: "pending",
+          payment_method: "mobile_money",
+          recipient: {
+            phone_number: metadata.phone_number,
+            network: metadata.network,
+            country_code: metadata.country_code,
+            beneficiary: metadata.beneficiary || null,
+          },
+          created_at: new Date().toISOString(),
+        },
+      });
+    } catch (err: any) {
+      console.error("[SDK PAYOUT ERROR]", err.message);
+      res.status(500).json({ status: "error", message: "Erreur interne du serveur", data: null });
+    }
+  });
+
+  // ─── SDK API v1 : Statut transaction ──────────────────────────
+
+  app.get("/api/sdk/v1/transaction/:orderId", sdkAuthMiddleware, async (req, res) => {
+    try {
+      const merchant = (req as any).sdkMerchant;
+      const { orderId } = req.params;
+      const pending = await storage.getPendingPaymentByOmnipayReference(orderId);
+      if (pending && pending.merchantId === merchant.id) {
+        return res.json({
+          status: "success",
+          data: {
+            reference: orderId,
+            amount: pending.amount,
+            status: pending.status,
+            payment_method: "mobile_money",
+            network: pending.paymentMethod,
+            country: pending.country,
+            phone_number: pending.payerPhone,
+            created_at: pending.createdAt,
+          },
+        });
+      }
+      const tx = await storage.getTransactionByTxId(orderId);
+      if (tx && tx.merchantId === merchant.id) {
+        return res.json({
+          status: "success",
+          data: {
+            reference: orderId,
+            amount: tx.amount,
+            status: tx.status,
+            payment_method: "mobile_money",
+            network: tx.operator,
+            country: tx.country,
+            phone_number: tx.payerNumber,
+            created_at: tx.createdAt,
+          },
+        });
+      }
+      const withdrawal = await storage.getWithdrawalByOmnipayRef(orderId);
+      if (withdrawal && withdrawal.merchantId === merchant.id) {
+        return res.json({
+          status: "success",
+          data: {
+            reference: orderId,
+            amount: withdrawal.amount,
+            fee: withdrawal.fees,
+            status: withdrawal.status,
+            type: "payout",
+            network: withdrawal.operator,
+            country: withdrawal.country,
+            phone_number: withdrawal.phone,
+            created_at: withdrawal.createdAt,
+          },
+        });
+      }
+      return res.status(404).json({ status: "error", message: "Transaction introuvable ou non autorisée." });
+    } catch (err: any) {
+      res.status(500).json({ status: "error", message: err.message });
+    }
+  });
+
+  // ─── SDK API v1 : Solde marchand ──────────────────────────────
+
+  app.get("/api/sdk/v1/balance", sdkAuthMiddleware, async (req, res) => {
+    try {
+      const merchant = (req as any).sdkMerchant;
+      const countries = await storage.getMerchantCountries(merchant.id);
+      const balances = countries.filter(c => c.active).map(c => ({
+        country: c.country,
+        balance: c.balance,
+        currency: (() => {
+          const cur: Record<string, string> = {
+            "Togo": "XOF", "Benin": "XOF", "Cote d'Ivoire": "XOF", "Senegal": "XOF",
+            "Mali": "XOF", "Burkina Faso": "XOF", "Cameroun": "XAF",
+            "Congo Brazzaville": "XAF", "Congo RDC": "CDF", "Guinee": "GNF", "Gambie": "GMD",
+          };
+          return cur[c.country] || "XOF";
+        })(),
+      }));
+      res.json({ status: "success", data: { balances } });
+    } catch (err: any) {
+      res.status(500).json({ status: "error", message: err.message });
+    }
+  });
+
+  // ─── SDK API v1 : Ping ────────────────────────────────────────
+
+  app.get("/api/sdk/v1/ping", sdkAuthMiddleware, async (req, res) => {
+    const merchant = (req as any).sdkMerchant;
+    res.json({ status: "success", message: "WestPay SDK opérationnel", merchant: merchant.name, timestamp: new Date().toISOString() });
+  });
+
   return httpServer;
 }

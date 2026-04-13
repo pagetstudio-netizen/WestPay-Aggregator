@@ -26,6 +26,8 @@ export const merchants = pgTable("merchants", {
   withdrawalMode: text("withdrawal_mode").default("manual").notNull(),
   website: text("website"),
   cryptoApiKey: text("crypto_api_key"),
+  sdkEnabled: boolean("sdk_enabled").default(false).notNull(),
+  sdkApiKey: text("sdk_api_key"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

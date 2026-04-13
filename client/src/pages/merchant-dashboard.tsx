@@ -27,7 +27,7 @@ import { Switch } from "@/components/ui/switch";
 import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry, Withdrawal } from "@shared/schema";
 import { useLanguage, LANGUAGES } from "@/lib/language";
 
-type MerchantTab = "overview" | "apikeys" | "webhook" | "virements" | "reversements" | "settings" | "paymentlinks" | "transactions" | "crypto";
+type MerchantTab = "overview" | "apikeys" | "webhook" | "virements" | "reversements" | "settings" | "paymentlinks" | "transactions" | "crypto" | "sdk";
 
 function useMerchantFetch(url: string, key: string[], token: string | null) {
   return useQuery({
@@ -2234,6 +2234,7 @@ const NAV_ITEMS: { key: MerchantTab; icon: any; color: string }[] = [
   { key: "reversements",  icon: Download,     color: "#fb8c00" },
   { key: "paymentlinks",  icon: Link,         color: "#e57373" },
   { key: "crypto",        icon: Bitcoin,      color: "#f59e0b" },
+  { key: "sdk",           icon: BookOpen,     color: "#8b5cf6" },
   { key: "apikeys",       icon: Key,          color: "#039be5" },
   { key: "webhook",       icon: Webhook,      color: "#43a047" },
   { key: "settings",      icon: Settings,     color: "#6d4c41" },
@@ -2278,14 +2279,19 @@ function NavItem({
 }
 
 function MerchantSidebarContent({
-  user, activeTab, collapsed, onTabChange, onLogout, t, hasCrypto
+  user, activeTab, collapsed, onTabChange, onLogout, t, hasCrypto, hasSdk
 }: {
   user: any; activeTab: MerchantTab; collapsed: boolean;
   onTabChange: (tab: MerchantTab) => void; onLogout: () => void;
   t: (key: string) => string;
   hasCrypto: boolean;
+  hasSdk: boolean;
 }) {
-  const visibleNavItems = NAV_ITEMS.filter(item => item.key !== "crypto" || hasCrypto);
+  const visibleNavItems = NAV_ITEMS.filter(item => {
+    if (item.key === "crypto") return hasCrypto;
+    if (item.key === "sdk") return hasSdk;
+    return true;
+  });
 
   return (
     <div className="flex flex-col h-full select-none">
@@ -2350,6 +2356,530 @@ function MerchantSidebarContent({
   );
 }
 
+function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
+  const { toast } = useToast();
+  const [showKey, setShowKey] = useState(false);
+  const copy = (text: string, label = "Copié") => { navigator.clipboard.writeText(text); toast({ title: label }); };
+  const BASE_URL = "https://westpay.cloud";
+  const KEY_DISPLAY = sdkApiKey ? (showKey ? sdkApiKey : sdkApiKey.slice(0, 10) + "••••••••••••••••••••••••••••••••••••••") : "WP-SDK-...";
+
+  const CodeBlock = ({ code }: { code: string }) => (
+    <div className="relative group">
+      <pre className="bg-gray-900 text-green-300 text-xs rounded-lg p-4 overflow-x-auto font-mono leading-relaxed whitespace-pre">{code}</pre>
+      <button
+        onClick={() => copy(code, "Code copié")}
+        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-700 hover:bg-gray-600 text-white rounded px-2 py-1 text-xs flex items-center gap-1"
+      >
+        <Copy className="w-3 h-3" />Copier
+      </button>
+    </div>
+  );
+
+  const Section = ({ id, title, icon: Icon, children }: { id: string; title: string; icon: any; children: any }) => (
+    <div id={id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100" style={{ background: "linear-gradient(90deg,#f8faff,#fff)" }}>
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: "#1e2231" }}>
+          <Icon className="w-4 h-4 text-white" />
+        </div>
+        <h3 className="text-base font-bold text-gray-800">{title}</h3>
+      </div>
+      <div className="px-6 py-5 space-y-4">{children}</div>
+    </div>
+  );
+
+  const EndpointBadge = ({ method }: { method: string }) => (
+    <span className={`inline-block px-2 py-0.5 rounded text-xs font-mono font-bold ${method === "POST" ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"}`}>{method}</span>
+  );
+
+  const ParamRow = ({ name, type, req, desc }: { name: string; type: string; req: boolean; desc: string }) => (
+    <tr className="border-b border-gray-50 last:border-0">
+      <td className="py-2 pr-3 align-top"><code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded font-mono text-gray-800">{name}</code></td>
+      <td className="py-2 pr-3 align-top"><span className="text-xs text-gray-500 font-mono">{type}</span></td>
+      <td className="py-2 pr-3 align-top">{req ? <span className="text-xs text-red-500 font-medium">Requis</span> : <span className="text-xs text-gray-400">Optionnel</span>}</td>
+      <td className="py-2 align-top text-xs text-gray-600">{desc}</td>
+    </tr>
+  );
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-gray-900 to-gray-800 rounded-2xl p-6 text-white">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "rgba(255,255,255,0.12)" }}>
+            <BookOpen className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold">WestPay SDK API</h2>
+            <p className="text-xs text-white/60">Documentation — Payin & Payout Mobile Money</p>
+          </div>
+        </div>
+        <div className="mt-4 bg-white/10 rounded-xl p-4 flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-white/50 mb-1 font-medium uppercase tracking-widest">Votre Clé SDK</p>
+            <code className="text-sm font-mono text-green-300 break-all">{KEY_DISPLAY}</code>
+          </div>
+          <button onClick={() => setShowKey(v => !v)} className="shrink-0 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition" data-testid="button-toggle-sdk-key">
+            <Eye className="w-4 h-4 text-white" />
+          </button>
+          {sdkApiKey && (
+            <button onClick={() => copy(sdkApiKey, "Clé SDK copiée")} className="shrink-0 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition" data-testid="button-copy-sdk-key-merchant">
+              <Copy className="w-4 h-4 text-white" />
+            </button>
+          )}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-3 text-xs text-white/60">
+          <span>URL de base: <code className="text-white font-mono">{BASE_URL}</code></span>
+          <span>•</span>
+          <span>Fournisseur: <span className="text-green-300 font-medium">Mbiyo Pay</span></span>
+          <span>•</span>
+          <span>Version: <span className="text-white font-medium">v1</span></span>
+        </div>
+      </div>
+
+      {/* Authentication */}
+      <Section id="auth" title="Authentification" icon={Key}>
+        <p className="text-sm text-gray-600">Toutes les requêtes doivent inclure votre clé SDK dans le header HTTP <code className="bg-gray-100 px-1 rounded font-mono text-xs">X-SDK-Key</code>.</p>
+        <CodeBlock code={`curl -X POST ${BASE_URL}/api/sdk/v1/payin \\
+  -H "Content-Type: application/json" \\
+  -H "X-SDK-Key: ${sdkApiKey || "WP-SDK-VOTRE_CLE"}" \\
+  -d '{...}'`} />
+        <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+          <span className="text-amber-500 text-sm mt-0.5">⚠️</span>
+          <p className="text-xs text-amber-700">Ne partagez jamais votre clé SDK publiquement. Stockez-la dans vos variables d'environnement serveur.</p>
+        </div>
+      </Section>
+
+      {/* Payin */}
+      <Section id="payin" title="Payin — Initier un Paiement Entrant" icon={ArrowRightLeft}>
+        <div className="flex items-center gap-2">
+          <EndpointBadge method="POST" />
+          <code className="text-sm font-mono text-gray-700 bg-gray-100 px-2 py-1 rounded">/api/sdk/v1/payin</code>
+        </div>
+        <p className="text-sm text-gray-600">Déclenche une demande de paiement Mobile Money vers le client. Le client reçoit une notification USSD ou push sur son téléphone.</p>
+        <div>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Paramètres du corps (JSON)</p>
+          <div className="overflow-x-auto rounded-lg border border-gray-100">
+            <table className="w-full text-sm min-w-[500px]">
+              <thead><tr className="bg-gray-50"><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Champ</th><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Type</th><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Requis</th><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Description</th></tr></thead>
+              <tbody className="divide-y divide-gray-50">
+                <ParamRow name="amount" type="number" req={true} desc="Montant en unité de la monnaie locale (ex: 5000 pour 5000 XOF)" />
+                <ParamRow name="currency" type="string" req={true} desc="Code devise ISO: XOF, XAF, GNF, CDF, GMD" />
+                <ParamRow name="order_id" type="string" req={true} desc="Identifiant unique de votre commande (stocké côté serveur)" />
+                <ParamRow name="callback_url" type="string" req={true} desc="URL de votre webhook pour recevoir la notification de statut" />
+                <ParamRow name="metadata.phone_number" type="string" req={true} desc="Numéro de téléphone du payeur avec indicatif (ex: +22890123456)" />
+                <ParamRow name="metadata.network" type="string" req={true} desc="Réseau mobile: mtn, orange, moov, wave, togocom, flooz, airtel, mpesa" />
+                <ParamRow name="metadata.country_code" type="string" req={true} desc="Code pays ISO 2 lettres: TG, BJ, CI, SN, ML, BF, CM, CG, CD, GN, GM" />
+                <ParamRow name="metadata.customer_name" type="string" req={false} desc="Nom du client (optionnel, pour votre référence)" />
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Exemple de requête</p>
+          <CodeBlock code={`curl -X POST ${BASE_URL}/api/sdk/v1/payin \\
+  -H "Content-Type: application/json" \\
+  -H "X-SDK-Key: ${sdkApiKey || "WP-SDK-VOTRE_CLE"}" \\
+  -d '{
+    "amount": 5000,
+    "currency": "XOF",
+    "order_id": "CMD-2024-001",
+    "callback_url": "https://votre-site.com/webhook/paiement",
+    "metadata": {
+      "phone_number": "+22890123456",
+      "network": "moov",
+      "country_code": "TG",
+      "customer_name": "Jean Dupont"
+    }
+  }'`} />
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Réponse succès (200)</p>
+          <CodeBlock code={`{
+  "status": "success",
+  "message": "Paiement initié avec succès",
+  "data": {
+    "reference": "MB1A2B3C4D5E6F7G",
+    "transaction_id": "TXN-MBIYO-XXXX",
+    "amount": 5000,
+    "currency": "XOF",
+    "order_id": "CMD-2024-001",
+    "status": "pending",
+    "payment_method": "mobile_money",
+    "network": "moov",
+    "country_code": "TG",
+    "redirect_url": null,
+    "instructions": "Composez *155# pour valider",
+    "created_at": "2024-01-15T10:30:00Z"
+  }
+}`} />
+        </div>
+      </Section>
+
+      {/* Payout */}
+      <Section id="payout" title="Payout — Retrait Automatique (Envoi d'argent)" icon={Send}>
+        <div className="flex items-center gap-2">
+          <EndpointBadge method="POST" />
+          <code className="text-sm font-mono text-gray-700 bg-gray-100 px-2 py-1 rounded">/api/sdk/v1/payout</code>
+        </div>
+        <p className="text-sm text-gray-600">Envoie un paiement Mobile Money vers un bénéficiaire depuis votre solde WestPay. Le solde est débité immédiatement. Les frais sont calculés automatiquement.</p>
+        <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700">
+          💡 <strong>Frais appliqués:</strong> 4,5% du montant (5,5% pour Congo Brazzaville et Congo RDC). Votre solde disponible doit couvrir le montant + frais.
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Paramètres du corps (JSON)</p>
+          <div className="overflow-x-auto rounded-lg border border-gray-100">
+            <table className="w-full text-sm min-w-[500px]">
+              <thead><tr className="bg-gray-50"><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Champ</th><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Type</th><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Requis</th><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Description</th></tr></thead>
+              <tbody>
+                <ParamRow name="amount" type="number" req={true} desc="Montant à envoyer (sans les frais, qui sont ajoutés automatiquement)" />
+                <ParamRow name="currency" type="string" req={true} desc="Code devise ISO: XOF, XAF, GNF, CDF, GMD" />
+                <ParamRow name="order_id" type="string" req={true} desc="Identifiant unique de votre opération de payout" />
+                <ParamRow name="callback_url" type="string" req={true} desc="URL de votre webhook pour la notification de statut" />
+                <ParamRow name="metadata.phone_number" type="string" req={true} desc="Numéro de téléphone du bénéficiaire avec indicatif" />
+                <ParamRow name="metadata.network" type="string" req={true} desc="Réseau mobile du bénéficiaire: mtn, orange, moov, wave..." />
+                <ParamRow name="metadata.country_code" type="string" req={true} desc="Code pays du bénéficiaire: TG, BJ, CI, SN, ML, BF, CM, CG, CD, GN, GM" />
+                <ParamRow name="metadata.beneficiary" type="string" req={false} desc="Nom du bénéficiaire (optionnel)" />
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Exemple de requête</p>
+          <CodeBlock code={`curl -X POST ${BASE_URL}/api/sdk/v1/payout \\
+  -H "Content-Type: application/json" \\
+  -H "X-SDK-Key: ${sdkApiKey || "WP-SDK-VOTRE_CLE"}" \\
+  -d '{
+    "amount": 10000,
+    "currency": "XOF",
+    "order_id": "PAYOUT-2024-001",
+    "callback_url": "https://votre-site.com/webhook/payout",
+    "metadata": {
+      "phone_number": "+22670123456",
+      "network": "orange",
+      "country_code": "BF",
+      "beneficiary": "Marie Koné"
+    }
+  }'`} />
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Réponse succès (200)</p>
+          <CodeBlock code={`{
+  "status": "success",
+  "message": "Payout initié avec succès",
+  "data": {
+    "reference": "MB7H8I9J0K1L2M3N",
+    "transaction_id": "TXN-PAYOUT-XXXX",
+    "amount": 10000,
+    "fee": 450,
+    "charged_amount": 10450,
+    "currency": "XOF",
+    "order_id": "PAYOUT-2024-001",
+    "status": "pending",
+    "payment_method": "mobile_money",
+    "recipient": {
+      "phone_number": "+22670123456",
+      "network": "orange",
+      "country_code": "BF",
+      "beneficiary": "Marie Koné"
+    },
+    "created_at": "2024-01-15T10:35:00Z"
+  }
+}`} />
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Erreur solde insuffisant (422)</p>
+          <CodeBlock code={`{
+  "status": "error",
+  "message": "Solde insuffisant pour ce retrait.",
+  "data": {
+    "required_amount": 10450,
+    "available_balance": 5000,
+    "currency": "XOF"
+  }
+}`} />
+        </div>
+      </Section>
+
+      {/* Transaction Status */}
+      <Section id="status" title="Statut Transaction" icon={Search}>
+        <div className="flex items-center gap-2">
+          <EndpointBadge method="GET" />
+          <code className="text-sm font-mono text-gray-700 bg-gray-100 px-2 py-1 rounded">/api/sdk/v1/transaction/:reference</code>
+        </div>
+        <p className="text-sm text-gray-600">Récupère le statut actuel d'une transaction payin ou payout à partir de sa référence WestPay (champ <code className="bg-gray-100 px-1 rounded text-xs font-mono">reference</code> de la réponse initiale).</p>
+        <CodeBlock code={`curl -X GET ${BASE_URL}/api/sdk/v1/transaction/MB1A2B3C4D5E6F7G \\
+  -H "X-SDK-Key: ${sdkApiKey || "WP-SDK-VOTRE_CLE"}"`} />
+        <div>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Réponse (200)</p>
+          <CodeBlock code={`{
+  "status": "success",
+  "data": {
+    "reference": "MB1A2B3C4D5E6F7G",
+    "amount": 5000,
+    "status": "confirmed",
+    "payment_method": "mobile_money",
+    "network": "moov",
+    "country": "Togo",
+    "phone_number": "+22890123456",
+    "created_at": "2024-01-15T10:30:00Z"
+  }
+}`} />
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Valeurs de statut possibles</p>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { s: "pending", c: "bg-yellow-100 text-yellow-700", d: "En attente de confirmation" },
+              { s: "confirmed", c: "bg-green-100 text-green-700", d: "Paiement confirmé" },
+              { s: "failed", c: "bg-red-100 text-red-700", d: "Echec de la transaction" },
+              { s: "processing", c: "bg-blue-100 text-blue-700", d: "En cours de traitement (payout)" },
+              { s: "completed", c: "bg-green-100 text-green-700", d: "Payout effectué avec succès" },
+            ].map(({ s, c, d }) => (
+              <div key={s} className="flex items-center gap-2 p-2 rounded-lg border border-gray-100">
+                <span className={`text-xs px-2 py-0.5 rounded font-mono font-medium ${c}`}>{s}</span>
+                <span className="text-xs text-gray-500">{d}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Section>
+
+      {/* Balance */}
+      <Section id="balance" title="Solde par Pays" icon={Wallet}>
+        <div className="flex items-center gap-2">
+          <EndpointBadge method="GET" />
+          <code className="text-sm font-mono text-gray-700 bg-gray-100 px-2 py-1 rounded">/api/sdk/v1/balance</code>
+        </div>
+        <p className="text-sm text-gray-600">Retourne vos soldes disponibles pour tous vos pays actifs.</p>
+        <CodeBlock code={`curl -X GET ${BASE_URL}/api/sdk/v1/balance \\
+  -H "X-SDK-Key: ${sdkApiKey || "WP-SDK-VOTRE_CLE"}"`} />
+        <CodeBlock code={`{
+  "status": "success",
+  "data": {
+    "balances": [
+      { "country": "Togo",      "balance": 125000, "currency": "XOF" },
+      { "country": "Benin",     "balance": 80000,  "currency": "XOF" },
+      { "country": "Cameroun",  "balance": 50000,  "currency": "XAF" }
+    ]
+  }
+}`} />
+      </Section>
+
+      {/* Webhooks */}
+      <Section id="webhook" title="Notifications Webhook" icon={Webhook}>
+        <p className="text-sm text-gray-600">WestPay envoie une requête <code className="bg-gray-100 px-1 rounded text-xs font-mono">POST</code> vers votre <code className="bg-gray-100 px-1 rounded text-xs font-mono">callback_url</code> dès que le statut d'une transaction change.</p>
+        <div>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Payload webhook payin (paiement confirmé)</p>
+          <CodeBlock code={`{
+  "event": "payment.confirmed",
+  "reference": "MB1A2B3C4D5E6F7G",
+  "order_id": "CMD-2024-001",
+  "amount": 5000,
+  "currency": "XOF",
+  "status": "confirmed",
+  "payment_method": "mobile_money",
+  "payer": {
+    "phone_number": "+22890123456",
+    "network": "moov",
+    "country_code": "TG"
+  },
+  "timestamp": "2024-01-15T10:32:15Z"
+}`} />
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Payload webhook payout</p>
+          <CodeBlock code={`{
+  "event": "payout.completed",
+  "reference": "MB7H8I9J0K1L2M3N",
+  "order_id": "PAYOUT-2024-001",
+  "amount": 10000,
+  "fee": 450,
+  "currency": "XOF",
+  "status": "completed",
+  "recipient": {
+    "phone_number": "+22670123456",
+    "network": "orange",
+    "country_code": "BF"
+  },
+  "timestamp": "2024-01-15T10:37:45Z"
+}`} />
+        </div>
+        <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700">
+          💡 Votre endpoint webhook doit répondre avec un code HTTP 200 pour confirmer la réception. WestPay réessaie automatiquement en cas d'échec.
+        </div>
+      </Section>
+
+      {/* Networks */}
+      <Section id="networks" title="Réseaux & Pays Supportés" icon={Globe}>
+        <div className="overflow-x-auto rounded-lg border border-gray-100">
+          <table className="w-full text-xs">
+            <thead><tr className="bg-gray-50"><th className="text-left py-2 px-3 text-gray-500 font-medium">Pays</th><th className="text-left py-2 px-3 text-gray-500 font-medium">Code</th><th className="text-left py-2 px-3 text-gray-500 font-medium">Devise</th><th className="text-left py-2 px-3 text-gray-500 font-medium">Réseaux disponibles</th></tr></thead>
+            <tbody className="divide-y divide-gray-50">
+              {[
+                { pays: "Togo", code: "TG", devise: "XOF", reseaux: "togocom, moov, flooz" },
+                { pays: "Bénin", code: "BJ", devise: "XOF", reseaux: "mtn, moov" },
+                { pays: "Côte d'Ivoire", code: "CI", devise: "XOF", reseaux: "mtn, orange, moov, wave" },
+                { pays: "Sénégal", code: "SN", devise: "XOF", reseaux: "orange, wave, free" },
+                { pays: "Mali", code: "ML", devise: "XOF", reseaux: "orange, moov, wave" },
+                { pays: "Burkina Faso", code: "BF", devise: "XOF", reseaux: "orange, moov, wave" },
+                { pays: "Cameroun", code: "CM", devise: "XAF", reseaux: "mtn, orange" },
+                { pays: "Congo Brazzaville", code: "CG", devise: "XAF", reseaux: "mtn, airtel" },
+                { pays: "Congo RDC", code: "CD", devise: "CDF", reseaux: "mtn, orange, airtel, mpesa" },
+                { pays: "Guinée", code: "GN", devise: "GNF", reseaux: "mtn, orange, moov" },
+                { pays: "Gambie", code: "GM", devise: "GMD", reseaux: "afrimoney, qmoney" },
+              ].map(r => (
+                <tr key={r.code} className="hover:bg-gray-50/50">
+                  <td className="py-2 px-3 font-medium text-gray-700">{r.pays}</td>
+                  <td className="py-2 px-3"><code className="bg-gray-100 px-1.5 rounded font-mono">{r.code}</code></td>
+                  <td className="py-2 px-3"><code className="bg-gray-100 px-1.5 rounded font-mono">{r.devise}</code></td>
+                  <td className="py-2 px-3 text-gray-500">{r.reseaux}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Section>
+
+      {/* Errors */}
+      <Section id="errors" title="Codes d'Erreur" icon={XCircle}>
+        <div className="overflow-x-auto rounded-lg border border-gray-100">
+          <table className="w-full text-xs">
+            <thead><tr className="bg-gray-50"><th className="text-left py-2 px-3 text-gray-500 font-medium">HTTP</th><th className="text-left py-2 px-3 text-gray-500 font-medium">status</th><th className="text-left py-2 px-3 text-gray-500 font-medium">Cause</th></tr></thead>
+            <tbody className="divide-y divide-gray-50">
+              {[
+                { code: "400", s: "error", cause: "Paramètres manquants ou invalides dans le corps de la requête" },
+                { code: "401", s: "error", cause: "Clé SDK manquante, invalide ou SDK désactivé sur ce compte" },
+                { code: "403", s: "error", cause: "Compte marchand suspendu" },
+                { code: "404", s: "error", cause: "Transaction introuvable pour cette référence" },
+                { code: "422", s: "error", cause: "Solde insuffisant (payout) ou refus du fournisseur Mbiyo" },
+                { code: "503", s: "error", cause: "Passerelle Mbiyo non configurée (contacter le support)" },
+                { code: "500", s: "error", cause: "Erreur interne du serveur" },
+              ].map(r => (
+                <tr key={r.code} className="hover:bg-gray-50/50">
+                  <td className="py-2 px-3"><span className={`px-1.5 py-0.5 rounded font-mono font-bold ${r.code.startsWith("2") ? "bg-green-100 text-green-700" : r.code.startsWith("4") ? "bg-red-100 text-red-700" : "bg-orange-100 text-orange-700"}`}>{r.code}</span></td>
+                  <td className="py-2 px-3"><code className="text-red-500 font-mono">{r.s}</code></td>
+                  <td className="py-2 px-3 text-gray-600">{r.cause}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Format de réponse d'erreur</p>
+          <CodeBlock code={`{
+  "status": "error",
+  "message": "Description lisible de l'erreur",
+  "data": null
+}`} />
+        </div>
+      </Section>
+
+      {/* PHP Example */}
+      <Section id="examples" title="Exemple d'Intégration PHP" icon={Hash}>
+        <CodeBlock code={`<?php
+// Configuration
+$SDK_KEY = '${sdkApiKey || "WP-SDK-VOTRE_CLE"}';
+$BASE_URL = '${BASE_URL}';
+
+// Initier un paiement
+function initiatePayin($amount, $currency, $orderId, $callbackUrl, $phone, $network, $countryCode) {
+    global $SDK_KEY, $BASE_URL;
+    
+    $data = [
+        'amount'       => $amount,
+        'currency'     => $currency,
+        'order_id'     => $orderId,
+        'callback_url' => $callbackUrl,
+        'metadata'     => [
+            'phone_number' => $phone,
+            'network'      => $network,
+            'country_code' => $countryCode,
+        ]
+    ];
+    
+    $ch = curl_init("$BASE_URL/api/sdk/v1/payin");
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER     => [
+            'Content-Type: application/json',
+            "X-SDK-Key: $SDK_KEY"
+        ],
+        CURLOPT_POSTFIELDS     => json_encode($data),
+    ]);
+    
+    $response = json_decode(curl_exec($ch), true);
+    curl_close($ch);
+    return $response;
+}
+
+// Recevoir le webhook
+$payload = json_decode(file_get_contents('php://input'), true);
+if ($payload['status'] === 'confirmed') {
+    $orderId   = $payload['order_id'];
+    $amount    = $payload['amount'];
+    $reference = $payload['reference'];
+    // Mettre à jour votre base de données...
+}
+http_response_code(200);
+?>`} />
+      </Section>
+
+      {/* JavaScript Example */}
+      <Section id="js-example" title="Exemple d'Intégration Node.js" icon={Zap}>
+        <CodeBlock code={`const SDK_KEY  = process.env.WESTPAY_SDK_KEY; // "${sdkApiKey ? sdkApiKey.slice(0, 12) + "..." : "WP-SDK-..."}"
+const BASE_URL = '${BASE_URL}';
+
+// Initier un payin
+async function initiatePayin({ amount, currency, orderId, callbackUrl, phone, network, countryCode }) {
+  const res = await fetch(\`\${BASE_URL}/api/sdk/v1/payin\`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-SDK-Key': SDK_KEY },
+    body: JSON.stringify({
+      amount, currency, order_id: orderId, callback_url: callbackUrl,
+      metadata: { phone_number: phone, network, country_code: countryCode }
+    })
+  });
+  return res.json();
+}
+
+// Initier un payout
+async function initiatePayout({ amount, currency, orderId, callbackUrl, phone, network, countryCode, beneficiary }) {
+  const res = await fetch(\`\${BASE_URL}/api/sdk/v1/payout\`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-SDK-Key': SDK_KEY },
+    body: JSON.stringify({
+      amount, currency, order_id: orderId, callback_url: callbackUrl,
+      metadata: { phone_number: phone, network, country_code: countryCode, beneficiary }
+    })
+  });
+  return res.json();
+}
+
+// Vérifier un statut
+async function getTransactionStatus(reference) {
+  const res = await fetch(\`\${BASE_URL}/api/sdk/v1/transaction/\${reference}\`, {
+    headers: { 'X-SDK-Key': SDK_KEY }
+  });
+  return res.json();
+}
+
+// Exemple d'utilisation
+const result = await initiatePayin({
+  amount: 5000, currency: 'XOF', orderId: 'CMD-001',
+  callbackUrl: 'https://mon-site.com/webhook',
+  phone: '+22890123456', network: 'moov', countryCode: 'TG'
+});
+console.log(result);`} />
+      </Section>
+
+      <div className="text-center py-4 text-xs text-gray-400">
+        WestPay SDK v1 — Support: <a href="mailto:support@westpay.cloud" className="text-blue-500 hover:underline">support@westpay.cloud</a>
+      </div>
+    </div>
+  );
+}
+
 export default function MerchantDashboard() {
   const { user, token, logout, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
@@ -2373,6 +2903,22 @@ export default function MerchantDashboard() {
   });
   const hasCrypto = (cryptoAggs as any[]).length > 0;
 
+  const { data: sdkStatus } = useQuery({
+    queryKey: ["/api/merchant/sdk/status"],
+    queryFn: async () => {
+      if (!token) return { sdkEnabled: false };
+      const res = await fetch("/api/merchant/sdk/status", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return { sdkEnabled: false };
+      return res.json();
+    },
+    enabled: !!token,
+    staleTime: 60000,
+  });
+  const hasSdk = !!(sdkStatus as any)?.sdkEnabled;
+  const sdkApiKey = (sdkStatus as any)?.sdkApiKey as string | null;
+
   useEffect(() => {
     if (!authLoading && (!user || user.role !== "merchant")) {
       setLocation("/merchant-login");
@@ -2380,10 +2926,9 @@ export default function MerchantDashboard() {
   }, [authLoading, user, setLocation]);
 
   useEffect(() => {
-    if (!hasCrypto && activeTab === "crypto") {
-      setActiveTab("overview");
-    }
-  }, [hasCrypto, activeTab]);
+    if (!hasCrypto && activeTab === "crypto") setActiveTab("overview");
+    if (!hasSdk && activeTab === "sdk") setActiveTab("overview");
+  }, [hasCrypto, hasSdk, activeTab]);
 
   if (authLoading) return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: "#e8eaed" }}>
@@ -2399,7 +2944,11 @@ export default function MerchantDashboard() {
   const handleLogout = () => { logout(); setLocation("/merchant-login"); };
   const handleTabChange = (tab: MerchantTab) => { setActiveTab(tab); setMobileOpen(false); };
 
-  const visibleNavItems = NAV_ITEMS.filter(item => item.key !== "crypto" || hasCrypto);
+  const visibleNavItems = NAV_ITEMS.filter(item => {
+    if (item.key === "crypto") return hasCrypto;
+    if (item.key === "sdk") return hasSdk;
+    return true;
+  });
   const currentItem = visibleNavItems.find(n => n.key === activeTab);
 
   return (
@@ -2422,6 +2971,7 @@ export default function MerchantDashboard() {
           onLogout={handleLogout}
           t={t}
           hasCrypto={hasCrypto}
+          hasSdk={hasSdk}
         />
       </aside>
 
@@ -2452,6 +3002,7 @@ export default function MerchantDashboard() {
           onLogout={handleLogout}
           t={t}
           hasCrypto={hasCrypto}
+          hasSdk={hasSdk}
         />
       </aside>
 
@@ -2487,7 +3038,7 @@ export default function MerchantDashboard() {
                   <currentItem.icon className="w-3.5 h-3.5" style={{ color: currentItem.color }} />
                 </div>
                 <span className="text-sm font-semibold text-white/80 hidden sm:block">
-                  {activeTab === "virements" ? t("transfers") : activeTab === "reversements" ? t("withdrawals") : activeTab === "paymentlinks" ? t("paymentlinks") : activeTab === "apikeys" ? t("apikeys") : activeTab === "crypto" ? "Paiements Crypto" : t(activeTab)}
+                  {activeTab === "virements" ? t("transfers") : activeTab === "reversements" ? t("withdrawals") : activeTab === "paymentlinks" ? t("paymentlinks") : activeTab === "apikeys" ? t("apikeys") : activeTab === "crypto" ? "Paiements Crypto" : activeTab === "sdk" ? "SDK API" : t(activeTab)}
                 </span>
               </div>
             )}
@@ -2526,6 +3077,7 @@ export default function MerchantDashboard() {
           {activeTab === "webhook"       && <WebhookPanel token={token} />}
           {activeTab === "settings"      && <MerchantSettingsPanel token={token} />}
           {activeTab === "crypto"        && <CryptoPanel token={token} user={user} />}
+          {activeTab === "sdk"           && <SdkDocPanel sdkApiKey={sdkApiKey} />}
         </main>
       </div>
     </div>
