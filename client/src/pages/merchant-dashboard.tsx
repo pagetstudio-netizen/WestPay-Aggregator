@@ -19,7 +19,7 @@ import {
 import {
   Wallet, ArrowRightLeft, Key, Settings, LogOut, Loader2, Download,
   Copy, Globe, DollarSign, Hash, TrendingUp, Search, RefreshCw, BookOpen, Lock, ExternalLink,
-  Webhook, Send, CheckCircle2, XCircle, Clock, ArrowUpRight, Zap, Link, QrCode,
+  Webhook, Send, CheckCircle2, XCircle, Clock, ArrowUpRight, Zap, Link, QrCode, Eye, EyeOff,
   Trash2, Plus, ToggleLeft, ToggleRight, Edit3, BarChart3, MessageCircle, Phone, Receipt, User, Calendar, CreditCard, Filter,
   Bell, Mail, HelpCircle, Power, Menu, X, ChevronLeft, ChevronRight, Bitcoin
 } from "lucide-react";
@@ -2419,7 +2419,7 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
             <code className="text-sm font-mono text-green-300 break-all">{KEY_DISPLAY}</code>
           </div>
           <button onClick={() => setShowKey(v => !v)} className="shrink-0 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition" data-testid="button-toggle-sdk-key">
-            <Eye className="w-4 h-4 text-white" />
+            {showKey ? <EyeOff className="w-4 h-4 text-white" /> : <Eye className="w-4 h-4 text-white" />}
           </button>
           {sdkApiKey && (
             <button onClick={() => copy(sdkApiKey, "Clé SDK copiée")} className="shrink-0 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition" data-testid="button-copy-sdk-key-merchant">
