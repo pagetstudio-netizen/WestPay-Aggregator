@@ -1948,7 +1948,57 @@ export async function registerRoutes(
               const statusResult = await mbiyoGetStatus(mbiyoApiKey, pending.omnipayTxId);
               if (statusResult.status === "success" && statusResult.data) {
                 const s = statusResult.data.status;
-                return res.json({ status: s === "successful" ? "confirmed" : s === "failed" || s === "cancelled" ? "failed" : "pending", paymentId: pending.id });
+                const isSuccess = s === "successful";
+                const isFailure = s === "failed" || s === "cancelled";
+
+                if (isSuccess) {
+                  const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
+                  const merchant = await storage.getMerchantById(pending.merchantId);
+                  if (mc) {
+                    const credit = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount, pending.country);
+                    await storage.incrementMerchantCountryBalance(mc.id, credit);
+                    await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
+                    const txRef = statusResult.data.transaction_id || pending.omnipayReference;
+                    const existingTx = await storage.getTransactionByTxId(txRef);
+                    if (!existingTx) {
+                      await storage.createTransaction({
+                        merchantId: pending.merchantId,
+                        country: pending.country,
+                        txId: txRef,
+                        amount: pending.amount,
+                        payerNumber: pending.payerPhone || null,
+                        payerName: pending.payerName || null,
+                        status: "confirmed",
+                        provider: "mbiyo",
+                        omnipayTxId: statusResult.data.transaction_id || null,
+                        operator: pending.paymentMethod || null,
+                        omnipayReference: pending.omnipayReference,
+                        errorMessage: null,
+                      });
+                    }
+                    console.log(`[POLL MBIYO] Paiement credite via polling — ref=${pending.omnipayReference} montant=${pending.amount} credit=${credit} marchand=#${pending.merchantId}`);
+                    if (merchant?.webhookUrl) {
+                      try {
+                        const fetch2 = (await import("node-fetch")).default;
+                        const wp = { event: "payment.confirmed", txId: txRef, amount: pending.amount, country: pending.country, payerNumber: pending.payerPhone, payerName: pending.payerName, status: "confirmed", reference: pending.omnipayReference, provider: "mbiyo" };
+                        const hmac = crypto.createHmac("sha256", merchant.webhookSecret || "").update(JSON.stringify(wp)).digest("hex");
+                        await fetch2(merchant.webhookUrl, { method: "POST", headers: { "Content-Type": "application/json", "X-Signature": hmac }, body: JSON.stringify(wp) });
+                      } catch {}
+                    }
+                    notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "omnipay" }).catch(() => {});
+                    notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "omnipay", status: "confirmed" }).catch(() => {});
+                  } else {
+                    console.error(`[POLL MBIYO] MerchantCountry introuvable pour merchantId=${pending.merchantId} country="${pending.country}"`);
+                  }
+                  return res.json({ status: "confirmed", paymentId: pending.id });
+                }
+
+                if (isFailure) {
+                  await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+                  return res.json({ status: "failed", paymentId: pending.id });
+                }
+
+                return res.json({ status: "pending", paymentId: pending.id });
               }
             } catch {}
           }
