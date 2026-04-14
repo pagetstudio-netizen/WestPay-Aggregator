@@ -2172,7 +2172,7 @@ export async function registerRoutes(
         return res.status(200).json({ received: true });
       }
 
-      if (withdrawal.status === "approved" || withdrawal.status === "rejected" || withdrawal.status === "failed") {
+      if (withdrawal.status === "approved" || withdrawal.status === "rejected") {
         return res.json({ status: "already_processed" });
       }
 
@@ -2182,6 +2182,24 @@ export async function registerRoutes(
       const wdStatusLower = (payload.status || "").toLowerCase();
       const wdIsSuccess = ["successful", "success", "paid", "completed"].includes(wdStatusLower);
       const wdIsFailure = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(wdStatusLower);
+
+      // Reconciliation : retrait marqué failed chez nous mais confirmé par Mbiyo
+      // (crash décimal avant ce correctif — Mbiyo a quand même envoyé l'argent)
+      if (withdrawal.status === "failed" && wdIsSuccess) {
+        const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
+        if (mc) {
+          await storage.decrementMerchantCountryBalance(mc.id, withdrawal.amount);
+        }
+        await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Transfert Mbiyo confirme (reconciliation automatique)`, payload.order_id, wdFees);
+        console.log(`[MBIYO PAYOUT CALLBACK] Reconciliation retrait #${withdrawal.id} — redebit balance ${withdrawal.amount}`);
+        notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: withdrawal.withdrawalMode }).catch(() => {});
+        notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
+        return res.json({ status: "reconciled" });
+      }
+
+      if (withdrawal.status === "failed") {
+        return res.json({ status: "already_processed" });
+      }
 
       if (wdIsSuccess) {
         await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Transfert Mbiyo confirme`, payload.order_id, wdFees);
