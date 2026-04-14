@@ -2128,35 +2128,40 @@ export async function registerRoutes(
           errorMessage: null,
         });
 
-        if (merchant) {
-          if (merchant.webhookUrl) {
-            try {
-              const fetch = (await import("node-fetch")).default;
-              const webhookPayload = {
-                event: "payment.confirmed",
-                txId: tx.txId,
-                amount: tx.amount,
-                country: tx.country,
-                payerNumber: tx.payerNumber,
-                payerName: tx.payerName,
-                status: "confirmed",
-                reference: payload.order_id,
-                provider: "mbiyo",
-              };
-              const hmac = crypto.createHmac("sha256", merchant.webhookSecret || "").update(JSON.stringify(webhookPayload)).digest("hex");
-              await fetch(merchant.webhookUrl, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-Signature": hmac },
-                body: JSON.stringify(webhookPayload),
-              });
-            } catch {}
-          }
-          notifyMerchantPayment(merchant, pending.amount, pending.payerPhone || "", pending.payerName || "").catch(() => {});
-          notifyAdminPayment(merchant, pending.amount, pending.payerPhone || "", tx.txId || "", "Mbiyo").catch(() => {});
-        }
-
         console.log(`[MBIYO CALLBACK] Paiement confirme: ${payload.order_id}`);
-        return res.json({ status: "confirmed" });
+        res.json({ status: "confirmed" });
+
+        setImmediate(async () => {
+          try {
+            if (merchant?.webhookUrl) {
+              try {
+                const fetch = (await import("node-fetch")).default;
+                const webhookPayload = {
+                  event: "payment.confirmed",
+                  txId: tx.txId,
+                  amount: tx.amount,
+                  country: tx.country,
+                  payerNumber: tx.payerNumber,
+                  payerName: tx.payerName,
+                  status: "confirmed",
+                  reference: payload.order_id,
+                  provider: "mbiyo",
+                };
+                const hmac = crypto.createHmac("sha256", merchant.webhookSecret || "").update(JSON.stringify(webhookPayload)).digest("hex");
+                await fetch(merchant.webhookUrl, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", "X-Signature": hmac },
+                  body: JSON.stringify(webhookPayload),
+                });
+              } catch {}
+            }
+            if (merchant) {
+              notifyMerchantPayment(pending.merchantId, { txId: tx.txId || txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "omnipay" }).catch(() => {});
+              notifyAdminPayment({ txId: tx.txId || txRef, merchantName: merchant.name, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "omnipay", status: "confirmed" }).catch(() => {});
+            }
+          } catch {}
+        });
+        return;
       } else if (isFailure) {
         await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
         storage.createTransaction({
