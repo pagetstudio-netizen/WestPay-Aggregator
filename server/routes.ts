@@ -1414,14 +1414,7 @@ export async function registerRoutes(
       };
       const dialCode = dialCodes[country] || "";
       const cleanPhone = payerPhone.replace(/[\s\-\(\)\+]/g, "");
-      let msisdn: string;
-      if (cleanPhone.startsWith(dialCode)) {
-        msisdn = cleanPhone;
-      } else if (cleanPhone.startsWith("0") && dialCode) {
-        msisdn = `${dialCode}${cleanPhone.slice(1)}`;
-      } else {
-        msisdn = `${dialCode}${cleanPhone}`;
-      }
+      const msisdn = cleanPhone.startsWith(dialCode) ? cleanPhone : `${dialCode}${cleanPhone}`;
 
       const operatorRecord = await storage.getWithdrawalOperatorByNameAndCountry(paymentMethod, country);
       const useMbiyo = operatorRecord?.gateway?.toLowerCase() === "mbiyo";
