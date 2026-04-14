@@ -2177,7 +2177,7 @@ export async function registerRoutes(
       }
 
       const wdMerchant = await storage.getMerchantById(withdrawal.merchantId);
-      const wdFees = payload.fee || 0;
+      const wdFees = Math.round(parseFloat(String(payload.fee || 0)) || 0);
 
       const wdStatusLower = (payload.status || "").toLowerCase();
       const wdIsSuccess = ["successful", "success", "paid", "completed"].includes(wdStatusLower);
@@ -3260,7 +3260,7 @@ export async function registerRoutes(
 
           if (result.status === "success" && result.data) {
             const mbiyoRef = result.data.transaction_id || reference;
-            const mbiyoFee = result.data.fee || withdrawalFee;
+            const mbiyoFee = Math.round(parseFloat(String(result.data.fee || 0)) || withdrawalFee);
             await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement Mbiyo - TxID: ${mbiyoRef}`, reference, mbiyoFee);
             console.log(`[WITHDRAWAL MBIYO] Initié - TxID: ${mbiyoRef} ref=${reference}`);
             return res.json({ ...w, status: "pending", omnipayRef: reference, fees: mbiyoFee, netAmount, autoProcessed: true, gateway: "mbiyo" });
@@ -3389,7 +3389,7 @@ export async function registerRoutes(
             });
             if (result.status === "success" && result.data) {
               omnipayRef = reference;
-              fees = result.data.fee || 0;
+              fees = Math.round(parseFloat(String(result.data.fee || 0)) || 0);
               sentToProvider = true;
               console.log(`[ADMIN APPROVE WD MBIYO] Initié - TxID: ${result.data.transaction_id}, Ref: ${reference} - en attente callback`);
             } else {
