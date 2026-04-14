@@ -3321,9 +3321,10 @@ export async function registerRoutes(
           const msisdnFull = prependDialCode(phone, mc.country);
           const countryCode = mbiyoCountryCode(mc.country);
           const currency = mbiyoCurrency(mc.country);
-          const network = mbiyoNetwork(operator || "");
+          const network = payoutOpRecord?.mbiyoCode || mbiyoNetwork(operator || "");
           const callbackBaseUrl = process.env.NODE_ENV === "production" ? "https://westpay.cloud" : `${req.protocol}://${req.get("host")}`;
           const callbackUrl = `${callbackBaseUrl}/api/mbiyo/payout-callback`;
+          console.log(`[WITHDRAWAL MBIYO] Params: msisdn=${msisdnFull} network=${network} country=${countryCode} currency=${currency}`);
 
           const result = await mbiyoInitiatePayout({
             apiKey: mbiyoApiKey,
@@ -3452,10 +3453,11 @@ export async function registerRoutes(
             const msisdnFull = prependDialCode(w.phone, w.country);
             const countryCode = mbiyoCountryCode(w.country);
             const currency = mbiyoCurrency(w.country);
-            const network = mbiyoNetwork(w.operator || "");
+            const wdOpRecord = w.operator ? await storage.getWithdrawalOperatorByNameAndCountry(w.operator, w.country) : null;
+            const network = wdOpRecord?.mbiyoCode || mbiyoNetwork(w.operator || "");
             const callbackBaseUrl = process.env.NODE_ENV === "production" ? "https://westpay.cloud" : `${req.protocol}://${req.get("host")}`;
             const callbackUrl = `${callbackBaseUrl}/api/mbiyo/payout-callback`;
-            console.log(`[ADMIN APPROVE WD MBIYO] Transfert: ${w.amount} vers ${msisdnFull}, ref: ${reference}`);
+            console.log(`[ADMIN APPROVE WD MBIYO] Transfert: ${w.amount} vers ${msisdnFull}, ref: ${reference}, network: ${network}`);
             const result = await mbiyoInitiatePayout({
               apiKey: mbiyoApiKey,
               amount: w.amount,
@@ -3584,7 +3586,7 @@ export async function registerRoutes(
 
   app.post("/api/admin/withdrawal-operators", authMiddleware("admin"), async (req, res) => {
     try {
-      const { name, type, country, dailyLimit, gateway, omnipayCode, active } = req.body;
+      const { name, type, country, dailyLimit, gateway, omnipayCode, mbiyoCode, active } = req.body;
       if (!name || !country) return res.status(400).json({ message: "Nom et pays requis" });
       const op = await storage.createWithdrawalOperator({
         name,
@@ -3593,6 +3595,7 @@ export async function registerRoutes(
         dailyLimit: dailyLimit ? Number(dailyLimit) : 1000000,
         gateway: gateway || "OmniPay",
         omnipayCode: omnipayCode?.trim() || null,
+        mbiyoCode: mbiyoCode?.trim() || null,
         active: active !== false,
         maintenanceAll: false,
         maintenanceDeposits: false,
@@ -3609,7 +3612,7 @@ export async function registerRoutes(
   app.put("/api/admin/withdrawal-operators/:id", authMiddleware("admin"), async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const { name, type, country, dailyLimit, gateway, omnipayCode, active, maintenanceAll, maintenanceDeposits, maintenanceWithdrawals, maintenancePaymentLinks, maintenanceApiPayment } = req.body;
+      const { name, type, country, dailyLimit, gateway, omnipayCode, mbiyoCode, active, maintenanceAll, maintenanceDeposits, maintenanceWithdrawals, maintenancePaymentLinks, maintenanceApiPayment } = req.body;
       const updated = await storage.updateWithdrawalOperator(id, {
         ...(name !== undefined && { name }),
         ...(type !== undefined && { type }),
@@ -3617,6 +3620,7 @@ export async function registerRoutes(
         ...(dailyLimit !== undefined && { dailyLimit: Number(dailyLimit) }),
         ...(gateway !== undefined && { gateway }),
         ...(omnipayCode !== undefined && { omnipayCode: omnipayCode?.trim() || null }),
+        ...(mbiyoCode !== undefined && { mbiyoCode: mbiyoCode?.trim() || null }),
         ...(active !== undefined && { active }),
         ...(maintenanceAll !== undefined && { maintenanceAll }),
         ...(maintenanceDeposits !== undefined && { maintenanceDeposits }),

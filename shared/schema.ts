@@ -195,6 +195,7 @@ export const withdrawalOperators = pgTable("withdrawal_operators", {
   dailyLimit: integer("daily_limit").notNull().default(1000000),
   gateway: text("gateway").notNull().default("OmniPay"),
   omnipayCode: text("omnipay_code"),
+  mbiyoCode: text("mbiyo_code"),
   active: boolean("active").default(true).notNull(),
   maintenanceAll: boolean("maintenance_all").default(false).notNull(),
   maintenanceDeposits: boolean("maintenance_deposits").default(false).notNull(),

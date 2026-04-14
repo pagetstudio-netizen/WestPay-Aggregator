@@ -3020,13 +3020,13 @@ function WithdrawalOperatorsPanel() {
   const [editingOp, setEditingOp] = useState<WithdrawalOperator | null>(null);
   const [filterCountry, setFilterCountry] = useState("all");
 
-  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "OmniPay", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false };
+  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "OmniPay", omnipayCode: "", mbiyoCode: "", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false };
   const [form, setForm] = useState(emptyForm);
 
   const openCreate = () => { setEditingOp(null); setForm(emptyForm); setOpDialogOpen(true); };
   const openEdit = (op: WithdrawalOperator) => {
     setEditingOp(op);
-    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, active: op.active, maintenanceAll: op.maintenanceAll, maintenanceDeposits: op.maintenanceDeposits, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment });
+    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, omnipayCode: op.omnipayCode || "", mbiyoCode: op.mbiyoCode || "", active: op.active, maintenanceAll: op.maintenanceAll, maintenanceDeposits: op.maintenanceDeposits, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment });
     setOpDialogOpen(true);
   };
 
@@ -3104,7 +3104,9 @@ function WithdrawalOperatorsPanel() {
                       <Badge variant="secondary" className="text-xs py-0">{op.country}</Badge>
                       {!op.active && <Badge variant="destructive" className="text-xs py-0">Inactif</Badge>}
                     </div>
-                    <span className="text-xs text-muted-foreground">Passerelle : {op.gateway} · Limite : {op.dailyLimit.toLocaleString("fr-FR")} FCFA/j</span>
+                    <span className="text-xs text-muted-foreground">
+                      Passerelle : {op.gateway}{op.gateway?.toLowerCase() === "mbiyo" && op.mbiyoCode ? ` (${op.mbiyoCode})` : op.gateway?.toLowerCase() === "mbiyo" ? " ⚠️ code réseau manquant" : ""} · Limite : {op.dailyLimit.toLocaleString("fr-FR")} FCFA/j
+                    </span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -3176,6 +3178,18 @@ function WithdrawalOperatorsPanel() {
               </Select>
               <p className="text-xs text-muted-foreground">La passerelle sélectionnée sera utilisée pour tous les paiements et retraits via cet opérateur, pour tous les marchands de ce pays.</p>
             </div>
+            {form.gateway?.toLowerCase() === "mbiyo" && (
+              <div className="space-y-2">
+                <Label>Code réseau Mbiyo</Label>
+                <Input
+                  value={form.mbiyoCode}
+                  onChange={e => setForm(f => ({ ...f, mbiyoCode: e.target.value }))}
+                  placeholder="Ex: mtn, moov, wave, celtiis, orange..."
+                  data-testid="input-op-mbiyo-code"
+                />
+                <p className="text-xs text-muted-foreground">Code réseau exact attendu par Mbiyo pour les retraits (ex: <code>mtn</code>, <code>moov</code>, <code>wave</code>, <code>celtiis</code>). Obligatoire si la passerelle est Mbiyo.</p>
+              </div>
+            )}
             <div className="flex items-center gap-3">
               <Switch checked={form.active} onCheckedChange={v => setForm(f => ({ ...f, active: v }))} data-testid="switch-op-active-form" />
               <Label>Actif</Label>
