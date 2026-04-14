@@ -2050,15 +2050,17 @@ export async function registerRoutes(
       const isFailure = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(statusLower);
 
       if (isSuccess) {
-        await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
-
         const merchant = await storage.getMerchantById(pending.merchantId);
-        const credit = calcMerchantCredit(pending.amount, pending.country);
+        const credit = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount, pending.country);
 
         const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
-        if (mc) {
-          await storage.incrementMerchantCountryBalance(mc.id, credit);
+        if (!mc) {
+          console.error(`[MBIYO CALLBACK] CRITIQUE: MerchantCountry introuvable pour merchantId=${pending.merchantId} country="${pending.country}" — solde non credite, callback rejete pour retry`);
+          return res.status(500).json({ message: "MerchantCountry introuvable — réessayez" });
         }
+
+        await storage.incrementMerchantCountryBalance(mc.id, credit);
+        await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
 
         const txRef = payload.transaction_id || payload.order_id;
         const tx = await storage.createTransaction({
