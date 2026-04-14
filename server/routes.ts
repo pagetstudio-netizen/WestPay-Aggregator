@@ -2241,17 +2241,17 @@ export async function registerRoutes(
       const wdIsFailure = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(wdStatusLower);
 
       // Reconciliation : retrait marqué failed chez nous mais confirmé par Mbiyo
-      // (crash décimal avant ce correctif — Mbiyo a quand même envoyé l'argent)
       if (withdrawal.status === "failed" && wdIsSuccess) {
         const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
-        if (mc) {
-          await storage.decrementMerchantCountryBalance(mc.id, withdrawal.amount);
-        }
+        if (mc) await storage.decrementMerchantCountryBalance(mc.id, withdrawal.amount);
         await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Transfert Mbiyo confirme (reconciliation automatique)`, payload.order_id, wdFees);
         console.log(`[MBIYO PAYOUT CALLBACK] Reconciliation retrait #${withdrawal.id} — redebit balance ${withdrawal.amount}`);
-        notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: withdrawal.withdrawalMode }).catch(() => {});
-        notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
-        return res.json({ status: "reconciled" });
+        res.json({ status: "reconciled" });
+        setImmediate(() => {
+          notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: withdrawal.withdrawalMode }).catch(() => {});
+          notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
+        });
+        return;
       }
 
       if (withdrawal.status === "failed") {
@@ -2260,20 +2260,24 @@ export async function registerRoutes(
 
       if (wdIsSuccess) {
         await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Transfert Mbiyo confirme`, payload.order_id, wdFees);
-        notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: withdrawal.withdrawalMode }).catch(() => {});
-        notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
-        console.log(`[MBIYO PAYOUT CALLBACK] Retrait #${withdrawal.id} approuvé - ref=${payload.order_id}`);
-        return res.json({ status: "approved" });
+        console.log(`[MBIYO PAYOUT CALLBACK] Retrait #${withdrawal.id} approuve - ref=${payload.order_id}`);
+        res.json({ status: "approved" });
+        setImmediate(() => {
+          notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: withdrawal.withdrawalMode }).catch(() => {});
+          notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
+        });
+        return;
       } else if (wdIsFailure) {
         await storage.updateWithdrawalStatus(withdrawal.id, "failed", `Transfert Mbiyo echoue - statut: ${payload.status}`, payload.order_id);
         const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
-        if (mc) {
-          await storage.incrementMerchantCountryBalance(mc.id, withdrawal.amount);
-        }
-        notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed", mode: withdrawal.withdrawalMode }).catch(() => {});
-        notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed" }).catch(() => {});
+        if (mc) await storage.incrementMerchantCountryBalance(mc.id, withdrawal.amount);
         console.log(`[MBIYO PAYOUT CALLBACK] Retrait #${withdrawal.id} echoue - ref=${payload.order_id}`);
-        return res.json({ status: "failed" });
+        res.json({ status: "failed" });
+        setImmediate(() => {
+          notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed", mode: withdrawal.withdrawalMode }).catch(() => {});
+          notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed" }).catch(() => {});
+        });
+        return;
       }
 
       res.json({ received: true });
@@ -3333,11 +3337,12 @@ export async function registerRoutes(
             beneficiary: merchant.name,
           });
 
-          if (result.status === "success" && result.data) {
-            const mbiyoRef = result.data.transaction_id || reference;
-            const mbiyoFee = Math.round(parseFloat(String(result.data.fee || 0)) || withdrawalFee);
+          const payoutInitOk = (result.status === "success" || result.status === "pending") && result.data;
+          if (payoutInitOk) {
+            const mbiyoRef = result.data!.transaction_id || reference;
+            const mbiyoFee = Math.round(parseFloat(String(result.data!.fee || 0)) || withdrawalFee);
             await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement Mbiyo - TxID: ${mbiyoRef}`, reference, mbiyoFee);
-            console.log(`[WITHDRAWAL MBIYO] Initié - TxID: ${mbiyoRef} ref=${reference}`);
+            console.log(`[WITHDRAWAL MBIYO] Initié (statut: ${result.status}) - TxID: ${mbiyoRef} ref=${reference}`);
             return res.json({ ...w, status: "pending", omnipayRef: reference, fees: mbiyoFee, netAmount, autoProcessed: true, gateway: "mbiyo" });
           } else {
             const errMsg = result.message || "Echec du transfert Mbiyo";
@@ -3462,11 +3467,11 @@ export async function registerRoutes(
               countryCode,
               beneficiary: merchant.name,
             });
-            if (result.status === "success" && result.data) {
+            if ((result.status === "success" || result.status === "pending") && result.data) {
               omnipayRef = reference;
               fees = Math.round(parseFloat(String(result.data.fee || 0)) || 0);
               sentToProvider = true;
-              console.log(`[ADMIN APPROVE WD MBIYO] Initié - TxID: ${result.data.transaction_id}, Ref: ${reference} - en attente callback`);
+              console.log(`[ADMIN APPROVE WD MBIYO] Initié (statut: ${result.status}) - TxID: ${result.data.transaction_id}, Ref: ${reference} - en attente callback`);
             } else {
               console.error(`[ADMIN APPROVE WD MBIYO] Echec: ${result.message}`);
             }
