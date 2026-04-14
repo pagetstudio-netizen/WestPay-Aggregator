@@ -2054,7 +2054,11 @@ export async function registerRoutes(
 
         const merchant = await storage.getMerchantById(pending.merchantId);
         const credit = calcMerchantCredit(pending.amount, pending.country);
-        await storage.updateMerchantBalance(pending.merchantId, credit);
+
+        const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
+        if (mc) {
+          await storage.incrementMerchantCountryBalance(mc.id, credit);
+        }
 
         const txRef = payload.transaction_id || payload.order_id;
         const tx = await storage.createTransaction({
@@ -2064,7 +2068,7 @@ export async function registerRoutes(
           amount: pending.amount,
           payerNumber: pending.payerPhone || null,
           payerName: pending.payerName || null,
-          status: "completed",
+          status: "confirmed",
           provider: "mbiyo",
           omnipayTxId: payload.transaction_id || null,
           operator: pending.paymentMethod || null,
@@ -2077,17 +2081,17 @@ export async function registerRoutes(
             try {
               const fetch = (await import("node-fetch")).default;
               const webhookPayload = {
-                event: "payment.success",
+                event: "payment.confirmed",
                 txId: tx.txId,
                 amount: tx.amount,
                 country: tx.country,
                 payerNumber: tx.payerNumber,
                 payerName: tx.payerName,
-                status: "completed",
+                status: "confirmed",
                 reference: payload.order_id,
                 provider: "mbiyo",
               };
-              const hmac = crypto.createHmac("sha256", merchant.apiKey || "").update(JSON.stringify(webhookPayload)).digest("hex");
+              const hmac = crypto.createHmac("sha256", merchant.webhookSecret || "").update(JSON.stringify(webhookPayload)).digest("hex");
               await fetch(merchant.webhookUrl, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "X-Signature": hmac },
@@ -2245,7 +2249,11 @@ export async function registerRoutes(
 
       const merchant = await storage.getMerchantById(pending.merchantId);
       const credit = calcMerchantCredit(pending.amount, pending.country);
-      await storage.updateMerchantBalance(pending.merchantId, credit);
+
+      const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
+      if (mc) {
+        await storage.incrementMerchantCountryBalance(mc.id, credit);
+      }
 
       const tx = await storage.createTransaction({
         merchantId: pending.merchantId,
@@ -2254,7 +2262,7 @@ export async function registerRoutes(
         amount: pending.amount,
         payerNumber: pending.payerPhone || null,
         payerName: pending.payerName || null,
-        status: "completed",
+        status: "confirmed",
         provider: "mbiyo",
         omnipayTxId: txId || null,
         operator: pending.paymentMethod || null,
