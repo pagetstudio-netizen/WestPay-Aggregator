@@ -2995,6 +2995,27 @@ export async function registerRoutes(
   });
 
   // ==================== SUPPORT CONTACTS (public) ====================
+  app.get("/api/public/platform-flags", async (_req, res) => {
+    try {
+      const withdrawalsDisabled = await storage.getSetting("withdrawals_disabled");
+      res.json({ withdrawalsDisabled: withdrawalsDisabled === "true" });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.put("/api/admin/platform-flags", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { withdrawalsDisabled } = req.body;
+      if (withdrawalsDisabled !== undefined) {
+        await storage.setSetting("withdrawals_disabled", withdrawalsDisabled ? "true" : "false");
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/public/support-contacts", async (_req, res) => {
     try {
       const [tg1, tg2, wa1, wa2, hours1, hours2] = await Promise.all([
@@ -3279,6 +3300,12 @@ export async function registerRoutes(
       const merchantId = (req as any).user.id;
       const { merchantCountryId, amount, phone, operator } = req.body;
       if (!merchantCountryId || !amount || !phone) return res.status(400).json({ message: "Champs requis manquants" });
+
+      const withdrawalsDisabledFlag = await storage.getSetting("withdrawals_disabled");
+      if (withdrawalsDisabledFlag === "true") {
+        return res.status(503).json({ message: "Les retraits sont temporairement indisponibles. Veuillez réessayer plus tard.", withdrawalsDisabled: true });
+      }
+
       const mc = await storage.getMerchantCountryById(Number(merchantCountryId));
       if (!mc || mc.merchantId !== merchantId) return res.status(403).json({ message: "Wallet introuvable" });
       if (amount <= 0) return res.status(400).json({ message: "Montant invalide" });

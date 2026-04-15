@@ -3571,9 +3571,32 @@ function SettingsPanel() {
   const [showApiKey, setShowApiKey] = useState(false);
   const [groupIdInput, setGroupIdInput] = useState("");
   const [isSavingGroup, setIsSavingGroup] = useState(false);
+  const [isTogglingWd, setIsTogglingWd] = useState(false);
 
   const { data: profile } = useAdminFetch("/api/admin/profile", ["/api/admin/profile"]);
   const { data: tgSettings, refetch: refetchTg } = useAdminFetch("/api/admin/telegram/settings", ["/api/admin/telegram/settings"]);
+  const { data: platformFlags, refetch: refetchFlags } = useQuery<{ withdrawalsDisabled: boolean }>({
+    queryKey: ["/api/public/platform-flags"],
+    queryFn: () => fetch("/api/public/platform-flags").then(r => r.json()),
+  });
+
+  const toggleWithdrawals = async (disabled: boolean) => {
+    setIsTogglingWd(true);
+    try {
+      const res = await fetch("/api/admin/platform-flags", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ withdrawalsDisabled: disabled }),
+      });
+      if (!res.ok) throw new Error("Erreur");
+      await refetchFlags();
+      toast({ title: disabled ? "Retraits bloqués" : "Retraits réactivés", description: disabled ? "Les marchands ne peuvent plus effectuer de retraits." : "Les retraits sont de nouveau disponibles." });
+    } catch {
+      toast({ title: "Erreur", variant: "destructive" });
+    } finally {
+      setIsTogglingWd(false);
+    }
+  };
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -3597,6 +3620,41 @@ function SettingsPanel() {
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-foreground">Parametres</h2>
+
+      <Card className={platformFlags?.withdrawalsDisabled ? "border-red-400 dark:border-red-500" : ""}>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${platformFlags?.withdrawalsDisabled ? "bg-red-500" : "bg-green-500"}`} />
+            Contrôle des retraits
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between gap-4 p-3 rounded-lg border bg-muted/30">
+            <div>
+              <p className="text-sm font-medium">Retraits marchands</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {platformFlags?.withdrawalsDisabled
+                  ? "Les retraits sont actuellement bloqués — les marchands voient les opérateurs mais ne peuvent pas soumettre de demande."
+                  : "Les retraits sont actifs — les marchands peuvent soumettre des demandes normalement."}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {isTogglingWd && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+              <Switch
+                checked={!platformFlags?.withdrawalsDisabled}
+                onCheckedChange={(v) => toggleWithdrawals(!v)}
+                disabled={isTogglingWd}
+                data-testid="switch-withdrawals-enabled"
+              />
+            </div>
+          </div>
+          {platformFlags?.withdrawalsDisabled && (
+            <p className="text-xs text-red-600 dark:text-red-400 font-medium flex items-center gap-1">
+              <span>⚠</span> Les retraits sont bloqués. Réactivez le switch pour les rouvrir.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader><CardTitle className="text-base">Informations du compte</CardTitle></CardHeader>

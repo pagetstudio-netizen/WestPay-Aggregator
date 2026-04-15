@@ -913,6 +913,12 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
   const { data: withdrawalList = [], isLoading: wdLoading } = useMerchantFetch("/api/merchant/withdrawals", ["/api/merchant/withdrawals"], token);
   const { data: me } = useMerchantFetch("/api/merchant/me", ["/api/merchant/me"], token);
   const feeExempt = !!(me as any)?.feeExempt;
+  const { data: platformFlags } = useQuery<{ withdrawalsDisabled: boolean }>({
+    queryKey: ["/api/public/platform-flags"],
+    queryFn: () => fetch("/api/public/platform-flags").then(r => r.json()),
+    refetchInterval: 60000,
+  });
+  const withdrawalsDisabled = !!platformFlags?.withdrawalsDisabled;
 
   const [selectedWalletId, setSelectedWalletId] = useState("");
   const [selectedOperator, setSelectedOperator] = useState("");
@@ -1040,29 +1046,40 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                   {operatorList.map((op) => (
                     <div
                       key={op.id}
-                      onClick={() => setSelectedOperator(op.name)}
-                      className="rounded-xl p-3 cursor-pointer transition-all flex items-center gap-2"
+                      onClick={() => { if (!withdrawalsDisabled) setSelectedOperator(op.name); }}
+                      className="rounded-xl p-3 transition-all flex items-center gap-2"
                       style={{
-                        background: selectedOperator === op.name ? "#1e88e5" : "#f5f6f8",
-                        border: `2px solid ${selectedOperator === op.name ? "#1e88e5" : "#e8ecf0"}`,
+                        background: withdrawalsDisabled ? "#f5f6f8" : selectedOperator === op.name ? "#1e88e5" : "#f5f6f8",
+                        border: `2px solid ${withdrawalsDisabled ? "#e8ecf0" : selectedOperator === op.name ? "#1e88e5" : "#e8ecf0"}`,
+                        cursor: withdrawalsDisabled ? "not-allowed" : "pointer",
+                        opacity: withdrawalsDisabled ? 0.6 : 1,
                       }}
                       data-testid={`operator-card-${op.id}`}
                     >
-                      <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: selectedOperator === op.name ? "rgba(255,255,255,0.2)" : "#e8ecf0" }}>
-                        <Zap className="w-4 h-4" style={{ color: selectedOperator === op.name ? "#fff" : "#00b050" }} />
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: (!withdrawalsDisabled && selectedOperator === op.name) ? "rgba(255,255,255,0.2)" : "#e8ecf0" }}>
+                        <Zap className="w-4 h-4" style={{ color: (!withdrawalsDisabled && selectedOperator === op.name) ? "#fff" : "#00b050" }} />
                       </div>
                       <div className="min-w-0">
-                        <p className="text-xs font-bold truncate" style={{ color: selectedOperator === op.name ? "#fff" : "#1a1a1a" }}>{op.name}</p>
-                        <p className="text-xs" style={{ color: selectedOperator === op.name ? "rgba(255,255,255,0.7)" : "#aaa" }}>{op.type}</p>
+                        <p className="text-xs font-bold truncate" style={{ color: (!withdrawalsDisabled && selectedOperator === op.name) ? "#fff" : "#1a1a1a" }}>{op.name}</p>
+                        <p className="text-xs" style={{ color: (!withdrawalsDisabled && selectedOperator === op.name) ? "rgba(255,255,255,0.7)" : "#aaa" }}>{op.type}</p>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
+              {withdrawalsDisabled && operatorList.length > 0 && (
+                <div className="mt-3 rounded-xl p-4 flex items-start gap-3" style={{ background: "#fff0f0", border: "1.5px solid #ffb3b3" }}>
+                  <span className="text-xl mt-0.5">🚫</span>
+                  <div>
+                    <p className="text-sm font-bold" style={{ color: "#c0392b" }}>Retrait non disponible</p>
+                    <p className="text-xs mt-0.5" style={{ color: "#922b21" }}>Les retraits sont temporairement suspendus. Veuillez réessayer ultérieurement ou contacter le support.</p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {selectedWallet && selectedOperator && (
+          {selectedWallet && selectedOperator && !withdrawalsDisabled && (
             <form onSubmit={handleSubmit}>
               <p className="text-sm font-bold mb-3" style={{ color: "#333" }}>
                 <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs mr-2" style={{ background: "#00b050" }}>3</span>
