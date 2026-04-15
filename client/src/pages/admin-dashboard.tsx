@@ -3212,6 +3212,29 @@ function AdminWithdrawalsPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
   const { data: wdList = [], isLoading } = useAdminFetch("/api/admin/withdrawals", ["/api/admin/withdrawals"]);
+  const { data: platformFlags, refetch: refetchFlags } = useQuery<{ withdrawalsDisabled: boolean }>({
+    queryKey: ["/api/public/platform-flags"],
+    queryFn: () => fetch("/api/public/platform-flags").then(r => r.json()),
+  });
+  const [isTogglingWd, setIsTogglingWd] = useState(false);
+
+  const toggleWithdrawals = async (disabled: boolean) => {
+    setIsTogglingWd(true);
+    try {
+      const res = await fetch("/api/admin/platform-flags", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ withdrawalsDisabled: disabled }),
+      });
+      if (!res.ok) throw new Error("Erreur");
+      await refetchFlags();
+      toast({ title: disabled ? "Retraits bloqués" : "Retraits réactivés", description: disabled ? "Les marchands ne peuvent plus effectuer de retraits." : "Les retraits sont de nouveau disponibles." });
+    } catch {
+      toast({ title: "Erreur", variant: "destructive" });
+    } finally {
+      setIsTogglingWd(false);
+    }
+  };
 
   const [activeSubTab, setActiveSubTab] = useState<"requests" | "operators">("requests");
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
@@ -3280,6 +3303,32 @@ function AdminWithdrawalsPanel() {
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-lg font-semibold text-foreground">Reversements (Retraits Marchands)</h2>
         {pending.length > 0 && <Badge className="bg-orange-500">{pending.length} en attente</Badge>}
+      </div>
+
+      {/* Contrôle global des retraits */}
+      <div className={`flex items-center justify-between gap-4 p-4 rounded-xl border-2 ${platformFlags?.withdrawalsDisabled ? "border-red-400 bg-red-50 dark:bg-red-950/20" : "border-green-300 bg-green-50 dark:bg-green-950/20"}`}>
+        <div className="flex items-center gap-3">
+          <span className={`w-3 h-3 rounded-full shrink-0 ${platformFlags?.withdrawalsDisabled ? "bg-red-500" : "bg-green-500"}`} />
+          <div>
+            <p className="text-sm font-semibold text-foreground">
+              {platformFlags?.withdrawalsDisabled ? "Retraits marchands bloqués" : "Retraits marchands actifs"}
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {platformFlags?.withdrawalsDisabled
+                ? "Les marchands voient les opérateurs mais ne peuvent pas soumettre de retrait."
+                : "Les marchands peuvent effectuer des retraits normalement."}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {isTogglingWd && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+          <Switch
+            checked={!platformFlags?.withdrawalsDisabled}
+            onCheckedChange={(v) => toggleWithdrawals(!v)}
+            disabled={isTogglingWd}
+            data-testid="switch-withdrawals-enabled"
+          />
+        </div>
       </div>
 
       <div className="flex gap-1 border-b">
