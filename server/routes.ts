@@ -3316,6 +3316,11 @@ export async function registerRoutes(
       const payoutOpRecord = operator ? await storage.getWithdrawalOperatorByNameAndCountry(operator, mc.country) : null;
       const useMbiyoPayout = payoutOpRecord?.gateway?.toLowerCase() === "mbiyo";
 
+      // Montant minimum pour Mbiyo (Mbiyo rejette les montants trop faibles)
+      if (useMbiyoPayout && amount < 500) {
+        return res.status(400).json({ message: "Le montant minimum de retrait est de 500 FCFA." });
+      }
+
       const w = await storage.createWithdrawal({
         merchantId,
         merchantCountryId: mc.id,
@@ -3381,8 +3386,11 @@ export async function registerRoutes(
             return res.status(400).json({ message: errMsg });
           }
         } catch (mbiyoErr: any) {
-          console.error("[WITHDRAWAL MBIYO] Erreur:", mbiyoErr.message);
-          await storage.updateWithdrawalStatus(w.id, "failed", `Erreur technique Mbiyo lors du traitement`, reference);
+          const errDetail = mbiyoErr?.cause?.message || mbiyoErr?.message || "unknown";
+          const isTimeout = errDetail.includes("abort") || errDetail.includes("timeout") || errDetail.includes("UND_ERR");
+          const techMsg = isTimeout ? "Timeout/connexion Mbiyo" : `Erreur technique Mbiyo: ${errDetail}`;
+          console.error(`[WITHDRAWAL MBIYO] Erreur catch — retrait #${w.id} | ${techMsg}`);
+          await storage.updateWithdrawalStatus(w.id, "failed", techMsg, reference);
           notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
           notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
           await storage.incrementMerchantCountryBalance(mc.id, amount);
@@ -3505,7 +3513,9 @@ export async function registerRoutes(
               console.error(`[ADMIN APPROVE WD MBIYO] Echec: ${result.message}`);
             }
           } catch (mbiyoErr: any) {
-            console.error("[ADMIN APPROVE WD MBIYO] Erreur:", mbiyoErr.message);
+            const errDetail = mbiyoErr?.cause?.message || mbiyoErr?.message || "unknown";
+            const isTimeout = errDetail.includes("abort") || errDetail.includes("timeout") || errDetail.includes("UND_ERR");
+            console.error(`[ADMIN APPROVE WD MBIYO] Erreur catch — retrait #${w.id} | ${isTimeout ? "Timeout/connexion Mbiyo" : errDetail}`);
           }
         }
       } else {
