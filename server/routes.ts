@@ -1428,7 +1428,7 @@ export async function registerRoutes(
         const reference = mbiyoGenerateRef();
         const countryCode = mbiyoCountryCode(country);
         const currency = mbiyoCurrency(country);
-        const network = mbiyoNetwork(operator || paymentMethod);
+        const network = operatorRecord?.mbiyoCode || mbiyoNetwork(operator || paymentMethod);
         const callbackUrl = `${callbackBaseUrl}/api/mbiyo/callback`;
         const returnUrl = `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
 
