@@ -149,7 +149,9 @@ function prependDialCode(phone: string, country: string): string {
   const cleaned = phone.replace(/[\s\-\(\)\+]/g, "");
   const dialCode = COUNTRY_DIAL_CODES[country] || "";
   if (!dialCode || cleaned.startsWith(dialCode)) return cleaned;
-  return `${dialCode}${cleaned}`;
+  const TRUNK_PREFIX_COUNTRIES = new Set(["Congo RDC", "Congo Brazzaville", "Gabon"]);
+  const local = (TRUNK_PREFIX_COUNTRIES.has(country) && cleaned.startsWith("0")) ? cleaned.slice(1) : cleaned;
+  return `${dialCode}${local}`;
 }
 async function resolveOmnipayOperatorCode(operatorName: string | null | undefined, country: string | null | undefined): Promise<string | undefined> {
   if (!operatorName) return undefined;
@@ -1414,7 +1416,12 @@ export async function registerRoutes(
       };
       const dialCode = dialCodes[country] || "";
       const cleanPhone = payerPhone.replace(/[\s\-\(\)\+]/g, "");
-      const msisdn = cleanPhone.startsWith(dialCode) ? cleanPhone : `${dialCode}${cleanPhone}`;
+      // Certains pays utilisent un 0 comme préfixe national (ex: RDC 0981556946 → international 243981556946)
+      const TRUNK_PREFIX_COUNTRIES = new Set(["Congo RDC", "Congo Brazzaville", "Gabon"]);
+      const localPhone = (TRUNK_PREFIX_COUNTRIES.has(country) && cleanPhone.startsWith("0") && !cleanPhone.startsWith(dialCode))
+        ? cleanPhone.slice(1)
+        : cleanPhone;
+      const msisdn = localPhone.startsWith(dialCode) ? localPhone : `${dialCode}${localPhone}`;
 
       const operatorRecord = await storage.getWithdrawalOperatorByNameAndCountry(paymentMethod, country);
       const useMbiyo = operatorRecord?.gateway?.toLowerCase() === "mbiyo";

@@ -134,7 +134,6 @@ export async function initiatePayin(params: MbiyoPayinRequest): Promise<MbiyoPay
     payment_method: "mobile_money",
     order_id: params.orderId,
     callback_url: params.callbackUrl,
-    mode: params.mode || "live",
     metadata: {
       network: params.network,
       phone_number: params.phoneNumber,
@@ -146,7 +145,7 @@ export async function initiatePayin(params: MbiyoPayinRequest): Promise<MbiyoPay
     body.metadata.om_otp = params.otp;
   }
 
-  console.log(`[MBIYO] Demande de paiement: ${params.amount} ${params.currency} - Ref: ${params.orderId} - Tel: ${params.phoneNumber}`);
+  console.log(`[MBIYO] Demande de paiement: ${params.amount} ${params.currency} - Ref: ${params.orderId} - Tel: ${params.phoneNumber} - Network: ${params.network} - Country: ${params.countryCode}`);
 
   try {
     const response = await fetch(`${MBIYO_BASE_URL}/merchant/payin`, {
