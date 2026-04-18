@@ -7,11 +7,11 @@ import HelpButton from "@/components/HelpButton";
 
 const PAYMENT_METHODS: Record<string, string[]> = {
   "Togo": ["Moov Money", "TMoney"],
-  "Benin": ["MTN Mobile Money"],
-  "Burkina Faso": ["Moov Money", "Orange Money"],
+  "Benin": ["MTN Mobile Money", "Moov Money", "Celtiis"],
+  "Burkina Faso": ["Coris Money", "Moov Money", "Orange Money"],
   "Cameroun": ["MTN Mobile Money", "Orange Money"],
   "Congo Brazzaville": ["MTN Mobile Money"],
-  "Congo RDC": ["Airtel Money", "M-Pesa", "Orange Money"],
+  "Congo RDC": ["Africell", "Airtel Money", "M-Pesa", "Orange Money"],
   "Gabon": ["Airtel Money", "Moov Money"],
   "Cote d'Ivoire": ["Moov Money", "MTN Mobile Money", "Orange Money", "Wave"],
   "Mali": ["Orange Money"],
