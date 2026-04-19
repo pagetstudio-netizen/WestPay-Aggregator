@@ -207,7 +207,7 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
   };
 
   const providerLabel = (p: string) => {
-    if (p === "omnipay") return "Mobile Money";
+    if (p === "omnipay" || p === "mbiyo") return "Mobile Money";
     if (p === "sms") return "SMS";
     return p;
   };
