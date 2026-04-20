@@ -320,7 +320,7 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs" style={{ color: "#888" }}>
                       {tx.payerNumber && <span><Phone className="w-3 h-3 inline mr-0.5" /><span data-testid={`text-payer-number-${tx.id}`}>{tx.payerNumber}</span></span>}
                       <span><Calendar className="w-3 h-3 inline mr-0.5" /><span data-testid={`text-tx-date-${tx.id}`}>{new Date(tx.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span></span>
-                      <span style={{ color: "#1976d2", fontWeight: 600 }}>{providerLabel(tx.provider)}</span>
+                      <span style={{ color: "#1976d2", fontWeight: 600 }}>Validé par RobotPay</span>
                     </div>
                   </div>
                   <div className="text-right shrink-0">
@@ -1970,7 +1970,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
       <div>
         <h2 className="text-xl font-bold mb-1" style={{ color: "#1a237e" }}>Paiements Crypto</h2>
         <p className="text-sm" style={{ color: "#546e7a" }}>
-          Acceptez des cryptomonnaies via OxaPay — USDT, BTC, ETH, LTC, TRX et plus. Mondial, sans restriction de pays.
+          Acceptez des cryptomonnaies via RobotPay — USDT, BTC, ETH, LTC, TRX et plus. Mondial, sans restriction de pays.
         </p>
       </div>
 
@@ -2114,7 +2114,7 @@ X-API-KEY: <votre_clé_api>
                   <code className="block text-xs p-3 rounded-lg" style={{ background: "#f1f5f9", color: "#0f172a", fontFamily: "monospace" }}>
 {`{
   "trackId": "TP-XXXX",
-  "payLink": "https://oxapay.com/pay/...",
+  "payLink": "https://pay.robotpay.net/...",
   "paymentUrl": "https://westpay.cloud/pay/crypto/TP-XXXX",
   "expiredAt": "2026-03-27T12:30:00Z"
 }`}
@@ -2139,7 +2139,7 @@ X-API-KEY: <votre_clé_api>
                 </div>
 
                 <div>
-                  <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>Webhook OxaPay (callback)</p>
+                  <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>Webhook RobotPay (callback)</p>
                   <div className="relative">
                     <code className="block text-xs p-3 rounded-lg break-all" style={{ background: "#e3f2fd", color: "#1565c0", fontFamily: "monospace" }}>
                       {window.location.origin}/api/oxapay/callback
@@ -2154,7 +2154,7 @@ X-API-KEY: <votre_clé_api>
                     </button>
                   </div>
                   <p className="text-xs mt-1" style={{ color: "#78909c" }}>
-                    Configurer cette URL dans votre dashboard OxaPay comme "Callback URL".
+                    Configurer cette URL dans votre tableau de bord de paiement crypto comme "Callback URL".
                   </p>
                 </div>
               </div>
@@ -2447,7 +2447,7 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
         <div className="mt-3 flex flex-wrap gap-3 text-xs text-white/60">
           <span>URL de base: <code className="text-white font-mono">{BASE_URL}</code></span>
           <span>•</span>
-          <span>Fournisseur: <span className="text-green-300 font-medium">Mbiyo Pay</span></span>
+          <span>Fournisseur: <span className="text-green-300 font-medium">RobotPay</span></span>
           <span>•</span>
           <span>Version: <span className="text-white font-medium">v1</span></span>
         </div>
@@ -2516,7 +2516,7 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
   "message": "Paiement initié avec succès",
   "data": {
     "reference": "MB1A2B3C4D5E6F7G",
-    "transaction_id": "TXN-MBIYO-XXXX",
+    "transaction_id": "TXN-RBPAY-XXXX",
     "amount": 5000,
     "currency": "XOF",
     "order_id": "CMD-2024-001",
@@ -2768,8 +2768,8 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
                 { code: "401", s: "error", cause: "Clé SDK manquante, invalide ou SDK désactivé sur ce compte" },
                 { code: "403", s: "error", cause: "Compte marchand suspendu" },
                 { code: "404", s: "error", cause: "Transaction introuvable pour cette référence" },
-                { code: "422", s: "error", cause: "Solde insuffisant (payout) ou refus du fournisseur Mbiyo" },
-                { code: "503", s: "error", cause: "Passerelle Mbiyo non configurée (contacter le support)" },
+                { code: "422", s: "error", cause: "Solde insuffisant (payout) ou paiement refusé" },
+                { code: "503", s: "error", cause: "Passerelle de paiement non disponible (contacter le support)" },
                 { code: "500", s: "error", cause: "Erreur interne du serveur" },
               ].map(r => (
                 <tr key={r.code} className="hover:bg-gray-50/50">
