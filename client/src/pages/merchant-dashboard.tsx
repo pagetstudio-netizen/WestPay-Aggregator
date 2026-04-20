@@ -358,7 +358,7 @@ function ApiKeysPanel({ token }: { token: string | null }) {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/api-keys"] });
       toast({ title: t("apiKey"), description: t("keyActive") });
     },
-    onError: (err: any) => toast({ title: t("error"), description: err.message, variant: "destructive" }),
+    onError: () => toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" }),
   });
 
   if (isLoading) return <MerchantLoadingSkeleton />;
@@ -485,7 +485,7 @@ function WebhookPanel({ token }: { token: string | null }) {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook"] });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook/logs"] });
     } catch (err: any) {
-      toast({ title: t("error"), description: err.message, variant: "destructive" });
+      toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" });
     } finally { setIsSaving(false); }
   };
 
@@ -498,10 +498,10 @@ function WebhookPanel({ token }: { token: string | null }) {
       });
       const data = await res.json();
       if (data.success) toast({ title: t("webhookTested"), description: `HTTP ${data.statusCode}` });
-      else toast({ title: t("error"), description: data.error || `Code: ${data.statusCode}`, variant: "destructive" });
+      else toast({ title: "Test non concluant", description: "Le webhook n'a pas répondu correctement. Vérifiez votre URL.", variant: "destructive" });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook/logs"] });
     } catch (err: any) {
-      toast({ title: t("error"), description: err.message, variant: "destructive" });
+      toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" });
     } finally { setIsTesting(false); }
   };
 
@@ -518,7 +518,7 @@ function WebhookPanel({ token }: { token: string | null }) {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook"] });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook/logs"] });
     } catch (err: any) {
-      toast({ title: t("error"), description: err.message, variant: "destructive" });
+      toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" });
     } finally { setIsSaving(false); }
   };
 
@@ -697,22 +697,22 @@ function TransfersPanel({ token }: { token: string | null }) {
       setLastName("");
       setOperator("");
     },
-    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+    onError: () => toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" }),
   });
 
   const handleTransfer = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCountry || !recipientPhone || !amount || !firstName || !lastName) {
-      toast({ title: "Erreur", description: "Tous les champs sont requis", variant: "destructive" });
+      toast({ title: "Champs incomplets", description: "Veuillez remplir tous les champs requis.", variant: "destructive" });
       return;
     }
     const parsedAmount = parseInt(amount);
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      toast({ title: "Erreur", description: "Le montant doit etre un nombre positif", variant: "destructive" });
+      toast({ title: "Montant invalide", description: "Le montant doit être un nombre entier positif.", variant: "destructive" });
       return;
     }
     if (selectedMC && parsedAmount > selectedMC.balance) {
-      toast({ title: "Erreur", description: "Solde insuffisant pour ce pays", variant: "destructive" });
+      toast({ title: "Solde insuffisant", description: "Votre solde disponible ne permet pas d'effectuer cette opération.", variant: "destructive" });
       return;
     }
     transferMutation.mutate({
@@ -960,7 +960,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
       setAmount(""); setPhone(""); setSelectedOperator("");
       toast({ title: "Demande soumise", description: "Votre demande de reversement est en cours de traitement." });
     },
-    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+    onError: () => toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" }),
   });
 
   const handleSubmit = (e: { preventDefault: () => void }) => {
@@ -969,7 +969,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
     const amountNum = parseInt(amount);
     if (isNaN(amountNum) || amountNum <= 0) return;
     if (selectedWallet && amountNum > selectedWallet.balance) {
-      toast({ title: t("error"), description: `${t("availableBalance")} : ${selectedWallet.balance.toLocaleString("fr-FR")} FCFA`, variant: "destructive" });
+      toast({ title: "Solde insuffisant", description: `Votre solde disponible est de ${selectedWallet.balance.toLocaleString("fr-FR")} FCFA.`, variant: "destructive" });
       return;
     }
     createMutation.mutate({ merchantCountryId: Number(selectedWalletId), amount: amountNum, phone, operator: selectedOperator });
@@ -1237,18 +1237,18 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
       });
       setFromCountryId(""); setToCountryId(""); setAmount("");
     },
-    onError: (err: any) => toast({ title: t("error"), description: err.message, variant: "destructive" }),
+    onError: () => toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" }),
   });
 
   const handleSubmit = (e: { preventDefault: () => void }) => {
     e.preventDefault();
     if (!fromCountryId || !toCountryId || !amount) {
-      toast({ title: t("error"), description: t("confirm"), variant: "destructive" });
+      toast({ title: "Champs incomplets", description: "Veuillez sélectionner les pays et saisir un montant.", variant: "destructive" });
       return;
     }
     const parsed = parseInt(amount);
     if (isNaN(parsed) || parsed <= 0) {
-      toast({ title: t("error"), description: t("amount"), variant: "destructive" });
+      toast({ title: "Montant invalide", description: "Le montant doit être un nombre entier positif.", variant: "destructive" });
       return;
     }
     createMutation.mutate({ fromCountryId, toCountryId, amount });
@@ -1471,7 +1471,7 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
       toast({ title: t("passwordChanged") });
       setCurrentPassword(""); setNewPassword("");
     } catch (err: any) {
-      toast({ title: t("error"), description: err.message, variant: "destructive" });
+      toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" });
     } finally { setIsChanging(false); }
   };
 
@@ -1595,7 +1595,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
       return res.json();
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] }); setShowCreate(false); setForm({ name: "", amountType: "fixed", amount: "", redirectUrl: "", paymentLimit: "" }); toast({ title: t("linkCreated") }); },
-    onError: (e: any) => toast({ title: t("error"), description: e.message, variant: "destructive" }),
+    onError: () => toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" }),
   });
 
   const updateMutation = useMutation({
@@ -1609,7 +1609,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
       return res.json();
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] }); setEditLink(null); toast({ title: t("linkUpdated") }); },
-    onError: (e: any) => toast({ title: t("error"), description: e.message, variant: "destructive" }),
+    onError: () => toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({

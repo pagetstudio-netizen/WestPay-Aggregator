@@ -178,7 +178,7 @@ export default function PaymentPage() {
         } else if (data.status === "failed") {
           if (pollingRef.current) clearInterval(pollingRef.current);
           setOmnipayPolling(false);
-          toast({ title: "Paiement echoue", description: "Le paiement a ete refuse ou a expire.", variant: "destructive" });
+          toast({ title: "Paiement non abouti", description: "Votre paiement n'a pas pu être traité. Veuillez réessayer.", variant: "destructive" });
           setStep(1);
         }
       } catch {
@@ -196,7 +196,7 @@ export default function PaymentPage() {
 
   const handleStep1Next = async () => {
     if (!selectedMethod) {
-      toast({ title: "Veuillez choisir une methode de paiement", variant: "destructive" });
+      toast({ title: "Méthode de paiement requise", description: "Veuillez sélectionner une méthode de paiement pour continuer.", variant: "destructive" });
       return;
     }
 
@@ -217,7 +217,7 @@ export default function PaymentPage() {
         if (!res.ok) throw new Error(data.message);
         window.location.replace(`/pay/crypto/${data.trackId}`);
       } catch (err: any) {
-        toast({ title: "Erreur crypto", description: err.message, variant: "destructive" });
+        toast({ title: "Paiement non disponible", description: "Une erreur est survenue lors de l'initialisation. Veuillez réessayer.", variant: "destructive" });
       } finally {
         setIsCryptoLoading(false);
       }
@@ -225,11 +225,11 @@ export default function PaymentPage() {
     }
 
     if (!payerPhone.trim()) {
-      toast({ title: "Veuillez entrer votre numero de telephone", variant: "destructive" });
+      toast({ title: "Numéro requis", description: "Veuillez saisir votre numéro de téléphone pour continuer.", variant: "destructive" });
       return;
     }
     if (needsManualOtp && !otpCode.trim()) {
-      toast({ title: "Veuillez entrer votre code OTP Orange Money", variant: "destructive" });
+      toast({ title: "Code OTP requis", description: "Veuillez saisir le code reçu par SMS pour valider votre paiement.", variant: "destructive" });
       return;
     }
     setIsSubmitting(true);
@@ -269,7 +269,7 @@ export default function PaymentPage() {
         startOmnipayPolling(data.paymentId);
       }
     } catch (err: any) {
-      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+      toast({ title: "Paiement non abouti", description: "Une erreur est survenue. Veuillez vérifier vos informations et réessayer.", variant: "destructive" });
     } finally {
       setIsSubmitting(false);
     }
