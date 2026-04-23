@@ -1200,6 +1200,11 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
     queryFn: () => fetch("/api/wallet-transfer-countries").then(r => r.json()),
   });
 
+  const { data: wtFeeSettings } = useQuery<{ feeType: string; feeValue: number }>({
+    queryKey: ["/api/public/wallet-transfer-fee"],
+    queryFn: () => fetch("/api/public/wallet-transfer-fee").then(r => r.json()),
+  });
+
   const [fromCountryId, setFromCountryId] = useState("");
   const [toCountryId, setToCountryId] = useState("");
   const [amount, setAmount] = useState("");
@@ -1237,7 +1242,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
       });
       setFromCountryId(""); setToCountryId(""); setAmount("");
     },
-    onError: () => toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" }),
+    onError: (err: any) => toast({ title: "Action non effectuée", description: err.message || "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" }),
   });
 
   const handleSubmit = (e: { preventDefault: () => void }) => {
@@ -1376,36 +1381,71 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
             </div>
           )}
 
-          {fromCountryId && toCountryId && amount && !isNaN(parseInt(amount)) && parseInt(amount) > 0 && (
-            <div className="rounded-lg p-2.5 text-xs space-y-1" style={{ background: "#f0faf5", border: "1px solid #c3e6cb" }}>
-              {feeExempt ? (
-                <div className="flex justify-between items-center">
-                  <span style={{ color: "#155724", fontWeight: 600 }}>✦ Mode sans frais</span>
-                  <span style={{ color: "#155724", fontWeight: 600 }}>0 {fromZone || "FCFA"}</span>
-                </div>
-              ) : (
+          {fromCountryId && toCountryId && amount && !isNaN(parseInt(amount)) && parseInt(amount) > 0 && (() => {
+            const parsedAmt = parseInt(amount);
+            let estimatedFee = 0;
+            if (!feeExempt && wtFeeSettings) {
+              if (wtFeeSettings.feeType === "percentage") {
+                estimatedFee = Math.round((parsedAmt * wtFeeSettings.feeValue) / 100);
+              } else {
+                estimatedFee = Math.round(wtFeeSettings.feeValue);
+              }
+            }
+            const totalNeeded = parsedAmt + estimatedFee;
+            const hasEnough = !fromMC || fromMC.balance >= totalNeeded;
+            return (
+              <div className="rounded-lg p-2.5 text-xs space-y-1.5" style={{ background: hasEnough ? "#f0faf5" : "#fff5f5", border: `1px solid ${hasEnough ? "#c3e6cb" : "#feb2b2"}` }}>
                 <div className="flex justify-between">
-                  <span style={{ color: "#666" }}>Frais de virement</span>
-                  <span style={{ color: "#e53e3e", fontWeight: 600 }}>estimé selon configuration</span>
+                  <span style={{ color: "#555" }}>Montant</span>
+                  <span style={{ color: "#333", fontWeight: 600 }}>{parsedAmt.toLocaleString("fr-FR")} {fromZone || "FCFA"}</span>
                 </div>
-              )}
-              <div className="flex justify-between border-t pt-1" style={{ borderColor: "#c3e6cb" }}>
-                <span style={{ color: "#155724", fontWeight: 700 }}>Montant transféré</span>
-                <span style={{ color: "#155724", fontWeight: 700 }}>{parseInt(amount).toLocaleString("fr-FR")} {fromZone || "FCFA"}</span>
+                <div className="flex justify-between">
+                  <span style={{ color: "#555" }}>Frais de virement</span>
+                  {feeExempt ? (
+                    <span style={{ color: "#2e7d32", fontWeight: 600 }}>✦ Sans frais</span>
+                  ) : (
+                    <span style={{ color: estimatedFee > 0 ? "#e53e3e" : "#555", fontWeight: 600 }}>
+                      {estimatedFee > 0 ? `−${estimatedFee.toLocaleString("fr-FR")} ${fromZone || "FCFA"}` : "0"}
+                    </span>
+                  )}
+                </div>
+                <div className="flex justify-between border-t pt-1.5" style={{ borderColor: hasEnough ? "#c3e6cb" : "#feb2b2" }}>
+                  <span style={{ color: hasEnough ? "#155724" : "#c53030", fontWeight: 700 }}>Total débité</span>
+                  <span style={{ color: hasEnough ? "#155724" : "#c53030", fontWeight: 700 }}>{totalNeeded.toLocaleString("fr-FR")} {fromZone || "FCFA"}</span>
+                </div>
+                {!hasEnough && fromMC && (
+                  <p className="text-xs pt-0.5" style={{ color: "#c53030" }}>
+                    Solde insuffisant — vous avez {fromMC.balance.toLocaleString("fr-FR")} {fromZone}, il vous manque {(totalNeeded - fromMC.balance).toLocaleString("fr-FR")} {fromZone}.
+                  </p>
+                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
 
-          <button
-            type="submit"
-            disabled={createMutation.isPending || !fromCountryId || !toCountryId || !amount}
-            className="w-full rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 transition-all"
-            style={{ background: createMutation.isPending || !fromCountryId || !toCountryId || !amount ? "#ccc" : "#7e57c2", color: "#fff", border: "none", cursor: createMutation.isPending ? "not-allowed" : "pointer" }}
-            data-testid="button-submit-virement"
-          >
-            {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightLeft className="w-4 h-4" />}
-            {createMutation.isPending ? t("loading") : t("confirmTransfer")}
-          </button>
+          {(() => {
+            const parsedAmt = parseInt(amount) || 0;
+            let estimatedFee = 0;
+            if (!feeExempt && wtFeeSettings && parsedAmt > 0) {
+              estimatedFee = wtFeeSettings.feeType === "percentage"
+                ? Math.round((parsedAmt * wtFeeSettings.feeValue) / 100)
+                : Math.round(wtFeeSettings.feeValue);
+            }
+            const totalNeeded = parsedAmt + estimatedFee;
+            const insufficientBalance = !!(fromMC && parsedAmt > 0 && fromMC.balance < totalNeeded);
+            const isDisabled = createMutation.isPending || !fromCountryId || !toCountryId || !amount || insufficientBalance;
+            return (
+              <button
+                type="submit"
+                disabled={isDisabled}
+                className="w-full rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 transition-all"
+                style={{ background: isDisabled ? "#ccc" : "#7e57c2", color: "#fff", border: "none", cursor: isDisabled ? "not-allowed" : "pointer" }}
+                data-testid="button-submit-virement"
+              >
+                {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightLeft className="w-4 h-4" />}
+                {createMutation.isPending ? t("loading") : insufficientBalance ? "Solde insuffisant" : t("confirmTransfer")}
+              </button>
+            );
+          })()}
         </form>
       </div>
 

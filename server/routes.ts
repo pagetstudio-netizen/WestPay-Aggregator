@@ -3002,6 +3002,19 @@ export async function registerRoutes(
   });
 
   // ==================== SUPPORT CONTACTS (public) ====================
+  app.get("/api/public/wallet-transfer-fee", async (_req, res) => {
+    try {
+      const feeType = await storage.getSetting("wallet_transfer_fee_type");
+      const feeValue = await storage.getSetting("wallet_transfer_fee_value");
+      res.json({
+        feeType: feeType?.value || "percentage",
+        feeValue: parseFloat(feeValue?.value || "3"),
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/public/platform-flags", async (_req, res) => {
     try {
       const withdrawalsDisabled = await storage.getSetting("withdrawals_disabled");
