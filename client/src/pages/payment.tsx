@@ -21,6 +21,7 @@ const PAYMENT_METHODS: Record<string, string[]> = {
   "Mali": ["Orange Money"],
   "Senegal": ["Mixx by Yas", "Orange Money", "Wave"],
   "Guinee": ["MTN Mobile Money", "Orange Money"],
+  "Gambie": ["Africell Money"],
 };
 
 const DIAL_CODES: Record<string, string> = {
@@ -35,7 +36,16 @@ const DIAL_CODES: Record<string, string> = {
   "Mali": "+223",
   "Senegal": "+221",
   "Guinee": "+224",
+  "Gambie": "+220",
 };
+
+function currencyForCountry(country: string): string {
+  if (["Cameroun", "Congo Brazzaville", "Gabon"].includes(country)) return "XAF";
+  if (country === "Congo RDC") return "CDF";
+  if (country === "Guinee") return "GNF";
+  if (country === "Gambie") return "GMD";
+  return "XOF";
+}
 
 export default function PaymentPage() {
   const { toast } = useToast();
@@ -62,6 +72,7 @@ export default function PaymentPage() {
   const [payerPhone, setPayerPhone] = useState("");
   const [payerName, setPayerName] = useState("");
   const [selectedCountry, setSelectedCountry] = useState(countryParam);
+  const currency = currencyForCountry(selectedCountry);
   const [selectedMethod, setSelectedMethod] = useState("");
   const [otpCode, setOtpCode] = useState("");
   const [paymentId, setPaymentId] = useState<number | null>(null);
@@ -209,7 +220,7 @@ export default function PaymentPage() {
           body: JSON.stringify({
             merchantSlug,
             amount,
-            currency: "XOF",
+            currency: currency,
             returnUrl: redirectUrl || undefined,
           }),
         });
@@ -436,7 +447,7 @@ export default function PaymentPage() {
         <div className="mb-3">
           <p className="text-white/80 text-xs">Montant:</p>
           <p className="text-white font-bold text-3xl" data-testid="text-pay-amount">
-            {formatAmount(amount)}<span className="text-base ml-2">XOF</span>
+            {formatAmount(amount)}<span className="text-base ml-2">{currency}</span>
           </p>
         </div>
 
@@ -705,12 +716,12 @@ export default function PaymentPage() {
                     className="p-3 rounded-md text-center text-sm font-medium"
                     style={{ backgroundColor: "#dbeafe", color: "#1e40af" }}
                   >
-                    Cliquez sur le bouton ci-dessous pour valider votre paiement de {formatAmount(amount)} XOF
+                    Cliquez sur le bouton ci-dessous pour valider votre paiement de {formatAmount(amount)} {currency}
                   </div>
 
                   {omnipayFees > 0 && (
                     <p className="text-xs text-center" style={{ color: "#6b7280" }}>
-                      Frais de transaction: {formatAmount(omnipayFees)} XOF
+                      Frais de transaction: {formatAmount(omnipayFees)} {currency}
                     </p>
                   )}
 
@@ -754,11 +765,11 @@ export default function PaymentPage() {
                       Validez le paiement sur votre telephone
                     </p>
                     <p className="text-xs mt-1" style={{ color: "#6b7280" }}>
-                      Composez votre code secret pour confirmer la transaction de {formatAmount(amount)} XOF
+                      Composez votre code secret pour confirmer la transaction de {formatAmount(amount)} {currency}
                     </p>
                     {omnipayFees > 0 && (
                       <p className="text-xs mt-1" style={{ color: "#6b7280" }}>
-                        Frais: {formatAmount(omnipayFees)} XOF
+                        Frais: {formatAmount(omnipayFees)} {currency}
                       </p>
                     )}
                   </div>
@@ -822,7 +833,7 @@ export default function PaymentPage() {
                 Paiement confirme !
               </h2>
               <p className="text-sm" style={{ color: "#4b5563" }}>
-                Votre paiement de <strong>{formatAmount(amount)} XOF</strong> a ete confirme avec succes.
+                Votre paiement de <strong>{formatAmount(amount)} {currency}</strong> a ete confirme avec succes.
               </p>
               {omnipayReference && (
                 <p className="text-xs" style={{ color: "#6b7280" }}>
