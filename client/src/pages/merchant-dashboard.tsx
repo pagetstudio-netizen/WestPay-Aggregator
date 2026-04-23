@@ -43,6 +43,13 @@ function useMerchantFetch(url: string, key: string[], token: string | null) {
   });
 }
 
+function countryToCurrency(country: string): string {
+  if (country === "Congo RDC") return "CDF";
+  if (country === "Guinee") return "GNF";
+  if (country === "Gambie") return "GMD";
+  return "FCFA";
+}
+
 const COUNTRY_COLORS = [
   "#1976d2", "#26a69a", "#e57373", "#7e57c2",
   "#00897b", "#fb8c00", "#43a047", "#d81b60",
@@ -162,7 +169,7 @@ function OverviewPanel({ token }: { token: string | null }) {
                   )}
                 </div>
                 <p className="text-3xl font-bold text-white leading-none">
-                  {(c.balance ?? 0).toLocaleString("fr-FR")}<span className="text-xl font-semibold ml-2 text-white/90">FCFA</span>
+                  {(c.balance ?? 0).toLocaleString("fr-FR")}<span className="text-xl font-semibold ml-2 text-white/90">{countryToCurrency(c.country)}</span>
                 </p>
                 {!c.active && (
                   <p className="text-xs text-white/60 mt-2">Ce pays est désactivé — non visible sur la page de paiement</p>
@@ -969,7 +976,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
     const amountNum = parseInt(amount);
     if (isNaN(amountNum) || amountNum <= 0) return;
     if (selectedWallet && amountNum > selectedWallet.balance) {
-      toast({ title: "Solde insuffisant", description: `Votre solde disponible est de ${selectedWallet.balance.toLocaleString("fr-FR")} FCFA.`, variant: "destructive" });
+      toast({ title: "Solde insuffisant", description: `Votre solde disponible est de ${selectedWallet.balance.toLocaleString("fr-FR")} ${countryToCurrency(selectedWallet.country)}.`, variant: "destructive" });
       return;
     }
     createMutation.mutate({ merchantCountryId: Number(selectedWalletId), amount: amountNum, phone, operator: selectedOperator });
@@ -1021,7 +1028,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                   >
                     <p className="text-xs font-bold uppercase tracking-wide mb-1" style={{ color: String(w.id) === selectedWalletId ? "rgba(255,255,255,0.8)" : "#888" }}>{w.country}</p>
                     <p className="text-lg font-bold" style={{ color: String(w.id) === selectedWalletId ? "#fff" : "#1a1a1a" }}>
-                      {w.balance.toLocaleString("fr-FR")}<span className="text-xs ml-1" style={{ color: String(w.id) === selectedWalletId ? "rgba(255,255,255,0.7)" : "#aaa" }}>FCFA</span>
+                      {w.balance.toLocaleString("fr-FR")}<span className="text-xs ml-1" style={{ color: String(w.id) === selectedWalletId ? "rgba(255,255,255,0.7)" : "#aaa" }}>{countryToCurrency(w.country)}</span>
                     </p>
                   </div>
                 ))}
@@ -1086,11 +1093,11 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                 {t("withdrawalHistory")}
               </p>
               <div className="rounded-xl p-3 mb-4 text-xs" style={{ background: "#f0faf5", border: "1px solid #c3e6cb" }}>
-                <span style={{ color: "#155724" }}>{selectedWallet.country} · <strong>{selectedOperator}</strong> · {t("availableBalance")} : <strong>{selectedWallet.balance.toLocaleString("fr-FR")} FCFA</strong></span>
+                <span style={{ color: "#155724" }}>{selectedWallet.country} · <strong>{selectedOperator}</strong> · {t("availableBalance")} : <strong>{selectedWallet.balance.toLocaleString("fr-FR")} {countryToCurrency(selectedWallet.country)}</strong></span>
               </div>
               <div className="space-y-3">
                 <div>
-                  <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>{t("amount")} (FCFA)</label>
+                  <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>{t("amount")} ({countryToCurrency(selectedWallet.country)})</label>
                   <input
                     type="number"
                     value={amount}
@@ -1165,7 +1172,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
           (withdrawalList as Withdrawal[]).map((w) => (
             <div key={w.id} className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }} data-testid={`withdrawal-row-${w.id}`}>
               <div className="flex items-center justify-between gap-2 mb-2">
-                <p className="text-lg font-bold" style={{ color: "#1a1a1a" }}>{w.amount.toLocaleString("fr-FR")} <span className="text-sm font-semibold" style={{ color: "#888" }}>FCFA</span></p>
+                <p className="text-lg font-bold" style={{ color: "#1a1a1a" }}>{w.amount.toLocaleString("fr-FR")} <span className="text-sm font-semibold" style={{ color: "#888" }}>{countryToCurrency(w.country)}</span></p>
                 <StatusPill status={w.status} />
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: "#888" }}>
@@ -1263,6 +1270,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
 
   const xofCountries = wtcList.filter((c: WalletTransferCountry) => c.currencyZone === "XOF").map((c: WalletTransferCountry) => c.country).join(", ");
   const xafCountries = wtcList.filter((c: WalletTransferCountry) => c.currencyZone === "XAF").map((c: WalletTransferCountry) => c.country).join(", ");
+  const cdfCountries = wtcList.filter((c: WalletTransferCountry) => c.currencyZone === "CDF").map((c: WalletTransferCountry) => c.country).join(", ");
   const totalTransferred = (walletTransfers as WalletTransfer[]).filter(w => w.status === "approved").reduce((s, w) => s + w.amount, 0);
   const pendingCount = (walletTransfers as WalletTransfer[]).filter(w => w.status === "pending").length;
 
@@ -1297,6 +1305,12 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
               <span style={{ color: "#1976d2" }}>{xafCountries}</span>
             </div>
           )}
+          {cdfCountries && (
+            <div className="rounded-xl px-3 py-2 text-xs" style={{ background: "#fff8e1", border: "1px solid #ffe082" }}>
+              <span className="font-bold" style={{ color: "#e65100" }}>Zone CDF : </span>
+              <span style={{ color: "#ef6c00" }}>{cdfCountries}</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -1324,7 +1338,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
               >
                 <option value="">{eligibleCountries.length === 0 ? t("noData") : t("selectFromCountry")}</option>
                 {eligibleCountries.map(c => (
-                  <option key={c.id} value={String(c.id)}>{c.country} — {c.balance.toLocaleString("fr-FR")} FCFA</option>
+                  <option key={c.id} value={String(c.id)}>{c.country} — {c.balance.toLocaleString("fr-FR")} {countryToCurrency(c.country)}</option>
                 ))}
               </select>
             </div>
@@ -1343,7 +1357,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
               >
                 <option value="">{fromCountryId && toCountries.length === 0 ? t("noData") : t("selectToCountry")}</option>
                 {toCountries.map(c => (
-                  <option key={c.id} value={String(c.id)}>{c.country} — {c.balance.toLocaleString("fr-FR")} FCFA</option>
+                  <option key={c.id} value={String(c.id)}>{c.country} — {c.balance.toLocaleString("fr-FR")} {countryToCurrency(c.country)}</option>
                 ))}
               </select>
             </div>

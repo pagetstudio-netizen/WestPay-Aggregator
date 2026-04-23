@@ -3101,8 +3101,8 @@ export async function registerRoutes(
   app.post("/api/admin/wallet-transfer-countries", authMiddleware("admin"), async (req, res) => {
     try {
       const { country, currencyZone } = req.body;
-      if (!country?.trim() || !["XOF", "XAF"].includes(currencyZone)) {
-        return res.status(400).json({ message: "Pays et zone monetaire requis (XOF ou XAF)" });
+      if (!country?.trim() || !["XOF", "XAF", "CDF"].includes(currencyZone)) {
+        return res.status(400).json({ message: "Pays et zone monetaire requis (XOF, XAF ou CDF)" });
       }
       const existing = await storage.getWalletTransferCountryByName(country.trim());
       if (existing) return res.status(409).json({ message: "Ce pays existe deja" });

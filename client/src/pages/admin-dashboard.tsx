@@ -2787,6 +2787,7 @@ function AdminWalletTransfersPanel() {
                 <SelectContent>
                   <SelectItem value="XOF">XOF</SelectItem>
                   <SelectItem value="XAF">XAF</SelectItem>
+                  <SelectItem value="CDF">CDF</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -2797,7 +2798,7 @@ function AdminWalletTransfersPanel() {
           </form>
 
           <div className="space-y-2">
-            {["XOF", "XAF"].map(zone => {
+            {["XOF", "XAF", "CDF"].map(zone => {
               const zoneCountries = (wtcList as any[]).filter((c: any) => c.currencyZone === zone);
               if (zoneCountries.length === 0) return null;
               return (

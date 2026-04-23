@@ -207,6 +207,7 @@ export async function runMigrations() {
       { country: "Tchad", zone: "XAF" },
       { country: "Centrafrique", zone: "XAF" },
       { country: "Guinee Equatoriale", zone: "XAF" },
+      { country: "Congo RDC", zone: "CDF" },
     ];
     for (const c of defaultWtcCountries) {
       await client.query(
