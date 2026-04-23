@@ -1532,7 +1532,7 @@ function CountriesPanel() {
 
   if (isLoading) return <LoadingSkeleton />;
 
-  const availableCountries = ["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon", "Guinee"];
+  const availableCountries = ["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon", "Guinee", "Gambie"];
   const selectedMerchantName = (merchants as Merchant[]).find(m => m.id.toString() === merchantId)?.name;
   const filteredCountries = filterSearch.trim()
     ? (countries as any[]).filter((mc: any) =>
@@ -2788,6 +2788,8 @@ function AdminWalletTransfersPanel() {
                   <SelectItem value="XOF">XOF</SelectItem>
                   <SelectItem value="XAF">XAF</SelectItem>
                   <SelectItem value="CDF">CDF</SelectItem>
+                  <SelectItem value="GNF">GNF</SelectItem>
+                  <SelectItem value="GMD">GMD</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -2798,7 +2800,7 @@ function AdminWalletTransfersPanel() {
           </form>
 
           <div className="space-y-2">
-            {["XOF", "XAF", "CDF"].map(zone => {
+            {["XOF", "XAF", "CDF", "GNF", "GMD"].map(zone => {
               const zoneCountries = (wtcList as any[]).filter((c: any) => c.currencyZone === zone);
               if (zoneCountries.length === 0) return null;
               return (

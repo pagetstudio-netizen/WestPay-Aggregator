@@ -208,6 +208,8 @@ export async function runMigrations() {
       { country: "Centrafrique", zone: "XAF" },
       { country: "Guinee Equatoriale", zone: "XAF" },
       { country: "Congo RDC", zone: "CDF" },
+      { country: "Guinee", zone: "GNF" },
+      { country: "Gambie", zone: "GMD" },
     ];
     for (const c of defaultWtcCountries) {
       await client.query(
@@ -297,8 +299,9 @@ export async function runMigrations() {
       { name: "Moov Money", type: "Mobile Money", country: "Gabon", dailyLimit: 1000000, gateway: "OmniPay" },
       { name: "Orange Money", type: "Mobile Money", country: "Congo RDC", dailyLimit: 500000, gateway: "OmniPay" },
       { name: "M-Pesa", type: "Mobile Money", country: "Congo RDC", dailyLimit: 500000, gateway: "OmniPay" },
-      { name: "MTN Mobile Money", type: "Mobile Money", country: "Guinee", dailyLimit: 1000000, gateway: "OmniPay" },
-      { name: "Orange Money", type: "Mobile Money", country: "Guinee", dailyLimit: 1000000, gateway: "OmniPay" },
+      { name: "MTN Mobile Money", type: "Mobile Money", country: "Guinee", dailyLimit: 1000000, gateway: "Mbiyo" },
+      { name: "Orange Money", type: "Mobile Money", country: "Guinee", dailyLimit: 1000000, gateway: "Mbiyo" },
+      { name: "Africell Money", type: "Mobile Money", country: "Gambie", dailyLimit: 1000000, gateway: "Mbiyo" },
     ];
 
     for (const op of defaultOperators) {
@@ -312,8 +315,16 @@ export async function runMigrations() {
       );
     }
 
+    // Mise à jour des opérateurs Guinée et Gambie vers la gateway Mbiyo
+    await client.query(`
+      UPDATE withdrawal_operators
+      SET gateway = 'Mbiyo'
+      WHERE country IN ('Guinee', 'Gambie') AND gateway != 'Mbiyo'
+    `);
+
     await client.query(`ALTER TABLE merchants ADD COLUMN IF NOT EXISTS fee_exempt boolean NOT NULL DEFAULT false`);
     await client.query(`ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS omnipay_code text`);
+    await client.query(`ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS mbiyo_code text`);
     await client.query(`ALTER TABLE merchants ADD COLUMN IF NOT EXISTS crypto_api_key text`);
     await client.query(`ALTER TABLE merchant_countries ADD COLUMN IF NOT EXISTS payin_gateway text NOT NULL DEFAULT 'omnipay'`);
     await client.query(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS gateway text NOT NULL DEFAULT 'omnipay'`);

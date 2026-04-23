@@ -93,7 +93,7 @@ const COUNTRY_DIAL_CODES: Record<string, string> = {
   "Togo": "228", "Benin": "229", "Cote d'Ivoire": "225",
   "Senegal": "221", "Mali": "223", "Burkina Faso": "226",
   "Cameroun": "237", "Congo Brazzaville": "242", "Gabon": "241",
-  "Congo RDC": "243", "Guinee": "224",
+  "Congo RDC": "243", "Guinee": "224", "Gambie": "220",
 };
 
 const COUNTRY_ALIASES: Record<string, string> = {
@@ -113,6 +113,7 @@ const COUNTRY_ALIASES: Record<string, string> = {
   "republique democratique du congo": "Congo RDC", "république démocratique du congo": "Congo RDC",
   "democratic republic of congo": "Congo RDC", "democratic republic of the congo": "Congo RDC",
   "guinee": "Guinee", "guinée": "Guinee", "guinea": "Guinee", "republic of guinea": "Guinee",
+  "gambie": "Gambie", "gambia": "Gambie", "the gambia": "Gambie",
   // Codes API (préfixe des clés WestPay : TGO-xxx, BEN-xxx, etc.)
   "tgo": "Togo",
   "ben": "Benin",
@@ -124,6 +125,7 @@ const COUNTRY_ALIASES: Record<string, string> = {
   "cog": "Congo Brazzaville",
   "gab": "Gabon",
   "gin": "Guinee",
+  "gmb": "Gambie",
   // Codes ISO 3166-1 alpha-2
   "tg": "Togo",
   "bj": "Benin",
@@ -136,6 +138,7 @@ const COUNTRY_ALIASES: Record<string, string> = {
   "ga": "Gabon",
   "cd": "Congo RDC", "cod": "Congo RDC",
   "gn": "Guinee",
+  "gm": "Gambie",
 };
 
 function normalizeCountry(country: string): string {
@@ -171,7 +174,7 @@ function generateSecureApiKey(country: string): string {
     "Togo": "TGO", "Benin": "BEN", "Cote d'Ivoire": "CIV",
     "Senegal": "SEN", "Mali": "MLI", "Burkina Faso": "BFA",
     "Cameroun": "CMR", "Congo Brazzaville": "COG", "Gabon": "GAB",
-    "Congo RDC": "COD", "Guinee": "GIN",
+    "Congo RDC": "COD", "Guinee": "GIN", "Gambie": "GMB",
   };
   const prefix = prefixes[country] || country.substring(0, 3).toUpperCase();
   const randomPart = crypto.randomBytes(20).toString("hex").toUpperCase();
@@ -1412,7 +1415,7 @@ export async function registerRoutes(
         "Togo": "228", "Benin": "229", "Cote d'Ivoire": "225",
         "Senegal": "221", "Mali": "223", "Burkina Faso": "226",
         "Cameroun": "237", "Congo Brazzaville": "242", "Gabon": "241",
-        "Congo RDC": "243", "Guinee": "224",
+        "Congo RDC": "243", "Guinee": "224", "Gambie": "220",
       };
       const dialCode = dialCodes[country] || "";
       const cleanPhone = payerPhone.replace(/[\s\-\(\)\+]/g, "");
@@ -3101,8 +3104,8 @@ export async function registerRoutes(
   app.post("/api/admin/wallet-transfer-countries", authMiddleware("admin"), async (req, res) => {
     try {
       const { country, currencyZone } = req.body;
-      if (!country?.trim() || !["XOF", "XAF", "CDF"].includes(currencyZone)) {
-        return res.status(400).json({ message: "Pays et zone monetaire requis (XOF, XAF ou CDF)" });
+      if (!country?.trim() || !["XOF", "XAF", "CDF", "GNF", "GMD"].includes(currencyZone)) {
+        return res.status(400).json({ message: "Pays et zone monetaire requis (XOF, XAF, CDF, GNF ou GMD)" });
       }
       const existing = await storage.getWalletTransferCountryByName(country.trim());
       if (existing) return res.status(409).json({ message: "Ce pays existe deja" });
