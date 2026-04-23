@@ -266,6 +266,7 @@ export async function initiatePayout(params: MbiyoPayoutRequest): Promise<MbiyoP
     amount: params.amount,
     currency: params.currency,
     payment_method: "mobile_money",
+    mode: "live",
     order_id: params.orderId,
     callback_url: params.callbackUrl,
     metadata: {
