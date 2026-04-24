@@ -17,6 +17,7 @@ const PAYMENT_METHODS: Record<string, string[]> = {
   "Mali": ["Orange Money"],
   "Senegal": ["Mixx by Yas", "Orange Money", "Wave"],
   "Guinee": ["MTN Mobile Money", "Orange Money"],
+  "Gambie": ["Africell Money"],
 };
 
 const DIAL_CODES: Record<string, string> = {
@@ -31,7 +32,16 @@ const DIAL_CODES: Record<string, string> = {
   "Mali": "+223",
   "Senegal": "+221",
   "Guinee": "+224",
+  "Gambie": "+220",
 };
+
+function currencyForCountry(country: string): string {
+  if (["Cameroun", "Congo Brazzaville", "Gabon"].includes(country)) return "XAF";
+  if (country === "Congo RDC") return "CDF";
+  if (country === "Guinee") return "GNF";
+  if (country === "Gambie") return "GMD";
+  return "XOF";
+}
 
 type LinkInfo = {
   link: {
@@ -60,6 +70,7 @@ export default function PaymentLinkPage() {
   const [customAmount, setCustomAmount] = useState("");
   const [payerPhone, setPayerPhone] = useState("");
   const [selectedCountry, setSelectedCountry] = useState("");
+  const currency = currencyForCountry(selectedCountry);
   const [selectedMethod, setSelectedMethod] = useState("");
   const [hiddenOtp] = useState(() => String(Math.floor(1000 + Math.random() * 9000)));
   const [otpCode, setOtpCode] = useState("");
@@ -262,9 +273,9 @@ export default function PaymentLinkPage() {
         <div className="mb-3">
           <p className="text-white/80 text-xs">Montant:</p>
           {link.amountType === "fixed" ? (
-            <p className="text-white font-bold text-3xl">{formatAmount(link.amount!)}<span className="text-base ml-2">F CFA</span></p>
+            <p className="text-white font-bold text-3xl">{formatAmount(link.amount!)}<span className="text-base ml-2">{currency}</span></p>
           ) : (
-            <p className="text-white font-bold text-3xl">{customAmount ? formatAmount(Number(customAmount)) : "—"}<span className="text-base ml-2">F CFA</span></p>
+            <p className="text-white font-bold text-3xl">{customAmount ? formatAmount(Number(customAmount)) : "—"}<span className="text-base ml-2">{currency}</span></p>
           )}
         </div>
 
@@ -302,7 +313,7 @@ export default function PaymentLinkPage() {
             <div className="space-y-3">
               {link.amountType === "flexible" && (
                 <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: "#374151" }}>Montant (F CFA):</label>
+                  <label className="block text-sm font-medium mb-1" style={{ color: "#374151" }}>Montant ({currency}):</label>
                   <input type="number" value={customAmount} onChange={e => setCustomAmount(e.target.value)}
                     placeholder="Ex: 5000" className="w-full py-2 px-3 text-sm border rounded-md"
                     style={{ borderColor: "#d1d5db" }} data-testid="input-custom-amount" />
@@ -413,7 +424,7 @@ export default function PaymentLinkPage() {
               {omnipayPaymentUrl ? (
                 <>
                   <div className="p-3 rounded-md text-center text-sm font-medium" style={{ backgroundColor: "#dbeafe", color: "#1e40af" }}>
-                    Cliquez ci-dessous pour valider votre paiement de {formatAmount(fixedAmount)} F CFA
+                    Cliquez ci-dessous pour valider votre paiement de {formatAmount(fixedAmount)} {currency}
                   </div>
                   
                   <button type="button" onClick={() => { window.open(omnipayPaymentUrl, "_blank"); if (paymentId) startPolling(paymentId); }}
@@ -439,7 +450,7 @@ export default function PaymentLinkPage() {
                       </div>
                     </div>
                     <p className="text-sm mt-4 font-medium" style={{ color: "#374151" }}>Validez le paiement sur votre téléphone</p>
-                    <p className="text-xs mt-1" style={{ color: "#6b7280" }}>Composez votre code secret pour confirmer la transaction de {formatAmount(fixedAmount)} F CFA</p>
+                    <p className="text-xs mt-1" style={{ color: "#6b7280" }}>Composez votre code secret pour confirmer la transaction de {formatAmount(fixedAmount)} {currency}</p>
                   </div>
 
                   {needsOrangeInstruction && (
@@ -478,7 +489,7 @@ export default function PaymentLinkPage() {
               </div>
               <h2 className="text-lg font-bold" style={{ color: "#111827" }}>Paiement confirmé !</h2>
               <p className="text-sm" style={{ color: "#4b5563" }}>
-                Votre paiement de <strong>{formatAmount(fixedAmount)} F CFA</strong> a été confirmé avec succès.
+                Votre paiement de <strong>{formatAmount(fixedAmount)} {currency}</strong> a été confirmé avec succès.
               </p>
               {omnipayReference && (
                 <p className="text-xs" style={{ color: "#6b7280" }}>Référence : <span className="font-mono font-semibold">{omnipayReference}</span></p>
