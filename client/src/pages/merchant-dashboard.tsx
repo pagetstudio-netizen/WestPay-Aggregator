@@ -2021,8 +2021,13 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
   const isEnabled = aggList.length > 0;
   const cryptoApiKey = (cryptoKeyData as any)?.cryptoApiKey || null;
 
+  const { data: cryptoWebhookData } = useMerchantFetch("/api/merchant/webhook", ["/api/merchant/webhook"], token);
+  const [cryptoWebhookUrl, setCryptoWebhookUrl] = useState("");
+  const [isSavingWebhook, setIsSavingWebhook] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const { toast: cryptoToast } = useToast();
 
   const copyToClipboard = (text: string, key: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -2045,6 +2050,29 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
       alert(e.message);
     } finally {
       setIsRegenerating(false);
+    }
+  };
+
+  // ── Webhook sync ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if ((cryptoWebhookData as any)?.webhookUrl) setCryptoWebhookUrl((cryptoWebhookData as any).webhookUrl);
+  }, [cryptoWebhookData]);
+
+  const handleSaveCryptoWebhook = async () => {
+    setIsSavingWebhook(true);
+    try {
+      const res = await fetch("/api/merchant/webhook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ webhookUrl: cryptoWebhookUrl.trim() }),
+      });
+      if (!res.ok) throw new Error("Erreur lors de la sauvegarde");
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook"] });
+      cryptoToast({ title: "Webhook enregistré" });
+    } catch (e: any) {
+      cryptoToast({ title: "Erreur", description: e.message, variant: "destructive" });
+    } finally {
+      setIsSavingWebhook(false);
     }
   };
 
@@ -2648,134 +2676,58 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                 )}
               </div>
 
-              {/* Docs */}
-              <div className="rounded-xl p-4 space-y-4" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
+              {/* Webhook URL crypto */}
+              <div className="rounded-xl p-4 space-y-3" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
+                <h3 className="text-xs font-bold uppercase tracking-widest" style={{ color: "#90a4ae" }}>URL Webhook Crypto</h3>
+                <p className="text-xs" style={{ color: "#546e7a" }}>
+                  RobotPay envoie une notification <code className="font-mono bg-slate-100 px-1 rounded">POST</code> à cette URL dès qu'un paiement crypto est confirmé.
+                </p>
+                {(cryptoWebhookData as any)?.webhookUrl && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono" style={{ background: "#e8f5e9", border: "1px solid #a5d6a7", color: "#2e7d32" }}>
+                    <span className="text-green-600">✓</span>
+                    <span className="flex-1 truncate">{(cryptoWebhookData as any).webhookUrl}</span>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={cryptoWebhookUrl}
+                    onChange={e => setCryptoWebhookUrl(e.target.value)}
+                    placeholder="https://monsite.com/webhook/robotpay"
+                    className="flex-1 text-xs px-3 py-2 rounded-lg border outline-none focus:ring-2 focus:ring-blue-200"
+                    style={{ background: "#f8fafc", border: "1px solid #e2e8f0" }}
+                    data-testid="input-crypto-webhook-url"
+                  />
+                  <button
+                    onClick={handleSaveCryptoWebhook}
+                    disabled={isSavingWebhook || !cryptoWebhookUrl.trim()}
+                    className="shrink-0 px-3 py-2 rounded-lg text-xs font-semibold"
+                    style={{ background: "#1a237e", color: "#fff", opacity: isSavingWebhook || !cryptoWebhookUrl.trim() ? 0.6 : 1 }}
+                    data-testid="btn-save-crypto-webhook"
+                  >
+                    {isSavingWebhook ? "..." : "Enregistrer"}
+                  </button>
+                </div>
+                <p className="text-xs" style={{ color: "#b0bec5" }}>
+                  Signature HMAC envoyée dans le header <code className="font-mono">X-RobotPay-Signature</code>
+                </p>
+              </div>
+
+              {/* Bouton documentation */}
+              <div className="rounded-xl p-4 space-y-3" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
                 <h3 className="text-xs font-bold uppercase tracking-widest" style={{ color: "#90a4ae" }}>Documentation</h3>
-
-                <div className="flex items-start gap-3 p-3 rounded-lg" style={{ background: "#e8f5e9", border: "1px solid #a5d6a7" }}>
-                  <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5 text-xs font-bold" style={{ background: "#2e7d32", color: "#fff" }}>✓</div>
-                  <p className="text-xs" style={{ color: "#2e7d32" }}>
-                    <strong>Crypto activé.</strong> Utilisez votre clé API Crypto (ci-dessus) dans le header <code className="font-mono">X-API-KEY</code>.
-                  </p>
-                </div>
-
-                <div className="space-y-4">
-                  {/* Créer invoice */}
-                  <div>
-                    <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>1. Créer une invoice</p>
-                    <div className="relative">
-                      <pre className="text-xs p-3 rounded-lg overflow-x-auto" style={{ background: "#f1f5f9", color: "#0f172a", fontFamily: "monospace", margin: 0 }}>{`POST /api/merchant/crypto/invoice
-X-API-KEY: <votre_clé_api>
-Content-Type: application/json
-
-{
-  "amount": 10,
-  "currency": "USDT",
-  "description": "Commande #123",
-  "orderId": "CMD-123",
-  "returnUrl": "https://monsite.com/merci"
-}`}</pre>
-                      <button
-                        onClick={() => copyToClipboard(`POST /api/merchant/crypto/invoice\nX-API-KEY: <votre_clé_api>\n\n{\n  "amount": 10,\n  "currency": "USDT",\n  "description": "Commande #123",\n  "orderId": "CMD-123",\n  "returnUrl": "https://monsite.com/merci"\n}`, "invoice")}
-                        className="absolute top-2 right-2 text-xs px-2 py-1 rounded"
-                        style={{ background: "#e2e8f0", color: "#475569" }}
-                        data-testid="btn-copy-invoice-example"
-                      >
-                        {copiedKey === "invoice" ? "Copié !" : "Copier"}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Réponse */}
-                  <div>
-                    <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>2. Réponse — rediriger l'utilisateur</p>
-                    <pre className="text-xs p-3 rounded-lg" style={{ background: "#f1f5f9", color: "#0f172a", fontFamily: "monospace", margin: 0 }}>{`{
-  "trackId": "TP-XXXX",
-  "paymentUrl": "https://westpay.cloud/pay/crypto/TP-XXXX",
-  "expiredAt": "2026-05-01T12:30:00Z"
-}`}</pre>
-                    <p className="text-xs mt-1" style={{ color: "#78909c" }}>
-                      Redirigez votre client vers <code className="bg-gray-100 px-1 rounded text-xs font-mono">paymentUrl</code> pour effectuer le paiement.
-                    </p>
-                  </div>
-
-                  {/* Statut */}
-                  <div>
-                    <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>3. Vérifier le statut</p>
-                    <div className="relative">
-                      <pre className="text-xs p-3 rounded-lg" style={{ background: "#f1f5f9", color: "#0f172a", fontFamily: "monospace", margin: 0 }}>{"GET /api/payment/crypto/{trackId}/status"}</pre>
-                      <button
-                        onClick={() => copyToClipboard("GET /api/payment/crypto/{trackId}/status", "status")}
-                        className="absolute top-2 right-2 text-xs px-2 py-1 rounded"
-                        style={{ background: "#e2e8f0", color: "#475569" }}
-                        data-testid="btn-copy-status-url"
-                      >
-                        {copiedKey === "status" ? "Copié !" : "Copier"}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Retrait API */}
-                  <div>
-                    <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>4. Soumettre un retrait (API)</p>
-                    <div className="relative">
-                      <pre className="text-xs p-3 rounded-lg overflow-x-auto" style={{ background: "#f1f5f9", color: "#0f172a", fontFamily: "monospace", margin: 0 }}>{`POST /api/merchant/crypto/withdraw
-X-API-KEY: <votre_clé_api>
-Content-Type: application/json
-
-{
-  "currency": "USDT",
-  "amount": 5.0,
-  "walletAddress": "TXxx...abc",
-  "network": "TRC20"
-}`}</pre>
-                      <button
-                        onClick={() => copyToClipboard(`POST /api/merchant/crypto/withdraw\nX-API-KEY: <votre_clé_api>\n\n{\n  "currency": "USDT",\n  "amount": 5.0,\n  "walletAddress": "TXxx...abc",\n  "network": "TRC20"\n}`, "withdraw-api")}
-                        className="absolute top-2 right-2 text-xs px-2 py-1 rounded"
-                        style={{ background: "#e2e8f0", color: "#475569" }}
-                        data-testid="btn-copy-withdraw-example"
-                      >
-                        {copiedKey === "withdraw-api" ? "Copié !" : "Copier"}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Webhook Notifications */}
-                  <div className="rounded-lg p-3" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
-                    <p className="text-xs font-bold mb-1" style={{ color: "#166534" }}>5. Notifications webhook (recommandé)</p>
-                    <p className="text-xs mb-2" style={{ color: "#166534" }}>
-                      RobotPay envoie automatiquement une notification <code className="bg-green-100 px-1 rounded text-xs font-mono">POST</code> vers votre URL webhook dès qu'un paiement est confirmé.
-                    </p>
-                    <div className="rounded p-2 text-xs font-mono mb-2" style={{ background: "#dcfce7", color: "#15803d" }}>
-{`{
-  "event": "crypto.payment.confirmed",
-  "trackId": "TP-XXXX",
-  "status": "paid",
-  "currency": "USDT",
-  "grossAmount": 10.0,
-  "feeAmount": 0.5,
-  "netAmount": 9.5,
-  "orderId": "CMD-123",
-  "timestamp": "2026-05-01T12:35:00Z"
-}`}
-                    </div>
-                    <p className="text-xs" style={{ color: "#166534" }}>
-                      Configurez votre URL webhook dans l'onglet <strong>Webhook</strong> de votre tableau de bord. La signature HMAC est envoyée dans le header <code className="bg-green-100 px-1 rounded font-mono">X-RobotPay-Signature</code>.
-                    </p>
-                  </div>
-
-                  {/* Cryptos supportées */}
-                  <div>
-                    <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>Cryptomonnaies supportées</p>
-                    <div className="flex flex-wrap gap-2">
-                      {SUPPORTED_INVOICE_CURRENCIES.map(c => (
-                        <span key={c} className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: "#fff8e1", color: "#f59e0b", border: "1px solid #fde68a" }}>
-                          {c}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+                <p className="text-xs" style={{ color: "#546e7a" }}>
+                  Consultez la documentation complète : lien de paiement, API invoice, vérification de statut, webhooks, exemples de code PHP / JavaScript / cURL.
+                </p>
+                <button
+                  onClick={() => window.open("/crypto-docs", "_blank")}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90"
+                  style={{ background: "linear-gradient(135deg, #f59e0b 0%, #1a237e 100%)", color: "#fff" }}
+                  data-testid="btn-open-crypto-docs"
+                >
+                  <span>📄</span>
+                  Ouvrir la documentation API Crypto
+                </button>
               </div>
             </div>
           )}
