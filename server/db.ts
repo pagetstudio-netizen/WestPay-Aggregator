@@ -351,6 +351,26 @@ export async function runMigrations() {
       WHERE omnipay_code IS NULL
     `);
 
+    // Auto-seeder l'agrégateur OxaPay depuis la variable d'environnement
+    const oxapayKey = process.env.OXAPAY_API_KEY;
+    if (oxapayKey) {
+      const existing = await client.query(`SELECT id FROM crypto_aggregators WHERE type = 'oxapay' LIMIT 1`);
+      if (existing.rows.length === 0) {
+        await client.query(
+          `INSERT INTO crypto_aggregators (name, type, api_key, active) VALUES ($1, $2, $3, $4)`,
+          ["OxaPay", "oxapay", oxapayKey, true]
+        );
+        console.log("[DB] Agrégateur OxaPay créé automatiquement");
+      } else {
+        // Mettre à jour la clé si elle a changé
+        await client.query(
+          `UPDATE crypto_aggregators SET api_key = $1, active = true WHERE type = 'oxapay'`,
+          [oxapayKey]
+        );
+        console.log("[DB] Agrégateur OxaPay mis à jour");
+      }
+    }
+
     console.log("[DB] Migrations appliquees avec succes");
   } catch (err) {
     console.error("[DB] Erreur migration:", err);
