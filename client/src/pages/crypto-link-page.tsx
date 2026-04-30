@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Check, ExternalLink } from "lucide-react";
+import { Loader2, Check, Copy, CheckCircle2, XCircle, Clock, RefreshCw, AlertTriangle } from "lucide-react";
+import QRCode from "react-qr-code";
 
 type LinkInfo = {
   uniqueId: string;
@@ -15,15 +16,73 @@ type LinkInfo = {
   merchantSlug: string;
 };
 
+type PaymentData = {
+  trackId: string;
+  address: string;
+  network?: string;
+  payAmount?: number;
+  payCurrency: string;
+  expiredAt?: string;
+};
+
+type StatusData = {
+  status: string;
+  txHash?: string;
+  payAmount?: number;
+  payCurrency?: string;
+};
+
+const STATUS_CFG: Record<string, { label: string; color: string; icon: any; spin?: boolean }> = {
+  new:        { label: "En attente de paiement", color: "#1976d2", icon: Clock, spin: true },
+  waiting:    { label: "En attente de paiement", color: "#1976d2", icon: Clock, spin: true },
+  confirming: { label: "Confirmation en cours",  color: "#fb8c00", icon: RefreshCw, spin: true },
+  paying:     { label: "Paiement reçu",          color: "#43a047", icon: RefreshCw, spin: true },
+  paid:       { label: "Paiement confirmé ✓",    color: "#2e7d32", icon: CheckCircle2 },
+  expired:    { label: "Lien expiré",             color: "#757575", icon: XCircle },
+  failed:     { label: "Paiement échoué",         color: "#c62828", icon: XCircle },
+  refunded:   { label: "Remboursé",               color: "#6d4c41", icon: AlertTriangle },
+};
+
+function CopyBtn({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => { navigator.clipboard.writeText(value).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }); }}
+      className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+      style={{ background: copied ? "#dcfce7" : "#f0f4f8", color: copied ? "#166534" : "#1976d2", border: `1px solid ${copied ? "#bbf7d0" : "#bbdefb"}` }}
+    >
+      {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+      {copied ? "Copié !" : "Copier"}
+    </button>
+  );
+}
+
+function Countdown({ expiredAt }: { expiredAt: string }) {
+  const [remaining, setRemaining] = useState(0);
+  useEffect(() => {
+    const upd = () => setRemaining(Math.max(0, Math.floor((new Date(expiredAt).getTime() - Date.now()) / 1000)));
+    upd(); const t = setInterval(upd, 1000); return () => clearInterval(t);
+  }, [expiredAt]);
+  const m = Math.floor(remaining / 60), s = remaining % 60;
+  const urgent = remaining < 300;
+  return (
+    <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: urgent ? "#ffebee" : "#e3f2fd", color: urgent ? "#c62828" : "#1976d2" }}>
+      {remaining === 0 ? "Expiré" : `${m}m ${s.toString().padStart(2, "0")}s`}
+    </span>
+  );
+}
+
 export default function CryptoLinkPage() {
   const [, params] = useRoute("/c/:uniqueId");
   const uniqueId = params?.uniqueId || "";
 
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [customAmount, setCustomAmount] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [paymentUrl, setPaymentUrl] = useState("");
+  const [payment, setPayment] = useState<PaymentData | null>(null);
+  const [statusData, setStatusData] = useState<StatusData | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { data: link, isLoading, isError } = useQuery<LinkInfo>({
     queryKey: ["/api/crypto-link", uniqueId],
@@ -40,20 +99,35 @@ export default function CryptoLinkPage() {
     document.title = link ? `Payer ${link.merchantName} — RobotPay` : "Paiement — RobotPay";
   }, [link]);
 
+  const pollStatus = useCallback(async (trackId: string) => {
+    try {
+      const res = await fetch(`/api/payment/crypto/${trackId}/status`);
+      if (!res.ok) return;
+      const data: StatusData = await res.json();
+      setStatusData(data);
+      if (["paid", "expired", "failed", "refunded"].includes(data.status)) {
+        if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null; }
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (payment?.trackId && step === 3) {
+      pollStatus(payment.trackId);
+      pollingRef.current = setInterval(() => pollStatus(payment.trackId), 5000);
+      return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
+    }
+  }, [payment?.trackId, step, pollStatus]);
+
   const isLibre = link?.amountType === "libre";
   const fixedAmount = link?.amount ? parseFloat(link.amount) : null;
-
-  const displayAmount = isLibre
-    ? (customAmount ? parseFloat(customAmount) : null)
-    : fixedAmount;
+  const displayAmount = isLibre ? (customAmount ? parseFloat(customAmount) : null) : fixedAmount;
 
   const handlePay = async () => {
     if (isLibre && (!customAmount || parseFloat(customAmount) <= 0)) {
-      setError("Veuillez saisir un montant valide");
-      return;
+      setError("Veuillez saisir un montant valide"); return;
     }
-    setError("");
-    setSubmitting(true);
+    setError(""); setSubmitting(true);
     try {
       const body: any = {};
       if (isLibre) body.customAmount = parseFloat(customAmount);
@@ -64,9 +138,8 @@ export default function CryptoLinkPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Erreur lors de la création du paiement");
-      setPaymentUrl(data.paymentUrl);
-      setStep(2);
-      setTimeout(() => { window.location.href = data.paymentUrl; }, 1500);
+      setPayment(data);
+      setStep(3);
     } catch (e: any) {
       setError(e.message || "Erreur inattendue");
     } finally {
@@ -74,60 +147,43 @@ export default function CryptoLinkPage() {
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "#00b050" }}>
-        <Loader2 className="w-10 h-10 animate-spin text-white" />
-      </div>
-    );
-  }
+  const status = statusData?.status || "new";
+  const cfg = STATUS_CFG[status] || STATUS_CFG["new"];
+  const StatusIcon = cfg.icon;
+  const isTerminal = ["paid", "expired", "failed", "refunded"].includes(status);
+  const isPaid = status === "paid";
 
-  if (isError || !link) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "#00b050" }}>
-        <div className="bg-white rounded-md p-6 max-w-sm w-full text-center space-y-3">
-          <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto">
-            <span className="text-red-600 text-xl font-bold">!</span>
-          </div>
-          <h2 className="text-lg font-semibold" style={{ color: "#111827" }}>Page introuvable</h2>
-          <p className="text-sm" style={{ color: "#6b7280" }}>Ce lien de paiement n'est pas valide.</p>
+  if (isLoading) return (
+    <div className="min-h-screen flex items-center justify-center" style={{ background: "#00b050" }}>
+      <Loader2 className="w-10 h-10 animate-spin text-white" />
+    </div>
+  );
+
+  if (isError || !link) return (
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "#00b050" }}>
+      <div className="bg-white rounded-md p-6 max-w-sm w-full text-center space-y-3">
+        <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto">
+          <span className="text-red-600 text-xl font-bold">!</span>
         </div>
+        <h2 className="text-lg font-semibold" style={{ color: "#111827" }}>Page introuvable</h2>
+        <p className="text-sm" style={{ color: "#6b7280" }}>Ce lien de paiement n'est pas valide.</p>
       </div>
-    );
-  }
+    </div>
+  );
+
+  const stepLabels = ["Informations", "Paiement"];
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center" style={{ background: "#00b050" }}>
       <style>{`
         .crypto-card { color: #1f2937; }
         .crypto-card input {
-          color: #111827 !important;
-          background-color: #ffffff !important;
-          border-color: #d1d5db !important;
-          -webkit-text-fill-color: #111827 !important;
+          color: #111827 !important; background-color: #ffffff !important;
+          border-color: #d1d5db !important; -webkit-text-fill-color: #111827 !important;
         }
-        .crypto-card input::placeholder {
-          color: #9ca3af !important;
-          -webkit-text-fill-color: #9ca3af !important;
-        }
-        .crypto-card input:focus {
-          border-color: #00b050 !important;
-          box-shadow: 0 0 0 2px rgba(0,176,80,0.15);
-          outline: none;
-        }
-        .pay-btn {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 0.5rem;
-          font-weight: 600;
-          font-size: 0.875rem;
-          border-radius: 0.375rem;
-          padding: 0.625rem 1.5rem;
-          border: none;
-          cursor: pointer;
-          transition: opacity 0.15s, transform 0.1s;
-        }
+        .crypto-card input::placeholder { color: #9ca3af !important; -webkit-text-fill-color: #9ca3af !important; }
+        .crypto-card input:focus { border-color: #00b050 !important; box-shadow: 0 0 0 2px rgba(0,176,80,0.15); outline: none; }
+        .pay-btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; font-weight: 600; font-size: 0.875rem; border-radius: 0.375rem; padding: 0.625rem 1.5rem; border: none; cursor: pointer; transition: opacity 0.15s, transform 0.1s; }
         .pay-btn:active:not(:disabled) { transform: scale(0.97); }
         .pay-btn:disabled { opacity: 0.45; cursor: not-allowed; }
         .pay-btn-green { background-color: #00b050; color: #ffffff; }
@@ -144,8 +200,7 @@ export default function CryptoLinkPage() {
           <p className="text-white/80 text-xs">Montant :</p>
           {displayAmount !== null ? (
             <p className="text-white font-bold text-3xl">
-              {displayAmount.toLocaleString("fr-FR")}
-              <span className="text-base ml-2">{link.currency}</span>
+              {displayAmount.toLocaleString("fr-FR")}<span className="text-base ml-2">{link.currency}</span>
             </p>
           ) : (
             <p className="text-white font-bold text-2xl opacity-60">Montant libre</p>
@@ -153,151 +208,172 @@ export default function CryptoLinkPage() {
         </div>
 
         <div className="bg-white rounded-lg p-4 crypto-card">
+          {/* Barre de progression */}
           <div className="mb-2">
             <div className="w-full h-2 rounded-full overflow-hidden" style={{ backgroundColor: "#e5e7eb" }}>
-              <div
-                className="h-full rounded-full"
-                style={{
-                  width: step === 1 ? "50%" : "100%",
-                  backgroundColor: "#00b050",
-                  transition: "width 0.5s ease-in-out",
-                }}
-              />
+              <div className="h-full rounded-full" style={{ width: step === 1 ? "50%" : "100%", backgroundColor: "#00b050", transition: "width 0.5s ease-in-out" }} />
             </div>
-            <p className="text-xs text-right mt-1" style={{ color: "#9ca3af" }}>
-              Étape {step} sur 2
-            </p>
+            <p className="text-xs text-right mt-1" style={{ color: "#9ca3af" }}>Étape {step === 1 ? 1 : 2} sur 2</p>
           </div>
 
+          {/* Indicateurs d'étapes */}
           <div className="flex items-center justify-around mb-4 px-2">
-            {["Informations", "Confirmation"].map((label, i) => {
-              const stepNum = i + 1;
-              const isActive = step === stepNum;
-              const isDone = step > stepNum;
+            {stepLabels.map((label, i) => {
+              const sn = i + 1;
+              const isActive = (step === 1 && sn === 1) || (step > 1 && sn === 2);
+              const isDone = (step > 1 && sn === 1);
               return (
-                <div key={stepNum} className="flex flex-col items-center relative" style={{ flex: 1 }}>
-                  {i > 0 && (
-                    <div
-                      className="absolute top-3 right-1/2 h-0.5"
-                      style={{
-                        width: "100%",
-                        backgroundColor: isDone || isActive ? "#00b050" : "#d1d5db",
-                      }}
-                    />
-                  )}
+                <div key={sn} className="flex flex-col items-center relative" style={{ flex: 1 }}>
+                  {i > 0 && <div className="absolute top-3 right-1/2 h-0.5" style={{ width: "100%", backgroundColor: isDone || isActive ? "#00b050" : "#d1d5db" }} />}
                   <div className="relative z-10 flex flex-col items-center">
-                    <div
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border-2"
-                      style={{
-                        borderColor: isActive || isDone ? "#00b050" : "#d1d5db",
-                        backgroundColor: isDone ? "#00b050" : "#ffffff",
-                        color: isDone ? "#ffffff" : isActive ? "#00b050" : "#9ca3af",
-                      }}
-                    >
-                      {isDone ? <Check className="w-4 h-4" /> : stepNum}
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border-2" style={{ borderColor: isActive || isDone ? "#00b050" : "#d1d5db", backgroundColor: isDone ? "#00b050" : "#ffffff", color: isDone ? "#ffffff" : isActive ? "#00b050" : "#9ca3af" }}>
+                      {isDone ? <Check className="w-4 h-4" /> : sn}
                     </div>
-                    <p
-                      className="text-xs text-center mt-1 leading-tight"
-                      style={{ color: isActive || isDone ? "#00b050" : "#9ca3af" }}
-                    >
-                      {label}
-                    </p>
+                    <p className="text-xs text-center mt-1 leading-tight" style={{ color: isActive || isDone ? "#00b050" : "#9ca3af" }}>{label}</p>
                   </div>
                 </div>
               );
             })}
           </div>
 
+          {/* ─── Étape 1 : Informations ─── */}
           {step === 1 && (
             <div className="space-y-4">
               <div>
-                <p className="text-sm font-semibold mb-1" style={{ color: "#374151" }}>Marchand</p>
+                <p className="text-sm font-semibold mb-0.5" style={{ color: "#374151" }}>Marchand</p>
                 <p className="text-base font-bold" style={{ color: "#111827" }}>{link.merchantName}</p>
               </div>
-
               <div>
-                <p className="text-sm font-semibold mb-1" style={{ color: "#374151" }}>Objet du paiement</p>
+                <p className="text-sm font-semibold mb-0.5" style={{ color: "#374151" }}>Objet du paiement</p>
                 <p className="text-sm" style={{ color: "#4b5563" }}>{link.name}</p>
               </div>
-
               <div>
                 <p className="text-sm font-semibold mb-1" style={{ color: "#374151" }}>Devise de paiement</p>
-                <span
-                  className="inline-block px-3 py-1 rounded-full text-sm font-bold"
-                  style={{ background: "#fff8e1", color: "#b45309" }}
-                >
-                  {link.currency}
-                </span>
+                <span className="inline-block px-3 py-1 rounded-full text-sm font-bold" style={{ background: "#fff8e1", color: "#b45309" }}>{link.currency}</span>
               </div>
-
               {isLibre && (
                 <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: "#374151" }}>
-                    Montant à payer ({link.currency})
-                  </label>
-                  <input
-                    type="number"
-                    min="0.01"
-                    step="any"
-                    placeholder="ex: 10"
-                    value={customAmount}
-                    onChange={e => setCustomAmount(e.target.value)}
-                    className="w-full py-2 px-3 text-sm border rounded-md"
-                    data-testid="input-crypto-amount"
-                  />
+                  <label className="block text-sm font-medium mb-1" style={{ color: "#374151" }}>Montant à payer ({link.currency})</label>
+                  <input type="number" min="0.01" step="any" placeholder="ex: 10" value={customAmount} onChange={e => setCustomAmount(e.target.value)} className="w-full py-2 px-3 text-sm border rounded-md" data-testid="input-crypto-amount" />
                 </div>
               )}
-
-              {error && (
-                <div className="text-xs p-2 rounded-md" style={{ background: "#fef2f2", color: "#b91c1c" }}>
-                  {error}
-                </div>
-              )}
-
-              <button
-                onClick={handlePay}
-                disabled={submitting || (isLibre && !customAmount)}
-                className="pay-btn pay-btn-green w-full"
-                data-testid="btn-pay-crypto"
-              >
-                {submitting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Création du paiement…
-                  </>
-                ) : (
-                  "Payer maintenant"
-                )}
+              {error && <div className="text-xs p-2 rounded-md" style={{ background: "#fef2f2", color: "#b91c1c" }}>{error}</div>}
+              <button onClick={handlePay} disabled={submitting || (isLibre && !customAmount)} className="pay-btn pay-btn-green w-full" data-testid="btn-pay-crypto">
+                {submitting ? <><Loader2 className="w-4 h-4 animate-spin" />Préparation du paiement…</> : "Payer maintenant"}
               </button>
             </div>
           )}
 
-          {step === 2 && (
-            <div className="space-y-4 text-center py-4">
-              <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto" style={{ background: "#f0fdf4" }}>
-                <Check className="w-8 h-8" style={{ color: "#00b050" }} />
+          {/* ─── Étape 3 : Paiement crypto inline ─── */}
+          {step === 3 && payment && (
+            <div className="space-y-4">
+              {/* Statut */}
+              <div className="flex items-center gap-2 py-2 px-3 rounded-xl" style={{ background: `${cfg.color}15`, border: `1px solid ${cfg.color}30` }}>
+                <StatusIcon className={`w-5 h-5 shrink-0 ${cfg.spin && !isTerminal ? "animate-spin" : ""}`} style={{ color: cfg.color }} />
+                <p className="text-sm font-bold flex-1" style={{ color: cfg.color }}>{cfg.label}</p>
+                {payment.expiredAt && !isTerminal && <Countdown expiredAt={payment.expiredAt} />}
               </div>
-              <div>
-                <p className="font-semibold text-base" style={{ color: "#111827" }}>Paiement en cours de traitement</p>
-                <p className="text-sm mt-1" style={{ color: "#6b7280" }}>Redirection vers la page de paiement…</p>
-              </div>
-              <Loader2 className="w-6 h-6 animate-spin mx-auto" style={{ color: "#00b050" }} />
-              {paymentUrl && (
-                <a
-                  href={paymentUrl}
-                  className="text-xs underline flex items-center justify-center gap-1"
-                  style={{ color: "#6b7280" }}
-                >
-                  Cliquez ici si la redirection ne fonctionne pas <ExternalLink size={11} />
-                </a>
+
+              {/* Montant à envoyer */}
+              {payment.payAmount && payment.payCurrency && !isPaid && (
+                <div className="text-center py-2 rounded-xl" style={{ background: "#f8fafc" }}>
+                  <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: "#9ca3af" }}>Montant exact à envoyer</p>
+                  <p className="text-2xl font-bold" style={{ color: "#111827" }}>
+                    {payment.payAmount} <span className="text-base font-medium" style={{ color: "#6b7280" }}>{payment.payCurrency}</span>
+                  </p>
+                  {payment.network && (
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full mt-1 inline-block" style={{ background: "#fef3c7", color: "#92400e" }}>
+                      Réseau : {payment.network}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* QR Code + adresse (si pas encore payé) */}
+              {!isPaid && !["expired", "failed"].includes(status) && (
+                <>
+                  {/* QR Code */}
+                  <div className="flex flex-col items-center">
+                    <div className="rounded-xl p-3" style={{ background: "#fff", border: "1px solid #e5e7eb" }}>
+                      <QRCode value={payment.address} size={150} viewBox="0 0 256 256" />
+                    </div>
+                    <p className="text-xs mt-1.5" style={{ color: "#9ca3af" }}>Scannez avec votre wallet crypto</p>
+                  </div>
+
+                  {/* Adresse */}
+                  <div className="rounded-xl p-3 space-y-2" style={{ background: "#f8fafc", border: "1px solid #e5e7eb" }}>
+                    <p className="text-xs font-semibold" style={{ color: "#374151" }}>Adresse de dépôt</p>
+                    <p className="text-xs font-mono break-all rounded-lg p-2" style={{ background: "#f0f9ff", color: "#1d4ed8" }} data-testid="text-wallet-address">
+                      {payment.address}
+                    </p>
+                    <div className="flex justify-end">
+                      <CopyBtn value={payment.address} />
+                    </div>
+                  </div>
+
+                  {/* Avertissement */}
+                  <div className="rounded-xl p-3 text-xs text-center" style={{ background: "#fffbeb", color: "#92400e", border: "1px solid #fde68a" }}>
+                    ⚠️ Envoyez <strong>exactement</strong> le montant indiqué sur le <strong>bon réseau</strong>. Toute erreur peut entraîner une perte définitive des fonds.
+                  </div>
+                </>
+              )}
+
+              {/* En cours de confirmation */}
+              {(status === "confirming" || status === "paying") && (
+                <div className="flex flex-col items-center gap-2 py-3 text-center">
+                  <RefreshCw className="w-8 h-8 animate-spin" style={{ color: "#00b050" }} />
+                  <p className="text-sm font-semibold" style={{ color: "#111827" }}>Transaction détectée !</p>
+                  <p className="text-xs" style={{ color: "#6b7280" }}>Confirmation en cours sur la blockchain…</p>
+                </div>
+              )}
+
+              {/* Paiement confirmé */}
+              {isPaid && (
+                <div className="flex flex-col items-center gap-3 py-4 text-center">
+                  <div className="w-16 h-16 rounded-full flex items-center justify-center" style={{ background: "#f0fdf4" }}>
+                    <CheckCircle2 className="w-10 h-10" style={{ color: "#00b050" }} />
+                  </div>
+                  <div>
+                    <p className="font-bold text-lg" style={{ color: "#111827" }}>Paiement confirmé !</p>
+                    <p className="text-sm mt-1" style={{ color: "#6b7280" }}>Votre transaction a été confirmée sur la blockchain.</p>
+                  </div>
+                  {statusData?.txHash && (
+                    <div className="w-full rounded-xl p-3 text-left" style={{ background: "#f8fafc", border: "1px solid #e5e7eb" }}>
+                      <p className="text-xs font-semibold mb-1" style={{ color: "#374151" }}>Hash de transaction</p>
+                      <p className="text-xs font-mono break-all" style={{ color: "#6b7280" }} data-testid="text-tx-hash">{statusData.txHash}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Expiré / Échoué */}
+              {(status === "expired" || status === "failed") && (
+                <div className="flex flex-col items-center gap-2 py-4 text-center">
+                  <XCircle className="w-12 h-12" style={{ color: status === "expired" ? "#9ca3af" : "#ef4444" }} />
+                  <p className="text-sm font-semibold" style={{ color: "#374151" }}>
+                    {status === "expired" ? "Ce lien a expiré." : "Le paiement a échoué."}
+                  </p>
+                  <p className="text-xs" style={{ color: "#9ca3af" }}>Contactez le marchand pour un nouveau lien.</p>
+                </div>
+              )}
+
+              {/* Actualiser */}
+              {!isTerminal && (
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => payment?.trackId && pollStatus(payment.trackId)}
+                    className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg"
+                    style={{ background: "#f0fdf4", color: "#166534", border: "1px solid #bbf7d0" }}
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Actualiser
+                  </button>
+                </div>
               )}
             </div>
           )}
 
           <div className="mt-4 pt-3" style={{ borderTop: "1px solid #e5e7eb" }}>
-            <p className="text-xs text-center" style={{ color: "#9ca3af" }}>
-              Paiement sécurisé via RobotPay · {link.currency}
-            </p>
+            <p className="text-xs text-center" style={{ color: "#9ca3af" }}>Paiement sécurisé via RobotPay · {link.currency}</p>
           </div>
         </div>
       </div>

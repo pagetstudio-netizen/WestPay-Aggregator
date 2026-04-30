@@ -21,6 +21,7 @@ import {
 } from "./omnipay";
 import {
   createInvoice as oxapayCreateInvoice,
+  createWhiteLabel as oxapayCreateWhiteLabel,
   getStatus as oxapayGetStatus,
   verifyWebhook as oxapayVerifyWebhook,
   getCurrencies as oxapayGetCurrencies,
@@ -1483,7 +1484,7 @@ export async function registerRoutes(
     }
   });
 
-  // ── Public: pay via crypto link uniqueId ─────────────────────────────────
+  // ── Public: pay via crypto link uniqueId (white label — no redirect) ────────
   app.post("/api/crypto-link/:uniqueId/pay", async (req, res) => {
     try {
       const link = await storage.getCryptoPaymentLinkByUniqueId(req.params.uniqueId);
@@ -1494,7 +1495,7 @@ export async function registerRoutes(
       if (!merchant || merchant.suspended) {
         return res.status(404).json({ message: "Marchand introuvable ou suspendu" });
       }
-      const { customAmount } = req.body;
+      const { customAmount, network } = req.body;
       const isLibre = link.amountType === "libre";
       const amountNum = isLibre ? Number(customAmount) : Number(link.amount);
       if (isNaN(amountNum) || amountNum <= 0) {
@@ -1507,39 +1508,52 @@ export async function registerRoutes(
       const agg = merchantAggs[0];
       const callbackUrl = `${process.env.APP_URL || "https://westpay.cloud"}/api/oxapay/callback`;
       const XOF_PER_USD = parseInt(process.env.XOF_PER_USD || "600", 10);
-      const currency = link.currency;
-      const isXof = currency.toUpperCase() === "XOF" || currency.toUpperCase() === "FCFA";
+      const currency = link.currency.toUpperCase();
+      const isXof = currency === "XOF" || currency === "FCFA";
       const invoiceAmount = isXof ? parseFloat((amountNum / XOF_PER_USD).toFixed(2)) : amountNum;
-      const invoiceCurrency = isXof ? "USD" : currency.toUpperCase();
-      const invoiceResult = await oxapayCreateInvoice(agg.apiKey, {
+      const invoiceCurrency = isXof ? "USDT" : currency;
+
+      // Use white label to get wallet address immediately (no redirect to OxaPay)
+      const wlResult = await oxapayCreateWhiteLabel(agg.apiKey, {
         amount: invoiceAmount,
         currency: invoiceCurrency,
+        payCurrency: invoiceCurrency,
         lifeTime: 30,
         feePaidByPayer: 1,
         callbackUrl,
         ...(link.returnUrl && { returnUrl: link.returnUrl }),
         ...(link.description && { description: link.description }),
         orderId: link.uniqueId,
+        ...(network && { network }),
       });
-      if (invoiceResult.result !== 100 || !invoiceResult.trackId) {
-        return res.status(502).json({ message: invoiceResult.message || "Échec de création de l'invoice" });
+
+      if (wlResult.result !== 100 || !wlResult.trackId || !wlResult.address) {
+        return res.status(502).json({ message: wlResult.message || "Échec de création du paiement" });
       }
+
       await storage.createCryptoTransaction({
         aggregatorId: agg.id,
         merchantId: merchant.id,
-        trackId: invoiceResult.trackId,
+        trackId: wlResult.trackId,
         amount: String(amountNum),
-        currency: currency.toUpperCase(),
+        currency: currency,
         status: "pending",
         callbackUrl,
         ...(link.returnUrl && { returnUrl: link.returnUrl }),
         ...(link.description && { description: link.description }),
         orderId: link.uniqueId,
+        walletAddress: wlResult.address,
+        network: wlResult.network,
       });
+
       res.json({
         success: true,
-        trackId: invoiceResult.trackId,
-        paymentUrl: `${process.env.APP_URL || "https://westpay.cloud"}/pay/crypto/${invoiceResult.trackId}`,
+        trackId: wlResult.trackId,
+        address: wlResult.address,
+        network: wlResult.network,
+        payAmount: wlResult.payAmount,
+        payCurrency: wlResult.payCurrency || currency,
+        expiredAt: wlResult.expiredAt,
       });
     } catch (err: any) {
       res.status(500).json({ message: err.message });

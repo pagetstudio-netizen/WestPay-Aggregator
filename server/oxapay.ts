@@ -23,6 +23,31 @@ export interface OxaPayInvoiceResponse {
   expiredAt?: string;
 }
 
+export interface OxaPayWhiteLabelRequest {
+  amount: number;
+  currency: string;
+  payCurrency: string;
+  lifeTime?: number;
+  feePaidByPayer?: number;
+  callbackUrl?: string;
+  returnUrl?: string;
+  description?: string;
+  orderId?: string;
+  email?: string;
+  network?: string;
+}
+
+export interface OxaPayWhiteLabelResponse {
+  result: number;
+  message?: string;
+  trackId?: string;
+  address?: string;
+  network?: string;
+  payAmount?: number;
+  payCurrency?: string;
+  expiredAt?: string;
+}
+
 export interface OxaPayStatusResponse {
   result: number;
   message?: string;
@@ -128,6 +153,32 @@ export async function createInvoice(merchantApiKey: string, params: OxaPayInvoic
     console.log(`[OXAPAY] Invoice créée - TrackId: ${result.trackId}`);
   } else {
     console.error(`[OXAPAY] Échec création invoice - Code: ${result.result} - ${result.message}`);
+  }
+
+  return result;
+}
+
+export async function createWhiteLabel(merchantApiKey: string, params: OxaPayWhiteLabelRequest): Promise<OxaPayWhiteLabelResponse> {
+  console.log(`[OXAPAY] White Label: ${params.amount} ${params.currency} → ${params.payCurrency}`);
+
+  const result = await oxapayRequest<OxaPayWhiteLabelResponse>(merchantApiKey, "/merchants/request/whitelabel", {
+    amount: params.amount,
+    currency: params.currency,
+    payCurrency: params.payCurrency,
+    lifeTime: params.lifeTime ?? 30,
+    feePaidByPayer: params.feePaidByPayer ?? 0,
+    ...(params.callbackUrl && { callbackUrl: params.callbackUrl }),
+    ...(params.returnUrl && { returnUrl: params.returnUrl }),
+    ...(params.description && { description: params.description }),
+    ...(params.orderId && { orderId: params.orderId }),
+    ...(params.email && { email: params.email }),
+    ...(params.network && { network: params.network }),
+  });
+
+  if (result.result === 100) {
+    console.log(`[OXAPAY] White Label créée - TrackId: ${result.trackId} | Adresse: ${result.address} | Réseau: ${result.network}`);
+  } else {
+    console.error(`[OXAPAY] Échec White Label - Code: ${result.result} - ${result.message}`);
   }
 
   return result;
