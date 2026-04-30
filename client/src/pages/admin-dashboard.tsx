@@ -4201,7 +4201,8 @@ function CryptoAggPanel() {
   const [addOpen, setAddOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [selectedAgg, setSelectedAgg] = useState<CryptoAggType | null>(null);
-  const [configTab, setConfigTab] = useState<"general" | "countries" | "merchants">("general");
+  const [configTab, setConfigTab] = useState<"general" | "merchants">("general");
+  const [merchantSearch, setMerchantSearch] = useState("");
 
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("oxapay");
@@ -4314,6 +4315,7 @@ function CryptoAggPanel() {
     setEditPayoutKey(agg.payoutApiKey || "");
     setEditCallbackKey(agg.callbackKey || "");
     setConfigTab("general");
+    setMerchantSearch("");
     setConfigOpen(true);
   };
 
@@ -4408,11 +4410,7 @@ function CryptoAggPanel() {
                         <span className="text-xs text-muted-foreground capitalize">{agg.type}</span>
                         <span className="text-xs text-muted-foreground">•</span>
                         <span className="text-xs text-muted-foreground">
-                          {agg.countries.filter(c => c.active).length} pays
-                        </span>
-                        <span className="text-xs text-muted-foreground">•</span>
-                        <span className="text-xs text-muted-foreground">
-                          {agg.assignedMerchants.filter(m => m.active).length} marchands
+                          {agg.assignedMerchants.filter(m => m.active).length} marchand(s) actif(s)
                         </span>
                         <span className="text-xs text-muted-foreground">•</span>
                         <span className="text-xs text-muted-foreground" data-testid={`text-agg-date-${agg.id}`}>
@@ -4467,14 +4465,14 @@ function CryptoAggPanel() {
           {selectedAgg && (
             <div className="space-y-4 pt-2">
               <div className="flex gap-1 border-b">
-                {(["general", "countries", "merchants"] as const).map(tab => (
+                {(["general", "merchants"] as const).map(tab => (
                   <button
                     key={tab}
                     onClick={() => setConfigTab(tab)}
                     className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${configTab === tab ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
                     data-testid={`tab-config-${tab}`}
                   >
-                    {tab === "general" ? "Général" : tab === "countries" ? "Pays" : "Marchands"}
+                    {tab === "general" ? "Général" : "Marchands"}
                   </button>
                 ))}
               </div>
@@ -4550,49 +4548,30 @@ function CryptoAggPanel() {
                 </div>
               )}
 
-              {configTab === "countries" && (
-                <div className="space-y-3">
-                  <p className="text-xs text-muted-foreground">Activez les pays où les paiements crypto sont disponibles pour cet agrégateur.</p>
-                  <div className="divide-y rounded-lg border overflow-hidden">
-                    {SUPPORTED_COUNTRIES.map(country => {
-                      const isActive = isCountryActive(selectedAgg, country);
-                      return (
-                        <div key={country} className="flex items-center justify-between gap-4 px-4 py-3">
-                          <span className="text-sm font-medium">{country}</span>
-                          <div className="flex gap-2">
-                            <Button
-                              size="sm"
-                              variant={isActive ? "default" : "outline"}
-                              className={isActive ? "bg-emerald-600 hover:bg-emerald-700 text-white h-7 text-xs" : "h-7 text-xs"}
-                              onClick={() => countryMutation.mutate({ id: selectedAgg.id, country, active: true })}
-                              disabled={isActive || countryMutation.isPending}
-                              data-testid={`button-country-activate-${country.replace(/\s/g, "-")}`}
-                            >
-                              Activer
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant={!isActive ? "secondary" : "outline"}
-                              className="h-7 text-xs"
-                              onClick={() => countryMutation.mutate({ id: selectedAgg.id, country, active: false })}
-                              disabled={!isActive || countryMutation.isPending}
-                              data-testid={`button-country-deactivate-${country.replace(/\s/g, "-")}`}
-                            >
-                              Désactiver
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
               {configTab === "merchants" && (
                 <div className="space-y-3">
-                  <p className="text-xs text-muted-foreground">Assignez les marchands qui peuvent utiliser cet agrégateur.</p>
-                  <div className="divide-y rounded-lg border overflow-hidden">
-                    {(allMerchants as any[]).map((m: any) => {
+                  <p className="text-xs text-muted-foreground">
+                    Activez la crypto pour les marchands de votre choix. La crypto est mondiale — aucune restriction de pays.
+                  </p>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={merchantSearch}
+                      onChange={e => setMerchantSearch(e.target.value)}
+                      placeholder="Rechercher un marchand (nom, email)..."
+                      className="w-full text-sm px-3 py-2 pl-9 rounded-lg border bg-background"
+                      data-testid="input-merchant-search"
+                    />
+                    <svg className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                  <div className="divide-y rounded-lg border overflow-hidden max-h-96 overflow-y-auto">
+                    {(allMerchants as any[]).filter((m: any) => {
+                      if (!merchantSearch.trim()) return true;
+                      const q = merchantSearch.toLowerCase();
+                      return (m.name || "").toLowerCase().includes(q) || (m.email || "").toLowerCase().includes(q) || (m.businessName || "").toLowerCase().includes(q);
+                    }).map((m: any) => {
                       const isAssigned = isMerchantAssigned(selectedAgg, m.id);
                       const displayKey = regenCryptoKeys[m.id] ?? m.cryptoApiKey;
                       return (
@@ -4646,9 +4625,13 @@ function CryptoAggPanel() {
                         </div>
                       );
                     })}
-                    {(allMerchants as any[]).length === 0 && (
+                    {(allMerchants as any[]).filter((m: any) => {
+                      if (!merchantSearch.trim()) return true;
+                      const q = merchantSearch.toLowerCase();
+                      return (m.name || "").toLowerCase().includes(q) || (m.email || "").toLowerCase().includes(q) || (m.businessName || "").toLowerCase().includes(q);
+                    }).length === 0 && (
                       <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-                        Aucun marchand disponible
+                        {merchantSearch.trim() ? `Aucun marchand trouvé pour "${merchantSearch}"` : "Aucun marchand disponible"}
                       </div>
                     )}
                   </div>
