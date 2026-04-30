@@ -1352,6 +1352,31 @@ export async function registerRoutes(
     }
   });
 
+  // ─── Docs : infos crypto marchand (via token docs) ────────────────────────
+  app.get("/api/docs/crypto-merchant-info", async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ message: "Token requis" });
+      const token = authHeader.slice(7);
+      let payload: any;
+      try { payload = jwt.verify(token, JWT_SECRET); } catch { return res.status(401).json({ message: "Token invalide ou expiré" }); }
+      if (payload.purpose !== "docs") return res.status(403).json({ message: "Accès interdit" });
+      const merchant = await storage.getMerchantById(payload.merchantId);
+      if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
+      const aggs = await storage.getCryptoAggregatorsByMerchant(merchant.id);
+      res.json({
+        name: merchant.name,
+        email: merchant.email,
+        slug: merchant.slug,
+        cryptoApiKey: merchant.cryptoApiKey || null,
+        webhookUrl: merchant.webhookUrl || null,
+        cryptoEnabled: aggs.length > 0,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // ==================== PAYMENT PAGE (public) ====================
   // ─── Crypto : vérification activation crypto pour un marchand (public) ──────
 
