@@ -2091,36 +2091,61 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
   };
 
   // ── Créer un lien de paiement crypto ─────────────────────────────────────
-  const [invAmount, setInvAmount] = useState("");
-  const [invCurrency, setInvCurrency] = useState("USDT");
   const [invDescription, setInvDescription] = useState("");
-  const [invOrderId, setInvOrderId] = useState("");
   const [invReturnUrl, setInvReturnUrl] = useState("");
+  const [invFreePrice, setInvFreePrice] = useState(false);
+  const [invAmount, setInvAmount] = useState("");
+  const [invSelectedCurrencies, setInvSelectedCurrencies] = useState<string[]>(["USDT"]);
   const [invLoading, setInvLoading] = useState(false);
-  const [invResult, setInvResult] = useState<{ trackId: string; paymentUrl: string; payLink?: string; expiredAt?: string } | null>(null);
+  const [invResults, setInvResults] = useState<Array<{ trackId: string; paymentUrl: string; currency: string; expiredAt?: string }>>([]);
   const [invError, setInvError] = useState("");
 
+  const INVOICE_CURRENCIES = ["USDT", "BTC", "ETH", "LTC", "TRX", "MATIC", "BNB", "DOGE"];
+
+  const toggleInvCurrency = (c: string) => {
+    setInvSelectedCurrencies(prev =>
+      prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]
+    );
+  };
+
+  const handleSelectAllCurrencies = () => {
+    if (invSelectedCurrencies.length === INVOICE_CURRENCIES.length) {
+      setInvSelectedCurrencies(["USDT"]);
+    } else {
+      setInvSelectedCurrencies([...INVOICE_CURRENCIES]);
+    }
+  };
+
   const handleCreateInvoice = async () => {
-    setInvError(""); setInvResult(null);
-    const amt = parseFloat(invAmount);
-    if (isNaN(amt) || amt <= 0) { setInvError("Montant invalide"); return; }
+    setInvError(""); setInvResults([]);
+    if (!invDescription.trim()) { setInvError("Nom du produit requis"); return; }
+    if (invSelectedCurrencies.length === 0) { setInvError("Sélectionnez au moins une cryptomonnaie"); return; }
+    const amt = invFreePrice ? 0 : parseFloat(invAmount);
+    if (!invFreePrice && (isNaN(amt) || amt <= 0)) { setInvError("Montant invalide"); return; }
     if (!cryptoApiKey) { setInvError("Clé API crypto non disponible"); return; }
     setInvLoading(true);
     try {
-      const res = await fetch("/api/merchant/crypto/invoice", {
-        method: "POST",
-        headers: { "X-API-KEY": cryptoApiKey, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          amount: amt,
-          currency: invCurrency,
-          description: invDescription || undefined,
-          orderId: invOrderId || undefined,
-          returnUrl: invReturnUrl || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Erreur création invoice");
-      setInvResult(data);
+      const results: Array<{ trackId: string; paymentUrl: string; currency: string; expiredAt?: string }> = [];
+      for (const currency of invSelectedCurrencies) {
+        const res = await fetch("/api/merchant/crypto/invoice", {
+          method: "POST",
+          headers: { "X-API-KEY": cryptoApiKey, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            amount: amt,
+            currency,
+            description: invDescription,
+            returnUrl: invReturnUrl || undefined,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setInvError(`Erreur (${currency}) : ${data.message || "Erreur"}`);
+          setInvLoading(false);
+          return;
+        }
+        results.push({ trackId: data.trackId, paymentUrl: data.paymentUrl, currency, expiredAt: data.expiredAt });
+      }
+      setInvResults(results);
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/crypto/transactions"] });
     } catch (e: any) {
       setInvError(e.message);
@@ -2234,129 +2259,189 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
           {/* ── Lien de paiement crypto ── */}
           {cryptoTab === "invoice" && (
             <div className="space-y-4">
-              <div className="rounded-xl p-5 space-y-4" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
-                <p className="text-xs" style={{ color: "#546e7a" }}>
-                  Créez un lien de paiement crypto directement depuis votre tableau de bord, sans avoir à appeler l'API manuellement.
-                </p>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>Montant *</label>
+              <div className="rounded-xl p-5 space-y-5" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
+
+                {/* Nom du produit */}
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>Nom du produit *</label>
+                  <input
+                    type="text"
+                    value={invDescription}
+                    onChange={e => setInvDescription(e.target.value)}
+                    placeholder="ex: Abonnement Premium, Commande #123..."
+                    className="w-full text-sm px-3 py-2.5 rounded-lg"
+                    style={{ border: "1px solid #e2e8f0", background: "#f8fafc", color: "#1a237e" }}
+                    data-testid="input-invoice-description"
+                  />
+                </div>
+
+                {/* Prix */}
+                <div>
+                  <label className="block text-xs font-semibold mb-2" style={{ color: "#546e7a" }}>Prix</label>
+                  <div className="flex gap-2 mb-3">
+                    <button
+                      onClick={() => setInvFreePrice(false)}
+                      className="flex-1 py-2 rounded-lg text-xs font-semibold transition-colors"
+                      style={{
+                        background: !invFreePrice ? "#1a237e" : "#f1f5f9",
+                        color: !invFreePrice ? "#fff" : "#546e7a",
+                        border: `1px solid ${!invFreePrice ? "#1a237e" : "#e2e8f0"}`,
+                      }}
+                      data-testid="btn-price-fixed"
+                    >
+                      Prix fixé
+                    </button>
+                    <button
+                      onClick={() => setInvFreePrice(true)}
+                      className="flex-1 py-2 rounded-lg text-xs font-semibold transition-colors"
+                      style={{
+                        background: invFreePrice ? "#1a237e" : "#f1f5f9",
+                        color: invFreePrice ? "#fff" : "#546e7a",
+                        border: `1px solid ${invFreePrice ? "#1a237e" : "#e2e8f0"}`,
+                      }}
+                      data-testid="btn-price-free"
+                    >
+                      Prix libre
+                    </button>
+                  </div>
+                  {!invFreePrice ? (
                     <input
                       type="number"
                       min="0.01"
                       step="any"
                       value={invAmount}
                       onChange={e => setInvAmount(e.target.value)}
-                      placeholder="ex: 10"
-                      className="w-full text-sm px-3 py-2 rounded-lg"
+                      placeholder="Montant (ex: 10)"
+                      className="w-full text-sm px-3 py-2.5 rounded-lg"
                       style={{ border: "1px solid #e2e8f0", background: "#f8fafc", color: "#1a237e" }}
                       data-testid="input-invoice-amount"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>Crypto *</label>
-                    <select
-                      value={invCurrency}
-                      onChange={e => setInvCurrency(e.target.value)}
-                      className="w-full text-sm px-3 py-2 rounded-lg"
-                      style={{ border: "1px solid #e2e8f0", background: "#f8fafc", color: "#1a237e" }}
-                      data-testid="select-invoice-currency"
-                    >
-                      {SUPPORTED_INVOICE_CURRENCIES.map(c => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
-                  </div>
+                  ) : (
+                    <div className="rounded-lg px-3 py-2.5 text-xs" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", color: "#166534" }}>
+                      Le client saisit lui-même le montant qu'il souhaite payer.
+                    </div>
+                  )}
                 </div>
+
+                {/* Cryptomonnaies */}
                 <div>
-                  <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>Description</label>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs font-semibold" style={{ color: "#546e7a" }}>Cryptomonnaies à accepter *</label>
+                    <button
+                      onClick={handleSelectAllCurrencies}
+                      className="text-xs font-semibold px-2 py-1 rounded"
+                      style={{ background: invSelectedCurrencies.length === INVOICE_CURRENCIES.length ? "#e8eaf6" : "#f1f5f9", color: "#1a237e" }}
+                      data-testid="btn-select-all-currencies"
+                    >
+                      {invSelectedCurrencies.length === INVOICE_CURRENCIES.length ? "Tout désélectionner" : "Tout sélectionner"}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {INVOICE_CURRENCIES.map(c => {
+                      const selected = invSelectedCurrencies.includes(c);
+                      return (
+                        <button
+                          key={c}
+                          onClick={() => toggleInvCurrency(c)}
+                          className="flex flex-col items-center justify-center py-2.5 rounded-xl text-xs font-bold transition-all"
+                          style={{
+                            background: selected ? "#e8eaf6" : "#f8fafc",
+                            color: selected ? "#1a237e" : "#90a4ae",
+                            border: selected ? "2px solid #1a237e" : "1.5px solid #e2e8f0",
+                          }}
+                          data-testid={`btn-currency-${c}`}
+                        >
+                          {selected && <span className="text-xs mb-0.5" style={{ color: "#1a237e" }}>✓</span>}
+                          {c}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {invSelectedCurrencies.length > 1 && (
+                    <p className="text-xs mt-2" style={{ color: "#78909c" }}>
+                      {invSelectedCurrencies.length} cryptomonnaies sélectionnées — un lien distinct sera créé pour chacune.
+                    </p>
+                  )}
+                </div>
+
+                {/* URL de retour */}
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>URL de retour (facultatif)</label>
                   <input
-                    type="text"
-                    value={invDescription}
-                    onChange={e => setInvDescription(e.target.value)}
-                    placeholder="ex: Commande #123"
-                    className="w-full text-sm px-3 py-2 rounded-lg"
+                    type="url"
+                    value={invReturnUrl}
+                    onChange={e => setInvReturnUrl(e.target.value)}
+                    placeholder="https://monsite.com/merci"
+                    className="w-full text-sm px-3 py-2.5 rounded-lg"
                     style={{ border: "1px solid #e2e8f0", background: "#f8fafc", color: "#1a237e" }}
-                    data-testid="input-invoice-description"
+                    data-testid="input-invoice-returnurl"
                   />
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>Order ID (facultatif)</label>
-                    <input
-                      type="text"
-                      value={invOrderId}
-                      onChange={e => setInvOrderId(e.target.value)}
-                      placeholder="ex: CMD-456"
-                      className="w-full text-sm px-3 py-2 rounded-lg"
-                      style={{ border: "1px solid #e2e8f0", background: "#f8fafc", color: "#1a237e" }}
-                      data-testid="input-invoice-orderid"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>URL de retour (facultatif)</label>
-                    <input
-                      type="url"
-                      value={invReturnUrl}
-                      onChange={e => setInvReturnUrl(e.target.value)}
-                      placeholder="https://monsite.com/merci"
-                      className="w-full text-sm px-3 py-2 rounded-lg"
-                      style={{ border: "1px solid #e2e8f0", background: "#f8fafc", color: "#1a237e" }}
-                      data-testid="input-invoice-returnurl"
-                    />
-                  </div>
-                </div>
+
                 {invError && (
                   <div className="text-xs p-2 rounded-lg" style={{ background: "#ffebee", color: "#c62828" }}>{invError}</div>
                 )}
+
                 <button
                   onClick={handleCreateInvoice}
                   disabled={invLoading}
-                  className="w-full py-2.5 rounded-lg text-sm font-bold"
+                  className="w-full py-3 rounded-xl text-sm font-bold"
                   style={{ background: invLoading ? "#e2e8f0" : "#1a237e", color: invLoading ? "#90a4ae" : "#fff" }}
                   data-testid="btn-create-invoice"
                 >
-                  {invLoading ? "Création en cours..." : "Créer le lien de paiement"}
+                  {invLoading ? "Création en cours..." : "Générer le lien de paiement"}
                 </button>
               </div>
 
-              {invResult && (
-                <div className="rounded-xl p-5 space-y-3" style={{ background: "#e8f5e9", border: "1px solid #a5d6a7" }}>
-                  <p className="text-xs font-bold" style={{ color: "#2e7d32" }}>Lien de paiement créé avec succès !</p>
-                  <div>
-                    <p className="text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>Track ID</p>
-                    <code className="text-xs font-mono" style={{ color: "#1a237e" }}>{invResult.trackId}</code>
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>URL de paiement</p>
-                    <div className="flex items-center gap-2">
-                      <a
-                        href={invResult.paymentUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex-1 text-xs font-mono break-all underline"
-                        style={{ color: "#1565c0" }}
-                        data-testid="link-invoice-result"
-                      >
-                        {invResult.paymentUrl}
-                      </a>
-                      <button
-                        onClick={() => copyToClipboard(invResult.paymentUrl, "inv-url")}
-                        className="shrink-0 text-xs px-2 py-1 rounded"
-                        style={{ background: "#c8e6c9", color: "#2e7d32" }}
-                        data-testid="btn-copy-invoice-url"
-                      >
-                        {copiedKey === "inv-url" ? "Copié !" : "Copier"}
-                      </button>
-                    </div>
-                  </div>
-                  {invResult.expiredAt && (
-                    <p className="text-xs" style={{ color: "#78909c" }}>
-                      Expire le : {new Date(invResult.expiredAt).toLocaleString("fr-FR")}
+              {invResults.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-bold" style={{ color: "#2e7d32" }}>
+                      ✓ {invResults.length === 1 ? "Lien créé avec succès !" : `${invResults.length} liens créés avec succès !`}
                     </p>
-                  )}
+                    <button
+                      onClick={() => { setInvResults([]); setInvAmount(""); setInvDescription(""); setInvReturnUrl(""); setInvFreePrice(false); setInvSelectedCurrencies(["USDT"]); }}
+                      className="text-xs underline"
+                      style={{ color: "#546e7a" }}
+                    >
+                      Nouveau lien
+                    </button>
+                  </div>
+                  {invResults.map(r => (
+                    <div key={r.trackId} className="rounded-xl p-4 space-y-3" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: "#fff8e1", color: "#f59e0b" }}>{r.currency}</span>
+                        <code className="text-xs font-mono" style={{ color: "#546e7a" }}>{r.trackId}</code>
+                        {r.expiredAt && (
+                          <span className="text-xs ml-auto" style={{ color: "#78909c" }}>
+                            Expire : {new Date(r.expiredAt).toLocaleString("fr-FR")}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={r.paymentUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 text-xs font-mono break-all underline"
+                          style={{ color: "#1565c0" }}
+                          data-testid={`link-invoice-${r.currency}`}
+                        >
+                          {r.paymentUrl}
+                        </a>
+                        <button
+                          onClick={() => copyToClipboard(r.paymentUrl, `inv-${r.currency}`)}
+                          className="shrink-0 text-xs px-3 py-1.5 rounded-lg font-semibold"
+                          style={{ background: "#c8e6c9", color: "#2e7d32" }}
+                          data-testid={`btn-copy-invoice-${r.currency}`}
+                        >
+                          {copiedKey === `inv-${r.currency}` ? "Copié !" : "Copier"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                   <button
-                    onClick={() => { setInvResult(null); setInvAmount(""); setInvDescription(""); setInvOrderId(""); setInvReturnUrl(""); }}
+                    onClick={() => { setInvResults([]); setInvAmount(""); setInvDescription(""); setInvReturnUrl(""); setInvFreePrice(false); setInvSelectedCurrencies(["USDT"]); }}
                     className="text-xs underline"
                     style={{ color: "#546e7a" }}
                   >

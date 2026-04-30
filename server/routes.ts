@@ -3961,14 +3961,14 @@ export async function registerRoutes(
         amount: invoiceAmount,
         currency: invoiceCurrency,
         lifeTime: 30,
-        feePaidByPayer: 0,
+        feePaidByPayer: 1,
         callbackUrl,
         ...(returnUrl && { returnUrl }),
         ...(description && { description }),
         ...(orderId && { orderId }),
       });
       if (invoiceResult.result !== 100 || !invoiceResult.trackId) {
-        return res.status(502).json({ message: invoiceResult.message || "Échec de création de l'invoice OxaPay" });
+        return res.status(502).json({ message: invoiceResult.message || "Échec de création de l'invoice" });
       }
       let walletAddress: string | undefined;
       let payCurrency: string | undefined;
@@ -4126,11 +4126,11 @@ export async function registerRoutes(
     try {
       const merchantId = (req as any).user.id;
       const { amount, currency, description, orderId, callbackUrl, returnUrl } = req.body;
-      if (!amount || !currency) {
+      if (amount === undefined || amount === null || !currency) {
         return res.status(400).json({ message: "amount et currency sont requis" });
       }
       const amountNum = Number(amount);
-      if (isNaN(amountNum) || amountNum <= 0) {
+      if (isNaN(amountNum) || amountNum < 0) {
         return res.status(400).json({ message: "Montant invalide" });
       }
       const merchantAggs = await storage.getCryptoAggregatorsByMerchant(merchantId);
@@ -4147,14 +4147,14 @@ export async function registerRoutes(
         amount: invoiceAmount,
         currency: invoiceCurrency,
         lifeTime: 30,
-        feePaidByPayer: 0,
+        feePaidByPayer: 1,
         callbackUrl: invoiceCallbackUrl,
         ...(returnUrl && { returnUrl }),
         ...(description && { description }),
         ...(orderId && { orderId }),
       });
       if (invoiceResult.result !== 100 || !invoiceResult.trackId) {
-        return res.status(502).json({ message: invoiceResult.message || "Échec de création de l'invoice OxaPay" });
+        return res.status(502).json({ message: invoiceResult.message || "Échec de création de l'invoice" });
       }
       const cryptoTx = await storage.createCryptoTransaction({
         aggregatorId: agg.id,
