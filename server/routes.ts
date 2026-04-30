@@ -4192,6 +4192,75 @@ export async function registerRoutes(
     }
   });
 
+  // ─── Crypto : demandes de retrait (marchand) ─────────────────────────────
+
+  app.post("/api/merchant/crypto/withdraw", cryptoApiKeyAuthMiddleware, async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const { currency, amount, walletAddress, network } = req.body;
+      if (!currency?.trim() || !amount || !walletAddress?.trim()) {
+        return res.status(400).json({ message: "currency, amount et walletAddress sont requis" });
+      }
+      const amountNum = parseFloat(amount);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        return res.status(400).json({ message: "Montant invalide" });
+      }
+      const balances = await storage.getCryptoBalances(merchantId);
+      const bal = balances.find(b => b.currency.toUpperCase() === currency.toUpperCase());
+      const available = parseFloat(bal?.balance || "0");
+      if (amountNum > available) {
+        return res.status(400).json({ message: `Solde insuffisant. Disponible : ${available.toFixed(8)} ${currency}` });
+      }
+      await storage.deductCryptoBalance(merchantId, currency.toUpperCase(), amountNum);
+      const wr = await storage.createCryptoWithdrawalRequest({
+        merchantId,
+        currency: currency.toUpperCase(),
+        amount: amountNum.toFixed(8),
+        walletAddress: walletAddress.trim(),
+        network: network?.trim() || null,
+        status: "pending",
+      });
+      res.json({ id: wr.id, message: "Demande de retrait soumise avec succès", withdrawal: wr });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/merchant/crypto/withdrawals", cryptoApiKeyAuthMiddleware, async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const reqs = await storage.getCryptoWithdrawalRequestsByMerchant(merchantId);
+      res.json(reqs);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── Crypto : retraits (admin) ────────────────────────────────────────────
+
+  app.get("/api/admin/crypto/withdrawals", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const reqs = await storage.getAllCryptoWithdrawalRequests();
+      res.json(reqs);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.patch("/api/admin/crypto/withdrawals/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { status, adminNote } = req.body;
+      if (!["pending", "processing", "completed", "rejected"].includes(status)) {
+        return res.status(400).json({ message: "Statut invalide" });
+      }
+      await storage.updateCryptoWithdrawalRequest(id, status, adminNote);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // ─── Crypto : régénération clé API crypto (admin) ────────────────────────
 
   app.put("/api/admin/merchant/:id/crypto/regenerate-key", authMiddleware("admin"), async (req, res) => {

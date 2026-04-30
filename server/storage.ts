@@ -2,7 +2,7 @@ import {
   admins, merchants, merchantCountries, transactions, smsLogs, numbers, settings, loginLogs,
   merchantPins, apiLogs, pendingPayments, webhookLogs, telegramActivationCodes, paymentLinks,
   walletTransfers, walletTransferCountries, withdrawals, withdrawalOperators, statsBaselines,
-  cryptoAggregators, cryptoAggregatorCountries, cryptoAggregatorMerchants, cryptoTransactions, cryptoBalances,
+  cryptoAggregators, cryptoAggregatorCountries, cryptoAggregatorMerchants, cryptoTransactions, cryptoBalances, cryptoWithdrawalRequests,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
@@ -20,6 +20,7 @@ import {
   type CryptoAggregatorMerchant, type InsertCryptoAggregatorMerchant,
   type CryptoTransaction, type InsertCryptoTransaction,
   type CryptoBalance, type InsertCryptoBalance,
+  type CryptoWithdrawalRequest, type InsertCryptoWithdrawalRequest,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and, gte, lt, inArray, isNull } from "drizzle-orm";
@@ -180,6 +181,12 @@ export interface IStorage {
   getMerchantBySdkKey(sdkApiKey: string): Promise<Merchant | undefined>;
   enableMerchantSdk(merchantId: number, sdkApiKey: string): Promise<void>;
   disableMerchantSdk(merchantId: number): Promise<void>;
+
+  createCryptoWithdrawalRequest(data: InsertCryptoWithdrawalRequest): Promise<CryptoWithdrawalRequest>;
+  getCryptoWithdrawalRequestsByMerchant(merchantId: number): Promise<CryptoWithdrawalRequest[]>;
+  getAllCryptoWithdrawalRequests(): Promise<CryptoWithdrawalRequest[]>;
+  updateCryptoWithdrawalRequest(id: number, status: string, adminNote?: string): Promise<void>;
+  deductCryptoBalance(merchantId: number, currency: string, amount: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1031,6 +1038,39 @@ export class DatabaseStorage implements IStorage {
 
   async disableMerchantSdk(merchantId: number): Promise<void> {
     await db.update(merchants).set({ sdkEnabled: false, sdkApiKey: null }).where(eq(merchants.id, merchantId));
+  }
+
+  async createCryptoWithdrawalRequest(data: InsertCryptoWithdrawalRequest): Promise<CryptoWithdrawalRequest> {
+    const [req] = await db.insert(cryptoWithdrawalRequests).values(data).returning();
+    return req;
+  }
+
+  async getCryptoWithdrawalRequestsByMerchant(merchantId: number): Promise<CryptoWithdrawalRequest[]> {
+    return db.select().from(cryptoWithdrawalRequests)
+      .where(eq(cryptoWithdrawalRequests.merchantId, merchantId))
+      .orderBy(desc(cryptoWithdrawalRequests.createdAt));
+  }
+
+  async getAllCryptoWithdrawalRequests(): Promise<CryptoWithdrawalRequest[]> {
+    return db.select().from(cryptoWithdrawalRequests)
+      .orderBy(desc(cryptoWithdrawalRequests.createdAt));
+  }
+
+  async updateCryptoWithdrawalRequest(id: number, status: string, adminNote?: string): Promise<void> {
+    await db.update(cryptoWithdrawalRequests)
+      .set({ status, ...(adminNote !== undefined && { adminNote }), updatedAt: new Date() })
+      .where(eq(cryptoWithdrawalRequests.id, id));
+  }
+
+  async deductCryptoBalance(merchantId: number, currency: string, amount: number): Promise<void> {
+    const [existing] = await db.select().from(cryptoBalances)
+      .where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
+    if (existing) {
+      const newBalance = Math.max(0, parseFloat(existing.balance) - amount).toFixed(8);
+      await db.update(cryptoBalances)
+        .set({ balance: newBalance, updatedAt: new Date() })
+        .where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
+    }
   }
 }
 

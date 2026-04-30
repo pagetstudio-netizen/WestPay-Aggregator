@@ -351,6 +351,19 @@ export async function runMigrations() {
       WHERE omnipay_code IS NULL
     `);
 
+    await client.query(`CREATE TABLE IF NOT EXISTS crypto_withdrawal_requests (
+      id serial PRIMARY KEY,
+      merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+      currency text NOT NULL,
+      amount text NOT NULL,
+      wallet_address text NOT NULL,
+      network text,
+      status text NOT NULL DEFAULT 'pending',
+      admin_note text,
+      created_at timestamp NOT NULL DEFAULT now(),
+      updated_at timestamp NOT NULL DEFAULT now()
+    )`);
+
     // Auto-seeder l'agrégateur OxaPay depuis la variable d'environnement
     const oxapayKey = process.env.OXAPAY_API_KEY;
     if (oxapayKey) {

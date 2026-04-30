@@ -1950,8 +1950,44 @@ function LanguageDropdown() {
   );
 }
 
+const CRYPTO_TX_STATUS: Record<string, { bg: string; color: string; label: string }> = {
+  new:        { bg: "#e3f2fd", color: "#1976d2", label: "Nouveau" },
+  pending:    { bg: "#e3f2fd", color: "#1976d2", label: "En attente" },
+  waiting:    { bg: "#e3f2fd", color: "#1976d2", label: "En attente" },
+  confirming: { bg: "#fff3e0", color: "#fb8c00", label: "Confirmation" },
+  paying:     { bg: "#e8f5e9", color: "#43a047", label: "Reçu" },
+  paid:       { bg: "#e8f5e9", color: "#2e7d32", label: "Confirmé" },
+  expired:    { bg: "#f5f5f5", color: "#757575", label: "Expiré" },
+  failed:     { bg: "#ffebee", color: "#c62828", label: "Échoué" },
+  refunded:   { bg: "#efebe9", color: "#6d4c41", label: "Remboursé" },
+};
+
+const WITHDRAWAL_STATUS: Record<string, { bg: string; color: string; label: string }> = {
+  pending:    { bg: "#e3f2fd", color: "#1976d2", label: "En attente" },
+  processing: { bg: "#fff3e0", color: "#fb8c00", label: "En cours" },
+  completed:  { bg: "#e8f5e9", color: "#2e7d32", label: "Complété" },
+  rejected:   { bg: "#ffebee", color: "#c62828", label: "Rejeté" },
+};
+
+const CRYPTO_NETWORKS: Record<string, string[]> = {
+  USDT: ["TRC20", "ERC20", "BEP20"],
+  BTC:  ["Bitcoin"],
+  ETH:  ["ERC20"],
+  LTC:  ["Litecoin"],
+  TRX:  ["TRC20"],
+  BNB:  ["BEP20"],
+  SOL:  ["Solana"],
+  DOGE: ["Dogecoin"],
+  XRP:  ["XRP Ledger"],
+  DAI:  ["ERC20", "BEP20"],
+};
+
+const SUPPORTED_INVOICE_CURRENCIES = ["USDT", "BTC", "ETH", "LTC", "TRX", "BNB", "SOL", "DOGE"];
+
 function CryptoPanel({ token, user }: { token: string | null; user: any }) {
   const queryClient = useQueryClient();
+  const [cryptoTab, setCryptoTab] = useState<"balances" | "invoice" | "withdrawals" | "transactions" | "api">("balances");
+
   const { data: aggs = [], isLoading: aggLoading } = useMerchantFetch(
     "/api/merchant/crypto-aggregators",
     ["/api/merchant/crypto-aggregators"],
@@ -1962,7 +1998,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
     ["/api/merchant/crypto/transactions"],
     token
   );
-  const { data: cryptoBalances = [] } = useMerchantFetch(
+  const { data: cryptoBalancesData = [] } = useMerchantFetch(
     "/api/merchant/crypto/balances",
     ["/api/merchant/crypto/balances"],
     token
@@ -1972,13 +2008,28 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
     ["/api/merchant/crypto/api-key"],
     token
   );
+  const { data: withdrawalsData = [], isLoading: wrLoading } = useMerchantFetch(
+    "/api/merchant/crypto/withdrawals",
+    ["/api/merchant/crypto/withdrawals"],
+    token
+  );
 
   const aggList = aggs as { id: number; name: string; type: string; countries: string[] }[];
-  const balances = cryptoBalances as { currency: string; balance: string }[];
+  const balances = cryptoBalancesData as { currency: string; balance: string }[];
   const txs = (cryptoTxs as any[]).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const withdrawals = (withdrawalsData as any[]).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const isEnabled = aggList.length > 0;
   const cryptoApiKey = (cryptoKeyData as any)?.cryptoApiKey || null;
+
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const copyToClipboard = (text: string, key: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 2000);
+    });
+  };
 
   const handleRegenerateKey = async () => {
     if (!confirm("Régénérer la clé API crypto ? L'ancienne clé sera immédiatement invalidée.")) return;
@@ -1997,27 +2048,96 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
     }
   };
 
-  const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
-    new:        { bg: "#e3f2fd", color: "#1976d2", label: "Nouveau" },
-    pending:    { bg: "#e3f2fd", color: "#1976d2", label: "En attente" },
-    waiting:    { bg: "#e3f2fd", color: "#1976d2", label: "En attente" },
-    confirming: { bg: "#fff3e0", color: "#fb8c00", label: "Confirmation" },
-    paying:     { bg: "#e8f5e9", color: "#43a047", label: "Reçu" },
-    paid:       { bg: "#e8f5e9", color: "#2e7d32", label: "Confirmé" },
-    expired:    { bg: "#f5f5f5", color: "#757575", label: "Expiré" },
-    failed:     { bg: "#ffebee", color: "#c62828", label: "Échoué" },
-    refunded:   { bg: "#efebe9", color: "#6d4c41", label: "Remboursé" },
+  // ── Retrait ──────────────────────────────────────────────────────────────
+  const [withdrawModal, setWithdrawModal] = useState<{ currency: string; available: string } | null>(null);
+  const [wdAddress, setWdAddress] = useState("");
+  const [wdNetwork, setWdNetwork] = useState("");
+  const [wdAmount, setWdAmount] = useState("");
+  const [wdLoading, setWdLoading] = useState(false);
+  const [wdError, setWdError] = useState("");
+
+  const openWithdrawModal = (currency: string, available: string) => {
+    setWithdrawModal({ currency, available });
+    setWdAddress(""); setWdNetwork(""); setWdAmount(""); setWdError("");
+    const nets = CRYPTO_NETWORKS[currency] || [];
+    setWdNetwork(nets[0] || "");
   };
 
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const copyToClipboard = (text: string, key: string) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopiedKey(key);
-      setTimeout(() => setCopiedKey(null), 2000);
-    });
+  const handleWithdraw = async () => {
+    setWdError("");
+    if (!wdAddress.trim()) { setWdError("Adresse requise"); return; }
+    const amt = parseFloat(wdAmount);
+    if (isNaN(amt) || amt <= 0) { setWdError("Montant invalide"); return; }
+    const avail = parseFloat(withdrawModal?.available || "0");
+    if (amt > avail) { setWdError(`Montant dépasse le solde disponible (${avail.toFixed(6)} ${withdrawModal?.currency})`); return; }
+    setWdLoading(true);
+    try {
+      const res = await fetch("/api/merchant/crypto/withdraw", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ currency: withdrawModal?.currency, amount: amt, walletAddress: wdAddress, network: wdNetwork }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Erreur");
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/crypto/balances"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/crypto/withdrawals"] });
+      setWithdrawModal(null);
+      setCryptoTab("withdrawals");
+    } catch (e: any) {
+      setWdError(e.message);
+    } finally {
+      setWdLoading(false);
+    }
+  };
+
+  // ── Créer un lien de paiement crypto ─────────────────────────────────────
+  const [invAmount, setInvAmount] = useState("");
+  const [invCurrency, setInvCurrency] = useState("USDT");
+  const [invDescription, setInvDescription] = useState("");
+  const [invOrderId, setInvOrderId] = useState("");
+  const [invReturnUrl, setInvReturnUrl] = useState("");
+  const [invLoading, setInvLoading] = useState(false);
+  const [invResult, setInvResult] = useState<{ trackId: string; paymentUrl: string; payLink?: string; expiredAt?: string } | null>(null);
+  const [invError, setInvError] = useState("");
+
+  const handleCreateInvoice = async () => {
+    setInvError(""); setInvResult(null);
+    const amt = parseFloat(invAmount);
+    if (isNaN(amt) || amt <= 0) { setInvError("Montant invalide"); return; }
+    if (!cryptoApiKey) { setInvError("Clé API crypto non disponible"); return; }
+    setInvLoading(true);
+    try {
+      const res = await fetch("/api/merchant/crypto/invoice", {
+        method: "POST",
+        headers: { "X-API-KEY": cryptoApiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: amt,
+          currency: invCurrency,
+          description: invDescription || undefined,
+          orderId: invOrderId || undefined,
+          returnUrl: invReturnUrl || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Erreur création invoice");
+      setInvResult(data);
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/crypto/transactions"] });
+    } catch (e: any) {
+      setInvError(e.message);
+    } finally {
+      setInvLoading(false);
+    }
   };
 
   if (aggLoading) return <MerchantLoadingSkeleton />;
+
+  const CRYPTO_TABS: { key: typeof cryptoTab; label: string }[] = [
+    { key: "balances",     label: "Soldes" },
+    { key: "invoice",      label: "Créer un lien" },
+    { key: "withdrawals",  label: "Retraits" },
+    { key: "transactions", label: "Transactions" },
+    { key: "api",          label: "API" },
+  ];
 
   return (
     <div className="space-y-6">
@@ -2028,7 +2148,6 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
         </p>
       </div>
 
-      {/* Statut activation */}
       {!isEnabled ? (
         <div className="rounded-xl p-6 text-center" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
           <Bitcoin className="w-10 h-10 mx-auto mb-3" style={{ color: "#e2e8f0" }} />
@@ -2039,110 +2158,416 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
         </div>
       ) : (
         <>
-          {/* Soldes crypto */}
-          <div>
-            <h3 className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#90a4ae" }}>
-              Soldes par crypto
-            </h3>
-            {balances.length === 0 ? (
-              <div className="rounded-xl p-4 text-sm" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", color: "#90a4ae" }}>
-                Aucun solde crypto pour le moment. Les soldes s'accumulent après chaque paiement reçu.
-              </div>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-3">
-                {balances.map((b) => (
-                  <div
-                    key={b.currency}
-                    className="rounded-xl p-4 flex items-center gap-3"
-                    style={{ background: "#fff", border: "1px solid #e2e8f0" }}
-                    data-testid={`card-crypto-balance-${b.currency}`}
-                  >
-                    <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "#fff8e1" }}>
-                      <Bitcoin className="w-4 h-4" style={{ color: "#f59e0b" }} />
-                    </div>
-                    <div>
-                      <p className="text-xs font-semibold uppercase" style={{ color: "#90a4ae" }}>{b.currency}</p>
-                      <p className="text-lg font-bold" style={{ color: "#1a237e" }}>
-                        {parseFloat(b.balance).toFixed(6)}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+          {/* Sous-onglets */}
+          <div className="flex gap-1 flex-wrap" style={{ borderBottom: "2px solid #e2e8f0", paddingBottom: 0 }}>
+            {CRYPTO_TABS.map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => setCryptoTab(tab.key)}
+                className="px-4 py-2 text-xs font-semibold rounded-t-lg transition-colors"
+                style={{
+                  background: cryptoTab === tab.key ? "#fff" : "transparent",
+                  color: cryptoTab === tab.key ? "#1a237e" : "#90a4ae",
+                  borderBottom: cryptoTab === tab.key ? "2px solid #1a237e" : "2px solid transparent",
+                  marginBottom: -2,
+                }}
+                data-testid={`tab-crypto-${tab.key}`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
 
-          {/* Clé API Crypto */}
-          <div>
-            <h3 className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#90a4ae" }}>
-              Clé API Crypto
-            </h3>
-            <div className="rounded-xl p-4 space-y-3" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
-              <p className="text-xs" style={{ color: "#546e7a" }}>
-                Cette clé API est dédiée aux paiements crypto. Elle est globale (non liée à un pays) et peut être utilisée sans aucune configuration mobile money.
-              </p>
-              {cryptoApiKey ? (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <code
-                      className="flex-1 text-xs px-3 py-2 rounded-lg font-mono break-all"
-                      style={{ background: "#f1f5f9", color: "#1565c0", border: "1px solid #e2e8f0" }}
-                      data-testid="text-crypto-api-key"
-                    >
-                      {cryptoApiKey}
-                    </code>
-                    <button
-                      onClick={() => copyToClipboard(cryptoApiKey, "crypto-key")}
-                      className="shrink-0 px-3 py-2 rounded-lg text-xs font-semibold"
-                      style={{ background: copiedKey === "crypto-key" ? "#e8f5e9" : "#e3f2fd", color: copiedKey === "crypto-key" ? "#2e7d32" : "#1565c0" }}
-                      data-testid="btn-copy-crypto-key"
-                    >
-                      {copiedKey === "crypto-key" ? "Copié !" : "Copier"}
-                    </button>
-                  </div>
-                  <div className="flex justify-end">
-                    <button
-                      onClick={handleRegenerateKey}
-                      disabled={isRegenerating}
-                      className="text-xs px-3 py-1.5 rounded-lg font-semibold"
-                      style={{ background: "#fff8e1", color: "#f59e0b", border: "1px solid #fde68a" }}
-                      data-testid="btn-regenerate-crypto-key"
-                    >
-                      {isRegenerating ? "Régénération..." : "Régénérer la clé"}
-                    </button>
-                  </div>
-                  <p className="text-xs" style={{ color: "#b0bec5" }}>
-                    Utilisez ce header dans vos requêtes : <code className="font-mono" style={{ color: "#546e7a" }}>X-API-KEY: {cryptoApiKey}</code>
-                  </p>
+          {/* ── Soldes ── */}
+          {cryptoTab === "balances" && (
+            <div className="space-y-4">
+              {balances.length === 0 ? (
+                <div className="rounded-xl p-6 text-center" style={{ background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                  <Bitcoin className="w-8 h-8 mx-auto mb-2" style={{ color: "#e2e8f0" }} />
+                  <p className="text-sm" style={{ color: "#90a4ae" }}>Aucun solde crypto pour le moment.</p>
+                  <p className="text-xs mt-1" style={{ color: "#b0bec5" }}>Les soldes s'accumulent après chaque paiement reçu.</p>
                 </div>
               ) : (
-                <div className="p-3 rounded-lg text-xs" style={{ background: "#f8fafc", color: "#90a4ae" }}>
-                  Aucune clé API crypto générée. Contactez l'administrateur.
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {balances.map((b) => {
+                    const nets = CRYPTO_NETWORKS[b.currency.toUpperCase()] || [];
+                    return (
+                      <div
+                        key={b.currency}
+                        className="rounded-xl p-4 space-y-3"
+                        style={{ background: "#fff", border: "1px solid #e2e8f0" }}
+                        data-testid={`card-crypto-balance-${b.currency}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "#fff8e1" }}>
+                            <Bitcoin className="w-4 h-4" style={{ color: "#f59e0b" }} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold uppercase" style={{ color: "#90a4ae" }}>{b.currency}</p>
+                            <p className="text-lg font-bold" style={{ color: "#1a237e" }}>
+                              {parseFloat(b.balance).toFixed(6)}
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => openWithdrawModal(b.currency, b.balance)}
+                          className="w-full text-xs font-semibold py-1.5 rounded-lg"
+                          style={{ background: "#e3f2fd", color: "#1565c0", border: "1px solid #bbdefb" }}
+                          data-testid={`btn-withdraw-${b.currency}`}
+                        >
+                          Retirer
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
-          </div>
+          )}
 
-          {/* Documentation API */}
-          <div>
-            <h3 className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#90a4ae" }}>
-              Intégration API
-            </h3>
-            <div className="rounded-xl p-4 space-y-4" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
-              <div className="flex items-start gap-3 p-3 rounded-lg" style={{ background: "#e8f5e9", border: "1px solid #a5d6a7" }}>
-                <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ background: "#2e7d32", color: "#fff", fontSize: 11, fontWeight: 700 }}>✓</div>
-                <p className="text-xs" style={{ color: "#2e7d32" }}>
-                  <strong>Crypto activé sur votre compte.</strong> Utilisez votre clé API Crypto (section ci-dessus) pour créer des invoices.
+          {/* ── Lien de paiement crypto ── */}
+          {cryptoTab === "invoice" && (
+            <div className="space-y-4">
+              <div className="rounded-xl p-5 space-y-4" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
+                <p className="text-xs" style={{ color: "#546e7a" }}>
+                  Créez un lien de paiement crypto directement depuis votre tableau de bord, sans avoir à appeler l'API manuellement.
                 </p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>Montant *</label>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="any"
+                      value={invAmount}
+                      onChange={e => setInvAmount(e.target.value)}
+                      placeholder="ex: 10"
+                      className="w-full text-sm px-3 py-2 rounded-lg"
+                      style={{ border: "1px solid #e2e8f0", background: "#f8fafc", color: "#1a237e" }}
+                      data-testid="input-invoice-amount"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>Crypto *</label>
+                    <select
+                      value={invCurrency}
+                      onChange={e => setInvCurrency(e.target.value)}
+                      className="w-full text-sm px-3 py-2 rounded-lg"
+                      style={{ border: "1px solid #e2e8f0", background: "#f8fafc", color: "#1a237e" }}
+                      data-testid="select-invoice-currency"
+                    >
+                      {SUPPORTED_INVOICE_CURRENCIES.map(c => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>Description</label>
+                  <input
+                    type="text"
+                    value={invDescription}
+                    onChange={e => setInvDescription(e.target.value)}
+                    placeholder="ex: Commande #123"
+                    className="w-full text-sm px-3 py-2 rounded-lg"
+                    style={{ border: "1px solid #e2e8f0", background: "#f8fafc", color: "#1a237e" }}
+                    data-testid="input-invoice-description"
+                  />
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>Order ID (facultatif)</label>
+                    <input
+                      type="text"
+                      value={invOrderId}
+                      onChange={e => setInvOrderId(e.target.value)}
+                      placeholder="ex: CMD-456"
+                      className="w-full text-sm px-3 py-2 rounded-lg"
+                      style={{ border: "1px solid #e2e8f0", background: "#f8fafc", color: "#1a237e" }}
+                      data-testid="input-invoice-orderid"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>URL de retour (facultatif)</label>
+                    <input
+                      type="url"
+                      value={invReturnUrl}
+                      onChange={e => setInvReturnUrl(e.target.value)}
+                      placeholder="https://monsite.com/merci"
+                      className="w-full text-sm px-3 py-2 rounded-lg"
+                      style={{ border: "1px solid #e2e8f0", background: "#f8fafc", color: "#1a237e" }}
+                      data-testid="input-invoice-returnurl"
+                    />
+                  </div>
+                </div>
+                {invError && (
+                  <div className="text-xs p-2 rounded-lg" style={{ background: "#ffebee", color: "#c62828" }}>{invError}</div>
+                )}
+                <button
+                  onClick={handleCreateInvoice}
+                  disabled={invLoading}
+                  className="w-full py-2.5 rounded-lg text-sm font-bold"
+                  style={{ background: invLoading ? "#e2e8f0" : "#1a237e", color: invLoading ? "#90a4ae" : "#fff" }}
+                  data-testid="btn-create-invoice"
+                >
+                  {invLoading ? "Création en cours..." : "Créer le lien de paiement"}
+                </button>
               </div>
 
-              <div className="space-y-3">
-                <div>
-                  <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>1. Créer une invoice</p>
-                  <div className="relative">
-                    <code className="block text-xs p-3 rounded-lg overflow-x-auto" style={{ background: "#f1f5f9", color: "#0f172a", fontFamily: "monospace" }}>
-{`POST /api/merchant/crypto/invoice
+              {invResult && (
+                <div className="rounded-xl p-5 space-y-3" style={{ background: "#e8f5e9", border: "1px solid #a5d6a7" }}>
+                  <p className="text-xs font-bold" style={{ color: "#2e7d32" }}>Lien de paiement créé avec succès !</p>
+                  <div>
+                    <p className="text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>Track ID</p>
+                    <code className="text-xs font-mono" style={{ color: "#1a237e" }}>{invResult.trackId}</code>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>URL de paiement</p>
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={invResult.paymentUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 text-xs font-mono break-all underline"
+                        style={{ color: "#1565c0" }}
+                        data-testid="link-invoice-result"
+                      >
+                        {invResult.paymentUrl}
+                      </a>
+                      <button
+                        onClick={() => copyToClipboard(invResult.paymentUrl, "inv-url")}
+                        className="shrink-0 text-xs px-2 py-1 rounded"
+                        style={{ background: "#c8e6c9", color: "#2e7d32" }}
+                        data-testid="btn-copy-invoice-url"
+                      >
+                        {copiedKey === "inv-url" ? "Copié !" : "Copier"}
+                      </button>
+                    </div>
+                  </div>
+                  {invResult.expiredAt && (
+                    <p className="text-xs" style={{ color: "#78909c" }}>
+                      Expire le : {new Date(invResult.expiredAt).toLocaleString("fr-FR")}
+                    </p>
+                  )}
+                  <button
+                    onClick={() => { setInvResult(null); setInvAmount(""); setInvDescription(""); setInvOrderId(""); setInvReturnUrl(""); }}
+                    className="text-xs underline"
+                    style={{ color: "#546e7a" }}
+                  >
+                    Créer un nouveau lien
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Retraits ── */}
+          {cryptoTab === "withdrawals" && (
+            <div className="space-y-3">
+              {wrLoading ? (
+                <MerchantLoadingSkeleton />
+              ) : withdrawals.length === 0 ? (
+                <div className="rounded-xl p-6 text-center" style={{ background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                  <p className="text-sm" style={{ color: "#90a4ae" }}>Aucune demande de retrait pour le moment.</p>
+                  <p className="text-xs mt-1" style={{ color: "#b0bec5" }}>Allez dans "Soldes" pour initier un retrait.</p>
+                </div>
+              ) : (
+                <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #e2e8f0" }}>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr style={{ background: "#f8fafc" }}>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Date</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Crypto</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Montant</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Adresse</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Réseau</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Statut</th>
+                        </tr>
+                      </thead>
+                      <tbody style={{ background: "#fff" }}>
+                        {withdrawals.map((wr: any, idx: number) => {
+                          const s = WITHDRAWAL_STATUS[wr.status] || WITHDRAWAL_STATUS["pending"];
+                          return (
+                            <tr
+                              key={wr.id}
+                              style={{ borderTop: idx > 0 ? "1px solid #f0f4f8" : "none" }}
+                              data-testid={`row-withdrawal-${wr.id}`}
+                            >
+                              <td className="px-4 py-3" style={{ color: "#546e7a" }}>
+                                {new Date(wr.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                              </td>
+                              <td className="px-4 py-3 font-bold" style={{ color: "#f59e0b" }}>{wr.currency}</td>
+                              <td className="px-4 py-3 font-semibold" style={{ color: "#1a237e" }}>{parseFloat(wr.amount).toFixed(6)}</td>
+                              <td className="px-4 py-3 font-mono max-w-[120px] truncate" style={{ color: "#546e7a" }} title={wr.walletAddress}>
+                                {wr.walletAddress.slice(0, 10)}...{wr.walletAddress.slice(-6)}
+                              </td>
+                              <td className="px-4 py-3" style={{ color: "#546e7a" }}>{wr.network || "—"}</td>
+                              <td className="px-4 py-3">
+                                <span className="px-2 py-0.5 rounded-full font-bold" style={{ background: s.bg, color: s.color }}>
+                                  {s.label}
+                                </span>
+                                {wr.adminNote && (
+                                  <p className="text-xs mt-1" style={{ color: "#78909c" }}>{wr.adminNote}</p>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Transactions ── */}
+          {cryptoTab === "transactions" && (
+            <div>
+              {txLoading ? (
+                <MerchantLoadingSkeleton />
+              ) : txs.length === 0 ? (
+                <div className="rounded-xl p-6 text-center" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
+                  <p className="text-sm font-medium" style={{ color: "#546e7a" }}>Aucune transaction crypto pour le moment.</p>
+                </div>
+              ) : (
+                <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #e2e8f0" }}>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr style={{ background: "#f8fafc" }}>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Track ID</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Montant</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Crypto reçu</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Statut</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Date</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Page</th>
+                        </tr>
+                      </thead>
+                      <tbody style={{ background: "#fff" }}>
+                        {txs.map((tx: any, idx: number) => {
+                          const s = CRYPTO_TX_STATUS[tx.status] || CRYPTO_TX_STATUS["new"];
+                          return (
+                            <tr
+                              key={tx.id}
+                              style={{ borderTop: idx > 0 ? "1px solid #f0f4f8" : "none" }}
+                              data-testid={`row-crypto-tx-${tx.id}`}
+                            >
+                              <td className="px-4 py-3 font-mono" style={{ color: "#1565c0" }}>
+                                {tx.trackId?.substring(0, 12)}...
+                              </td>
+                              <td className="px-4 py-3 font-semibold" style={{ color: "#1a237e" }}>
+                                {tx.amount} {tx.currency}
+                              </td>
+                              <td className="px-4 py-3" style={{ color: "#43a047" }}>
+                                {tx.payAmount ? (
+                                  <span className="font-semibold">{tx.payAmount} {tx.payCurrency}</span>
+                                ) : (
+                                  <span style={{ color: "#b0bec5" }}>—</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className="px-2 py-0.5 rounded-full font-bold" style={{ background: s.bg, color: s.color }}>
+                                  {s.label}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3" style={{ color: "#546e7a" }}>
+                                {new Date(tx.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                              </td>
+                              <td className="px-4 py-3">
+                                <a
+                                  href={`/pay/crypto/${tx.trackId}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1 font-semibold hover:underline"
+                                  style={{ color: "#1976d2" }}
+                                  data-testid={`link-crypto-payment-${tx.id}`}
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  Voir
+                                </a>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── API ── */}
+          {cryptoTab === "api" && (
+            <div className="space-y-4">
+              {/* Clé API */}
+              <div className="rounded-xl p-4 space-y-3" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
+                <h3 className="text-xs font-bold uppercase tracking-widest" style={{ color: "#90a4ae" }}>Clé API Crypto</h3>
+                <p className="text-xs" style={{ color: "#546e7a" }}>
+                  Clé dédiée aux paiements crypto. Globale (non liée à un pays), utilisable indépendamment du mobile money.
+                </p>
+                {cryptoApiKey ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <code
+                        className="flex-1 text-xs px-3 py-2 rounded-lg font-mono break-all"
+                        style={{ background: "#f1f5f9", color: "#1565c0", border: "1px solid #e2e8f0" }}
+                        data-testid="text-crypto-api-key"
+                      >
+                        {cryptoApiKey}
+                      </code>
+                      <button
+                        onClick={() => copyToClipboard(cryptoApiKey, "crypto-key")}
+                        className="shrink-0 px-3 py-2 rounded-lg text-xs font-semibold"
+                        style={{ background: copiedKey === "crypto-key" ? "#e8f5e9" : "#e3f2fd", color: copiedKey === "crypto-key" ? "#2e7d32" : "#1565c0" }}
+                        data-testid="btn-copy-crypto-key"
+                      >
+                        {copiedKey === "crypto-key" ? "Copié !" : "Copier"}
+                      </button>
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        onClick={handleRegenerateKey}
+                        disabled={isRegenerating}
+                        className="text-xs px-3 py-1.5 rounded-lg font-semibold"
+                        style={{ background: "#fff8e1", color: "#f59e0b", border: "1px solid #fde68a" }}
+                        data-testid="btn-regenerate-crypto-key"
+                      >
+                        {isRegenerating ? "Régénération..." : "Régénérer la clé"}
+                      </button>
+                    </div>
+                    <p className="text-xs" style={{ color: "#b0bec5" }}>
+                      Header : <code className="font-mono" style={{ color: "#546e7a" }}>X-API-KEY: {cryptoApiKey}</code>
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-lg text-xs" style={{ background: "#f8fafc", color: "#90a4ae" }}>
+                    Aucune clé API crypto. Contactez l'administrateur.
+                  </div>
+                )}
+              </div>
+
+              {/* Docs */}
+              <div className="rounded-xl p-4 space-y-4" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
+                <h3 className="text-xs font-bold uppercase tracking-widest" style={{ color: "#90a4ae" }}>Documentation</h3>
+
+                <div className="flex items-start gap-3 p-3 rounded-lg" style={{ background: "#e8f5e9", border: "1px solid #a5d6a7" }}>
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5 text-xs font-bold" style={{ background: "#2e7d32", color: "#fff" }}>✓</div>
+                  <p className="text-xs" style={{ color: "#2e7d32" }}>
+                    <strong>Crypto activé.</strong> Utilisez votre clé API Crypto (ci-dessus) dans le header <code className="font-mono">X-API-KEY</code>.
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Créer invoice */}
+                  <div>
+                    <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>1. Créer une invoice</p>
+                    <div className="relative">
+                      <pre className="text-xs p-3 rounded-lg overflow-x-auto" style={{ background: "#f1f5f9", color: "#0f172a", fontFamily: "monospace", margin: 0 }}>{`POST /api/merchant/crypto/invoice
 X-API-KEY: <votre_clé_api>
+Content-Type: application/json
 
 {
   "amount": 10,
@@ -2150,149 +2575,222 @@ X-API-KEY: <votre_clé_api>
   "description": "Commande #123",
   "orderId": "CMD-123",
   "returnUrl": "https://monsite.com/merci"
-}`}
-                    </code>
-                    <button
-                      onClick={() => copyToClipboard(`POST /api/merchant/crypto/invoice\nX-API-KEY: <votre_clé_api>\n\n{\n  "amount": 10,\n  "currency": "USDT",\n  "description": "Commande #123",\n  "orderId": "CMD-123",\n  "returnUrl": "https://monsite.com/merci"\n}`, "invoice")}
-                      className="absolute top-2 right-2 text-xs px-2 py-1 rounded"
-                      style={{ background: "#e2e8f0", color: "#475569" }}
-                      data-testid="btn-copy-invoice-example"
-                    >
-                      {copiedKey === "invoice" ? "Copié !" : "Copier"}
-                    </button>
+}`}</pre>
+                      <button
+                        onClick={() => copyToClipboard(`POST /api/merchant/crypto/invoice\nX-API-KEY: <votre_clé_api>\n\n{\n  "amount": 10,\n  "currency": "USDT",\n  "description": "Commande #123",\n  "orderId": "CMD-123",\n  "returnUrl": "https://monsite.com/merci"\n}`, "invoice")}
+                        className="absolute top-2 right-2 text-xs px-2 py-1 rounded"
+                        style={{ background: "#e2e8f0", color: "#475569" }}
+                        data-testid="btn-copy-invoice-example"
+                      >
+                        {copiedKey === "invoice" ? "Copié !" : "Copier"}
+                      </button>
+                    </div>
                   </div>
-                </div>
 
-                <div>
-                  <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>2. Réponse — rediriger l'utilisateur</p>
-                  <code className="block text-xs p-3 rounded-lg" style={{ background: "#f1f5f9", color: "#0f172a", fontFamily: "monospace" }}>
-{`{
+                  {/* Réponse */}
+                  <div>
+                    <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>2. Réponse — rediriger l'utilisateur</p>
+                    <pre className="text-xs p-3 rounded-lg" style={{ background: "#f1f5f9", color: "#0f172a", fontFamily: "monospace", margin: 0 }}>{`{
   "trackId": "TP-XXXX",
-  "payLink": "https://pay.robotpay.net/...",
+  "payLink": "https://pay.oxapay.com/...",
   "paymentUrl": "https://westpay.cloud/pay/crypto/TP-XXXX",
-  "expiredAt": "2026-03-27T12:30:00Z"
-}`}
-                  </code>
-                </div>
-
-                <div>
-                  <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>3. Vérifier le statut</p>
-                  <div className="relative">
-                    <code className="block text-xs p-3 rounded-lg" style={{ background: "#f1f5f9", color: "#0f172a", fontFamily: "monospace" }}>
-                      GET /api/payment/crypto/&#123;trackId&#125;/status
-                    </code>
-                    <button
-                      onClick={() => copyToClipboard("GET /api/payment/crypto/{trackId}/status", "status")}
-                      className="absolute top-2 right-2 text-xs px-2 py-1 rounded"
-                      style={{ background: "#e2e8f0", color: "#475569" }}
-                      data-testid="btn-copy-status-url"
-                    >
-                      {copiedKey === "status" ? "Copié !" : "Copier"}
-                    </button>
+  "expiredAt": "2026-05-01T12:30:00Z"
+}`}</pre>
                   </div>
-                </div>
 
-                <div>
-                  <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>Webhook RobotPay (callback)</p>
-                  <div className="relative">
-                    <code className="block text-xs p-3 rounded-lg break-all" style={{ background: "#e3f2fd", color: "#1565c0", fontFamily: "monospace" }}>
-                      {window.location.origin}/api/oxapay/callback
-                    </code>
-                    <button
-                      onClick={() => copyToClipboard(`${window.location.origin}/api/oxapay/callback`, "callback")}
-                      className="absolute top-2 right-2 text-xs px-2 py-1 rounded"
-                      style={{ background: "#bbdefb", color: "#1565c0" }}
-                      data-testid="btn-copy-callback-url"
-                    >
-                      {copiedKey === "callback" ? "Copié !" : "Copier"}
-                    </button>
+                  {/* Statut */}
+                  <div>
+                    <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>3. Vérifier le statut</p>
+                    <div className="relative">
+                      <pre className="text-xs p-3 rounded-lg" style={{ background: "#f1f5f9", color: "#0f172a", fontFamily: "monospace", margin: 0 }}>{"GET /api/payment/crypto/{trackId}/status"}</pre>
+                      <button
+                        onClick={() => copyToClipboard("GET /api/payment/crypto/{trackId}/status", "status")}
+                        className="absolute top-2 right-2 text-xs px-2 py-1 rounded"
+                        style={{ background: "#e2e8f0", color: "#475569" }}
+                        data-testid="btn-copy-status-url"
+                      >
+                        {copiedKey === "status" ? "Copié !" : "Copier"}
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-xs mt-1" style={{ color: "#78909c" }}>
-                    Configurer cette URL dans votre tableau de bord de paiement crypto comme "Callback URL".
-                  </p>
+
+                  {/* Retrait API */}
+                  <div>
+                    <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>4. Soumettre un retrait (API)</p>
+                    <div className="relative">
+                      <pre className="text-xs p-3 rounded-lg overflow-x-auto" style={{ background: "#f1f5f9", color: "#0f172a", fontFamily: "monospace", margin: 0 }}>{`POST /api/merchant/crypto/withdraw
+X-API-KEY: <votre_clé_api>
+Content-Type: application/json
+
+{
+  "currency": "USDT",
+  "amount": 5.0,
+  "walletAddress": "TXxx...abc",
+  "network": "TRC20"
+}`}</pre>
+                      <button
+                        onClick={() => copyToClipboard(`POST /api/merchant/crypto/withdraw\nX-API-KEY: <votre_clé_api>\n\n{\n  "currency": "USDT",\n  "amount": 5.0,\n  "walletAddress": "TXxx...abc",\n  "network": "TRC20"\n}`, "withdraw-api")}
+                        className="absolute top-2 right-2 text-xs px-2 py-1 rounded"
+                        style={{ background: "#e2e8f0", color: "#475569" }}
+                        data-testid="btn-copy-withdraw-example"
+                      >
+                        {copiedKey === "withdraw-api" ? "Copié !" : "Copier"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Callback */}
+                  <div>
+                    <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>Webhook OxaPay (callback)</p>
+                    <div className="relative">
+                      <code className="block text-xs p-3 rounded-lg break-all" style={{ background: "#e3f2fd", color: "#1565c0", fontFamily: "monospace" }}>
+                        {window.location.origin}/api/oxapay/callback
+                      </code>
+                      <button
+                        onClick={() => copyToClipboard(`${window.location.origin}/api/oxapay/callback`, "callback")}
+                        className="absolute top-2 right-2 text-xs px-2 py-1 rounded"
+                        style={{ background: "#bbdefb", color: "#1565c0" }}
+                        data-testid="btn-copy-callback-url"
+                      >
+                        {copiedKey === "callback" ? "Copié !" : "Copier"}
+                      </button>
+                    </div>
+                    <p className="text-xs mt-1" style={{ color: "#78909c" }}>
+                      Configurez cette URL dans votre tableau de bord OxaPay comme "Callback URL".
+                    </p>
+                  </div>
+
+                  {/* Cryptos supportées */}
+                  <div>
+                    <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>Cryptomonnaies supportées</p>
+                    <div className="flex flex-wrap gap-2">
+                      {SUPPORTED_INVOICE_CURRENCIES.map(c => (
+                        <span key={c} className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: "#fff8e1", color: "#f59e0b", border: "1px solid #fde68a" }}>
+                          {c}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-
-          {/* Transactions crypto récentes */}
-          <div>
-            <h3 className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#90a4ae" }}>
-              Transactions récentes
-            </h3>
-            {txLoading ? (
-              <MerchantLoadingSkeleton />
-            ) : txs.length === 0 ? (
-              <div className="rounded-xl p-6 text-center" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
-                <p className="text-sm font-medium" style={{ color: "#546e7a" }}>Aucune transaction crypto pour le moment.</p>
-              </div>
-            ) : (
-              <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #e2e8f0" }}>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr style={{ background: "#f8fafc" }}>
-                        <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Track ID</th>
-                        <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Montant</th>
-                        <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Crypto reçu</th>
-                        <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Statut</th>
-                        <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Date</th>
-                        <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Page</th>
-                      </tr>
-                    </thead>
-                    <tbody style={{ background: "#fff" }}>
-                      {txs.map((tx: any, idx: number) => {
-                        const s = STATUS_STYLES[tx.status] || STATUS_STYLES["new"];
-                        return (
-                          <tr
-                            key={tx.id}
-                            style={{ borderTop: idx > 0 ? "1px solid #f0f4f8" : "none" }}
-                            data-testid={`row-crypto-tx-${tx.id}`}
-                          >
-                            <td className="px-4 py-3 font-mono" style={{ color: "#1565c0" }}>
-                              {tx.trackId?.substring(0, 12)}...
-                            </td>
-                            <td className="px-4 py-3 font-semibold" style={{ color: "#1a237e" }}>
-                              {tx.amount} {tx.currency}
-                            </td>
-                            <td className="px-4 py-3" style={{ color: "#43a047" }}>
-                              {tx.payAmount ? (
-                                <span className="font-semibold">{tx.payAmount} {tx.payCurrency}</span>
-                              ) : (
-                                <span style={{ color: "#b0bec5" }}>—</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className="px-2 py-0.5 rounded-full font-bold" style={{ background: s.bg, color: s.color }}>
-                                {s.label}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3" style={{ color: "#546e7a" }}>
-                              {new Date(tx.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}
-                            </td>
-                            <td className="px-4 py-3">
-                              <a
-                                href={`/pay/crypto/${tx.trackId}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-1 font-semibold hover:underline"
-                                style={{ color: "#1976d2" }}
-                                data-testid={`link-crypto-payment-${tx.id}`}
-                              >
-                                <ExternalLink className="w-3 h-3" />
-                                Voir
-                              </a>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
+          )}
         </>
+      )}
+
+      {/* ── Modal retrait ── */}
+      {withdrawModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.45)" }}
+          onClick={() => setWithdrawModal(null)}
+          data-testid="modal-withdraw"
+        >
+          <div
+            className="rounded-2xl p-6 w-full max-w-md space-y-4 mx-4"
+            style={{ background: "#fff", border: "1px solid #e2e8f0" }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-bold" style={{ color: "#1a237e" }}>Retirer {withdrawModal.currency}</h3>
+                <p className="text-xs" style={{ color: "#90a4ae" }}>
+                  Disponible : {parseFloat(withdrawModal.available).toFixed(6)} {withdrawModal.currency}
+                </p>
+              </div>
+              <button
+                onClick={() => setWithdrawModal(null)}
+                className="text-lg font-bold"
+                style={{ color: "#90a4ae" }}
+                data-testid="btn-close-withdraw-modal"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>Montant ({withdrawModal.currency}) *</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={wdAmount}
+                  onChange={e => setWdAmount(e.target.value)}
+                  placeholder={`Max: ${parseFloat(withdrawModal.available).toFixed(6)}`}
+                  className="w-full text-sm px-3 py-2 rounded-lg"
+                  style={{ border: "1px solid #e2e8f0", background: "#f8fafc", color: "#1a237e" }}
+                  data-testid="input-withdraw-amount"
+                />
+                <button
+                  onClick={() => setWdAmount(parseFloat(withdrawModal.available).toFixed(8))}
+                  className="text-xs mt-1 underline"
+                  style={{ color: "#1565c0" }}
+                >
+                  Max
+                </button>
+              </div>
+
+              {(CRYPTO_NETWORKS[withdrawModal.currency.toUpperCase()] || []).length > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>Réseau *</label>
+                  <select
+                    value={wdNetwork}
+                    onChange={e => setWdNetwork(e.target.value)}
+                    className="w-full text-sm px-3 py-2 rounded-lg"
+                    style={{ border: "1px solid #e2e8f0", background: "#f8fafc", color: "#1a237e" }}
+                    data-testid="select-withdraw-network"
+                  >
+                    {(CRYPTO_NETWORKS[withdrawModal.currency.toUpperCase()] || []).map(n => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>Adresse de destination *</label>
+                <input
+                  type="text"
+                  value={wdAddress}
+                  onChange={e => setWdAddress(e.target.value)}
+                  placeholder="Votre adresse crypto"
+                  className="w-full text-sm px-3 py-2 rounded-lg font-mono"
+                  style={{ border: "1px solid #e2e8f0", background: "#f8fafc", color: "#1a237e" }}
+                  data-testid="input-withdraw-address"
+                />
+              </div>
+
+              {wdError && (
+                <div className="text-xs p-2 rounded-lg" style={{ background: "#ffebee", color: "#c62828" }}>{wdError}</div>
+              )}
+
+              <div className="p-3 rounded-lg text-xs" style={{ background: "#fff8e1", border: "1px solid #fde68a", color: "#92400e" }}>
+                ⚠️ Vérifiez soigneusement l'adresse et le réseau. Les retraits crypto sont irréversibles.
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setWithdrawModal(null)}
+                className="flex-1 py-2 rounded-lg text-sm font-semibold"
+                style={{ background: "#f1f5f9", color: "#546e7a" }}
+                data-testid="btn-cancel-withdraw"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleWithdraw}
+                disabled={wdLoading}
+                className="flex-1 py-2 rounded-lg text-sm font-bold"
+                style={{ background: wdLoading ? "#e2e8f0" : "#1a237e", color: wdLoading ? "#90a4ae" : "#fff" }}
+                data-testid="btn-confirm-withdraw"
+              >
+                {wdLoading ? "Envoi..." : "Confirmer le retrait"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

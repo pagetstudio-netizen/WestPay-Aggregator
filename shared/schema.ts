@@ -281,6 +281,19 @@ export const cryptoBalances = pgTable("crypto_balances", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const cryptoWithdrawalRequests = pgTable("crypto_withdrawal_requests", {
+  id: serial("id").primaryKey(),
+  merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),
+  currency: text("currency").notNull(),
+  amount: text("amount").notNull(),
+  walletAddress: text("wallet_address").notNull(),
+  network: text("network"),
+  status: text("status").notNull().default("pending"),
+  adminNote: text("admin_note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const walletTransfers = pgTable("wallet_transfers", {
   id: serial("id").primaryKey(),
   merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),
@@ -309,6 +322,9 @@ export const insertSettingSchema = createInsertSchema(settings).omit({ id: true 
 export const insertLoginLogSchema = createInsertSchema(loginLogs).omit({ id: true, createdAt: true });
 export const insertMerchantPinSchema = createInsertSchema(merchantPins).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertApiLogSchema = createInsertSchema(apiLogs).omit({ id: true, createdAt: true });
+export const insertCryptoWithdrawalRequestSchema = createInsertSchema(cryptoWithdrawalRequests).omit({ id: true, createdAt: true, updatedAt: true });
+export type CryptoWithdrawalRequest = typeof cryptoWithdrawalRequests.$inferSelect;
+export type InsertCryptoWithdrawalRequest = z.infer<typeof insertCryptoWithdrawalRequestSchema>;
 export const insertPendingPaymentSchema = createInsertSchema(pendingPayments).omit({ id: true, createdAt: true });
 export const insertWebhookLogSchema = createInsertSchema(webhookLogs).omit({ id: true, createdAt: true });
 

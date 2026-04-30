@@ -31,7 +31,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
 
-type AdminTab = "overview" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "cryptoagg" | "virements" | "reversements" | "settings" | "sdk";
+type AdminTab = "overview" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "settings" | "sdk";
 
 function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: { staleTime?: number; refetchOnWindowFocus?: boolean }) {
   const { token, logout } = useAuth();
@@ -3952,6 +3952,229 @@ const SUPPORTED_COUNTRIES = [
   "Burkina Faso", "Cameroun", "Congo Brazzaville", "Gabon", "Congo RDC", "Guinee",
 ];
 
+const CRYPTO_WD_STATUS_LABELS: Record<string, { bg: string; color: string; label: string }> = {
+  pending:    { bg: "#e3f2fd", color: "#1976d2", label: "En attente" },
+  processing: { bg: "#fff3e0", color: "#fb8c00", label: "En cours" },
+  completed:  { bg: "#e8f5e9", color: "#2e7d32", label: "Complété" },
+  rejected:   { bg: "#ffebee", color: "#c62828", label: "Rejeté" },
+};
+
+function CryptoWithdrawalsAdminPanel() {
+  const { data: withdrawals = [], isLoading, refetch } = useAdminFetch(
+    "/api/admin/crypto/withdrawals",
+    ["/api/admin/crypto/withdrawals"]
+  );
+  const { data: merchantsData = [] } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
+  const { token } = useAuth();
+  const { toast } = useToast();
+
+  const [updating, setUpdating] = useState<number | null>(null);
+  const [noteModal, setNoteModal] = useState<{ id: number; status: string } | null>(null);
+  const [adminNote, setAdminNote] = useState("");
+
+  const merchantMap = (merchantsData as any[]).reduce((acc: Record<number, string>, m: any) => {
+    acc[m.id] = m.businessName || m.email;
+    return acc;
+  }, {});
+
+  const handleUpdate = async (id: number, status: string, note?: string) => {
+    setUpdating(id);
+    try {
+      const res = await fetch(`/api/admin/crypto/withdrawals/${id}`, {
+        method: "PATCH",
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ status, adminNote: note }),
+      });
+      if (!res.ok) throw new Error("Erreur");
+      refetch();
+      toast({ title: `Retrait mis à jour : ${status}` });
+    } catch (e: any) {
+      toast({ title: e.message, variant: "destructive" });
+    } finally {
+      setUpdating(null);
+      setNoteModal(null);
+    }
+  };
+
+  const wds = (withdrawals as any[]).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold">Retraits Crypto</h2>
+          <p className="text-sm text-muted-foreground">Gérez les demandes de retrait crypto des marchands.</p>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => refetch()} data-testid="btn-refresh-crypto-withdrawals">
+          Actualiser
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <div className="text-sm text-muted-foreground">Chargement...</div>
+      ) : wds.length === 0 ? (
+        <Card>
+          <CardContent className="py-10 text-center">
+            <p className="text-muted-foreground">Aucune demande de retrait crypto.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="rounded-xl overflow-hidden border">
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-muted">
+                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Date</th>
+                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Marchand</th>
+                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Crypto</th>
+                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Montant</th>
+                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Adresse</th>
+                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Réseau</th>
+                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Statut</th>
+                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="bg-background">
+                {wds.map((wr: any, idx: number) => {
+                  const s = CRYPTO_WD_STATUS_LABELS[wr.status] || CRYPTO_WD_STATUS_LABELS["pending"];
+                  return (
+                    <tr key={wr.id} style={{ borderTop: idx > 0 ? "1px solid hsl(var(--border))" : "none" }} data-testid={`row-admin-wd-${wr.id}`}>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {new Date(wr.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                      </td>
+                      <td className="px-4 py-3 font-semibold">{merchantMap[wr.merchantId] || `#${wr.merchantId}`}</td>
+                      <td className="px-4 py-3 font-bold text-amber-500">{wr.currency}</td>
+                      <td className="px-4 py-3 font-semibold">{parseFloat(wr.amount).toFixed(6)}</td>
+                      <td className="px-4 py-3 font-mono max-w-[120px] truncate text-muted-foreground" title={wr.walletAddress}>
+                        {wr.walletAddress.slice(0, 8)}...{wr.walletAddress.slice(-6)}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{wr.network || "—"}</td>
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-0.5 rounded-full font-bold text-xs" style={{ background: s.bg, color: s.color }}>
+                          {s.label}
+                        </span>
+                        {wr.adminNote && <p className="text-xs text-muted-foreground mt-1">{wr.adminNote}</p>}
+                      </td>
+                      <td className="px-4 py-3">
+                        {wr.status === "pending" && (
+                          <div className="flex gap-1 flex-wrap">
+                            <button
+                              onClick={() => handleUpdate(wr.id, "processing")}
+                              disabled={updating === wr.id}
+                              className="text-xs px-2 py-1 rounded font-semibold"
+                              style={{ background: "#fff3e0", color: "#fb8c00" }}
+                              data-testid={`btn-process-wd-${wr.id}`}
+                            >
+                              En cours
+                            </button>
+                            <button
+                              onClick={() => { setNoteModal({ id: wr.id, status: "completed" }); setAdminNote(""); }}
+                              disabled={updating === wr.id}
+                              className="text-xs px-2 py-1 rounded font-semibold"
+                              style={{ background: "#e8f5e9", color: "#2e7d32" }}
+                              data-testid={`btn-complete-wd-${wr.id}`}
+                            >
+                              Complété
+                            </button>
+                            <button
+                              onClick={() => { setNoteModal({ id: wr.id, status: "rejected" }); setAdminNote(""); }}
+                              disabled={updating === wr.id}
+                              className="text-xs px-2 py-1 rounded font-semibold"
+                              style={{ background: "#ffebee", color: "#c62828" }}
+                              data-testid={`btn-reject-wd-${wr.id}`}
+                            >
+                              Rejeter
+                            </button>
+                          </div>
+                        )}
+                        {wr.status === "processing" && (
+                          <div className="flex gap-1 flex-wrap">
+                            <button
+                              onClick={() => { setNoteModal({ id: wr.id, status: "completed" }); setAdminNote(""); }}
+                              disabled={updating === wr.id}
+                              className="text-xs px-2 py-1 rounded font-semibold"
+                              style={{ background: "#e8f5e9", color: "#2e7d32" }}
+                              data-testid={`btn-complete-wd-processing-${wr.id}`}
+                            >
+                              Marquer complété
+                            </button>
+                            <button
+                              onClick={() => { setNoteModal({ id: wr.id, status: "rejected" }); setAdminNote(""); }}
+                              disabled={updating === wr.id}
+                              className="text-xs px-2 py-1 rounded font-semibold"
+                              style={{ background: "#ffebee", color: "#c62828" }}
+                              data-testid={`btn-reject-wd-processing-${wr.id}`}
+                            >
+                              Rejeter
+                            </button>
+                          </div>
+                        )}
+                        {(wr.status === "completed" || wr.status === "rejected") && (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Modal note admin */}
+      {noteModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.45)" }}
+          onClick={() => setNoteModal(null)}
+        >
+          <div
+            className="rounded-2xl p-6 w-full max-w-sm space-y-4 mx-4 bg-background border"
+            onClick={e => e.stopPropagation()}
+            data-testid="modal-admin-wd-note"
+          >
+            <h3 className="font-bold">
+              {noteModal.status === "completed" ? "Marquer comme complété" : "Rejeter le retrait"}
+            </h3>
+            <div>
+              <label className="block text-xs font-semibold mb-1 text-muted-foreground">Note admin (optionnel)</label>
+              <textarea
+                value={adminNote}
+                onChange={e => setAdminNote(e.target.value)}
+                placeholder="Hash de transaction, raison du rejet..."
+                rows={3}
+                className="w-full text-sm px-3 py-2 rounded-lg border bg-background"
+                data-testid="input-admin-wd-note"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setNoteModal(null)}
+                className="flex-1 py-2 rounded-lg text-sm font-semibold bg-muted text-muted-foreground"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={() => handleUpdate(noteModal.id, noteModal.status, adminNote)}
+                disabled={updating === noteModal.id}
+                className="flex-1 py-2 rounded-lg text-sm font-bold"
+                style={{
+                  background: noteModal.status === "completed" ? "#2e7d32" : "#c62828",
+                  color: "#fff"
+                }}
+                data-testid="btn-confirm-admin-wd-action"
+              >
+                {updating === noteModal.id ? "Mise à jour..." : "Confirmer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 type CryptoAggType = {
   id: number;
   name: string;
@@ -4605,6 +4828,7 @@ export default function AdminDashboard() {
     { title: "Paiement", icon: Zap, tab: "omnipay" },
     { title: "Mbiyo", icon: Globe, tab: "mbiyo" },
     { title: "Crypto", icon: Bitcoin, tab: "cryptoagg" },
+    { title: "Retraits Crypto", icon: Download, tab: "cryptowithdrawals" },
     { title: "Virements", icon: ArrowUpRight, tab: "virements" },
     { title: "Reversements", icon: Download, tab: "reversements" },
     { title: "Parametres", icon: Settings, tab: "settings" },
@@ -4684,6 +4908,7 @@ export default function AdminDashboard() {
             {activeTab === "omnipay" && <OmniPayPanel />}
             {activeTab === "mbiyo" && <MbiyoPanel />}
             {activeTab === "cryptoagg" && <CryptoAggPanel />}
+            {activeTab === "cryptowithdrawals" && <CryptoWithdrawalsAdminPanel />}
             {activeTab === "virements" && <AdminWalletTransfersPanel />}
             {activeTab === "reversements" && <AdminWithdrawalsPanel />}
             {activeTab === "settings" && <SettingsPanel />}
