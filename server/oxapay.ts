@@ -1,6 +1,6 @@
 import crypto from "crypto";
 
-const OXAPAY_BASE_URL = "https://api.oxapay.com/v1";
+const OXAPAY_BASE_URL = "https://api.oxapay.com";
 
 export interface OxaPayInvoiceRequest {
   amount: number;
