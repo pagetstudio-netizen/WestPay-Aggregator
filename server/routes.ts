@@ -1456,6 +1456,148 @@ export async function registerRoutes(
     }
   });
 
+  // ── Public: get crypto payment link details ─────────────────────────────
+  app.get("/api/crypto-link/:uniqueId", async (req, res) => {
+    try {
+      const link = await storage.getCryptoPaymentLinkByUniqueId(req.params.uniqueId);
+      if (!link || !link.active) {
+        return res.status(404).json({ message: "Lien de paiement introuvable ou désactivé" });
+      }
+      const merchant = await storage.getMerchantById(link.merchantId);
+      if (!merchant || merchant.suspended) {
+        return res.status(404).json({ message: "Marchand introuvable ou suspendu" });
+      }
+      res.json({
+        uniqueId: link.uniqueId,
+        name: link.name,
+        currency: link.currency,
+        amountType: link.amountType,
+        amount: link.amount,
+        description: link.description,
+        returnUrl: link.returnUrl,
+        merchantName: merchant.name,
+        merchantSlug: merchant.slug,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Public: pay via crypto link uniqueId ─────────────────────────────────
+  app.post("/api/crypto-link/:uniqueId/pay", async (req, res) => {
+    try {
+      const link = await storage.getCryptoPaymentLinkByUniqueId(req.params.uniqueId);
+      if (!link || !link.active) {
+        return res.status(404).json({ message: "Lien de paiement introuvable ou désactivé" });
+      }
+      const merchant = await storage.getMerchantById(link.merchantId);
+      if (!merchant || merchant.suspended) {
+        return res.status(404).json({ message: "Marchand introuvable ou suspendu" });
+      }
+      const { customAmount } = req.body;
+      const isLibre = link.amountType === "libre";
+      const amountNum = isLibre ? Number(customAmount) : Number(link.amount);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        return res.status(400).json({ message: "Montant invalide" });
+      }
+      const merchantAggs = await storage.getCryptoAggregatorsByMerchant(merchant.id);
+      if (merchantAggs.length === 0) {
+        return res.status(403).json({ message: "Le paiement crypto n'est pas activé pour ce marchand" });
+      }
+      const agg = merchantAggs[0];
+      const callbackUrl = `${process.env.APP_URL || "https://westpay.cloud"}/api/oxapay/callback`;
+      const XOF_PER_USD = parseInt(process.env.XOF_PER_USD || "600", 10);
+      const currency = link.currency;
+      const isXof = currency.toUpperCase() === "XOF" || currency.toUpperCase() === "FCFA";
+      const invoiceAmount = isXof ? parseFloat((amountNum / XOF_PER_USD).toFixed(2)) : amountNum;
+      const invoiceCurrency = isXof ? "USD" : currency.toUpperCase();
+      const invoiceResult = await oxapayCreateInvoice(agg.apiKey, {
+        amount: invoiceAmount,
+        currency: invoiceCurrency,
+        lifeTime: 30,
+        feePaidByPayer: 1,
+        callbackUrl,
+        ...(link.returnUrl && { returnUrl: link.returnUrl }),
+        ...(link.description && { description: link.description }),
+        orderId: link.uniqueId,
+      });
+      if (invoiceResult.result !== 100 || !invoiceResult.trackId) {
+        return res.status(502).json({ message: invoiceResult.message || "Échec de création de l'invoice" });
+      }
+      await storage.createCryptoTransaction({
+        aggregatorId: agg.id,
+        merchantId: merchant.id,
+        trackId: invoiceResult.trackId,
+        amount: String(amountNum),
+        currency: currency.toUpperCase(),
+        status: "pending",
+        callbackUrl,
+        ...(link.returnUrl && { returnUrl: link.returnUrl }),
+        ...(link.description && { description: link.description }),
+        orderId: link.uniqueId,
+      });
+      res.json({
+        success: true,
+        trackId: invoiceResult.trackId,
+        paymentUrl: `${process.env.APP_URL || "https://westpay.cloud"}/pay/crypto/${invoiceResult.trackId}`,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Merchant: create crypto payment link ────────────────────────────────
+  app.post("/api/merchant/crypto-links", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const { name, currency, amountType, amount, description, returnUrl } = req.body;
+      if (!name || !currency || !amountType) {
+        return res.status(400).json({ message: "Nom, devise et type de montant requis" });
+      }
+      if (amountType === "fixed" && (!amount || Number(amount) <= 0)) {
+        return res.status(400).json({ message: "Montant requis pour un lien à montant fixe" });
+      }
+      const uniqueId = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 6);
+      const link = await storage.createCryptoPaymentLink({
+        merchantId,
+        uniqueId,
+        name,
+        currency: currency.toUpperCase(),
+        amountType,
+        amount: amountType === "fixed" ? String(amount) : null,
+        description: description || null,
+        returnUrl: returnUrl || null,
+        active: true,
+      });
+      res.json({ success: true, link, url: `${process.env.APP_URL || "https://westpay.cloud"}/c/${uniqueId}` });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Merchant: list crypto payment links ─────────────────────────────────
+  app.get("/api/merchant/crypto-links", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const links = await storage.getCryptoPaymentLinksByMerchant(merchantId);
+      const BASE = process.env.APP_URL || "https://westpay.cloud";
+      res.json(links.map(l => ({ ...l, url: `${BASE}/c/${l.uniqueId}` })));
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Merchant: delete crypto payment link ─────────────────────────────────
+  app.delete("/api/merchant/crypto-links/:id", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      await storage.deleteCryptoPaymentLink(Number(req.params.id), merchantId);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // ── Public crypto payment: create OxaPay invoice from slug link ───────────
   app.post("/api/pay-crypto/:slug", async (req, res) => {
     try {

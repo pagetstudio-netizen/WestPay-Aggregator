@@ -2124,7 +2124,8 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
   const [invFreePrice, setInvFreePrice] = useState(false);
   const [invAmount, setInvAmount] = useState("");
   const [invSelectedCurrencies, setInvSelectedCurrencies] = useState<string[]>(["USDT"]);
-  const [invResults, setInvResults] = useState<Array<{ paymentUrl: string; currency: string }>>([]);
+  const [invLoading, setInvLoading] = useState(false);
+  const [invResults, setInvResults] = useState<Array<{ paymentUrl: string; currency: string; name: string }>>([]);
   const [invError, setInvError] = useState("");
 
   const INVOICE_CURRENCIES = ["USDT", "BTC", "ETH", "LTC", "TRX", "MATIC", "BNB", "DOGE"];
@@ -2143,22 +2144,38 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
     }
   };
 
-  const handleCreateInvoice = () => {
+  const handleCreateInvoice = async () => {
     setInvError(""); setInvResults([]);
     if (!invDescription.trim()) { setInvError("Nom du produit requis"); return; }
     if (invSelectedCurrencies.length === 0) { setInvError("Sélectionnez au moins une cryptomonnaie"); return; }
     const amt = invFreePrice ? 0 : parseFloat(invAmount);
     if (!invFreePrice && (isNaN(amt) || amt <= 0)) { setInvError("Montant invalide"); return; }
-    const slug = user?.slug || "";
-    if (!slug) { setInvError("Slug marchand introuvable"); return; }
-    const BASE = "https://westpay.cloud";
-    const results: Array<{ paymentUrl: string; currency: string }> = invSelectedCurrencies.map(currency => {
-      const params = new URLSearchParams({ currency, description: invDescription.trim() });
-      if (!invFreePrice) params.set("amount", String(amt));
-      if (invReturnUrl.trim()) params.set("returnUrl", invReturnUrl.trim());
-      return { currency, paymentUrl: `${BASE}/c/${slug}?${params.toString()}` };
-    });
-    setInvResults(results);
+    setInvLoading(true);
+    try {
+      const results: Array<{ paymentUrl: string; currency: string; name: string }> = [];
+      for (const currency of invSelectedCurrencies) {
+        const res = await fetch("/api/merchant/crypto-links", {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: invDescription.trim(),
+            currency,
+            amountType: invFreePrice ? "libre" : "fixed",
+            amount: invFreePrice ? undefined : amt,
+            description: invDescription.trim(),
+            returnUrl: invReturnUrl.trim() || undefined,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) { setInvError(data.message || "Erreur de création"); setInvLoading(false); return; }
+        results.push({ currency, paymentUrl: data.url, name: invDescription.trim() });
+      }
+      setInvResults(results);
+    } catch (e: any) {
+      setInvError(e.message || "Erreur inattendue");
+    } finally {
+      setInvLoading(false);
+    }
   };
 
   if (aggLoading) return <MerchantLoadingSkeleton />;
@@ -2391,11 +2408,13 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
 
                 <button
                   onClick={handleCreateInvoice}
-                  className="w-full py-3 rounded-xl text-sm font-bold"
-                  style={{ background: "#1a237e", color: "#fff" }}
+                  disabled={invLoading}
+                  className="w-full py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2"
+                  style={{ background: invLoading ? "#9fa8da" : "#1a237e", color: "#fff" }}
                   data-testid="btn-create-invoice"
                 >
-                  Générer le lien de paiement
+                  {invLoading && <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                  {invLoading ? "Création en cours…" : "Générer le lien de paiement"}
                 </button>
               </div>
 

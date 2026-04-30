@@ -401,3 +401,21 @@ export type InsertCryptoTransaction = z.infer<typeof insertCryptoTransactionSche
 export const insertCryptoBalanceSchema = createInsertSchema(cryptoBalances).omit({ id: true, updatedAt: true });
 export type CryptoBalance = typeof cryptoBalances.$inferSelect;
 export type InsertCryptoBalance = z.infer<typeof insertCryptoBalanceSchema>;
+
+export const cryptoPaymentLinks = pgTable("crypto_payment_links", {
+  id: serial("id").primaryKey(),
+  merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),
+  uniqueId: text("unique_id").notNull().unique(),
+  name: text("name").notNull(),
+  currency: text("currency").notNull(),
+  amountType: text("amount_type").notNull().default("fixed"),
+  amount: text("amount"),
+  description: text("description"),
+  returnUrl: text("return_url"),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertCryptoPaymentLinkSchema = createInsertSchema(cryptoPaymentLinks).omit({ id: true, createdAt: true });
+export type CryptoPaymentLink = typeof cryptoPaymentLinks.$inferSelect;
+export type InsertCryptoPaymentLink = z.infer<typeof insertCryptoPaymentLinkSchema>;

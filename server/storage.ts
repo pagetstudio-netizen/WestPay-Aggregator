@@ -2,7 +2,7 @@ import {
   admins, merchants, merchantCountries, transactions, smsLogs, numbers, settings, loginLogs,
   merchantPins, apiLogs, pendingPayments, webhookLogs, telegramActivationCodes, paymentLinks,
   walletTransfers, walletTransferCountries, withdrawals, withdrawalOperators, statsBaselines,
-  cryptoAggregators, cryptoAggregatorCountries, cryptoAggregatorMerchants, cryptoTransactions, cryptoBalances, cryptoWithdrawalRequests,
+  cryptoAggregators, cryptoAggregatorCountries, cryptoAggregatorMerchants, cryptoTransactions, cryptoBalances, cryptoWithdrawalRequests, cryptoPaymentLinks,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
@@ -21,6 +21,7 @@ import {
   type CryptoTransaction, type InsertCryptoTransaction,
   type CryptoBalance, type InsertCryptoBalance,
   type CryptoWithdrawalRequest, type InsertCryptoWithdrawalRequest,
+  type CryptoPaymentLink, type InsertCryptoPaymentLink,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and, gte, lt, inArray, isNull } from "drizzle-orm";
@@ -187,6 +188,11 @@ export interface IStorage {
   getAllCryptoWithdrawalRequests(): Promise<CryptoWithdrawalRequest[]>;
   updateCryptoWithdrawalRequest(id: number, status: string, adminNote?: string): Promise<void>;
   deductCryptoBalance(merchantId: number, currency: string, amount: number): Promise<void>;
+
+  createCryptoPaymentLink(data: InsertCryptoPaymentLink): Promise<CryptoPaymentLink>;
+  getCryptoPaymentLinkByUniqueId(uniqueId: string): Promise<CryptoPaymentLink | undefined>;
+  getCryptoPaymentLinksByMerchant(merchantId: number): Promise<CryptoPaymentLink[]>;
+  deleteCryptoPaymentLink(id: number, merchantId: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1071,6 +1077,27 @@ export class DatabaseStorage implements IStorage {
         .set({ balance: newBalance, updatedAt: new Date() })
         .where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
     }
+  }
+
+  async createCryptoPaymentLink(data: InsertCryptoPaymentLink): Promise<CryptoPaymentLink> {
+    const [created] = await db.insert(cryptoPaymentLinks).values(data).returning();
+    return created;
+  }
+
+  async getCryptoPaymentLinkByUniqueId(uniqueId: string): Promise<CryptoPaymentLink | undefined> {
+    const [row] = await db.select().from(cryptoPaymentLinks).where(eq(cryptoPaymentLinks.uniqueId, uniqueId));
+    return row;
+  }
+
+  async getCryptoPaymentLinksByMerchant(merchantId: number): Promise<CryptoPaymentLink[]> {
+    return db.select().from(cryptoPaymentLinks)
+      .where(eq(cryptoPaymentLinks.merchantId, merchantId))
+      .orderBy(desc(cryptoPaymentLinks.createdAt));
+  }
+
+  async deleteCryptoPaymentLink(id: number, merchantId: number): Promise<void> {
+    await db.delete(cryptoPaymentLinks)
+      .where(and(eq(cryptoPaymentLinks.id, id), eq(cryptoPaymentLinks.merchantId, merchantId)));
   }
 }
 

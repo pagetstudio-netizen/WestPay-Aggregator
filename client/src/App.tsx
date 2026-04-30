@@ -33,7 +33,7 @@ function Router() {
       <Route path="/pay/crypto/:trackId" component={CryptoPaymentPage} />
       <Route path="/pay/:slug" component={PaymentPage} />
       <Route path="/link/:uniqueId" component={PaymentLinkPage} />
-      <Route path="/c/:slug" component={CryptoLinkPage} />
+      <Route path="/c/:uniqueId" component={CryptoLinkPage} />
       <Route component={NotFound} />
     </Switch>
   );

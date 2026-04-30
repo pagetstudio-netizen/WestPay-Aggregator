@@ -3,22 +3,21 @@ import { useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Check, ExternalLink } from "lucide-react";
 
-type MerchantInfo = {
-  id: number;
+type LinkInfo = {
+  uniqueId: string;
   name: string;
-  slug: string;
+  currency: string;
+  amountType: string;
+  amount: string | null;
+  description: string | null;
+  returnUrl: string | null;
+  merchantName: string;
+  merchantSlug: string;
 };
 
 export default function CryptoLinkPage() {
-  const [, params] = useRoute("/c/:slug");
-  const slug = params?.slug || "";
-
-  const urlParams = new URLSearchParams(window.location.search);
-  const currency = urlParams.get("currency") || "USDT";
-  const amountParam = urlParams.get("amount");
-  const descriptionParam = urlParams.get("description") || "";
-  const returnUrl = urlParams.get("returnUrl") || "";
-  const isLibre = !amountParam || amountParam === "0";
+  const [, params] = useRoute("/c/:uniqueId");
+  const uniqueId = params?.uniqueId || "";
 
   const [step, setStep] = useState(1);
   const [customAmount, setCustomAmount] = useState("");
@@ -26,36 +25,42 @@ export default function CryptoLinkPage() {
   const [error, setError] = useState("");
   const [paymentUrl, setPaymentUrl] = useState("");
 
-  const { data: merchant, isLoading, isError } = useQuery<MerchantInfo>({
-    queryKey: ["/api/merchant/public", slug],
+  const { data: link, isLoading, isError } = useQuery<LinkInfo>({
+    queryKey: ["/api/crypto-link", uniqueId],
     queryFn: async () => {
-      const res = await fetch(`/api/merchant/public/${slug}`);
-      if (!res.ok) throw new Error("Marchand introuvable");
+      const res = await fetch(`/api/crypto-link/${uniqueId}`);
+      if (!res.ok) throw new Error("Lien introuvable");
       return res.json();
     },
-    enabled: !!slug,
+    enabled: !!uniqueId,
     retry: false,
   });
 
   useEffect(() => {
-    document.title = merchant ? `Payer ${merchant.name} — RobotPay` : "Paiement — RobotPay";
-  }, [merchant]);
+    document.title = link ? `Payer ${link.merchantName} — RobotPay` : "Paiement — RobotPay";
+  }, [link]);
 
-  const fixedAmount = !isLibre ? parseFloat(amountParam!) : null;
+  const isLibre = link?.amountType === "libre";
+  const fixedAmount = link?.amount ? parseFloat(link.amount) : null;
+
+  const displayAmount = isLibre
+    ? (customAmount ? parseFloat(customAmount) : null)
+    : fixedAmount;
 
   const handlePay = async () => {
-    const amt = isLibre ? parseFloat(customAmount) : fixedAmount!;
-    if (isNaN(amt) || amt <= 0) {
+    if (isLibre && (!customAmount || parseFloat(customAmount) <= 0)) {
       setError("Veuillez saisir un montant valide");
       return;
     }
     setError("");
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/pay-crypto/${slug}`, {
+      const body: any = {};
+      if (isLibre) body.customAmount = parseFloat(customAmount);
+      const res = await fetch(`/api/crypto-link/${uniqueId}/pay`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: amt, currency, description: descriptionParam, returnUrl }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Erreur lors de la création du paiement");
@@ -77,10 +82,10 @@ export default function CryptoLinkPage() {
     );
   }
 
-  if (isError || !merchant) {
+  if (isError || !link) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "#00b050" }}>
-        <div className="bg-white rounded-md p-6 max-w-sm w-full text-center space-y-3" style={{ color: "#1f2937" }}>
+        <div className="bg-white rounded-md p-6 max-w-sm w-full text-center space-y-3">
           <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto">
             <span className="text-red-600 text-xl font-bold">!</span>
           </div>
@@ -91,15 +96,8 @@ export default function CryptoLinkPage() {
     );
   }
 
-  const displayAmount = isLibre
-    ? (customAmount ? parseFloat(customAmount) : null)
-    : fixedAmount;
-
   return (
-    <div
-      className="min-h-screen flex flex-col items-center justify-center"
-      style={{ background: "#00b050" }}
-    >
+    <div className="min-h-screen flex flex-col items-center justify-center" style={{ background: "#00b050" }}>
       <style>{`
         .crypto-card { color: #1f2937; }
         .crypto-card input {
@@ -129,7 +127,6 @@ export default function CryptoLinkPage() {
           border: none;
           cursor: pointer;
           transition: opacity 0.15s, transform 0.1s;
-          -webkit-tap-highlight-color: transparent;
         }
         .pay-btn:active:not(:disabled) { transform: scale(0.97); }
         .pay-btn:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -148,7 +145,7 @@ export default function CryptoLinkPage() {
           {displayAmount !== null ? (
             <p className="text-white font-bold text-3xl">
               {displayAmount.toLocaleString("fr-FR")}
-              <span className="text-base ml-2">{currency}</span>
+              <span className="text-base ml-2">{link.currency}</span>
             </p>
           ) : (
             <p className="text-white font-bold text-2xl opacity-60">Montant libre</p>
@@ -215,15 +212,13 @@ export default function CryptoLinkPage() {
             <div className="space-y-4">
               <div>
                 <p className="text-sm font-semibold mb-1" style={{ color: "#374151" }}>Marchand</p>
-                <p className="text-base font-bold" style={{ color: "#111827" }}>{merchant.name}</p>
+                <p className="text-base font-bold" style={{ color: "#111827" }}>{link.merchantName}</p>
               </div>
 
-              {descriptionParam && (
-                <div>
-                  <p className="text-sm font-semibold mb-1" style={{ color: "#374151" }}>Description</p>
-                  <p className="text-sm" style={{ color: "#4b5563" }}>{descriptionParam}</p>
-                </div>
-              )}
+              <div>
+                <p className="text-sm font-semibold mb-1" style={{ color: "#374151" }}>Objet du paiement</p>
+                <p className="text-sm" style={{ color: "#4b5563" }}>{link.name}</p>
+              </div>
 
               <div>
                 <p className="text-sm font-semibold mb-1" style={{ color: "#374151" }}>Devise de paiement</p>
@@ -231,14 +226,14 @@ export default function CryptoLinkPage() {
                   className="inline-block px-3 py-1 rounded-full text-sm font-bold"
                   style={{ background: "#fff8e1", color: "#b45309" }}
                 >
-                  {currency}
+                  {link.currency}
                 </span>
               </div>
 
               {isLibre && (
                 <div>
                   <label className="block text-sm font-medium mb-1" style={{ color: "#374151" }}>
-                    Montant à payer ({currency})
+                    Montant à payer ({link.currency})
                   </label>
                   <input
                     type="number"
@@ -301,7 +296,7 @@ export default function CryptoLinkPage() {
 
           <div className="mt-4 pt-3" style={{ borderTop: "1px solid #e5e7eb" }}>
             <p className="text-xs text-center" style={{ color: "#9ca3af" }}>
-              Paiement sécurisé via RobotPay · {currency}
+              Paiement sécurisé via RobotPay · {link.currency}
             </p>
           </div>
         </div>
