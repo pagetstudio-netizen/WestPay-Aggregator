@@ -4027,7 +4027,9 @@ function CryptoWithdrawalsAdminPanel() {
                   <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Date</th>
                   <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Marchand</th>
                   <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Crypto</th>
-                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Montant</th>
+                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Brut demandé</th>
+                  <th className="text-left px-4 py-3 font-semibold" style={{ color: "#dc2626" }}>Frais (5%)</th>
+                  <th className="text-left px-4 py-3 font-semibold" style={{ color: "#166534" }}>À envoyer</th>
                   <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Adresse</th>
                   <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Réseau</th>
                   <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Statut</th>
@@ -4045,6 +4047,12 @@ function CryptoWithdrawalsAdminPanel() {
                       <td className="px-4 py-3 font-semibold">{merchantMap[wr.merchantId] || `#${wr.merchantId}`}</td>
                       <td className="px-4 py-3 font-bold text-amber-500">{wr.currency}</td>
                       <td className="px-4 py-3 font-semibold">{parseFloat(wr.amount).toFixed(6)}</td>
+                      <td className="px-4 py-3 font-mono" style={{ color: "#dc2626" }}>
+                        −{wr.feeAmount ? parseFloat(wr.feeAmount).toFixed(6) : (parseFloat(wr.amount) * 0.05).toFixed(6)}
+                      </td>
+                      <td className="px-4 py-3 font-bold font-mono" style={{ color: "#166534" }}>
+                        {wr.netAmount ? parseFloat(wr.netAmount).toFixed(6) : (parseFloat(wr.amount) * 0.95).toFixed(6)}
+                      </td>
                       <td className="px-4 py-3 font-mono max-w-[120px] truncate text-muted-foreground" title={wr.walletAddress}>
                         {wr.walletAddress.slice(0, 8)}...{wr.walletAddress.slice(-6)}
                       </td>

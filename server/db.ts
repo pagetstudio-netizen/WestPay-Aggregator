@@ -356,6 +356,8 @@ export async function runMigrations() {
       merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
       currency text NOT NULL,
       amount text NOT NULL,
+      fee_amount text NOT NULL DEFAULT '0',
+      net_amount text NOT NULL DEFAULT '0',
       wallet_address text NOT NULL,
       network text,
       status text NOT NULL DEFAULT 'pending',
@@ -363,6 +365,8 @@ export async function runMigrations() {
       created_at timestamp NOT NULL DEFAULT now(),
       updated_at timestamp NOT NULL DEFAULT now()
     )`);
+    await client.query(`ALTER TABLE crypto_withdrawal_requests ADD COLUMN IF NOT EXISTS fee_amount text NOT NULL DEFAULT '0'`);
+    await client.query(`ALTER TABLE crypto_withdrawal_requests ADD COLUMN IF NOT EXISTS net_amount text NOT NULL DEFAULT '0'`);
 
     // Auto-seeder l'agrégateur OxaPay depuis la variable d'environnement
     const oxapayKey = process.env.OXAPAY_API_KEY;

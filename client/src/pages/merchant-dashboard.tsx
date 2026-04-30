@@ -2181,6 +2181,12 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
           {/* ── Soldes ── */}
           {cryptoTab === "balances" && (
             <div className="space-y-4">
+              <div className="rounded-lg px-3 py-2 text-xs flex items-start gap-2" style={{ background: "#fef9c3", border: "1px solid #fde047", color: "#713f12" }}>
+                <span className="text-base leading-none mt-0.5">💡</span>
+                <span>
+                  <strong>Frais RobotPay :</strong> 5% sur chaque dépôt reçu et 5% sur chaque retrait. Ces frais sont déduits automatiquement.
+                </span>
+              </div>
               {balances.length === 0 ? (
                 <div className="rounded-xl p-6 text-center" style={{ background: "#f8fafc", border: "1px solid #e2e8f0" }}>
                   <Bitcoin className="w-8 h-8 mx-auto mb-2" style={{ color: "#e2e8f0" }} />
@@ -2379,7 +2385,9 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                         <tr style={{ background: "#f8fafc" }}>
                           <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Date</th>
                           <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Crypto</th>
-                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Montant</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Montant brut</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#dc2626" }}>Frais (5%)</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#166534" }}>Net reçu</th>
                           <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Adresse</th>
                           <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Réseau</th>
                           <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Statut</th>
@@ -2399,6 +2407,12 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                               </td>
                               <td className="px-4 py-3 font-bold" style={{ color: "#f59e0b" }}>{wr.currency}</td>
                               <td className="px-4 py-3 font-semibold" style={{ color: "#1a237e" }}>{parseFloat(wr.amount).toFixed(6)}</td>
+                              <td className="px-4 py-3 font-mono" style={{ color: "#dc2626" }}>
+                                −{wr.feeAmount ? parseFloat(wr.feeAmount).toFixed(6) : (parseFloat(wr.amount) * 0.05).toFixed(6)}
+                              </td>
+                              <td className="px-4 py-3 font-semibold font-mono" style={{ color: "#166534" }}>
+                                {wr.netAmount ? parseFloat(wr.netAmount).toFixed(6) : (parseFloat(wr.amount) * 0.95).toFixed(6)}
+                              </td>
                               <td className="px-4 py-3 font-mono max-w-[120px] truncate" style={{ color: "#546e7a" }} title={wr.walletAddress}>
                                 {wr.walletAddress.slice(0, 10)}...{wr.walletAddress.slice(-6)}
                               </td>
@@ -2592,10 +2606,12 @@ Content-Type: application/json
                     <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>2. Réponse — rediriger l'utilisateur</p>
                     <pre className="text-xs p-3 rounded-lg" style={{ background: "#f1f5f9", color: "#0f172a", fontFamily: "monospace", margin: 0 }}>{`{
   "trackId": "TP-XXXX",
-  "payLink": "https://pay.oxapay.com/...",
   "paymentUrl": "https://westpay.cloud/pay/crypto/TP-XXXX",
   "expiredAt": "2026-05-01T12:30:00Z"
 }`}</pre>
+                    <p className="text-xs mt-1" style={{ color: "#78909c" }}>
+                      Redirigez votre client vers <code className="bg-gray-100 px-1 rounded text-xs font-mono">paymentUrl</code> pour effectuer le paiement.
+                    </p>
                   </div>
 
                   {/* Statut */}
@@ -2639,24 +2655,27 @@ Content-Type: application/json
                     </div>
                   </div>
 
-                  {/* Callback */}
-                  <div>
-                    <p className="text-xs font-bold mb-1" style={{ color: "#546e7a" }}>Webhook OxaPay (callback)</p>
-                    <div className="relative">
-                      <code className="block text-xs p-3 rounded-lg break-all" style={{ background: "#e3f2fd", color: "#1565c0", fontFamily: "monospace" }}>
-                        {window.location.origin}/api/oxapay/callback
-                      </code>
-                      <button
-                        onClick={() => copyToClipboard(`${window.location.origin}/api/oxapay/callback`, "callback")}
-                        className="absolute top-2 right-2 text-xs px-2 py-1 rounded"
-                        style={{ background: "#bbdefb", color: "#1565c0" }}
-                        data-testid="btn-copy-callback-url"
-                      >
-                        {copiedKey === "callback" ? "Copié !" : "Copier"}
-                      </button>
+                  {/* Webhook Notifications */}
+                  <div className="rounded-lg p-3" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+                    <p className="text-xs font-bold mb-1" style={{ color: "#166534" }}>5. Notifications webhook (recommandé)</p>
+                    <p className="text-xs mb-2" style={{ color: "#166534" }}>
+                      RobotPay envoie automatiquement une notification <code className="bg-green-100 px-1 rounded text-xs font-mono">POST</code> vers votre URL webhook dès qu'un paiement est confirmé.
+                    </p>
+                    <div className="rounded p-2 text-xs font-mono mb-2" style={{ background: "#dcfce7", color: "#15803d" }}>
+{`{
+  "event": "crypto.payment.confirmed",
+  "trackId": "TP-XXXX",
+  "status": "paid",
+  "currency": "USDT",
+  "grossAmount": 10.0,
+  "feeAmount": 0.5,
+  "netAmount": 9.5,
+  "orderId": "CMD-123",
+  "timestamp": "2026-05-01T12:35:00Z"
+}`}
                     </div>
-                    <p className="text-xs mt-1" style={{ color: "#78909c" }}>
-                      Configurez cette URL dans votre tableau de bord OxaPay comme "Callback URL".
+                    <p className="text-xs" style={{ color: "#166534" }}>
+                      Configurez votre URL webhook dans l'onglet <strong>Webhook</strong> de votre tableau de bord. La signature HMAC est envoyée dans le header <code className="bg-green-100 px-1 rounded font-mono">X-RobotPay-Signature</code>.
                     </p>
                   </div>
 
@@ -2760,6 +2779,24 @@ Content-Type: application/json
                   data-testid="input-withdraw-address"
                 />
               </div>
+
+              {wdAmount && !isNaN(parseFloat(wdAmount)) && parseFloat(wdAmount) > 0 && (
+                <div className="p-3 rounded-lg text-xs space-y-1" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+                  <div className="flex justify-between" style={{ color: "#374151" }}>
+                    <span>Montant demandé</span>
+                    <span className="font-mono font-semibold">{parseFloat(wdAmount).toFixed(6)} {withdrawModal.currency}</span>
+                  </div>
+                  <div className="flex justify-between" style={{ color: "#dc2626" }}>
+                    <span>Frais RobotPay (5%)</span>
+                    <span className="font-mono">−{(parseFloat(wdAmount) * 0.05).toFixed(6)} {withdrawModal.currency}</span>
+                  </div>
+                  <div className="h-px my-1" style={{ background: "#bbf7d0" }} />
+                  <div className="flex justify-between font-bold" style={{ color: "#166534" }}>
+                    <span>Vous recevez</span>
+                    <span className="font-mono">{(parseFloat(wdAmount) * 0.95).toFixed(6)} {withdrawModal.currency}</span>
+                  </div>
+                </div>
+              )}
 
               {wdError && (
                 <div className="text-xs p-2 rounded-lg" style={{ background: "#ffebee", color: "#c62828" }}>{wdError}</div>

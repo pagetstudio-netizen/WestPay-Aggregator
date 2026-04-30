@@ -259,26 +259,86 @@ async function cryptoApiKeyAuthMiddleware(req: Request, res: Response, next: Nex
   return res.status(401).json({ message: "Non autorise. Fournissez un Bearer token JWT ou un header X-API-KEY crypto (WP-CRYPTO-...) valide." });
 }
 
-async function creditMerchantForCryptoTx(cryptoTx: { id: number; merchantId: number; payCurrency: string | null; payAmount: string | null }): Promise<void> {
+const CRYPTO_FEE_RATE = 0.05;
+
+async function notifyCryptoWebhook(merchant: { id: number; webhookUrl?: string | null; webhookSecret?: string | null }, payload: Record<string, any>): Promise<void> {
+  if (!merchant.webhookUrl) return;
+  try {
+    const payloadStr = JSON.stringify(payload);
+    const signature = merchant.webhookSecret
+      ? crypto.createHmac("sha256", merchant.webhookSecret).update(payloadStr).digest("hex")
+      : "";
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    try {
+      const res = await fetch(merchant.webhookUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-RobotPay-Signature": signature,
+          "X-RobotPay-Event": payload.event || "crypto.payment.confirmed",
+        },
+        body: payloadStr,
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      await storage.createWebhookLog({
+        merchantId: merchant.id,
+        url: merchant.webhookUrl,
+        payload: payloadStr,
+        statusCode: res.status,
+        response: (await res.text().catch(() => "")).substring(0, 500),
+        success: res.status >= 200 && res.status < 300,
+      });
+      console.log(`[CRYPTO WEBHOOK] Envoyé à ${merchant.webhookUrl} → ${res.status}`);
+    } catch (fetchErr: any) {
+      clearTimeout(timeout);
+      const errMsg = fetchErr.name === "AbortError" ? "Timeout (10s)" : fetchErr.message;
+      await storage.createWebhookLog({
+        merchantId: merchant.id, url: merchant.webhookUrl, payload: payloadStr, statusCode: 0, response: errMsg, success: false,
+      });
+      console.error(`[CRYPTO WEBHOOK] Erreur:`, errMsg);
+    }
+  } catch (err: any) {
+    console.error(`[CRYPTO WEBHOOK] Erreur générale:`, err.message);
+  }
+}
+
+async function creditMerchantForCryptoTx(cryptoTx: { id: number; merchantId: number; payCurrency: string | null; payAmount: string | null; trackId?: string; orderId?: string | null; description?: string | null }): Promise<void> {
   if (!cryptoTx.payCurrency || !cryptoTx.payAmount) {
-    console.warn(`[OXAPAY CREDIT] Transaction #${cryptoTx.id} sans payCurrency/payAmount — crédit impossible`);
+    console.warn(`[CRYPTO CREDIT] Transaction #${cryptoTx.id} sans payCurrency/payAmount — crédit impossible`);
     return;
   }
   const payAmountNum = parseFloat(cryptoTx.payAmount);
   if (isNaN(payAmountNum) || payAmountNum <= 0) {
-    console.warn(`[OXAPAY CREDIT] Transaction #${cryptoTx.id} payAmount invalide (${cryptoTx.payAmount}) — crédit ignoré`);
+    console.warn(`[CRYPTO CREDIT] Transaction #${cryptoTx.id} payAmount invalide (${cryptoTx.payAmount}) — crédit ignoré`);
     return;
   }
   const credited = await storage.markCryptoTransactionCredited(cryptoTx.id);
   if (!credited) {
-    console.log(`[OXAPAY CREDIT] Transaction #${cryptoTx.id} déjà créditée — ignoré`);
+    console.log(`[CRYPTO CREDIT] Transaction #${cryptoTx.id} déjà créditée — ignoré`);
     return;
   }
   const merchant = await storage.getMerchantById(cryptoTx.merchantId);
-  const FEE_RATE = 0.03;
-  const netAmount = merchant?.feeExempt ? payAmountNum : payAmountNum * (1 - FEE_RATE);
+  const feeRate = merchant?.feeExempt ? 0 : CRYPTO_FEE_RATE;
+  const feeAmount = payAmountNum * feeRate;
+  const netAmount = payAmountNum - feeAmount;
   await storage.incrementCryptoBalance(cryptoTx.merchantId, cryptoTx.payCurrency, netAmount);
-  console.log(`[OXAPAY CREDIT] Crédit marchand #${cryptoTx.merchantId} — ${cryptoTx.payCurrency} — Brut: ${payAmountNum} — Net: ${netAmount.toFixed(8)} — tx #${cryptoTx.id}`);
+  console.log(`[CRYPTO CREDIT] Marchand #${cryptoTx.merchantId} — ${cryptoTx.payCurrency} — Brut: ${payAmountNum} — Frais: ${feeAmount.toFixed(8)} (${(feeRate*100).toFixed(0)}%) — Net: ${netAmount.toFixed(8)} — tx #${cryptoTx.id}`);
+  if (merchant?.webhookUrl) {
+    await notifyCryptoWebhook(merchant, {
+      event: "crypto.payment.confirmed",
+      trackId: cryptoTx.trackId || cryptoTx.id.toString(),
+      status: "paid",
+      currency: cryptoTx.payCurrency,
+      grossAmount: payAmountNum,
+      feeAmount: parseFloat(feeAmount.toFixed(8)),
+      netAmount: parseFloat(netAmount.toFixed(8)),
+      orderId: cryptoTx.orderId || null,
+      description: cryptoTx.description || null,
+      timestamp: new Date().toISOString(),
+    });
+  }
 }
 
 export async function registerRoutes(
@@ -3992,6 +4052,9 @@ export async function registerRoutes(
               merchantId: cryptoTx.merchantId,
               payCurrency: updatedPayCurrency || null,
               payAmount: updatedPayAmount || null,
+              trackId: cryptoTx.trackId,
+              orderId: cryptoTx.orderId || null,
+              description: cryptoTx.description || null,
             });
           }
         }
@@ -4211,16 +4274,27 @@ export async function registerRoutes(
       if (amountNum > available) {
         return res.status(400).json({ message: `Solde insuffisant. Disponible : ${available.toFixed(8)} ${currency}` });
       }
+      const merchant = await storage.getMerchantById(merchantId);
+      const withdrawFeeRate = merchant?.feeExempt ? 0 : CRYPTO_FEE_RATE;
+      const feeAmount = amountNum * withdrawFeeRate;
+      const netAmount = amountNum - feeAmount;
       await storage.deductCryptoBalance(merchantId, currency.toUpperCase(), amountNum);
       const wr = await storage.createCryptoWithdrawalRequest({
         merchantId,
         currency: currency.toUpperCase(),
         amount: amountNum.toFixed(8),
+        feeAmount: feeAmount.toFixed(8),
+        netAmount: netAmount.toFixed(8),
         walletAddress: walletAddress.trim(),
         network: network?.trim() || null,
         status: "pending",
       });
-      res.json({ id: wr.id, message: "Demande de retrait soumise avec succès", withdrawal: wr });
+      res.json({
+        id: wr.id,
+        message: "Demande de retrait soumise avec succès",
+        withdrawal: wr,
+        fee: { rate: `${(withdrawFeeRate * 100).toFixed(0)}%`, feeAmount: feeAmount.toFixed(8), netAmount: netAmount.toFixed(8) },
+      });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -4333,6 +4407,9 @@ export async function registerRoutes(
             merchantId: cryptoTx.merchantId,
             payCurrency: cbPayCurrency || null,
             payAmount: cbPayAmount || null,
+            trackId: cryptoTx.trackId,
+            orderId: cryptoTx.orderId || null,
+            description: cryptoTx.description || null,
           });
         }
       }

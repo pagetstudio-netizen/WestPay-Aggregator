@@ -286,6 +286,8 @@ export const cryptoWithdrawalRequests = pgTable("crypto_withdrawal_requests", {
   merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),
   currency: text("currency").notNull(),
   amount: text("amount").notNull(),
+  feeAmount: text("fee_amount").notNull().default("0"),
+  netAmount: text("net_amount").notNull().default("0"),
   walletAddress: text("wallet_address").notNull(),
   network: text("network"),
   status: text("status").notNull().default("pending"),
