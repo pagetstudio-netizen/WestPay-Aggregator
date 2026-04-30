@@ -2124,8 +2124,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
   const [invFreePrice, setInvFreePrice] = useState(false);
   const [invAmount, setInvAmount] = useState("");
   const [invSelectedCurrencies, setInvSelectedCurrencies] = useState<string[]>(["USDT"]);
-  const [invLoading, setInvLoading] = useState(false);
-  const [invResults, setInvResults] = useState<Array<{ trackId: string; paymentUrl: string; currency: string; expiredAt?: string }>>([]);
+  const [invResults, setInvResults] = useState<Array<{ paymentUrl: string; currency: string }>>([]);
   const [invError, setInvError] = useState("");
 
   const INVOICE_CURRENCIES = ["USDT", "BTC", "ETH", "LTC", "TRX", "MATIC", "BNB", "DOGE"];
@@ -2144,42 +2143,22 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
     }
   };
 
-  const handleCreateInvoice = async () => {
+  const handleCreateInvoice = () => {
     setInvError(""); setInvResults([]);
     if (!invDescription.trim()) { setInvError("Nom du produit requis"); return; }
     if (invSelectedCurrencies.length === 0) { setInvError("Sélectionnez au moins une cryptomonnaie"); return; }
     const amt = invFreePrice ? 0 : parseFloat(invAmount);
     if (!invFreePrice && (isNaN(amt) || amt <= 0)) { setInvError("Montant invalide"); return; }
-    if (!cryptoApiKey) { setInvError("Clé API crypto non disponible"); return; }
-    setInvLoading(true);
-    try {
-      const results: Array<{ trackId: string; paymentUrl: string; currency: string; expiredAt?: string }> = [];
-      for (const currency of invSelectedCurrencies) {
-        const res = await fetch("/api/merchant/crypto/invoice", {
-          method: "POST",
-          headers: { "X-API-KEY": cryptoApiKey, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            amount: amt,
-            currency,
-            description: invDescription,
-            returnUrl: invReturnUrl || undefined,
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          setInvError(`Erreur (${currency}) : ${data.message || "Erreur"}`);
-          setInvLoading(false);
-          return;
-        }
-        results.push({ trackId: data.trackId, paymentUrl: data.paymentUrl, currency, expiredAt: data.expiredAt });
-      }
-      setInvResults(results);
-      queryClient.invalidateQueries({ queryKey: ["/api/merchant/crypto/transactions"] });
-    } catch (e: any) {
-      setInvError(e.message);
-    } finally {
-      setInvLoading(false);
-    }
+    const slug = user?.slug || "";
+    if (!slug) { setInvError("Slug marchand introuvable"); return; }
+    const BASE = "https://westpay.cloud";
+    const results: Array<{ paymentUrl: string; currency: string }> = invSelectedCurrencies.map(currency => {
+      const params = new URLSearchParams({ currency, description: invDescription.trim() });
+      if (!invFreePrice) params.set("amount", String(amt));
+      if (invReturnUrl.trim()) params.set("returnUrl", invReturnUrl.trim());
+      return { currency, paymentUrl: `${BASE}/c/${slug}?${params.toString()}` };
+    });
+    setInvResults(results);
   };
 
   if (aggLoading) return <MerchantLoadingSkeleton />;
@@ -2412,12 +2391,11 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
 
                 <button
                   onClick={handleCreateInvoice}
-                  disabled={invLoading}
                   className="w-full py-3 rounded-xl text-sm font-bold"
-                  style={{ background: invLoading ? "#e2e8f0" : "#1a237e", color: invLoading ? "#90a4ae" : "#fff" }}
+                  style={{ background: "#1a237e", color: "#fff" }}
                   data-testid="btn-create-invoice"
                 >
-                  {invLoading ? "Création en cours..." : "Générer le lien de paiement"}
+                  Générer le lien de paiement
                 </button>
               </div>
 
@@ -2425,7 +2403,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-bold" style={{ color: "#2e7d32" }}>
-                      ✓ {invResults.length === 1 ? "Lien créé avec succès !" : `${invResults.length} liens créés avec succès !`}
+                      ✓ {invResults.length === 1 ? "Lien généré !" : `${invResults.length} liens générés !`}
                     </p>
                     <button
                       onClick={() => { setInvResults([]); setInvAmount(""); setInvDescription(""); setInvReturnUrl(""); setInvFreePrice(false); setInvSelectedCurrencies(["USDT"]); }}
@@ -2435,18 +2413,13 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                       Nouveau lien
                     </button>
                   </div>
+                  <p className="text-xs" style={{ color: "#78909c" }}>
+                    Partagez ce lien à votre client. Le paiement sera initié quand il clique dessus.
+                  </p>
                   {invResults.map(r => (
-                    <div key={r.trackId} className="rounded-xl p-4 space-y-3" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
-                      <div className="flex items-center gap-2">
-                        <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: "#fff8e1", color: "#f59e0b" }}>{r.currency}</span>
-                        <code className="text-xs font-mono" style={{ color: "#546e7a" }}>{r.trackId}</code>
-                        {r.expiredAt && (
-                          <span className="text-xs ml-auto" style={{ color: "#78909c" }}>
-                            Expire : {new Date(r.expiredAt).toLocaleString("fr-FR")}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
+                    <div key={r.currency} className="rounded-xl p-4 space-y-2" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: "#fff8e1", color: "#f59e0b" }}>{r.currency}</span>
+                      <div className="flex items-center gap-2 mt-2">
                         <a
                           href={r.paymentUrl}
                           target="_blank"

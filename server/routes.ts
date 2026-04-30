@@ -1443,6 +1443,77 @@ export async function registerRoutes(
     }
   });
 
+  // ── Public merchant info (for crypto payment link page) ───────────────────
+  app.get("/api/merchant/public/:slug", async (req, res) => {
+    try {
+      const merchant = await storage.getMerchantBySlug(req.params.slug);
+      if (!merchant || merchant.suspended) {
+        return res.status(404).json({ message: "Marchand introuvable ou suspendu" });
+      }
+      res.json({ id: merchant.id, name: merchant.name, slug: merchant.slug });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Public crypto payment: create OxaPay invoice from slug link ───────────
+  app.post("/api/pay-crypto/:slug", async (req, res) => {
+    try {
+      const merchant = await storage.getMerchantBySlug(req.params.slug);
+      if (!merchant || merchant.suspended) {
+        return res.status(404).json({ message: "Marchand introuvable ou suspendu" });
+      }
+      const { amount, currency, description, returnUrl } = req.body;
+      if (!amount || !currency) {
+        return res.status(400).json({ message: "Montant et devise requis" });
+      }
+      const amountNum = Number(amount);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        return res.status(400).json({ message: "Montant invalide" });
+      }
+      const merchantAggs = await storage.getCryptoAggregatorsByMerchant(merchant.id);
+      if (merchantAggs.length === 0) {
+        return res.status(403).json({ message: "Le paiement crypto n'est pas activé pour ce marchand" });
+      }
+      const agg = merchantAggs[0];
+      const callbackUrl = `${process.env.APP_URL || "https://westpay.cloud"}/api/oxapay/callback`;
+      const XOF_PER_USD = parseInt(process.env.XOF_PER_USD || "600", 10);
+      const isXof = currency.toUpperCase() === "XOF" || currency.toUpperCase() === "FCFA";
+      const invoiceAmount = isXof ? parseFloat((amountNum / XOF_PER_USD).toFixed(2)) : amountNum;
+      const invoiceCurrency = isXof ? "USD" : currency.toUpperCase();
+      const invoiceResult = await oxapayCreateInvoice(agg.apiKey, {
+        amount: invoiceAmount,
+        currency: invoiceCurrency,
+        lifeTime: 30,
+        feePaidByPayer: 1,
+        callbackUrl,
+        ...(returnUrl && { returnUrl }),
+        ...(description && { description }),
+      });
+      if (invoiceResult.result !== 100 || !invoiceResult.trackId) {
+        return res.status(502).json({ message: invoiceResult.message || "Échec de création de l'invoice" });
+      }
+      await storage.createCryptoTransaction({
+        aggregatorId: agg.id,
+        merchantId: merchant.id,
+        trackId: invoiceResult.trackId,
+        amount: String(amountNum),
+        currency: currency.toUpperCase(),
+        status: "pending",
+        callbackUrl,
+        ...(returnUrl && { returnUrl }),
+        ...(description && { description }),
+      });
+      res.json({
+        success: true,
+        trackId: invoiceResult.trackId,
+        paymentUrl: `${process.env.APP_URL || "https://westpay.cloud"}/pay/crypto/${invoiceResult.trackId}`,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/payment/:slug/info", async (req, res) => {
     try {
       const merchant = await storage.getMerchantBySlug(req.params.slug);

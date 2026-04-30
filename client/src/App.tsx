@@ -16,6 +16,7 @@ import PaymentPage from "@/pages/payment";
 import PaymentLinkPage from "@/pages/payment-link-page";
 import CryptoPaymentPage from "@/pages/crypto-payment";
 import CryptoDocsPage from "@/pages/crypto-docs";
+import CryptoLinkPage from "@/pages/crypto-link-page";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -32,6 +33,7 @@ function Router() {
       <Route path="/pay/crypto/:trackId" component={CryptoPaymentPage} />
       <Route path="/pay/:slug" component={PaymentPage} />
       <Route path="/link/:uniqueId" component={PaymentLinkPage} />
+      <Route path="/c/:slug" component={CryptoLinkPage} />
       <Route component={NotFound} />
     </Switch>
   );
