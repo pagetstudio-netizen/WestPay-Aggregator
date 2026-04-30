@@ -338,6 +338,19 @@ export async function runMigrations() {
       CREATE UNIQUE INDEX IF NOT EXISTS merchants_sdk_api_key_idx ON merchants(sdk_api_key) WHERE sdk_api_key IS NOT NULL;
     `);
 
+    // ── Déduplication des opérateurs avant d'ajouter la contrainte ────────────────
+    await client.query(`
+      DELETE FROM withdrawal_operators a
+      USING withdrawal_operators b
+      WHERE a.id > b.id
+        AND a.name = b.name
+        AND a.country = b.country;
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS withdrawal_operators_name_country_idx
+        ON withdrawal_operators(name, country);
+    `);
+
     // ── Données par défaut : pays de transfert ────────────────────────────────────
     await client.query(`
       INSERT INTO wallet_transfer_countries (country, currency_zone) VALUES
@@ -376,7 +389,7 @@ export async function runMigrations() {
         ('MTN Mobile Money','Mobile Money','Guinee',1000000,'Mbiyo'),
         ('Orange Money','Mobile Money','Guinee',1000000,'Mbiyo'),
         ('Africell Money','Mobile Money','Gambie',1000000,'Mbiyo')
-      ON CONFLICT DO NOTHING
+      ON CONFLICT (name, country) DO NOTHING
     `);
 
     // ── Mise à jour codes opérateurs ──────────────────────────────────────────────
