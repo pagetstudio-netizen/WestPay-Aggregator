@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, AlertCircle, Bitcoin, ArrowRight, ExternalLink } from "lucide-react";
+import { Loader2, Check, ExternalLink } from "lucide-react";
 
 type MerchantInfo = {
   id: number;
@@ -20,12 +20,13 @@ export default function CryptoLinkPage() {
   const returnUrl = urlParams.get("returnUrl") || "";
   const isLibre = !amountParam || amountParam === "0";
 
+  const [step, setStep] = useState(1);
   const [customAmount, setCustomAmount] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [paymentUrl, setPaymentUrl] = useState("");
 
-  const { data: merchant, isLoading: merchantLoading, isError } = useQuery<MerchantInfo>({
+  const { data: merchant, isLoading, isError } = useQuery<MerchantInfo>({
     queryKey: ["/api/merchant/public", slug],
     queryFn: async () => {
       const res = await fetch(`/api/merchant/public/${slug}`);
@@ -37,17 +38,19 @@ export default function CryptoLinkPage() {
   });
 
   useEffect(() => {
-    document.title = merchant ? `Payer ${merchant.name} en crypto` : "Paiement crypto — RobotPay";
+    document.title = merchant ? `Payer ${merchant.name} — RobotPay` : "Paiement — RobotPay";
   }, [merchant]);
 
+  const fixedAmount = !isLibre ? parseFloat(amountParam!) : null;
+
   const handlePay = async () => {
-    const amt = isLibre ? parseFloat(customAmount) : parseFloat(amountParam!);
+    const amt = isLibre ? parseFloat(customAmount) : fixedAmount!;
     if (isNaN(amt) || amt <= 0) {
       setError("Veuillez saisir un montant valide");
       return;
     }
     setError("");
-    setLoading(true);
+    setSubmitting(true);
     try {
       const res = await fetch(`/api/pay-crypto/${slug}`, {
         method: "POST",
@@ -57,123 +60,250 @@ export default function CryptoLinkPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Erreur lors de la création du paiement");
       setPaymentUrl(data.paymentUrl);
-      window.location.href = data.paymentUrl;
+      setStep(2);
+      setTimeout(() => { window.location.href = data.paymentUrl; }, 1500);
     } catch (e: any) {
       setError(e.message || "Erreur inattendue");
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
-  if (merchantLoading) {
+  if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "#f8fafc" }}>
-        <Loader2 className="animate-spin text-blue-600" size={36} />
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "#00b050" }}>
+        <Loader2 className="w-10 h-10 animate-spin text-white" />
       </div>
     );
   }
 
   if (isError || !merchant) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-3 p-6" style={{ background: "#f8fafc" }}>
-        <AlertCircle className="text-red-500" size={40} />
-        <p className="text-base font-semibold text-red-600">Lien de paiement invalide ou expiré</p>
-        <p className="text-sm text-gray-500">Ce lien ne correspond à aucun marchand actif.</p>
+      <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "#00b050" }}>
+        <div className="bg-white rounded-md p-6 max-w-sm w-full text-center space-y-3" style={{ color: "#1f2937" }}>
+          <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto">
+            <span className="text-red-600 text-xl font-bold">!</span>
+          </div>
+          <h2 className="text-lg font-semibold" style={{ color: "#111827" }}>Page introuvable</h2>
+          <p className="text-sm" style={{ color: "#6b7280" }}>Ce lien de paiement n'est pas valide.</p>
+        </div>
       </div>
     );
   }
 
-  if (paymentUrl) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-6" style={{ background: "#f8fafc" }}>
-        <Loader2 className="animate-spin text-blue-600" size={36} />
-        <p className="text-sm text-gray-600">Redirection vers la page de paiement…</p>
-        <a href={paymentUrl} className="text-xs text-blue-600 underline flex items-center gap-1">
-          Cliquez ici si la redirection ne fonctionne pas <ExternalLink size={12} />
-        </a>
-      </div>
-    );
-  }
+  const displayAmount = isLibre
+    ? (customAmount ? parseFloat(customAmount) : null)
+    : fixedAmount;
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4" style={{ background: "#f8fafc" }}>
-      <div className="w-full max-w-sm rounded-2xl shadow-lg overflow-hidden" style={{ background: "#fff" }}>
-        <div className="p-5" style={{ background: "linear-gradient(135deg, #1a237e 0%, #283593 100%)" }}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: "rgba(255,255,255,0.15)" }}>
-              <Bitcoin size={20} className="text-white" />
-            </div>
-            <div>
-              <p className="text-xs font-medium" style={{ color: "rgba(255,255,255,0.7)" }}>Paiement crypto via RobotPay</p>
-              <p className="text-base font-bold text-white">{merchant.name}</p>
-            </div>
-          </div>
+    <div
+      className="min-h-screen flex flex-col items-center justify-center"
+      style={{ background: "#00b050" }}
+    >
+      <style>{`
+        .crypto-card { color: #1f2937; }
+        .crypto-card input {
+          color: #111827 !important;
+          background-color: #ffffff !important;
+          border-color: #d1d5db !important;
+          -webkit-text-fill-color: #111827 !important;
+        }
+        .crypto-card input::placeholder {
+          color: #9ca3af !important;
+          -webkit-text-fill-color: #9ca3af !important;
+        }
+        .crypto-card input:focus {
+          border-color: #00b050 !important;
+          box-shadow: 0 0 0 2px rgba(0,176,80,0.15);
+          outline: none;
+        }
+        .pay-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.5rem;
+          font-weight: 600;
+          font-size: 0.875rem;
+          border-radius: 0.375rem;
+          padding: 0.625rem 1.5rem;
+          border: none;
+          cursor: pointer;
+          transition: opacity 0.15s, transform 0.1s;
+          -webkit-tap-highlight-color: transparent;
+        }
+        .pay-btn:active:not(:disabled) { transform: scale(0.97); }
+        .pay-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .pay-btn-green { background-color: #00b050; color: #ffffff; }
+        .pay-btn-green:hover:not(:disabled) { background-color: #009a45; }
+      `}</style>
+
+      <div className="w-full max-w-[420px] px-4 py-3">
+        <div className="mb-2">
+          <h1 className="text-white font-bold text-lg">RobotPay</h1>
+          <p className="text-white/80 text-sm">Paiement sécurisé</p>
         </div>
 
-        <div className="p-5 space-y-4">
-          {descriptionParam && (
-            <div className="rounded-xl p-3" style={{ background: "#f1f5f9" }}>
-              <p className="text-xs text-gray-500 mb-0.5">Description</p>
-              <p className="text-sm font-semibold text-gray-800">{descriptionParam}</p>
-            </div>
+        <div className="mb-3">
+          <p className="text-white/80 text-xs">Montant :</p>
+          {displayAmount !== null ? (
+            <p className="text-white font-bold text-3xl">
+              {displayAmount.toLocaleString("fr-FR")}
+              <span className="text-base ml-2">{currency}</span>
+            </p>
+          ) : (
+            <p className="text-white font-bold text-2xl opacity-60">Montant libre</p>
           )}
+        </div>
 
-          <div className="flex items-center gap-3 rounded-xl p-3" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
-            <span className="px-2 py-1 rounded-full text-xs font-bold" style={{ background: "#dcfce7", color: "#166534" }}>{currency}</span>
-            {isLibre ? (
-              <p className="text-sm text-gray-500">Montant libre</p>
-            ) : (
-              <p className="text-lg font-bold text-gray-800">{parseFloat(amountParam!).toLocaleString("fr-FR")} <span className="text-sm font-medium text-gray-500">{currency}</span></p>
-            )}
-          </div>
-
-          {isLibre && (
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Montant à payer ({currency})</label>
-              <input
-                type="number"
-                min="0.01"
-                step="any"
-                placeholder={`ex: 10`}
-                value={customAmount}
-                onChange={e => setCustomAmount(e.target.value)}
-                className="w-full rounded-xl border px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                style={{ borderColor: "#e2e8f0" }}
-                data-testid="input-crypto-amount"
+        <div className="bg-white rounded-lg p-4 crypto-card">
+          <div className="mb-2">
+            <div className="w-full h-2 rounded-full overflow-hidden" style={{ backgroundColor: "#e5e7eb" }}>
+              <div
+                className="h-full rounded-full"
+                style={{
+                  width: step === 1 ? "50%" : "100%",
+                  backgroundColor: "#00b050",
+                  transition: "width 0.5s ease-in-out",
+                }}
               />
             </div>
-          )}
+            <p className="text-xs text-right mt-1" style={{ color: "#9ca3af" }}>
+              Étape {step} sur 2
+            </p>
+          </div>
 
-          {error && (
-            <div className="rounded-lg p-3 text-xs flex items-center gap-2" style={{ background: "#ffebee", color: "#c62828" }}>
-              <AlertCircle size={14} />
-              {error}
+          <div className="flex items-center justify-around mb-4 px-2">
+            {["Informations", "Confirmation"].map((label, i) => {
+              const stepNum = i + 1;
+              const isActive = step === stepNum;
+              const isDone = step > stepNum;
+              return (
+                <div key={stepNum} className="flex flex-col items-center relative" style={{ flex: 1 }}>
+                  {i > 0 && (
+                    <div
+                      className="absolute top-3 right-1/2 h-0.5"
+                      style={{
+                        width: "100%",
+                        backgroundColor: isDone || isActive ? "#00b050" : "#d1d5db",
+                      }}
+                    />
+                  )}
+                  <div className="relative z-10 flex flex-col items-center">
+                    <div
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border-2"
+                      style={{
+                        borderColor: isActive || isDone ? "#00b050" : "#d1d5db",
+                        backgroundColor: isDone ? "#00b050" : "#ffffff",
+                        color: isDone ? "#ffffff" : isActive ? "#00b050" : "#9ca3af",
+                      }}
+                    >
+                      {isDone ? <Check className="w-4 h-4" /> : stepNum}
+                    </div>
+                    <p
+                      className="text-xs text-center mt-1 leading-tight"
+                      style={{ color: isActive || isDone ? "#00b050" : "#9ca3af" }}
+                    >
+                      {label}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {step === 1 && (
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm font-semibold mb-1" style={{ color: "#374151" }}>Marchand</p>
+                <p className="text-base font-bold" style={{ color: "#111827" }}>{merchant.name}</p>
+              </div>
+
+              {descriptionParam && (
+                <div>
+                  <p className="text-sm font-semibold mb-1" style={{ color: "#374151" }}>Description</p>
+                  <p className="text-sm" style={{ color: "#4b5563" }}>{descriptionParam}</p>
+                </div>
+              )}
+
+              <div>
+                <p className="text-sm font-semibold mb-1" style={{ color: "#374151" }}>Devise de paiement</p>
+                <span
+                  className="inline-block px-3 py-1 rounded-full text-sm font-bold"
+                  style={{ background: "#fff8e1", color: "#b45309" }}
+                >
+                  {currency}
+                </span>
+              </div>
+
+              {isLibre && (
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: "#374151" }}>
+                    Montant à payer ({currency})
+                  </label>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="any"
+                    placeholder="ex: 10"
+                    value={customAmount}
+                    onChange={e => setCustomAmount(e.target.value)}
+                    className="w-full py-2 px-3 text-sm border rounded-md"
+                    data-testid="input-crypto-amount"
+                  />
+                </div>
+              )}
+
+              {error && (
+                <div className="text-xs p-2 rounded-md" style={{ background: "#fef2f2", color: "#b91c1c" }}>
+                  {error}
+                </div>
+              )}
+
+              <button
+                onClick={handlePay}
+                disabled={submitting || (isLibre && !customAmount)}
+                className="pay-btn pay-btn-green w-full"
+                data-testid="btn-pay-crypto"
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Création du paiement…
+                  </>
+                ) : (
+                  "Payer maintenant"
+                )}
+              </button>
             </div>
           )}
 
-          <button
-            onClick={handlePay}
-            disabled={loading}
-            className="w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-opacity"
-            style={{ background: loading ? "#c5cae9" : "#1a237e", color: "#fff" }}
-            data-testid="btn-pay-crypto"
-          >
-            {loading ? (
-              <>
-                <Loader2 size={16} className="animate-spin" />
-                Création du paiement…
-              </>
-            ) : (
-              <>
-                Payer maintenant
-                <ArrowRight size={16} />
-              </>
-            )}
-          </button>
+          {step === 2 && (
+            <div className="space-y-4 text-center py-4">
+              <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto" style={{ background: "#f0fdf4" }}>
+                <Check className="w-8 h-8" style={{ color: "#00b050" }} />
+              </div>
+              <div>
+                <p className="font-semibold text-base" style={{ color: "#111827" }}>Paiement en cours de traitement</p>
+                <p className="text-sm mt-1" style={{ color: "#6b7280" }}>Redirection vers la page de paiement…</p>
+              </div>
+              <Loader2 className="w-6 h-6 animate-spin mx-auto" style={{ color: "#00b050" }} />
+              {paymentUrl && (
+                <a
+                  href={paymentUrl}
+                  className="text-xs underline flex items-center justify-center gap-1"
+                  style={{ color: "#6b7280" }}
+                >
+                  Cliquez ici si la redirection ne fonctionne pas <ExternalLink size={11} />
+                </a>
+              )}
+            </div>
+          )}
 
-          <p className="text-center text-xs" style={{ color: "#94a3b8" }}>
-            Sécurisé par RobotPay · Paiement en {currency}
-          </p>
+          <div className="mt-4 pt-3" style={{ borderTop: "1px solid #e5e7eb" }}>
+            <p className="text-xs text-center" style={{ color: "#9ca3af" }}>
+              Paiement sécurisé via RobotPay · {currency}
+            </p>
+          </div>
         </div>
       </div>
     </div>
