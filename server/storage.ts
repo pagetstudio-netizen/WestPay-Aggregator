@@ -1017,20 +1017,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async incrementCryptoBalance(merchantId: number, currency: string, amount: number): Promise<void> {
-    const [existing] = await db.select().from(cryptoBalances)
-      .where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
-    if (existing) {
-      const newBalance = (parseFloat(existing.balance) + amount).toFixed(8);
-      await db.update(cryptoBalances)
-        .set({ balance: newBalance, updatedAt: new Date() })
-        .where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
-    } else {
-      await db.insert(cryptoBalances).values({
-        merchantId,
-        currency,
-        balance: amount.toFixed(8),
+    await db.insert(cryptoBalances)
+      .values({ merchantId, currency, balance: amount.toFixed(8) })
+      .onConflictDoUpdate({
+        target: [cryptoBalances.merchantId, cryptoBalances.currency],
+        set: {
+          balance: sql`${cryptoBalances.balance} + ${amount.toFixed(8)}`,
+          updatedAt: new Date(),
+        },
       });
-    }
   }
 
   async getMerchantBySdkKey(sdkApiKey: string): Promise<Merchant | undefined> {
@@ -1069,14 +1064,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deductCryptoBalance(merchantId: number, currency: string, amount: number): Promise<void> {
-    const [existing] = await db.select().from(cryptoBalances)
+    await db.update(cryptoBalances)
+      .set({
+        balance: sql`GREATEST(0, ${cryptoBalances.balance} - ${amount.toFixed(8)})`,
+        updatedAt: new Date(),
+      })
       .where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
-    if (existing) {
-      const newBalance = Math.max(0, parseFloat(existing.balance) - amount).toFixed(8);
-      await db.update(cryptoBalances)
-        .set({ balance: newBalance, updatedAt: new Date() })
-        .where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
-    }
   }
 
   async createCryptoPaymentLink(data: InsertCryptoPaymentLink): Promise<CryptoPaymentLink> {
