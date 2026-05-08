@@ -3875,6 +3875,10 @@ export async function registerRoutes(
       let sentToProvider = false;
       const useMbiyoPayout = w.gateway === "mbiyo";
 
+      const adminWdFeeRate = merchant?.feeExempt ? 0 : getWithdrawalFeeRate(w.country);
+      const adminWdFee = Math.floor(w.amount * adminWdFeeRate);
+      const adminWdNetAmount = w.amount - adminWdFee;
+
       if (useMbiyoPayout) {
         const mbiyoApiKey = await getMbiyoApiKey();
         if (mc && mbiyoApiKey && merchant) {
@@ -3887,10 +3891,10 @@ export async function registerRoutes(
             const network = wdOpRecord?.mbiyoCode || mbiyoNetwork(w.operator || "");
             const callbackBaseUrl = process.env.NODE_ENV === "production" ? "https://westpay.cloud" : `${req.protocol}://${req.get("host")}`;
             const callbackUrl = `${callbackBaseUrl}/api/mbiyo/payout-callback`;
-            console.log(`[ADMIN APPROVE WD MBIYO] Transfert: ${w.amount} vers ${msisdnFull}, ref: ${reference}, network: ${network}`);
+            console.log(`[ADMIN APPROVE WD MBIYO] Transfert net: ${adminWdNetAmount} (brut: ${w.amount} - frais: ${adminWdFee}) vers ${msisdnFull}, ref: ${reference}, network: ${network}`);
             const result = await mbiyoInitiatePayout({
               apiKey: mbiyoApiKey,
-              amount: w.amount,
+              amount: adminWdNetAmount,
               currency,
               orderId: reference,
               callbackUrl,
@@ -3901,7 +3905,7 @@ export async function registerRoutes(
             });
             if ((result.status === "success" || result.status === "pending") && result.data) {
               omnipayRef = reference;
-              fees = Math.round(parseFloat(String(result.data.fee || 0)) || 0);
+              fees = adminWdFee;
               sentToProvider = true;
               console.log(`[ADMIN APPROVE WD MBIYO] Initié (statut: ${result.status}) - TxID: ${result.data.transaction_id}, Ref: ${reference} - en attente callback`);
             } else {
@@ -3923,11 +3927,11 @@ export async function registerRoutes(
             const mLastName = mNameParts.length > 1 ? mNameParts.slice(1).join(" ") : mNameParts[0] || merchant.name;
             const adminOmnipayCode = await resolveOmnipayOperatorCode(w.operator, w.country);
             const wdMsisdn = prependDialCode(w.phone, w.country);
-            console.log(`[ADMIN APPROVE WD] Transfert: ${w.amount} vers ${wdMsisdn}, operateur: ${adminOmnipayCode || "(auto)"}, ref: ${reference}`);
+            console.log(`[ADMIN APPROVE WD] Transfert net: ${adminWdNetAmount} (brut: ${w.amount} - frais: ${adminWdFee}) vers ${wdMsisdn}, operateur: ${adminOmnipayCode || "(auto)"}, ref: ${reference}`);
             const result = await omnipayInitiateTransfer({
               apikey: omnipayApiKey,
               msisdn: wdMsisdn,
-              amount: w.amount,
+              amount: adminWdNetAmount,
               reference,
               first_name: mFirstName,
               last_name: mLastName,
@@ -3935,7 +3939,7 @@ export async function registerRoutes(
             });
             if (result.success === 1) {
               omnipayRef = result.reference || reference;
-              fees = result.fees || 0;
+              fees = adminWdFee;
               sentToProvider = true;
               console.log(`[ADMIN APPROVE WD] Initié chez OmniPay - ID: ${result.id}, Ref: ${omnipayRef} - en attente callback`);
             } else {
