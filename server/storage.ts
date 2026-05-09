@@ -92,6 +92,7 @@ export interface IStorage {
   getPendingPaymentsByTxId(txId: string): Promise<PendingPayment[]>;
   updatePendingPaymentTxId(id: number, txId: string): Promise<PendingPayment>;
   updatePendingPaymentStatus(id: number, status: string): Promise<void>;
+  updatePendingPaymentStatusAtomic(id: number, newStatus: string, allowedStatuses: string[]): Promise<boolean>;
   cleanupExpiredPayments(): Promise<number>;
   getPendingPayments(merchantId?: number): Promise<PendingPayment[]>;
 
@@ -564,6 +565,14 @@ export class DatabaseStorage implements IStorage {
 
   async updatePendingPaymentStatus(id: number, status: string): Promise<void> {
     await db.update(pendingPayments).set({ status }).where(eq(pendingPayments.id, id));
+  }
+
+  async updatePendingPaymentStatusAtomic(id: number, newStatus: string, allowedStatuses: string[]): Promise<boolean> {
+    const result = await db.update(pendingPayments)
+      .set({ status: newStatus })
+      .where(and(eq(pendingPayments.id, id), inArray(pendingPayments.status, allowedStatuses)))
+      .returning({ id: pendingPayments.id });
+    return result.length > 0;
   }
 
   async cleanupExpiredPayments(): Promise<number> {

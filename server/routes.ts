@@ -7,7 +7,7 @@ import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer } from "./telegram-bot";
+import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminCryptoPayment } from "./telegram-bot";
 import {
   initiatePayment as omnipayInitiatePayment,
   initiateTransfer as omnipayInitiateTransfer,
@@ -340,6 +340,14 @@ async function creditMerchantForCryptoTx(cryptoTx: { id: number; merchantId: num
       timestamp: new Date().toISOString(),
     });
   }
+  notifyAdminCryptoPayment({
+    trackId: cryptoTx.trackId || cryptoTx.id.toString(),
+    merchantName: merchant?.name || `#${cryptoTx.merchantId}`,
+    currency: cryptoTx.payCurrency,
+    grossAmount: payAmountNum,
+    netAmount,
+    feeRate,
+  }).catch(() => {});
 }
 
 export async function registerRoutes(
@@ -366,6 +374,9 @@ export async function registerRoutes(
       }
 
       await storage.createLoginLog({ userId: admin.id, role: "admin", ip: req.ip || "", device: req.headers["user-agent"] || "", success: true });
+      notifyAdminGroup(
+        `🔐 *Connexion admin WestPay*\n\n📧 *Email :* ${admin.email}\n🌐 *IP :* \`${req.ip || "N/A"}\`\n📅 *Date :* ${new Date().toLocaleString("fr-FR", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC" })}`
+      ).catch(() => {});
       const token = signToken({ id: admin.id, role: "admin", email: admin.email });
       res.json({ token, user: { id: admin.id, email: admin.email } });
     } catch (err: any) {
@@ -548,6 +559,10 @@ export async function registerRoutes(
         description: `Marchand ${name} cree par l'administrateur`,
       });
 
+      notifyAdminGroup(
+        `🆕 *Nouveau marchand créé WestPay*\n\n🏪 *Nom :* ${name}\n📧 *Email :* ${email}\n🔗 *Slug :* \`${slug}\`\n📅 *Date :* ${new Date().toLocaleString("fr-FR", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC" })}`
+      ).catch(() => {});
+
       res.json(merchant);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -638,7 +653,11 @@ export async function registerRoutes(
 
   app.delete("/api/admin/delete-merchant/:id", authMiddleware("admin"), async (req, res) => {
     try {
+      const merchantToDelete = await storage.getMerchantById(parseInt(req.params.id as string));
       await storage.deleteMerchant(parseInt(req.params.id as string));
+      notifyAdminGroup(
+        `🗑️ *Marchand supprimé WestPay*\n\n🏪 *Nom :* ${merchantToDelete?.name || `#${req.params.id}`}\n📧 *Email :* ${merchantToDelete?.email || "N/A"}\n📅 *Date :* ${new Date().toLocaleString("fr-FR", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC" })}`
+      ).catch(() => {});
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -2143,7 +2162,14 @@ export async function registerRoutes(
           return res.status(500).json({ message: "Configuration marchand/pays introuvable" });
         }
 
-        await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
+        // ── Protection anti-double-crédit : mise à jour atomique ─────────────
+        const atomicUpdate = await storage.updatePendingPaymentStatusAtomic(
+          pending.id, "omnipay_confirmed", ["pending", "omnipay_pending"]
+        );
+        if (!atomicUpdate) {
+          console.log(`[OMNIPAY CALLBACK] Paiement #${pending.id} deja traite (race condition evitee)`);
+          return res.json({ status: "already_processed" });
+        }
 
         {
           const txId = `OP-${payload.id || payload.reference}`;
@@ -3955,6 +3981,9 @@ export async function registerRoutes(
       if (sentToProvider) {
         await storage.updateWithdrawalStatus(id, "pending", `En cours de traitement - en attente de confirmation${note ? ` - Note: ${note}` : ""}`, omnipayRef, fees);
         console.log(`[ADMIN APPROVE WD] Retrait #${id} en attente confirmation ${useMbiyoPayout ? "Mbiyo" : "OmniPay"} - ref=${omnipayRef}`);
+        notifyAdminGroup(
+          `⏳ *Retrait envoyé au prestataire WestPay*\n\n🔖 *ID :* \`WD-${id}\`\n🏪 *Marchand :* ${merchant?.name || `#${w.merchantId}`}\n🌍 *Pays :* ${w.country}\n💰 *Montant :* ${w.amount.toLocaleString("fr-FR")} F CFA\n💵 *Frais :* ${adminWdFee.toLocaleString("fr-FR")} F CFA\n✅ *Net envoyé :* ${adminWdNetAmount.toLocaleString("fr-FR")} F CFA\n📱 *Opérateur :* ${w.operator || "Auto"}\n⚙️ *Prestataire :* ${useMbiyoPayout ? "Mbiyo" : "OmniPay"}\n📊 *Statut :* En attente confirmation prestataire`
+        ).catch(() => {});
         res.json({ success: true, omnipayRef, fees, pendingOmnipay: true });
       } else {
         await storage.updateWithdrawalStatus(id, "approved", note, omnipayRef, fees);

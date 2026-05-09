@@ -1241,6 +1241,33 @@ export async function notifyMerchantWalletTransfer(merchantId: number, data: {
   }
 }
 
+export async function notifyAdminCryptoPayment(data: {
+  trackId: string;
+  merchantName: string;
+  currency: string;
+  grossAmount: number;
+  netAmount: number;
+  feeRate: number;
+}): Promise<void> {
+  const dateStr = new Date().toLocaleString("fr-FR", {
+    day: "2-digit", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", timeZone: "UTC",
+  });
+  const msg = [
+    `✅ *Paiement Crypto WestPay*`,
+    ``,
+    `📋 *Type :* Paiement Crypto (OxaPay)`,
+    `🔖 *Track ID :* \`${data.trackId}\``,
+    `🏪 *Marchand :* ${data.merchantName}`,
+    `💰 *Montant brut :* ${data.grossAmount.toFixed(8)} ${data.currency}`,
+    `💵 *Frais plateforme :* ${(data.feeRate * 100).toFixed(0)}%`,
+    `✅ *Montant net crédité :* ${data.netAmount.toFixed(8)} ${data.currency}`,
+    `📊 *Statut :* Confirmé`,
+    `📅 *Date :* ${dateStr}`,
+  ].join("\n");
+  await notifyAdminGroup(msg);
+}
+
 export async function notifyAdminBalanceUpdate(data: {
   merchantName: string;
   country: string;
