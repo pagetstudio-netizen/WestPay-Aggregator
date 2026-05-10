@@ -193,6 +193,15 @@ export interface IStorage {
   getCryptoPaymentLinkByUniqueId(uniqueId: string): Promise<CryptoPaymentLink | undefined>;
   getCryptoPaymentLinksByMerchant(merchantId: number): Promise<CryptoPaymentLink[]>;
   deleteCryptoPaymentLink(id: number, merchantId: number): Promise<void>;
+
+  getCommissionByMerchant(period: "today" | "month" | "all"): Promise<{
+    merchantId: number; merchantName: string;
+    collectionBenefit: number; withdrawalBenefit: number; transferBenefit: number; totalBenefit: number;
+  }[]>;
+  getCommissionByCountry(period: "today" | "month" | "all"): Promise<{
+    country: string;
+    collectionBenefit: number; withdrawalBenefit: number; totalBenefit: number;
+  }[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1170,6 +1179,142 @@ export class DatabaseStorage implements IStorage {
   async deleteCryptoPaymentLink(id: number, merchantId: number): Promise<void> {
     await db.delete(cryptoPaymentLinks)
       .where(and(eq(cryptoPaymentLinks.id, id), eq(cryptoPaymentLinks.merchantId, merchantId)));
+  }
+
+  async getCommissionByMerchant(period: "today" | "month" | "all") {
+    const now = new Date();
+    const todayIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const monthIso = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const cutoff = period === "today" ? todayIso : period === "month" ? monthIso : null;
+
+    const txFilter = cutoff ? sql`AND t.created_at >= ${cutoff}::timestamp` : sql``;
+    const wdFilter = cutoff ? sql`AND w.processed_at >= ${cutoff}::timestamp` : sql``;
+    const wtFilter = cutoff ? sql`AND wt.processed_at >= ${cutoff}::timestamp` : sql``;
+
+    type Row = { merchant_id: string; merchant_name: string; net: string };
+
+    const [txRows, wdRows, wtRows] = await Promise.all([
+      db.execute<Row>(sql`
+        SELECT t.merchant_id, m.name as merchant_name,
+          COALESCE(SUM(
+            CASE WHEN m.fee_exempt THEN -COALESCE(t.provider_fee, 0)
+            ELSE (t.amount - FLOOR(t.amount * CASE WHEN t.country IN ('Congo Brazzaville','Congo RDC') THEN 0.935 ELSE 0.945 END))
+                 - COALESCE(t.provider_fee, 0)
+            END
+          ), 0) as net
+        FROM transactions t
+        JOIN merchants m ON m.id = t.merchant_id
+        WHERE t.status IN ('confirmed','success','completed') AND t.amount > 0
+          AND (t.tx_id IS NULL OR t.tx_id NOT LIKE 'TR-%')
+          ${txFilter}
+        GROUP BY t.merchant_id, m.name
+      `),
+      db.execute<Row>(sql`
+        SELECT w.merchant_id, m.name as merchant_name,
+          COALESCE(SUM(
+            CASE WHEN m.fee_exempt THEN -COALESCE(w.fees, 0)
+            ELSE FLOOR(w.amount * CASE WHEN w.country IN ('Congo Brazzaville','Congo RDC') THEN 0.055 ELSE 0.045 END)
+                 - COALESCE(w.fees, 0)
+            END
+          ), 0) as net
+        FROM withdrawals w
+        JOIN merchants m ON m.id = w.merchant_id
+        WHERE w.status = 'approved'
+          ${wdFilter}
+        GROUP BY w.merchant_id, m.name
+      `),
+      db.execute<Row>(sql`
+        SELECT wt.merchant_id, m.name as merchant_name,
+          COALESCE(SUM(wt.fee), 0) as net
+        FROM wallet_transfers wt
+        JOIN merchants m ON m.id = wt.merchant_id
+        WHERE wt.status = 'approved'
+          ${wtFilter}
+        GROUP BY wt.merchant_id, m.name
+      `),
+    ]);
+
+    const map = new Map<number, { merchantId: number; merchantName: string; collectionBenefit: number; withdrawalBenefit: number; transferBenefit: number }>();
+    for (const r of txRows.rows) {
+      const id = Number(r.merchant_id);
+      map.set(id, { merchantId: id, merchantName: r.merchant_name, collectionBenefit: Number(r.net), withdrawalBenefit: 0, transferBenefit: 0 });
+    }
+    for (const r of wdRows.rows) {
+      const id = Number(r.merchant_id);
+      const ex = map.get(id);
+      if (ex) ex.withdrawalBenefit = Number(r.net);
+      else map.set(id, { merchantId: id, merchantName: r.merchant_name, collectionBenefit: 0, withdrawalBenefit: Number(r.net), transferBenefit: 0 });
+    }
+    for (const r of wtRows.rows) {
+      const id = Number(r.merchant_id);
+      const ex = map.get(id);
+      if (ex) ex.transferBenefit = Number(r.net);
+      else map.set(id, { merchantId: id, merchantName: r.merchant_name, collectionBenefit: 0, withdrawalBenefit: 0, transferBenefit: Number(r.net) });
+    }
+
+    return Array.from(map.values())
+      .map(r => ({ ...r, totalBenefit: r.collectionBenefit + r.withdrawalBenefit + r.transferBenefit }))
+      .sort((a, b) => b.totalBenefit - a.totalBenefit);
+  }
+
+  async getCommissionByCountry(period: "today" | "month" | "all") {
+    const now = new Date();
+    const todayIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const monthIso = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const cutoff = period === "today" ? todayIso : period === "month" ? monthIso : null;
+
+    const txFilter = cutoff ? sql`AND t.created_at >= ${cutoff}::timestamp` : sql``;
+    const wdFilter = cutoff ? sql`AND w.processed_at >= ${cutoff}::timestamp` : sql``;
+
+    type TxRow = { country: string; net: string };
+
+    const [txRows, wdRows] = await Promise.all([
+      db.execute<TxRow>(sql`
+        SELECT t.country,
+          COALESCE(SUM(
+            CASE WHEN m.fee_exempt THEN -COALESCE(t.provider_fee, 0)
+            ELSE (t.amount - FLOOR(t.amount * CASE WHEN t.country IN ('Congo Brazzaville','Congo RDC') THEN 0.935 ELSE 0.945 END))
+                 - COALESCE(t.provider_fee, 0)
+            END
+          ), 0) as net
+        FROM transactions t
+        JOIN merchants m ON m.id = t.merchant_id
+        WHERE t.status IN ('confirmed','success','completed') AND t.amount > 0
+          AND (t.tx_id IS NULL OR t.tx_id NOT LIKE 'TR-%')
+          ${txFilter}
+        GROUP BY t.country
+      `),
+      db.execute<TxRow>(sql`
+        SELECT w.country,
+          COALESCE(SUM(
+            CASE WHEN m.fee_exempt THEN -COALESCE(w.fees, 0)
+            ELSE FLOOR(w.amount * CASE WHEN w.country IN ('Congo Brazzaville','Congo RDC') THEN 0.055 ELSE 0.045 END)
+                 - COALESCE(w.fees, 0)
+            END
+          ), 0) as net
+        FROM withdrawals w
+        JOIN merchants m ON m.id = w.merchant_id
+        WHERE w.status = 'approved'
+          ${wdFilter}
+        GROUP BY w.country
+      `),
+    ]);
+
+    const map = new Map<string, { country: string; collectionBenefit: number; withdrawalBenefit: number }>();
+    for (const r of txRows.rows) {
+      const c = r.country || "Inconnu";
+      map.set(c, { country: c, collectionBenefit: Number(r.net), withdrawalBenefit: 0 });
+    }
+    for (const r of wdRows.rows) {
+      const c = r.country || "Inconnu";
+      const ex = map.get(c);
+      if (ex) ex.withdrawalBenefit = Number(r.net);
+      else map.set(c, { country: c, collectionBenefit: 0, withdrawalBenefit: Number(r.net) });
+    }
+
+    return Array.from(map.values())
+      .map(r => ({ ...r, totalBenefit: r.collectionBenefit + r.withdrawalBenefit }))
+      .sort((a, b) => b.totalBenefit - a.totalBenefit);
   }
 }
 

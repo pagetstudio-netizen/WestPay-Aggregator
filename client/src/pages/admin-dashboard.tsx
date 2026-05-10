@@ -31,7 +31,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
 
-type AdminTab = "overview" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "settings" | "sdk";
+type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "settings" | "sdk";
 
 function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: { staleTime?: number; refetchOnWindowFocus?: boolean }) {
   const { token, logout } = useAuth();
@@ -4806,6 +4806,144 @@ function SdkPanel() {
   );
 }
 
+type Period = "today" | "month" | "all";
+
+function AnalyticsPanel() {
+  const [period, setPeriod] = useState<Period>("month");
+
+  const { data: byMerchant, isLoading: loadingMerchant, isError: errorMerchant } = useAdminFetch(
+    `/api/admin/stats/by-merchant?period=${period}`,
+    ["/api/admin/stats/by-merchant", period],
+    { staleTime: 30000 }
+  );
+
+  const { data: byCountry, isLoading: loadingCountry, isError: errorCountry } = useAdminFetch(
+    `/api/admin/stats/by-country?period=${period}`,
+    ["/api/admin/stats/by-country", period],
+    { staleTime: 30000 }
+  );
+
+  const fmt = (n: number) => new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
+  const fmtSigned = (n: number) => (n >= 0 ? "+" : "") + fmt(n);
+
+  const periodLabel: Record<Period, string> = { today: "Aujourd'hui", month: "Ce mois", all: "Tout" };
+
+  const merchantRows = (byMerchant as { merchantId: number; merchantName: string; collectionBenefit: number; withdrawalBenefit: number; transferBenefit: number; totalBenefit: number }[] | undefined) || [];
+  const countryRows = (byCountry as { country: string; collectionBenefit: number; withdrawalBenefit: number; totalBenefit: number }[] | undefined) || [];
+
+  const totalMerchant = merchantRows.reduce((s, r) => s + r.totalBenefit, 0);
+  const totalCountry = countryRows.reduce((s, r) => s + r.totalBenefit, 0);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-xl font-semibold">Analytique — Bénéfice net</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">Bénéfice net WestPay par marchand (collectes + retraits − frais fournisseur + frais virements wallet) et par pays (collectes + retraits − frais fournisseur).</p>
+        </div>
+        <div className="flex gap-1 bg-muted rounded-lg p-1">
+          {(["today", "month", "all"] as Period[]).map(p => (
+            <button
+              key={p}
+              onClick={() => setPeriod(p)}
+              data-testid={`btn-period-${p}`}
+              className={`px-3 py-1.5 text-sm rounded-md font-medium transition-colors ${period === p ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              {periodLabel[p]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center justify-between">
+              <span className="flex items-center gap-2"><Users className="w-4 h-4 text-primary" />Par marchand</span>
+              <span className="text-sm font-normal text-muted-foreground">Total : <span className="font-semibold text-foreground">{fmt(totalMerchant)} FCFA</span></span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            {loadingMerchant ? (
+              <div className="p-4 space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
+            ) : errorMerchant ? (
+              <p className="text-sm text-red-500 text-center py-8">Erreur de chargement des données.</p>
+            ) : !merchantRows.length ? (
+              <p className="text-sm text-muted-foreground text-center py-8">Aucune donnée pour cette période.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/40">
+                      <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Marchand</th>
+                      <th className="text-right px-3 py-2.5 font-medium text-muted-foreground">Collectes</th>
+                      <th className="text-right px-3 py-2.5 font-medium text-muted-foreground">Retraits</th>
+                      <th className="text-right px-3 py-2.5 font-medium text-muted-foreground">Virements</th>
+                      <th className="text-right px-4 py-2.5 font-medium text-muted-foreground">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {merchantRows.map((row, i) => (
+                      <tr key={row.merchantId} data-testid={`row-merchant-${row.merchantId}`} className={`border-b last:border-0 hover:bg-muted/30 transition-colors ${i === 0 ? "bg-primary/4" : ""}`}>
+                        <td className="px-4 py-2.5 font-medium truncate max-w-36">{row.merchantName}</td>
+                        <td className={`text-right px-3 py-2.5 tabular-nums text-xs ${row.collectionBenefit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>{fmtSigned(row.collectionBenefit)}</td>
+                        <td className={`text-right px-3 py-2.5 tabular-nums text-xs ${row.withdrawalBenefit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>{fmtSigned(row.withdrawalBenefit)}</td>
+                        <td className={`text-right px-3 py-2.5 tabular-nums text-xs ${row.transferBenefit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>{fmtSigned(row.transferBenefit)}</td>
+                        <td className={`text-right px-4 py-2.5 font-semibold tabular-nums ${row.totalBenefit >= 0 ? "text-foreground" : "text-red-500"}`}>{fmt(row.totalBenefit)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center justify-between">
+              <span className="flex items-center gap-2"><Globe className="w-4 h-4 text-primary" />Par pays</span>
+              <span className="text-sm font-normal text-muted-foreground">Total : <span className="font-semibold text-foreground">{fmt(totalCountry)} FCFA</span></span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            {loadingCountry ? (
+              <div className="p-4 space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
+            ) : errorCountry ? (
+              <p className="text-sm text-red-500 text-center py-8">Erreur de chargement des données.</p>
+            ) : !countryRows.length ? (
+              <p className="text-sm text-muted-foreground text-center py-8">Aucune donnée pour cette période.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/40">
+                      <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Pays</th>
+                      <th className="text-right px-3 py-2.5 font-medium text-muted-foreground">Collectes</th>
+                      <th className="text-right px-3 py-2.5 font-medium text-muted-foreground">Retraits</th>
+                      <th className="text-right px-4 py-2.5 font-medium text-muted-foreground">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {countryRows.map((row, i) => (
+                      <tr key={row.country} data-testid={`row-country-${row.country}`} className={`border-b last:border-0 hover:bg-muted/30 transition-colors ${i === 0 ? "bg-primary/4" : ""}`}>
+                        <td className="px-4 py-2.5 font-medium">{row.country}</td>
+                        <td className={`text-right px-3 py-2.5 tabular-nums text-xs ${row.collectionBenefit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>{fmtSigned(row.collectionBenefit)}</td>
+                        <td className={`text-right px-3 py-2.5 tabular-nums text-xs ${row.withdrawalBenefit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>{fmtSigned(row.withdrawalBenefit)}</td>
+                        <td className={`text-right px-4 py-2.5 font-semibold tabular-nums ${row.totalBenefit >= 0 ? "text-foreground" : "text-red-500"}`}>{fmt(row.totalBenefit)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminDashboard() {
   const { user, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
@@ -4822,6 +4960,7 @@ export default function AdminDashboard() {
 
   const menuItems: { title: string; icon: any; tab: AdminTab }[] = [
     { title: "Vue d'ensemble", icon: BarChart3, tab: "overview" },
+    { title: "Analytique", icon: TrendingUp, tab: "analytics" },
     { title: "Marchands", icon: Users, tab: "merchants" },
     { title: "Liens de paiement", icon: Link, tab: "paymentlinks" },
     { title: "Transactions", icon: ArrowRightLeft, tab: "transactions" },
@@ -4902,6 +5041,7 @@ export default function AdminDashboard() {
 
           <main className="flex-1 overflow-auto p-4 md:p-6">
             {activeTab === "overview" && <OverviewPanel />}
+            {activeTab === "analytics" && <AnalyticsPanel />}
             {activeTab === "merchants" && <MerchantsPanel />}
             {activeTab === "paymentlinks" && <AdminPaymentLinksPanel />}
             {activeTab === "transactions" && <TransactionsPanel />}

@@ -472,6 +472,28 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/stats/by-merchant", authMiddleware("admin"), async (req, res) => {
+    try {
+      const period = (req.query.period as string) || "all";
+      const validPeriod = ["today", "month", "all"].includes(period) ? (period as "today" | "month" | "all") : "all";
+      const data = await storage.getCommissionByMerchant(validPeriod);
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/stats/by-country", authMiddleware("admin"), async (req, res) => {
+    try {
+      const period = (req.query.period as string) || "all";
+      const validPeriod = ["today", "month", "all"].includes(period) ? (period as "today" | "month" | "all") : "all";
+      const data = await storage.getCommissionByCountry(validPeriod);
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.post("/api/admin/reset-stats", authMiddleware("admin"), async (_req, res) => {
     try {
       const [stats, detailedStats] = await Promise.all([
