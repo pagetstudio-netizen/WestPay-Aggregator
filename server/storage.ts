@@ -92,7 +92,6 @@ export interface IStorage {
   getPendingPaymentsByTxId(txId: string): Promise<PendingPayment[]>;
   updatePendingPaymentTxId(id: number, txId: string): Promise<PendingPayment>;
   updatePendingPaymentStatus(id: number, status: string): Promise<void>;
-  updatePendingPaymentStatusAtomic(id: number, newStatus: string, excludedStatuses: string[]): Promise<boolean>;
   cleanupExpiredPayments(): Promise<number>;
   getPendingPayments(merchantId?: number): Promise<PendingPayment[]>;
 
@@ -449,39 +448,6 @@ export class DatabaseStorage implements IStorage {
       prevMonth: sql<number>`coalesce(sum(case when processed_at >= ${prevMonthIso}::timestamp and processed_at < ${prevMonthEndIso}::timestamp then fee else 0 end), 0)`,
     }).from(walletTransfers).where(eq(walletTransfers.status, "approved"));
 
-    // ── Commission de collecte : 5.5% (6.5% Congo) prélevé sur chaque paiement ──
-    // Tient compte des marchands fee_exempt (0%) et pays Congo (+1%)
-    const txFeesResult = await db.execute(sql`
-      SELECT
-        COALESCE(SUM(CASE
-          WHEN m.fee_exempt = true THEN 0
-          WHEN t.country IN ('Congo Brazzaville', 'Congo RDC') THEN FLOOR(t.amount * 0.065)
-          ELSE FLOOR(t.amount * 0.055)
-        END), 0) AS total,
-        COALESCE(SUM(CASE
-          WHEN m.fee_exempt = true THEN 0
-          WHEN t.created_at < ${todayIso}::timestamp THEN 0
-          WHEN t.country IN ('Congo Brazzaville', 'Congo RDC') THEN FLOOR(t.amount * 0.065)
-          ELSE FLOOR(t.amount * 0.055)
-        END), 0) AS today,
-        COALESCE(SUM(CASE
-          WHEN m.fee_exempt = true THEN 0
-          WHEN t.created_at < ${monthIso}::timestamp THEN 0
-          WHEN t.country IN ('Congo Brazzaville', 'Congo RDC') THEN FLOOR(t.amount * 0.065)
-          ELSE FLOOR(t.amount * 0.055)
-        END), 0) AS this_month,
-        COALESCE(SUM(CASE
-          WHEN m.fee_exempt = true THEN 0
-          WHEN t.created_at < ${prevMonthIso}::timestamp OR t.created_at >= ${prevMonthEndIso}::timestamp THEN 0
-          WHEN t.country IN ('Congo Brazzaville', 'Congo RDC') THEN FLOOR(t.amount * 0.065)
-          ELSE FLOOR(t.amount * 0.055)
-        END), 0) AS prev_month
-      FROM transactions t
-      JOIN merchants m ON m.id = t.merchant_id
-      WHERE t.status = 'confirmed'
-    `);
-    const txFees = ((txFeesResult as any).rows?.[0]) || { total: 0, today: 0, this_month: 0, prev_month: 0 };
-
     const [apiPay] = await db.select({
       count: sql<number>`count(*)`,
       total: sql<number>`coalesce(sum(amount), 0)`,
@@ -498,10 +464,10 @@ export class DatabaseStorage implements IStorage {
     }).from(withdrawals).where(eq(withdrawals.status, "approved"));
 
     return {
-      commissionTotal: Number(wdFees?.total || 0) + Number(wtFees?.total || 0) + Number(txFees.total || 0),
-      commissionToday: Number(wdFees?.today || 0) + Number(wtFees?.today || 0) + Number(txFees.today || 0),
-      commissionThisMonth: Number(wdFees?.thisMonth || 0) + Number(wtFees?.thisMonth || 0) + Number(txFees.this_month || 0),
-      commissionPrevMonth: Number(wdFees?.prevMonth || 0) + Number(wtFees?.prevMonth || 0) + Number(txFees.prev_month || 0),
+      commissionTotal: Number(wdFees?.total || 0) + Number(wtFees?.total || 0),
+      commissionToday: Number(wdFees?.today || 0) + Number(wtFees?.today || 0),
+      commissionThisMonth: Number(wdFees?.thisMonth || 0) + Number(wtFees?.thisMonth || 0),
+      commissionPrevMonth: Number(wdFees?.prevMonth || 0) + Number(wtFees?.prevMonth || 0),
       apiPaymentsCount: Number(apiPay?.count || 0),
       apiPaymentsTotal: Number(apiPay?.total || 0),
       linkPaymentsCount: Number(linkPay?.count || 0),
@@ -598,14 +564,6 @@ export class DatabaseStorage implements IStorage {
 
   async updatePendingPaymentStatus(id: number, status: string): Promise<void> {
     await db.update(pendingPayments).set({ status }).where(eq(pendingPayments.id, id));
-  }
-
-  async updatePendingPaymentStatusAtomic(id: number, newStatus: string, excludedStatuses: string[]): Promise<boolean> {
-    // Mise à jour atomique : réussit uniquement si le statut actuel N'EST PAS dans les statuts exclus (terminaux)
-    const result = await db.execute(
-      sql`UPDATE pending_payments SET status = ${newStatus} WHERE id = ${id} AND status NOT IN (${sql.join(excludedStatuses.map(s => sql`${s}`), sql`, `)}) RETURNING id`
-    );
-    return (result as any).rows?.length > 0;
   }
 
   async cleanupExpiredPayments(): Promise<number> {
@@ -1059,15 +1017,20 @@ export class DatabaseStorage implements IStorage {
   }
 
   async incrementCryptoBalance(merchantId: number, currency: string, amount: number): Promise<void> {
-    await db.insert(cryptoBalances)
-      .values({ merchantId, currency, balance: amount.toFixed(8) })
-      .onConflictDoUpdate({
-        target: [cryptoBalances.merchantId, cryptoBalances.currency],
-        set: {
-          balance: sql`${cryptoBalances.balance} + ${amount.toFixed(8)}`,
-          updatedAt: new Date(),
-        },
+    const [existing] = await db.select().from(cryptoBalances)
+      .where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
+    if (existing) {
+      const newBalance = (parseFloat(existing.balance) + amount).toFixed(8);
+      await db.update(cryptoBalances)
+        .set({ balance: newBalance, updatedAt: new Date() })
+        .where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
+    } else {
+      await db.insert(cryptoBalances).values({
+        merchantId,
+        currency,
+        balance: amount.toFixed(8),
       });
+    }
   }
 
   async getMerchantBySdkKey(sdkApiKey: string): Promise<Merchant | undefined> {
@@ -1106,12 +1069,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deductCryptoBalance(merchantId: number, currency: string, amount: number): Promise<void> {
-    await db.update(cryptoBalances)
-      .set({
-        balance: sql`GREATEST(0, ${cryptoBalances.balance} - ${amount.toFixed(8)})`,
-        updatedAt: new Date(),
-      })
+    const [existing] = await db.select().from(cryptoBalances)
       .where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
+    if (existing) {
+      const newBalance = Math.max(0, parseFloat(existing.balance) - amount).toFixed(8);
+      await db.update(cryptoBalances)
+        .set({ balance: newBalance, updatedAt: new Date() })
+        .where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
+    }
   }
 
   async createCryptoPaymentLink(data: InsertCryptoPaymentLink): Promise<CryptoPaymentLink> {

@@ -1055,7 +1055,6 @@ export async function notifyAdminPayment(data: {
   amount: number;
   provider: "omnipay" | "sms";
   status: "confirmed" | "failed";
-  feeExempt?: boolean;
 }): Promise<void> {
   const dateStr = new Date().toLocaleString("fr-FR", {
     day: "2-digit", month: "long", year: "numeric",
@@ -1065,11 +1064,6 @@ export async function notifyAdminPayment(data: {
   const statusLabel = data.status === "confirmed" ? "Succès" : "Échoué";
   const methodLabel = data.provider === "omnipay" ? "Mobile Money" : "SMS";
 
-  const congoCountries = ["Congo Brazzaville", "Congo RDC"];
-  const feeRate = data.feeExempt ? 0 : (congoCountries.includes(data.country) ? 0.065 : 0.055);
-  const platformFee = Math.floor(data.amount * feeRate);
-  const merchantNet = data.amount - platformFee;
-
   const msg = [
     `${icon} *Nouvelle transaction WestPay*`,
     ``,
@@ -1078,9 +1072,9 @@ export async function notifyAdminPayment(data: {
     `🏪 *Marchand :* ${data.merchantName}`,
     `📞 *Numéro client :* ${data.payerNumber || "N/A"}`,
     `🌍 *Pays :* ${countryLabel(data.country)}`,
-    `💰 *Montant brut :* ${formatAmount(data.amount)}`,
-    `💵 *Commission WestPay :* ${formatAmount(platformFee)}${data.feeExempt ? " (exempté)" : ` (${(feeRate * 100).toFixed(1)}%)`}`,
-    `✅ *Montant net marchand :* ${formatAmount(merchantNet)}`,
+    `💰 *Montant total :* ${formatAmount(data.amount)}`,
+    `💵 *Frais plateforme :* 0 F CFA`,
+    `✅ *Montant reçu :* ${formatAmount(data.amount)}`,
     `📱 *Méthode :* ${methodLabel}`,
     `📊 *Statut :* ${statusLabel}`,
     `📅 *Date :* ${dateStr}`,
@@ -1245,33 +1239,6 @@ export async function notifyMerchantWalletTransfer(merchantId: number, data: {
   } catch (err) {
     console.error("[TELEGRAM] Erreur notification virement marchand:", (err as any).message);
   }
-}
-
-export async function notifyAdminCryptoPayment(data: {
-  trackId: string;
-  merchantName: string;
-  currency: string;
-  grossAmount: number;
-  netAmount: number;
-  feeRate: number;
-}): Promise<void> {
-  const dateStr = new Date().toLocaleString("fr-FR", {
-    day: "2-digit", month: "long", year: "numeric",
-    hour: "2-digit", minute: "2-digit", timeZone: "UTC",
-  });
-  const msg = [
-    `✅ *Paiement Crypto WestPay*`,
-    ``,
-    `📋 *Type :* Paiement Crypto (OxaPay)`,
-    `🔖 *Track ID :* \`${data.trackId}\``,
-    `🏪 *Marchand :* ${data.merchantName}`,
-    `💰 *Montant brut :* ${data.grossAmount.toFixed(8)} ${data.currency}`,
-    `💵 *Frais plateforme :* ${(data.feeRate * 100).toFixed(0)}%`,
-    `✅ *Montant net crédité :* ${data.netAmount.toFixed(8)} ${data.currency}`,
-    `📊 *Statut :* Confirmé`,
-    `📅 *Date :* ${dateStr}`,
-  ].join("\n");
-  await notifyAdminGroup(msg);
 }
 
 export async function notifyAdminBalanceUpdate(data: {

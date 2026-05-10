@@ -18,13 +18,6 @@ export const db = drizzle(pool, { schema });
 export async function runMigrations() {
   const client = await pool.connect();
   try {
-    // ── Index uniques critiques créés AVANT la transaction (PostgreSQL exige que l'index
-    //    existe déjà en dehors de la transaction pour être utilisé dans ON CONFLICT) ────
-    await client.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS withdrawal_operators_name_country_idx
-        ON withdrawal_operators(name, country);
-    `).catch(() => {});
-
     // ─── Toutes les migrations dans une seule transaction pour maximiser la vitesse ───
     await client.query("BEGIN");
 
@@ -345,13 +338,17 @@ export async function runMigrations() {
       CREATE UNIQUE INDEX IF NOT EXISTS merchants_sdk_api_key_idx ON merchants(sdk_api_key) WHERE sdk_api_key IS NOT NULL;
     `);
 
-    // ── Déduplication des opérateurs (supprime les doublons avant l'insert) ─────────
+    // ── Déduplication des opérateurs avant d'ajouter la contrainte ────────────────
     await client.query(`
       DELETE FROM withdrawal_operators a
       USING withdrawal_operators b
       WHERE a.id > b.id
         AND a.name = b.name
         AND a.country = b.country;
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS withdrawal_operators_name_country_idx
+        ON withdrawal_operators(name, country);
     `);
 
     // ── Données par défaut : pays de transfert ────────────────────────────────────
@@ -372,9 +369,8 @@ export async function runMigrations() {
         ('TMoney','Mobile Money','Togo',1000000,'OmniPay'),
         ('MTN Mobile Money','Mobile Money','Benin',1000000,'OmniPay'),
         ('Moov Money','Mobile Money','Benin',1000000,'OmniPay'),
-        ('Moov Money','Mobile Money','Burkina Faso',1000000,'Mbiyo'),
-        ('Orange Money','Mobile Money','Burkina Faso',1000000,'Mbiyo'),
-        ('Coris Money','Mobile Money','Burkina Faso',1000000,'Mbiyo'),
+        ('Moov Money','Mobile Money','Burkina Faso',1000000,'OmniPay'),
+        ('Orange Money','Mobile Money','Burkina Faso',1000000,'OmniPay'),
         ('MTN Mobile Money','Mobile Money','Cote d''Ivoire',1000000,'OmniPay'),
         ('Moov Money','Mobile Money','Cote d''Ivoire',1000000,'OmniPay'),
         ('Orange Money','Mobile Money','Cote d''Ivoire',1000000,'OmniPay'),
@@ -383,11 +379,9 @@ export async function runMigrations() {
         ('Orange Money','Mobile Money','Senegal',1000000,'OmniPay'),
         ('Wave','Mobile Money','Senegal',1000000,'OmniPay'),
         ('Orange Money','Mobile Money','Mali',1000000,'OmniPay'),
-        ('Moov Money','Mobile Money','Mali',1000000,'OmniPay'),
         ('MTN Mobile Money','Mobile Money','Cameroun',1000000,'OmniPay'),
         ('Orange Money','Mobile Money','Cameroun',1000000,'OmniPay'),
         ('MTN Mobile Money','Mobile Money','Congo Brazzaville',1000000,'OmniPay'),
-        ('Airtel Money','Mobile Money','Congo Brazzaville',1000000,'OmniPay'),
         ('Airtel Money','Mobile Money','Gabon',1000000,'OmniPay'),
         ('Moov Money','Mobile Money','Gabon',1000000,'OmniPay'),
         ('Orange Money','Mobile Money','Congo RDC',500000,'OmniPay'),
@@ -400,35 +394,22 @@ export async function runMigrations() {
 
     // ── Mise à jour codes opérateurs ──────────────────────────────────────────────
     await client.query(`
-      UPDATE withdrawal_operators SET
-        omnipay_code = CASE
-          WHEN LOWER(name) LIKE '%mtn%' THEN 'mtn'
-          WHEN LOWER(name) LIKE '%moov%' THEN 'moov'
-          WHEN LOWER(name) LIKE '%orange%' THEN 'orange'
-          WHEN LOWER(name) LIKE '%wave%' THEN 'wave'
-          WHEN LOWER(name) LIKE '%tmoney%' OR LOWER(name) LIKE '%t-money%' THEN 'tmoney'
-          WHEN LOWER(name) LIKE '%mixx%' OR LOWER(name) LIKE '%yas%' THEN 'mixx'
-          WHEN LOWER(name) LIKE '%airtel%' THEN 'airtel'
-          WHEN LOWER(name) LIKE '%flooz%' THEN 'flooz'
-          WHEN LOWER(name) LIKE '%mpesa%' OR LOWER(name) LIKE '%m-pesa%' THEN 'mpesa'
-          ELSE omnipay_code
-        END,
-        mbiyo_code = CASE
-          WHEN LOWER(name) LIKE '%mtn%' THEN 'mtn'
-          WHEN LOWER(name) LIKE '%moov%' THEN 'moov'
-          WHEN LOWER(name) LIKE '%orange%' THEN 'orange'
-          WHEN LOWER(name) LIKE '%wave%' THEN 'wave'
-          WHEN LOWER(name) LIKE '%coris%' THEN 'coris'
-          WHEN LOWER(name) LIKE '%tmoney%' OR LOWER(name) LIKE '%t-money%' THEN 'togocom'
-          WHEN LOWER(name) LIKE '%airtel%' THEN 'airtel'
-          WHEN LOWER(name) LIKE '%mpesa%' OR LOWER(name) LIKE '%m-pesa%' THEN 'mpesa'
-          WHEN LOWER(name) LIKE '%africell%' THEN 'afrimoney'
-          ELSE mbiyo_code
-        END
-      WHERE omnipay_code IS NULL OR mbiyo_code IS NULL;
+      UPDATE withdrawal_operators SET omnipay_code = CASE
+        WHEN LOWER(name) LIKE '%mtn%' THEN 'mtn'
+        WHEN LOWER(name) LIKE '%moov%' THEN 'moov'
+        WHEN LOWER(name) LIKE '%orange%' THEN 'orange'
+        WHEN LOWER(name) LIKE '%wave%' THEN 'wave'
+        WHEN LOWER(name) LIKE '%tmoney%' OR LOWER(name) LIKE '%t-money%' THEN 'tmoney'
+        WHEN LOWER(name) LIKE '%mixx%' OR LOWER(name) LIKE '%yas%' THEN 'mixx'
+        WHEN LOWER(name) LIKE '%airtel%' THEN 'airtel'
+        WHEN LOWER(name) LIKE '%flooz%' THEN 'flooz'
+        WHEN LOWER(name) LIKE '%mpesa%' OR LOWER(name) LIKE '%m-pesa%' OR LOWER(name) LIKE '%m pesa%' THEN 'mpesa'
+        ELSE omnipay_code
+      END
+      WHERE omnipay_code IS NULL;
 
       UPDATE withdrawal_operators SET gateway = 'Mbiyo'
-      WHERE country IN ('Guinee', 'Gambie', 'Burkina Faso') AND gateway != 'Mbiyo';
+      WHERE country IN ('Guinee', 'Gambie') AND gateway != 'Mbiyo';
     `);
 
     await client.query("COMMIT");
