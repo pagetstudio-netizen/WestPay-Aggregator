@@ -478,27 +478,30 @@ export class DatabaseStorage implements IStorage {
 
     // Bénéfice net WestPay sur les collectes
     // = frais prélevés au marchand (5.5% / 6.5% Congo, 0% fee_exempt) − frais fournisseur (provider_fee)
+    // Formule exacte alignée sur calcMerchantCredit :
+    // frais_collecte = amount - floor(amount * (1 - taux)) = amount - floor(amount * net_rate)
+    // net_rate standard = 0.945, Congo = 0.935
     const txResult = await db.execute<FeeRow>(sql`
       SELECT
         coalesce(sum(
           case when m.fee_exempt then 0
-               else round(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.065 else 0.055 end)
+               else (t.amount - floor(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.935 else 0.945 end))
                     - coalesce(t.provider_fee, 0)
           end
         ), 0) as total,
         coalesce(sum(case when t.created_at >= ${todayIso}::timestamp then
           case when m.fee_exempt then 0
-               else round(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.065 else 0.055 end)
+               else (t.amount - floor(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.935 else 0.945 end))
                     - coalesce(t.provider_fee, 0)
           end else 0 end), 0) as today,
         coalesce(sum(case when t.created_at >= ${monthIso}::timestamp then
           case when m.fee_exempt then 0
-               else round(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.065 else 0.055 end)
+               else (t.amount - floor(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.935 else 0.945 end))
                     - coalesce(t.provider_fee, 0)
           end else 0 end), 0) as this_month,
         coalesce(sum(case when t.created_at >= ${prevMonthIso}::timestamp and t.created_at < ${prevMonthEndIso}::timestamp then
           case when m.fee_exempt then 0
-               else round(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.065 else 0.055 end)
+               else (t.amount - floor(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.935 else 0.945 end))
                     - coalesce(t.provider_fee, 0)
           end else 0 end), 0) as prev_month
       FROM transactions t
