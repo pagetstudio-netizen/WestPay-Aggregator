@@ -434,15 +434,41 @@ export class DatabaseStorage implements IStorage {
     const prevMonthIso = prevMonthStart.toISOString();
     const prevMonthEndIso = prevMonthEnd.toISOString();
 
-    // Frais de retrait nets WestPay (frais marchands — les provider fees ne sont pas stockés séparément)
-    const [wdFees] = await db.select({
-      total: sql<number>`coalesce(sum(fees), 0)`,
-      today: sql<number>`coalesce(sum(case when processed_at >= ${todayIso}::timestamp then fees else 0 end), 0)`,
-      thisMonth: sql<number>`coalesce(sum(case when processed_at >= ${monthIso}::timestamp then fees else 0 end), 0)`,
-      prevMonth: sql<number>`coalesce(sum(case when processed_at >= ${prevMonthIso}::timestamp and processed_at < ${prevMonthEndIso}::timestamp then fees else 0 end), 0)`,
-    }).from(withdrawals).where(eq(withdrawals.status, "approved"));
+    type FeeRow = { total: string; today: string; this_month: string; prev_month: string };
+    const zero: FeeRow = { total: "0", today: "0", this_month: "0", prev_month: "0" };
 
-    // Frais de virement wallet
+    // Bénéfice net WestPay sur les retraits
+    // = frais prélevés au marchand (4.5% / 5.5% Congo, 0% fee_exempt) − frais fournisseur (withdrawals.fees)
+    const wdResult = await db.execute<FeeRow>(sql`
+      SELECT
+        coalesce(sum(
+          case when m.fee_exempt then 0
+               else floor(w.amount * case when w.country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
+                    - coalesce(w.fees, 0)
+          end
+        ), 0) as total,
+        coalesce(sum(case when w.processed_at >= ${todayIso}::timestamp then
+          case when m.fee_exempt then 0
+               else floor(w.amount * case when w.country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
+                    - coalesce(w.fees, 0)
+          end else 0 end), 0) as today,
+        coalesce(sum(case when w.processed_at >= ${monthIso}::timestamp then
+          case when m.fee_exempt then 0
+               else floor(w.amount * case when w.country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
+                    - coalesce(w.fees, 0)
+          end else 0 end), 0) as this_month,
+        coalesce(sum(case when w.processed_at >= ${prevMonthIso}::timestamp and w.processed_at < ${prevMonthEndIso}::timestamp then
+          case when m.fee_exempt then 0
+               else floor(w.amount * case when w.country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
+                    - coalesce(w.fees, 0)
+          end else 0 end), 0) as prev_month
+      FROM withdrawals w
+      LEFT JOIN merchants m ON m.id = w.merchant_id
+      WHERE w.status = 'approved'
+    `);
+    const wdFees = wdResult.rows[0] ?? zero;
+
+    // Frais de virement wallet (pas de provider fee externe — net = fee wallet direct)
     const [wtFees] = await db.select({
       total: sql<number>`coalesce(sum(fee), 0)`,
       today: sql<number>`coalesce(sum(case when processed_at >= ${todayIso}::timestamp then fee else 0 end), 0)`,
@@ -450,9 +476,9 @@ export class DatabaseStorage implements IStorage {
       prevMonth: sql<number>`coalesce(sum(case when processed_at >= ${prevMonthIso}::timestamp and processed_at < ${prevMonthEndIso}::timestamp then fee else 0 end), 0)`,
     }).from(walletTransfers).where(eq(walletTransfers.status, "approved"));
 
-    // Frais de collecte nets WestPay = (montant × taux_WestPay) − frais_fournisseur
-    // Taux : 5.5% standard, 6.5% Congo, 0% fee_exempt. Soustrait provider_fee capturé depuis OmniPay/Mbiyo.
-    const txFeesResult = await db.execute(sql`
+    // Bénéfice net WestPay sur les collectes
+    // = frais prélevés au marchand (5.5% / 6.5% Congo, 0% fee_exempt) − frais fournisseur (provider_fee)
+    const txResult = await db.execute<FeeRow>(sql`
       SELECT
         coalesce(sum(
           case when m.fee_exempt then 0
@@ -464,25 +490,22 @@ export class DatabaseStorage implements IStorage {
           case when m.fee_exempt then 0
                else round(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.065 else 0.055 end)
                     - coalesce(t.provider_fee, 0)
-          end
-        else 0 end), 0) as today,
+          end else 0 end), 0) as today,
         coalesce(sum(case when t.created_at >= ${monthIso}::timestamp then
           case when m.fee_exempt then 0
                else round(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.065 else 0.055 end)
                     - coalesce(t.provider_fee, 0)
-          end
-        else 0 end), 0) as this_month,
+          end else 0 end), 0) as this_month,
         coalesce(sum(case when t.created_at >= ${prevMonthIso}::timestamp and t.created_at < ${prevMonthEndIso}::timestamp then
           case when m.fee_exempt then 0
                else round(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.065 else 0.055 end)
                     - coalesce(t.provider_fee, 0)
-          end
-        else 0 end), 0) as prev_month
+          end else 0 end), 0) as prev_month
       FROM transactions t
       JOIN merchants m ON m.id = t.merchant_id
       WHERE t.status IN ('confirmed','success','completed')
     `);
-    const txFees = (txFeesResult as any)?.rows?.[0] ?? (txFeesResult as any)?.[0] ?? {};
+    const txFees = txResult.rows[0] ?? zero;
 
     const [apiPay] = await db.select({
       count: sql<number>`count(*)`,
