@@ -449,6 +449,39 @@ export class DatabaseStorage implements IStorage {
       prevMonth: sql<number>`coalesce(sum(case when processed_at >= ${prevMonthIso}::timestamp and processed_at < ${prevMonthEndIso}::timestamp then fee else 0 end), 0)`,
     }).from(walletTransfers).where(eq(walletTransfers.status, "approved"));
 
+    // ── Commission de collecte : 5.5% (6.5% Congo) prélevé sur chaque paiement ──
+    // Tient compte des marchands fee_exempt (0%) et pays Congo (+1%)
+    const txFeesResult = await db.execute(sql`
+      SELECT
+        COALESCE(SUM(CASE
+          WHEN m.fee_exempt = true THEN 0
+          WHEN t.country IN ('Congo Brazzaville', 'Congo RDC') THEN FLOOR(t.amount * 0.065)
+          ELSE FLOOR(t.amount * 0.055)
+        END), 0) AS total,
+        COALESCE(SUM(CASE
+          WHEN m.fee_exempt = true THEN 0
+          WHEN t.created_at < ${todayIso}::timestamp THEN 0
+          WHEN t.country IN ('Congo Brazzaville', 'Congo RDC') THEN FLOOR(t.amount * 0.065)
+          ELSE FLOOR(t.amount * 0.055)
+        END), 0) AS today,
+        COALESCE(SUM(CASE
+          WHEN m.fee_exempt = true THEN 0
+          WHEN t.created_at < ${monthIso}::timestamp THEN 0
+          WHEN t.country IN ('Congo Brazzaville', 'Congo RDC') THEN FLOOR(t.amount * 0.065)
+          ELSE FLOOR(t.amount * 0.055)
+        END), 0) AS this_month,
+        COALESCE(SUM(CASE
+          WHEN m.fee_exempt = true THEN 0
+          WHEN t.created_at < ${prevMonthIso}::timestamp OR t.created_at >= ${prevMonthEndIso}::timestamp THEN 0
+          WHEN t.country IN ('Congo Brazzaville', 'Congo RDC') THEN FLOOR(t.amount * 0.065)
+          ELSE FLOOR(t.amount * 0.055)
+        END), 0) AS prev_month
+      FROM transactions t
+      JOIN merchants m ON m.id = t.merchant_id
+      WHERE t.status = 'confirmed'
+    `);
+    const txFees = ((txFeesResult as any).rows?.[0]) || { total: 0, today: 0, this_month: 0, prev_month: 0 };
+
     const [apiPay] = await db.select({
       count: sql<number>`count(*)`,
       total: sql<number>`coalesce(sum(amount), 0)`,
@@ -465,10 +498,10 @@ export class DatabaseStorage implements IStorage {
     }).from(withdrawals).where(eq(withdrawals.status, "approved"));
 
     return {
-      commissionTotal: Number(wdFees?.total || 0) + Number(wtFees?.total || 0),
-      commissionToday: Number(wdFees?.today || 0) + Number(wtFees?.today || 0),
-      commissionThisMonth: Number(wdFees?.thisMonth || 0) + Number(wtFees?.thisMonth || 0),
-      commissionPrevMonth: Number(wdFees?.prevMonth || 0) + Number(wtFees?.prevMonth || 0),
+      commissionTotal: Number(wdFees?.total || 0) + Number(wtFees?.total || 0) + Number(txFees.total || 0),
+      commissionToday: Number(wdFees?.today || 0) + Number(wtFees?.today || 0) + Number(txFees.today || 0),
+      commissionThisMonth: Number(wdFees?.thisMonth || 0) + Number(wtFees?.thisMonth || 0) + Number(txFees.this_month || 0),
+      commissionPrevMonth: Number(wdFees?.prevMonth || 0) + Number(wtFees?.prevMonth || 0) + Number(txFees.prev_month || 0),
       apiPaymentsCount: Number(apiPay?.count || 0),
       apiPaymentsTotal: Number(apiPay?.total || 0),
       linkPaymentsCount: Number(linkPay?.count || 0),

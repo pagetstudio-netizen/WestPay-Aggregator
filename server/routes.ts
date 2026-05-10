@@ -2235,6 +2235,7 @@ export async function registerRoutes(
               amount: pending.amount,
               provider: "omnipay",
               status: "confirmed",
+              feeExempt: merchant?.feeExempt,
             }).catch(() => {});
           }
         }
@@ -2337,7 +2338,7 @@ export async function registerRoutes(
                       } catch {}
                     }
                     notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "omnipay" }).catch(() => {});
-                    notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "omnipay", status: "confirmed" }).catch(() => {});
+                    notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "omnipay", status: "confirmed", feeExempt: merchant?.feeExempt }).catch(() => {});
                   } else {
                     console.error(`[POLL MBIYO] MerchantCountry introuvable pour merchantId=${pending.merchantId} country="${pending.country}"`);
                   }
@@ -2508,7 +2509,7 @@ export async function registerRoutes(
             }
             if (merchant) {
               notifyMerchantPayment(pending.merchantId, { txId: tx.txId || txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "omnipay" }).catch(() => {});
-              notifyAdminPayment({ txId: tx.txId || txRef, merchantName: merchant.name, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "omnipay", status: "confirmed" }).catch(() => {});
+              notifyAdminPayment({ txId: tx.txId || txRef, merchantName: merchant.name, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "omnipay", status: "confirmed", feeExempt: merchant.feeExempt }).catch(() => {});
             }
           } catch {}
         });
@@ -2702,7 +2703,7 @@ export async function registerRoutes(
 
       if (merchant) {
         notifyMerchantPayment(merchant, pending.amount, pending.payerPhone || "", pending.payerName || "").catch(() => {});
-        notifyAdminPayment(merchant, pending.amount, pending.payerPhone || "", tx.txId || "", "Mbiyo (Manuel)").catch(() => {});
+        notifyAdminPayment({ txId: tx.txId || reference, merchantName: merchant.name, payerNumber: pending.payerPhone || null, country: pending.country, amount: pending.amount, provider: "omnipay", status: "confirmed", feeExempt: merchant.feeExempt }).catch(() => {});
       }
 
       console.log(`[MBIYO ADMIN] Paiement confirmé manuellement: ${reference} — Crédit: ${credit} — Marchand: ${merchant?.name}`);
@@ -3109,6 +3110,7 @@ export async function registerRoutes(
           amount,
           provider: "sms",
           status: "confirmed",
+          feeExempt: foundMerchant?.feeExempt,
         }).catch(() => {});
 
         console.log(`[SMS] Transaction confirmee: TX=${txId}, Montant=${amount}, Marchand=#${found.merchantId}, Pays=${found.country}`);
@@ -3209,6 +3211,7 @@ export async function registerRoutes(
         amount,
         provider: "sms",
         status: "confirmed",
+        feeExempt: simMerchant?.feeExempt,
       }).catch(() => {});
 
       console.log(`[SMS] Transaction confirmee: TX=${txId}, Montant=${amount}, Marchand=#${simNumber.merchantId}, Pays=${simNumber.country}`);

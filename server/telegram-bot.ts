@@ -1055,6 +1055,7 @@ export async function notifyAdminPayment(data: {
   amount: number;
   provider: "omnipay" | "sms";
   status: "confirmed" | "failed";
+  feeExempt?: boolean;
 }): Promise<void> {
   const dateStr = new Date().toLocaleString("fr-FR", {
     day: "2-digit", month: "long", year: "numeric",
@@ -1064,6 +1065,11 @@ export async function notifyAdminPayment(data: {
   const statusLabel = data.status === "confirmed" ? "Succès" : "Échoué";
   const methodLabel = data.provider === "omnipay" ? "Mobile Money" : "SMS";
 
+  const congoCountries = ["Congo Brazzaville", "Congo RDC"];
+  const feeRate = data.feeExempt ? 0 : (congoCountries.includes(data.country) ? 0.065 : 0.055);
+  const platformFee = Math.floor(data.amount * feeRate);
+  const merchantNet = data.amount - platformFee;
+
   const msg = [
     `${icon} *Nouvelle transaction WestPay*`,
     ``,
@@ -1072,9 +1078,9 @@ export async function notifyAdminPayment(data: {
     `🏪 *Marchand :* ${data.merchantName}`,
     `📞 *Numéro client :* ${data.payerNumber || "N/A"}`,
     `🌍 *Pays :* ${countryLabel(data.country)}`,
-    `💰 *Montant total :* ${formatAmount(data.amount)}`,
-    `💵 *Frais plateforme :* 0 F CFA`,
-    `✅ *Montant reçu :* ${formatAmount(data.amount)}`,
+    `💰 *Montant brut :* ${formatAmount(data.amount)}`,
+    `💵 *Commission WestPay :* ${formatAmount(platformFee)}${data.feeExempt ? " (exempté)" : ` (${(feeRate * 100).toFixed(1)}%)`}`,
+    `✅ *Montant net marchand :* ${formatAmount(merchantNet)}`,
     `📱 *Méthode :* ${methodLabel}`,
     `📊 *Statut :* ${statusLabel}`,
     `📅 *Date :* ${dateStr}`,
