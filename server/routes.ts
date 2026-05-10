@@ -2163,8 +2163,11 @@ export async function registerRoutes(
         }
 
         // ── Protection anti-double-crédit : mise à jour atomique ─────────────
+        // On exclut uniquement les statuts terminaux — tout autre statut intermédiaire
+        // ("submitted", "omnipay_pending", "omnipay_status_X", etc.) est accepté
         const atomicUpdate = await storage.updatePendingPaymentStatusAtomic(
-          pending.id, "omnipay_confirmed", ["pending", "omnipay_pending"]
+          pending.id, "omnipay_confirmed",
+          ["omnipay_confirmed", "confirmed", "failed", "omnipay_error", "omnipay_failed"]
         );
         if (!atomicUpdate) {
           console.log(`[OMNIPAY CALLBACK] Paiement #${pending.id} deja traite (race condition evitee)`);

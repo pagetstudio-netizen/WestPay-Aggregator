@@ -92,7 +92,7 @@ export interface IStorage {
   getPendingPaymentsByTxId(txId: string): Promise<PendingPayment[]>;
   updatePendingPaymentTxId(id: number, txId: string): Promise<PendingPayment>;
   updatePendingPaymentStatus(id: number, status: string): Promise<void>;
-  updatePendingPaymentStatusAtomic(id: number, newStatus: string, allowedStatuses: string[]): Promise<boolean>;
+  updatePendingPaymentStatusAtomic(id: number, newStatus: string, excludedStatuses: string[]): Promise<boolean>;
   cleanupExpiredPayments(): Promise<number>;
   getPendingPayments(merchantId?: number): Promise<PendingPayment[]>;
 
@@ -567,12 +567,12 @@ export class DatabaseStorage implements IStorage {
     await db.update(pendingPayments).set({ status }).where(eq(pendingPayments.id, id));
   }
 
-  async updatePendingPaymentStatusAtomic(id: number, newStatus: string, allowedStatuses: string[]): Promise<boolean> {
-    const result = await db.update(pendingPayments)
-      .set({ status: newStatus })
-      .where(and(eq(pendingPayments.id, id), inArray(pendingPayments.status, allowedStatuses)))
-      .returning({ id: pendingPayments.id });
-    return result.length > 0;
+  async updatePendingPaymentStatusAtomic(id: number, newStatus: string, excludedStatuses: string[]): Promise<boolean> {
+    // Mise à jour atomique : réussit uniquement si le statut actuel N'EST PAS dans les statuts exclus (terminaux)
+    const result = await db.execute(
+      sql`UPDATE pending_payments SET status = ${newStatus} WHERE id = ${id} AND status NOT IN (${sql.join(excludedStatuses.map(s => sql`${s}`), sql`, `)}) RETURNING id`
+    );
+    return (result as any).rows?.length > 0;
   }
 
   async cleanupExpiredPayments(): Promise<number> {
