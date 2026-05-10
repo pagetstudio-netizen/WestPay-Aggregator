@@ -525,8 +525,8 @@ export class DatabaseStorage implements IStorage {
     return {
       commissionTotal: Number(wdFees?.total || 0) + Number(wtFees?.total || 0) + Number(txFees.total || 0),
       commissionToday: Number(wdFees?.today || 0) + Number(wtFees?.today || 0) + Number(txFees.today || 0),
-      commissionThisMonth: Number(wdFees?.thisMonth || 0) + Number(wtFees?.thisMonth || 0) + Number(txFees.this_month || 0),
-      commissionPrevMonth: Number(wdFees?.prevMonth || 0) + Number(wtFees?.prevMonth || 0) + Number(txFees.prev_month || 0),
+      commissionThisMonth: Number(wdFees?.this_month || 0) + Number(wtFees?.thisMonth || 0) + Number(txFees.this_month || 0),
+      commissionPrevMonth: Number(wdFees?.prev_month || 0) + Number(wtFees?.prevMonth || 0) + Number(txFees.prev_month || 0),
       apiPaymentsCount: Number(apiPay?.count || 0),
       apiPaymentsTotal: Number(apiPay?.total || 0),
       linkPaymentsCount: Number(linkPay?.count || 0),
