@@ -333,14 +333,6 @@ export async function runMigrations() {
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS mbiyo_code text;
     `);
 
-    // ── Correction gateway CI : OmniPay ne supporte pas les payouts CI ────────────
-    await client.query(`
-      UPDATE withdrawal_operators
-      SET gateway = 'mbiyo'
-      WHERE country = 'Cote d''Ivoire'
-        AND gateway = 'OmniPay'
-    `);
-
     // ── Index uniques ──────────────────────────────────────────────────────────────
     await client.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS merchants_crypto_api_key_idx ON merchants(crypto_api_key) WHERE crypto_api_key IS NOT NULL;

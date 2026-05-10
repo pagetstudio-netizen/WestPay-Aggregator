@@ -3182,6 +3182,18 @@ function WithdrawalOperatorsPanel() {
               </Select>
               <p className="text-xs text-muted-foreground">La passerelle sélectionnée sera utilisée pour tous les paiements et retraits via cet opérateur, pour tous les marchands de ce pays.</p>
             </div>
+            {form.gateway?.toLowerCase() === "omnipay" && (
+              <div className="space-y-2">
+                <Label>Code opérateur OmniPay</Label>
+                <Input
+                  value={form.omnipayCode}
+                  onChange={e => setForm(f => ({ ...f, omnipayCode: e.target.value }))}
+                  placeholder="Ex: mtn, orange, moov, wave, mixx..."
+                  data-testid="input-op-omnipay-code"
+                />
+                <p className="text-xs text-muted-foreground">Code opérateur envoyé à OmniPay. Laisser vide pour laisser OmniPay détecter automatiquement via le numéro. Requis pour Wave (<code>wave</code>) et Mixx (<code>mixx</code>).</p>
+              </div>
+            )}
             {form.gateway?.toLowerCase() === "mbiyo" && (
               <div className="space-y-2">
                 <Label>Code réseau Mbiyo</Label>
