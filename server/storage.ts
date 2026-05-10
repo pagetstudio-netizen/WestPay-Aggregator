@@ -434,6 +434,7 @@ export class DatabaseStorage implements IStorage {
     const prevMonthIso = prevMonthStart.toISOString();
     const prevMonthEndIso = prevMonthEnd.toISOString();
 
+    // Frais de retrait nets WestPay (frais marchands — les provider fees ne sont pas stockés séparément)
     const [wdFees] = await db.select({
       total: sql<number>`coalesce(sum(fees), 0)`,
       today: sql<number>`coalesce(sum(case when processed_at >= ${todayIso}::timestamp then fees else 0 end), 0)`,
@@ -441,12 +442,47 @@ export class DatabaseStorage implements IStorage {
       prevMonth: sql<number>`coalesce(sum(case when processed_at >= ${prevMonthIso}::timestamp and processed_at < ${prevMonthEndIso}::timestamp then fees else 0 end), 0)`,
     }).from(withdrawals).where(eq(withdrawals.status, "approved"));
 
+    // Frais de virement wallet
     const [wtFees] = await db.select({
       total: sql<number>`coalesce(sum(fee), 0)`,
       today: sql<number>`coalesce(sum(case when processed_at >= ${todayIso}::timestamp then fee else 0 end), 0)`,
       thisMonth: sql<number>`coalesce(sum(case when processed_at >= ${monthIso}::timestamp then fee else 0 end), 0)`,
       prevMonth: sql<number>`coalesce(sum(case when processed_at >= ${prevMonthIso}::timestamp and processed_at < ${prevMonthEndIso}::timestamp then fee else 0 end), 0)`,
     }).from(walletTransfers).where(eq(walletTransfers.status, "approved"));
+
+    // Frais de collecte nets WestPay = (montant × taux_WestPay) − frais_fournisseur
+    // Taux : 5.5% standard, 6.5% Congo, 0% fee_exempt. Soustrait provider_fee capturé depuis OmniPay/Mbiyo.
+    const txFeesResult = await db.execute(sql`
+      SELECT
+        coalesce(sum(
+          case when m.fee_exempt then 0
+               else round(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.065 else 0.055 end)
+                    - coalesce(t.provider_fee, 0)
+          end
+        ), 0) as total,
+        coalesce(sum(case when t.created_at >= ${todayIso}::timestamp then
+          case when m.fee_exempt then 0
+               else round(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.065 else 0.055 end)
+                    - coalesce(t.provider_fee, 0)
+          end
+        else 0 end), 0) as today,
+        coalesce(sum(case when t.created_at >= ${monthIso}::timestamp then
+          case when m.fee_exempt then 0
+               else round(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.065 else 0.055 end)
+                    - coalesce(t.provider_fee, 0)
+          end
+        else 0 end), 0) as this_month,
+        coalesce(sum(case when t.created_at >= ${prevMonthIso}::timestamp and t.created_at < ${prevMonthEndIso}::timestamp then
+          case when m.fee_exempt then 0
+               else round(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.065 else 0.055 end)
+                    - coalesce(t.provider_fee, 0)
+          end
+        else 0 end), 0) as prev_month
+      FROM transactions t
+      JOIN merchants m ON m.id = t.merchant_id
+      WHERE t.status IN ('confirmed','success','completed')
+    `);
+    const txFees = (txFeesResult as any)?.rows?.[0] ?? (txFeesResult as any)?.[0] ?? {};
 
     const [apiPay] = await db.select({
       count: sql<number>`count(*)`,
@@ -464,10 +500,10 @@ export class DatabaseStorage implements IStorage {
     }).from(withdrawals).where(eq(withdrawals.status, "approved"));
 
     return {
-      commissionTotal: Number(wdFees?.total || 0) + Number(wtFees?.total || 0),
-      commissionToday: Number(wdFees?.today || 0) + Number(wtFees?.today || 0),
-      commissionThisMonth: Number(wdFees?.thisMonth || 0) + Number(wtFees?.thisMonth || 0),
-      commissionPrevMonth: Number(wdFees?.prevMonth || 0) + Number(wtFees?.prevMonth || 0),
+      commissionTotal: Number(wdFees?.total || 0) + Number(wtFees?.total || 0) + Number(txFees.total || 0),
+      commissionToday: Number(wdFees?.today || 0) + Number(wtFees?.today || 0) + Number(txFees.today || 0),
+      commissionThisMonth: Number(wdFees?.thisMonth || 0) + Number(wtFees?.thisMonth || 0) + Number(txFees.this_month || 0),
+      commissionPrevMonth: Number(wdFees?.prevMonth || 0) + Number(wtFees?.prevMonth || 0) + Number(txFees.prev_month || 0),
       apiPaymentsCount: Number(apiPay?.count || 0),
       apiPaymentsTotal: Number(apiPay?.total || 0),
       linkPaymentsCount: Number(linkPay?.count || 0),

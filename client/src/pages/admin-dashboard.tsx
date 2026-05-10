@@ -404,13 +404,14 @@ function OverviewPanel() {
         <StatCard title="Paiements auj." value={stats?.todayPayments || 0} icon={TrendingUp} accent="orange" />
       </div>
 
-      {/* Commissions WestPay */}
+      {/* Bénéfice net WestPay */}
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Commissions WestPay</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Bénéfice net WestPay</p>
+        <p className="text-xs text-muted-foreground mb-3">Après déduction des frais fournisseur (OmniPay / Mbiyo)</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard title="Commission totale" value={fmtF(stats?.commissionTotal || 0)} icon={DollarSign} accent="green" />
-          <StatCard title="Commission du jour" value={fmtF(stats?.commissionToday || 0)} icon={TrendingUp} accent="orange" />
-          <StatCard title="Commission ce mois" value={fmtF(stats?.commissionThisMonth || 0)} icon={BarChart3} accent="blue" />
+          <StatCard title="Bénéfice total" value={fmtF(stats?.commissionTotal || 0)} icon={DollarSign} accent="green" />
+          <StatCard title="Bénéfice du jour" value={fmtF(stats?.commissionToday || 0)} icon={TrendingUp} accent="orange" />
+          <StatCard title="Bénéfice ce mois" value={fmtF(stats?.commissionThisMonth || 0)} icon={BarChart3} accent="blue" />
           <StatCard title="Mois précédent" value={fmtF(stats?.commissionPrevMonth || 0)} icon={BarChart3} accent="purple" />
         </div>
       </div>

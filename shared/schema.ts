@@ -65,6 +65,7 @@ export const transactions = pgTable("transactions", {
   operator: text("operator"),
   omnipayReference: text("omnipay_reference"),
   errorMessage: text("error_message"),
+  providerFee: integer("provider_fee"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

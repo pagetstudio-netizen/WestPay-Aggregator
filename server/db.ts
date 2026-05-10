@@ -319,6 +319,7 @@ export async function runMigrations() {
       ALTER TABLE transactions ADD COLUMN IF NOT EXISTS omnipay_tx_id text;
       ALTER TABLE transactions ADD COLUMN IF NOT EXISTS payer_name text;
       ALTER TABLE transactions ADD COLUMN IF NOT EXISTS merchant_country_id integer;
+      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS provider_fee integer;
       ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS omnipay_reference text;
       ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS omnipay_tx_id text;
       ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS omnipay_payment_url text;

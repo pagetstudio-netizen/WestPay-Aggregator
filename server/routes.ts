@@ -2162,6 +2162,7 @@ export async function registerRoutes(
               status: "confirmed",
               provider: "omnipay",
               omnipayTxId: payload.id || null,
+              providerFee: payload.fees != null ? parseInt(String(payload.fees)) || 0 : null,
             });
 
             await storage.incrementMerchantCountryBalance(merchantCountry.id, merchantCredit1);
@@ -2296,6 +2297,7 @@ export async function registerRoutes(
                         operator: pending.paymentMethod || null,
                         omnipayReference: pending.omnipayReference,
                         errorMessage: null,
+                        providerFee: statusResult.data.fee != null ? parseInt(String(statusResult.data.fee)) || 0 : null,
                       });
                     }
                     console.log(`[POLL MBIYO] Paiement credite via polling — ref=${pending.omnipayReference} montant=${pending.amount} credit=${credit} marchand=#${pending.merchantId}`);
@@ -2448,6 +2450,7 @@ export async function registerRoutes(
           operator: pending.paymentMethod || null,
           omnipayReference: payload.order_id,
           errorMessage: null,
+          providerFee: payload.fee != null ? parseInt(String(payload.fee)) || 0 : null,
         });
 
         console.log(`[MBIYO CALLBACK] Paiement confirme: ${payload.order_id}`);
