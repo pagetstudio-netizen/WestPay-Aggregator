@@ -515,6 +515,8 @@ export class DatabaseStorage implements IStorage {
       FROM transactions t
       JOIN merchants m ON m.id = t.merchant_id
       WHERE t.status IN ('confirmed','success','completed')
+        AND t.amount > 0
+        AND (t.tx_id IS NULL OR t.tx_id NOT LIKE 'TR-%')
     `);
     const txFees = txResult.rows[0] ?? zero;
 
