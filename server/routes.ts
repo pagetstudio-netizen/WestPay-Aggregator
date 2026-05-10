@@ -2116,6 +2116,7 @@ export async function registerRoutes(
               `Retrait confirmé${wdFees !== undefined ? ` - Frais: ${wdFees} F` : ""}`,
               payload.reference,
               wdFees,
+              wdFees,
             );
             notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees || 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: withdrawal.withdrawalMode }).catch(() => {});
             notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees || 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
@@ -2591,7 +2592,7 @@ export async function registerRoutes(
       if (withdrawal.status === "failed" && wdIsSuccess) {
         const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
         if (mc) await storage.decrementMerchantCountryBalance(mc.id, withdrawal.amount);
-        await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Transfert Mbiyo confirme (reconciliation automatique)`, payload.order_id, wdFees);
+        await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Transfert Mbiyo confirme (reconciliation automatique)`, payload.order_id, wdFees, wdFees);
         console.log(`[MBIYO PAYOUT CALLBACK] Reconciliation retrait #${withdrawal.id} — redebit balance ${withdrawal.amount}`);
         res.json({ status: "reconciled" });
         setImmediate(() => {
@@ -2606,7 +2607,7 @@ export async function registerRoutes(
       }
 
       if (wdIsSuccess) {
-        await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Transfert Mbiyo confirme`, payload.order_id, wdFees);
+        await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Transfert Mbiyo confirme`, payload.order_id, wdFees, wdFees);
         console.log(`[MBIYO PAYOUT CALLBACK] Retrait #${withdrawal.id} approuve - ref=${payload.order_id}`);
         res.json({ status: "approved" });
         setImmediate(() => {
@@ -3734,7 +3735,7 @@ export async function registerRoutes(
           if (payoutInitOk) {
             const mbiyoRef = result.data!.transaction_id || reference;
             const mbiyoFee = Math.round(parseFloat(String(result.data!.fee || 0)) || withdrawalFee);
-            await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - TxID: ${mbiyoRef}`, reference, mbiyoFee);
+            await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - TxID: ${mbiyoRef}`, reference, mbiyoFee, mbiyoFee);
             console.log(`[WITHDRAWAL MBIYO] Initié (statut: ${result.status}) - TxID: ${mbiyoRef} ref=${reference}`);
             return res.json({ ...w, status: "pending", omnipayRef: reference, fees: mbiyoFee, netAmount, autoProcessed: true, gateway: "mbiyo" });
           } else {
@@ -3761,7 +3762,8 @@ export async function registerRoutes(
                 });
                 if (fallbackResult.success === 1) {
                   const omnipayRef = fallbackResult.reference || fallbackRef;
-                  await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - Frais prévus: ${withdrawalFee} F`, omnipayRef, withdrawalFee);
+                  const fbProviderFee = fallbackResult.fees || 0;
+                  await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - Frais prévus: ${withdrawalFee} F`, omnipayRef, withdrawalFee, fbProviderFee);
                   console.log(`[WITHDRAWAL FALLBACK] Basculé sur OmniPay ref=${omnipayRef}`);
                   return res.json({ ...w, status: "pending", omnipayRef, fees: withdrawalFee, netAmount, autoProcessed: true, gateway: "omnipay" });
                 }
@@ -3802,7 +3804,8 @@ export async function registerRoutes(
               });
               if (fallbackResult.success === 1) {
                 const omnipayRef = fallbackResult.reference || fallbackRef;
-                await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - Frais prévus: ${withdrawalFee} F`, omnipayRef, withdrawalFee);
+                const fbProviderFee2 = fallbackResult.fees || 0;
+                await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - Frais prévus: ${withdrawalFee} F`, omnipayRef, withdrawalFee, fbProviderFee2);
                 console.log(`[WITHDRAWAL FALLBACK] Basculé sur OmniPay ref=${omnipayRef} (après erreur Mbiyo)`);
                 return res.json({ ...w, status: "pending", omnipayRef, fees: withdrawalFee, netAmount, autoProcessed: true, gateway: "omnipay" });
               }
@@ -3840,7 +3843,8 @@ export async function registerRoutes(
           });
           if (result.success === 1) {
             const omnipayRef = result.reference || reference;
-            await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - Frais prévus: ${withdrawalFee} F`, omnipayRef, withdrawalFee);
+            const omnipayProviderFee = result.fees || 0;
+            await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - Frais prévus: ${withdrawalFee} F`, omnipayRef, withdrawalFee, omnipayProviderFee);
             console.log(`[WITHDRAWAL AUTO] Initié chez OmniPay ref=${omnipayRef} - en attente du callback`);
             return res.json({ ...w, status: "pending", omnipayRef, fees: withdrawalFee, netAmount, autoProcessed: true });
           } else {
@@ -3974,11 +3978,11 @@ export async function registerRoutes(
       }
 
       if (sentToProvider) {
-        await storage.updateWithdrawalStatus(id, "pending", `En cours de traitement - en attente de confirmation${note ? ` - Note: ${note}` : ""}`, omnipayRef, fees);
+        await storage.updateWithdrawalStatus(id, "pending", `En cours de traitement - en attente de confirmation${note ? ` - Note: ${note}` : ""}`, omnipayRef, fees, fees);
         console.log(`[ADMIN APPROVE WD] Retrait #${id} en attente confirmation ${useMbiyoPayout ? "Mbiyo" : "OmniPay"} - ref=${omnipayRef}`);
         res.json({ success: true, omnipayRef, fees, pendingOmnipay: true });
       } else {
-        await storage.updateWithdrawalStatus(id, "approved", note, omnipayRef, fees);
+        await storage.updateWithdrawalStatus(id, "approved", note, omnipayRef, fees, fees);
         notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: fees || 0, phone: w.phone, operator: w.operator, status: "approved", mode: "manual" }).catch(() => {});
         notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: fees || 0, phone: w.phone, operator: w.operator, status: "approved" }).catch(() => {});
         res.json({ success: true, omnipayRef, fees });

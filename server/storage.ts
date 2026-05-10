@@ -138,7 +138,7 @@ export interface IStorage {
   getWithdrawals(merchantId?: number): Promise<(Withdrawal & { merchantName: string; merchantWebsite?: string | null })[]>;
   getWithdrawalById(id: number): Promise<Withdrawal | undefined>;
   getWithdrawalByOmnipayRef(ref: string): Promise<Withdrawal | undefined>;
-  updateWithdrawalStatus(id: number, status: string, adminNote?: string, omnipayRef?: string, fees?: number): Promise<void>;
+  updateWithdrawalStatus(id: number, status: string, adminNote?: string, omnipayRef?: string, fees?: number, providerPayoutFee?: number): Promise<void>;
   applyWithdrawal(id: number): Promise<void>;
 
   getWithdrawalOperators(country?: string, activeOnly?: boolean): Promise<WithdrawalOperator[]>;
@@ -447,33 +447,36 @@ export class DatabaseStorage implements IStorage {
     const zero: FeeRow = { total: "0", today: "0", this_month: "0", prev_month: "0" };
 
     // Bénéfice net WestPay sur les retraits
-    // = frais prélevés au marchand (4.5% / 5.5% Congo, 0% fee_exempt) − frais fournisseur (withdrawals.fees)
+    // = frais prélevés au marchand (4.5% / 5.5% Congo, 0% fee_exempt) − frais fournisseur (provider_payout_fee)
+    // provider_payout_fee = frais OmniPay/Mbiyo sur le payout (stockés explicitement depuis cette version)
+    // NULLIF(w.provider_payout_fee, 0) : traite 0 comme « non défini » pour retomber sur w.fees (valeur
+    // legacy) sur les anciennes lignes ayant reçu DEFAULT 0 avant la suppression du default.
     const wdResult = await db.execute<FeeRow>(sql`
       SELECT
         coalesce(sum(
           case when m.fee_exempt
-               then -coalesce(w.fees, 0)
+               then -coalesce(nullif(w.provider_payout_fee, 0), w.fees, 0)
                else floor(w.amount * case when w.country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
-                    - coalesce(w.fees, 0)
+                    - coalesce(nullif(w.provider_payout_fee, 0), w.fees, 0)
           end
         ), 0) as total,
         coalesce(sum(case when w.processed_at >= ${todayIso}::timestamp then
           case when m.fee_exempt
-               then -coalesce(w.fees, 0)
+               then -coalesce(nullif(w.provider_payout_fee, 0), w.fees, 0)
                else floor(w.amount * case when w.country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
-                    - coalesce(w.fees, 0)
+                    - coalesce(nullif(w.provider_payout_fee, 0), w.fees, 0)
           end else 0 end), 0) as today,
         coalesce(sum(case when w.processed_at >= ${monthIso}::timestamp then
           case when m.fee_exempt
-               then -coalesce(w.fees, 0)
+               then -coalesce(nullif(w.provider_payout_fee, 0), w.fees, 0)
                else floor(w.amount * case when w.country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
-                    - coalesce(w.fees, 0)
+                    - coalesce(nullif(w.provider_payout_fee, 0), w.fees, 0)
           end else 0 end), 0) as this_month,
         coalesce(sum(case when w.processed_at >= ${prevMonthIso}::timestamp and w.processed_at < ${prevMonthEndIso}::timestamp then
           case when m.fee_exempt
-               then -coalesce(w.fees, 0)
+               then -coalesce(nullif(w.provider_payout_fee, 0), w.fees, 0)
                else floor(w.amount * case when w.country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
-                    - coalesce(w.fees, 0)
+                    - coalesce(nullif(w.provider_payout_fee, 0), w.fees, 0)
           end else 0 end), 0) as prev_month
       FROM withdrawals w
       LEFT JOIN merchants m ON m.id = w.merchant_id
@@ -905,7 +908,7 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async updateWithdrawalStatus(id: number, status: string, adminNote?: string, omnipayRef?: string, fees?: number): Promise<void> {
+  async updateWithdrawalStatus(id: number, status: string, adminNote?: string, omnipayRef?: string, fees?: number, providerPayoutFee?: number): Promise<void> {
     const updateData: any = {
       status,
       adminNote: adminNote || null,
@@ -913,6 +916,7 @@ export class DatabaseStorage implements IStorage {
     };
     if (omnipayRef) updateData.omnipayRef = omnipayRef;
     if (fees !== undefined) updateData.fees = fees;
+    if (providerPayoutFee !== undefined) updateData.providerPayoutFee = providerPayoutFee;
     await db.update(withdrawals).set(updateData).where(eq(withdrawals.id, id));
   }
 

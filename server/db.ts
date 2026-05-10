@@ -328,6 +328,7 @@ export async function runMigrations() {
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS operator text;
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS omnipay_ref text;
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS fees integer DEFAULT 0;
+      ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS provider_payout_fee integer;
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS gateway text NOT NULL DEFAULT 'omnipay';
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS omnipay_code text;
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS mbiyo_code text;
@@ -337,6 +338,15 @@ export async function runMigrations() {
     await client.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS merchants_crypto_api_key_idx ON merchants(crypto_api_key) WHERE crypto_api_key IS NOT NULL;
       CREATE UNIQUE INDEX IF NOT EXISTS merchants_sdk_api_key_idx ON merchants(sdk_api_key) WHERE sdk_api_key IS NOT NULL;
+    `);
+
+    // ── Correction provider_payout_fee : suppression du DEFAULT 0 (idempotent) ─────
+    // La colonne peut avoir été créée initialement avec DEFAULT 0 ; on le supprime
+    // pour que les nouvelles lignes non-renseignées restent NULL.
+    // Les lignes historiques à 0 sont gérées côté stats via NULLIF(provider_payout_fee, 0)
+    // qui traite 0 comme « non défini » et bascule sur w.fees (valeur legacy).
+    await client.query(`
+      ALTER TABLE withdrawals ALTER COLUMN provider_payout_fee DROP DEFAULT;
     `);
 
     // ── Déduplication des opérateurs avant d'ajouter la contrainte ────────────────

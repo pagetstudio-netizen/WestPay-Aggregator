@@ -183,6 +183,7 @@ export const withdrawals = pgTable("withdrawals", {
   adminNote: text("admin_note"),
   omnipayRef: text("omnipay_ref"),
   fees: integer("fees").default(0),
+  providerPayoutFee: integer("provider_payout_fee"),
   gateway: text("gateway").notNull().default("omnipay"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   processedAt: timestamp("processed_at"),
