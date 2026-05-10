@@ -442,23 +442,27 @@ export class DatabaseStorage implements IStorage {
     const wdResult = await db.execute<FeeRow>(sql`
       SELECT
         coalesce(sum(
-          case when m.fee_exempt then 0
+          case when m.fee_exempt
+               then -coalesce(w.fees, 0)
                else floor(w.amount * case when w.country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
                     - coalesce(w.fees, 0)
           end
         ), 0) as total,
         coalesce(sum(case when w.processed_at >= ${todayIso}::timestamp then
-          case when m.fee_exempt then 0
+          case when m.fee_exempt
+               then -coalesce(w.fees, 0)
                else floor(w.amount * case when w.country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
                     - coalesce(w.fees, 0)
           end else 0 end), 0) as today,
         coalesce(sum(case when w.processed_at >= ${monthIso}::timestamp then
-          case when m.fee_exempt then 0
+          case when m.fee_exempt
+               then -coalesce(w.fees, 0)
                else floor(w.amount * case when w.country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
                     - coalesce(w.fees, 0)
           end else 0 end), 0) as this_month,
         coalesce(sum(case when w.processed_at >= ${prevMonthIso}::timestamp and w.processed_at < ${prevMonthEndIso}::timestamp then
-          case when m.fee_exempt then 0
+          case when m.fee_exempt
+               then -coalesce(w.fees, 0)
                else floor(w.amount * case when w.country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
                     - coalesce(w.fees, 0)
           end else 0 end), 0) as prev_month
@@ -484,23 +488,27 @@ export class DatabaseStorage implements IStorage {
     const txResult = await db.execute<FeeRow>(sql`
       SELECT
         coalesce(sum(
-          case when m.fee_exempt then 0
+          case when m.fee_exempt
+               then -coalesce(t.provider_fee, 0)
                else (t.amount - floor(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.935 else 0.945 end))
                     - coalesce(t.provider_fee, 0)
           end
         ), 0) as total,
         coalesce(sum(case when t.created_at >= ${todayIso}::timestamp then
-          case when m.fee_exempt then 0
+          case when m.fee_exempt
+               then -coalesce(t.provider_fee, 0)
                else (t.amount - floor(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.935 else 0.945 end))
                     - coalesce(t.provider_fee, 0)
           end else 0 end), 0) as today,
         coalesce(sum(case when t.created_at >= ${monthIso}::timestamp then
-          case when m.fee_exempt then 0
+          case when m.fee_exempt
+               then -coalesce(t.provider_fee, 0)
                else (t.amount - floor(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.935 else 0.945 end))
                     - coalesce(t.provider_fee, 0)
           end else 0 end), 0) as this_month,
         coalesce(sum(case when t.created_at >= ${prevMonthIso}::timestamp and t.created_at < ${prevMonthEndIso}::timestamp then
-          case when m.fee_exempt then 0
+          case when m.fee_exempt
+               then -coalesce(t.provider_fee, 0)
                else (t.amount - floor(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.935 else 0.945 end))
                     - coalesce(t.provider_fee, 0)
           end else 0 end), 0) as prev_month
