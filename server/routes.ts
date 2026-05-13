@@ -7,7 +7,7 @@ import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, getGeoInfo } from "./telegram-bot";
+import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, notifyAdminMerchantCreated, notifyAdminAdminCreated, getGeoInfo } from "./telegram-bot";
 import {
   initiatePayment as omnipayInitiatePayment,
   initiateTransfer as omnipayInitiateTransfer,
@@ -572,6 +572,31 @@ export async function registerRoutes(
         description: `Marchand ${name} cree par l'administrateur`,
       });
 
+      const adminUser = (req as any).user;
+      const mcIp = req.ip || "";
+      getGeoInfo(mcIp).then(geo => {
+        notifyAdminMerchantCreated({
+          merchantName: name,
+          merchantEmail: email,
+          merchantSlug: slug,
+          merchantId: merchant.id,
+          adminEmail: adminUser?.email,
+          adminId: adminUser?.id,
+          ip: mcIp,
+          geo,
+        }).catch(() => {});
+      }).catch(() => {
+        notifyAdminMerchantCreated({
+          merchantName: name,
+          merchantEmail: email,
+          merchantSlug: slug,
+          merchantId: merchant.id,
+          adminEmail: adminUser?.email,
+          adminId: adminUser?.id,
+          ip: mcIp,
+        }).catch(() => {});
+      });
+
       res.json(merchant);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -941,6 +966,26 @@ export async function registerRoutes(
       const passwordHash = await bcrypt.hash(password, 10);
       const apiKey = "WP-ADMIN-" + crypto.randomBytes(16).toString("hex").toUpperCase();
       await storage.createAdmin({ email, passwordHash, apiKey });
+
+      const creatorAdmin = (req as any).user;
+      const caIp = req.ip || "";
+      getGeoInfo(caIp).then(geo => {
+        notifyAdminAdminCreated({
+          newAdminEmail: email,
+          createdByEmail: creatorAdmin?.email,
+          createdById: creatorAdmin?.id,
+          ip: caIp,
+          geo,
+        }).catch(() => {});
+      }).catch(() => {
+        notifyAdminAdminCreated({
+          newAdminEmail: email,
+          createdByEmail: creatorAdmin?.email,
+          createdById: creatorAdmin?.id,
+          ip: caIp,
+        }).catch(() => {});
+      });
+
       res.json({ success: true, email });
     } catch (err: any) {
       res.status(500).json({ message: err.message });

@@ -1320,6 +1320,72 @@ export async function notifyAdminBalanceUpdate(data: {
   await notifyAdminGroup(msg);
 }
 
+export async function notifyAdminMerchantCreated(data: {
+  merchantName: string;
+  merchantEmail: string;
+  merchantSlug: string;
+  merchantId: number;
+  adminEmail?: string;
+  adminId?: number;
+  ip?: string;
+  geo?: GeoInfo;
+}): Promise<void> {
+  const dateStr = new Date().toLocaleString("fr-FR", {
+    day: "2-digit", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", timeZone: "UTC",
+  });
+  const geoLine = data.geo
+    ? `📍 *Localisation admin :* ${[data.geo.city, data.geo.region, data.geo.country].filter(Boolean).join(", ")}`
+    : null;
+
+  const msg = [
+    `🏪 *Nouveau marchand créé — WestPay*`,
+    ``,
+    `👤 *Admin :* ${data.adminEmail ? `\`${data.adminEmail}\`` : "Inconnu"}${data.adminId ? ` (ID ${data.adminId})` : ""}`,
+    data.ip ? `🌐 *IP admin :* \`${data.ip}\`` : null,
+    geoLine,
+    data.geo?.isp ? `🔌 *FAI :* ${data.geo.isp}` : null,
+    ``,
+    `🏷️ *Nom :* ${data.merchantName}`,
+    `📧 *Email :* \`${data.merchantEmail}\``,
+    `🔗 *Slug :* \`${data.merchantSlug}\``,
+    `🆔 *ID :* ${data.merchantId}`,
+    `📅 *Date :* ${dateStr} UTC`,
+  ].filter(Boolean).join("\n");
+
+  await notifyAdminGroup(msg);
+}
+
+export async function notifyAdminAdminCreated(data: {
+  newAdminEmail: string;
+  createdByEmail?: string;
+  createdById?: number;
+  ip?: string;
+  geo?: GeoInfo;
+}): Promise<void> {
+  const dateStr = new Date().toLocaleString("fr-FR", {
+    day: "2-digit", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", timeZone: "UTC",
+  });
+  const geoLine = data.geo
+    ? `📍 *Localisation :* ${[data.geo.city, data.geo.region, data.geo.country].filter(Boolean).join(", ")}`
+    : null;
+
+  const msg = [
+    `🛡️ *Nouveau compte administrateur — WestPay*`,
+    ``,
+    `📧 *Nouvel admin :* \`${data.newAdminEmail}\``,
+    ``,
+    `👤 *Créé par :* ${data.createdByEmail ? `\`${data.createdByEmail}\`` : "Inconnu"}${data.createdById ? ` (ID ${data.createdById})` : ""}`,
+    data.ip ? `🌐 *IP :* \`${data.ip}\`` : null,
+    geoLine,
+    data.geo?.isp ? `🔌 *FAI :* ${data.geo.isp}` : null,
+    `📅 *Date :* ${dateStr} UTC`,
+  ].filter(Boolean).join("\n");
+
+  await notifyAdminGroup(msg);
+}
+
 export async function notifyAdminLogin(data: {
   email: string;
   ip: string;

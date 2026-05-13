@@ -4,6 +4,8 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 
 const app = express();
+// Trust the first proxy (Replit / reverse proxy) so req.ip returns the real client IP
+app.set("trust proxy", true);
 const httpServer = createServer(app);
 
 declare module "http" {
