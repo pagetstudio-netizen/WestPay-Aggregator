@@ -97,7 +97,7 @@ export default function AdminLogin() {
                 className="wp-admin-input"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@westpay.com"
+                placeholder="Votre adresse email"
                 required
                 data-testid="input-admin-email"
               />

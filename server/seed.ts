@@ -15,8 +15,7 @@ function generateSecureApiKey(country: string): string {
 
 export async function seedDatabase() {
   const existingAdmin = await storage.getAdminByEmail("devappmanagement40@gmail.com");
-  const legacyAdmin = await storage.getAdminByEmail("admin@westpay.com");
-  if (existingAdmin || legacyAdmin) {
+  if (existingAdmin) {
     await ensurePinsExist();
     return;
   }

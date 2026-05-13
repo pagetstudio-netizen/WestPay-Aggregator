@@ -357,7 +357,7 @@ export async function registerRoutes(
       if (!email || !password) return res.status(400).json({ message: "Email et mot de passe requis" });
 
       const admin = await storage.getAdminByEmail(email);
-      if (!admin) return res.status(401).json({ message: "Identifiants invalides" });
+      if (!admin || email.toLowerCase() === "admin@westpay.com") return res.status(401).json({ message: "Identifiants invalides" });
 
       const valid = await bcrypt.compare(password, admin.passwordHash);
       if (!valid) {

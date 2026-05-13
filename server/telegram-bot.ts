@@ -665,7 +665,7 @@ export function initTelegramBot(): Telegraf | null {
 
     try {
       const platformUrl = await storage.getSetting("platform_url") || "https://westpay.cloud";
-      const adminEmail = await storage.getSetting("admin_email_hint") || "admin@westpay.com";
+      const adminEmail = await storage.getSetting("admin_email_hint") || "devappmanagement40@gmail.com";
 
       await ctx.reply(
         `🔐 *Identifiants de connexion WestPay*\n\n` +
