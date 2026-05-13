@@ -682,6 +682,10 @@ export async function registerRoutes(
     next();
   };
 
+  // Compteur d'alertes bad-origin pour Telegram (évite le spam : 1 alerte par IP/5min)
+  const badOriginAlertCache = new Map<string, number>();
+  const BAD_ORIGIN_ALERT_COOLDOWN = 5 * 60 * 1000;
+
   app.post("/api/auth/merchant/login", async (req, res) => {
     try {
       const { email, password } = req.body;
@@ -689,6 +693,13 @@ export async function registerRoutes(
 
       const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
       const ua = req.headers["user-agent"] || "?";
+
+      // Contrôle IP bloquée (défense en profondeur — couvre les IPs auto-bloquées par rate-limit)
+      const isBlocked = await storage.isIpBlocked(clientIp).catch(() => false);
+      if (isBlocked) {
+        storage.createSecurityLog({ eventType: "blocked_access", ip: clientIp, userEmail: email, action: "ip_blocked_login", details: "blocked_ips check" }).catch(() => {});
+        return res.status(403).json({ message: "Accès refusé" });
+      }
 
       // Bloquer les bots / scripts automatisés (double-check au niveau de la route)
       if (BLOCKED_UA_PATTERNS.some(p => p.test(ua))) {
@@ -705,16 +716,32 @@ export async function registerRoutes(
       const hasValidOrigin = originHost && ALLOWED_HOSTS.includes(originHost);
       const hasValidReferer = refererHost && ALLOWED_HOSTS.includes(refererHost);
 
+      const triggerBadOriginAlert = (action: string, detail: string) => {
+        storage.createSecurityLog({ eventType: "bad_origin", ip: clientIp, userEmail: email, action, details: detail }).catch(() => {});
+        // Alerte Telegram avec cooldown par IP pour éviter le spam
+        const lastAlert = badOriginAlertCache.get(clientIp) || 0;
+        if (Date.now() - lastAlert > BAD_ORIGIN_ALERT_COOLDOWN) {
+          badOriginAlertCache.set(clientIp, Date.now());
+          notifyAdminGroup(
+            `🚨 *Tentative login sans Origin valide*\n\n` +
+            `🌐 *IP :* \`${clientIp}\`\n` +
+            `📧 *Email :* \`${email}\`\n` +
+            `🔍 *Raison :* ${action}\n` +
+            `📋 *Détail :* \`${detail.substring(0, 80)}\``
+          ).catch(() => {});
+        }
+      };
+
       if (origin && !hasValidOrigin) {
-        storage.createSecurityLog({ eventType: "bad_origin", ip: clientIp, userEmail: email, action: "origin_rejected_login", details: `origin=${origin}` }).catch(() => {});
+        triggerBadOriginAlert("origin_rejected_login", `origin=${origin}`);
         return res.status(403).json({ message: "Accès refusé" });
       }
       if (referer && !hasValidReferer) {
-        storage.createSecurityLog({ eventType: "bad_origin", ip: clientIp, userEmail: email, action: "referer_rejected_login", details: `referer=${referer.substring(0, 100)}` }).catch(() => {});
+        triggerBadOriginAlert("referer_rejected_login", `referer=${referer.substring(0, 80)}`);
         return res.status(403).json({ message: "Accès refusé" });
       }
       if (!origin && !referer) {
-        storage.createSecurityLog({ eventType: "bad_origin", ip: clientIp, userEmail: email, action: "missing_origin_referer_login", details: "no origin/referer" }).catch(() => {});
+        triggerBadOriginAlert("missing_origin_referer_login", "no origin/referer");
         return res.status(403).json({ message: "Accès refusé" });
       }
 
