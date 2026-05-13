@@ -16,6 +16,13 @@ function generateSecureApiKey(country: string): string {
 export async function seedDatabase() {
   const existingAdmin = await storage.getAdminByEmail("devappmanagement40@gmail.com");
   if (existingAdmin) {
+    // Verify password hash is correct — fix if desynchronized across environments
+    const passwordOk = await bcrypt.compare("Admin@2026!", existingAdmin.passwordHash);
+    if (!passwordOk) {
+      const fixedHash = await bcrypt.hash("Admin@2026!", 10);
+      await storage.updateAdminPassword(existingAdmin.id, fixedHash);
+      console.log("[SEED] Admin password hash resynchronisé");
+    }
     await ensurePinsExist();
     return;
   }
