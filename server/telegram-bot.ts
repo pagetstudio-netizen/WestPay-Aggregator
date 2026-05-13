@@ -775,6 +775,11 @@ export function initTelegramBot(): Telegraf | null {
           `/restreint — Voir les utilisateurs bloqués\n` +
           `/restreint ID — Débloquer un utilisateur spécifique\n` +
           `/restreint tous — Débloquer tout le monde\n\n` +
+          `🛡️ *Gestion des IPs*\n` +
+          `/listeips — Voir toutes les IPs autorisées et bloquées\n` +
+          `/autoriserip IP [note] — Autoriser une adresse IP\n` +
+          `/bloquerip IP [raison] — Bloquer une adresse IP\n` +
+          `/debloquerip IP — Retirer une IP de toutes les listes\n\n` +
           `━━━━━━━━━━━━━━━━\n` +
           `💡 *Configurer un groupe marchand :*\n` +
           `1️⃣ Générer un code dans le dashboard WestPay\n` +
@@ -969,6 +974,144 @@ export function initTelegramBot(): Telegraf | null {
 
   bot.action("sec:noop", async (ctx) => {
     await ctx.answerCbQuery();
+  });
+
+  // ─── Gestion des IPs depuis le groupe admin ─────────────────────────────────
+
+  bot.command("autoriserip", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    if (!(await isAdminGroup(chatId))) return;
+    const args = (ctx.message.text || "").split(/\s+/).slice(1);
+    const ip = args[0]?.trim();
+    const note = args.slice(1).join(" ") || "Ajouté via Telegram";
+    if (!ip) {
+      await ctx.reply("❌ Usage : `/autoriserip <ip> [note]`\nEx: `/autoriserip 1.2.3.4 Bureau Paris`", { parse_mode: "Markdown" });
+      return;
+    }
+    try {
+      const geo = await getGeoInfo(ip).catch(() => ({ country: "", city: "" }));
+      await pool.query(
+        `INSERT INTO allowed_ips (ip_address, user_email, role, country, city, note, created_by)
+         VALUES ($1, $2, 'admin', $3, $4, $5, $6)
+         ON CONFLICT (ip_address) DO UPDATE SET note = $5, created_by = $6`,
+        [ip, "", geo.country || "", geo.city || "", note, ctx.from?.username || "telegram"]
+      );
+      const loc = [geo.city, geo.country].filter(Boolean).join(", ");
+      await ctx.reply(
+        `✅ *IP autorisée avec succès*\n\n` +
+        `🌐 IP : \`${ip}\`\n` +
+        `📍 Localisation : ${loc || "Inconnue"}\n` +
+        `📝 Note : ${note}\n` +
+        `👤 Ajoutée par : @${ctx.from?.username || "admin"}`,
+        { parse_mode: "Markdown" }
+      );
+    } catch (err: any) {
+      await ctx.reply(`❌ Erreur : ${err.message}`);
+    }
+  });
+
+  bot.command("bloquerip", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    if (!(await isAdminGroup(chatId))) return;
+    const args = (ctx.message.text || "").split(/\s+/).slice(1);
+    const ip = args[0]?.trim();
+    const reason = args.slice(1).join(" ") || "Bloqué via Telegram";
+    if (!ip) {
+      await ctx.reply("❌ Usage : `/bloquerip <ip> [raison]`\nEx: `/bloquerip 1.2.3.4 Comportement suspect`", { parse_mode: "Markdown" });
+      return;
+    }
+    try {
+      const geo = await getGeoInfo(ip).catch(() => ({ country: "", city: "" }));
+      await pool.query(
+        `INSERT INTO blocked_ips (ip_address, country, city, reason, blocked_by)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (ip_address) DO UPDATE SET reason = $4, blocked_by = $5`,
+        [ip, geo.country || "", geo.city || "", reason, ctx.from?.username || "telegram"]
+      );
+      // Also remove from allowed_ips if present
+      await pool.query(`DELETE FROM allowed_ips WHERE ip_address = $1`, [ip]).catch(() => {});
+      const loc = [geo.city, geo.country].filter(Boolean).join(", ");
+      await ctx.reply(
+        `⛔ *IP bloquée avec succès*\n\n` +
+        `🌐 IP : \`${ip}\`\n` +
+        `📍 Localisation : ${loc || "Inconnue"}\n` +
+        `⚠️ Raison : ${reason}\n` +
+        `👤 Bloquée par : @${ctx.from?.username || "admin"}`,
+        { parse_mode: "Markdown" }
+      );
+    } catch (err: any) {
+      await ctx.reply(`❌ Erreur : ${err.message}`);
+    }
+  });
+
+  bot.command("debloquerip", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    if (!(await isAdminGroup(chatId))) return;
+    const args = (ctx.message.text || "").split(/\s+/).slice(1);
+    const ip = args[0]?.trim();
+    if (!ip) {
+      await ctx.reply("❌ Usage : `/debloquerip <ip>`\nEx: `/debloquerip 1.2.3.4`", { parse_mode: "Markdown" });
+      return;
+    }
+    try {
+      const r1 = await pool.query(`DELETE FROM blocked_ips WHERE ip_address = $1`, [ip]);
+      const r2 = await pool.query(`DELETE FROM allowed_ips WHERE ip_address = $1`, [ip]);
+      const removed = (r1.rowCount || 0) + (r2.rowCount || 0);
+      if (removed === 0) {
+        await ctx.reply(`ℹ️ L'IP \`${ip}\` n'était dans aucune liste.`, { parse_mode: "Markdown" });
+      } else {
+        await ctx.reply(
+          `✅ *IP débloquée / retirée*\n\n` +
+          `🌐 IP : \`${ip}\`\n` +
+          `👤 Déblocage par : @${ctx.from?.username || "admin"}\n\n` +
+          `_L'adresse peut de nouveau accéder librement à la plateforme._`,
+          { parse_mode: "Markdown" }
+        );
+      }
+    } catch (err: any) {
+      await ctx.reply(`❌ Erreur : ${err.message}`);
+    }
+  });
+
+  bot.command("listeips", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    if (!(await isAdminGroup(chatId))) return;
+    try {
+      const allowed = await pool.query(`SELECT ip_address, note, created_by FROM allowed_ips ORDER BY created_at DESC LIMIT 15`);
+      const blocked = await pool.query(`SELECT ip_address, reason, blocked_by FROM blocked_ips ORDER BY created_at DESC LIMIT 15`);
+
+      let msg = `🔐 *Gestion des IPs WestPay*\n\n`;
+
+      if (allowed.rows.length === 0) {
+        msg += `✅ *IPs autorisées :* _Mode ouvert — aucune restriction_\n`;
+      } else {
+        msg += `✅ *IPs autorisées (${allowed.rows.length}) :*\n`;
+        for (const row of allowed.rows) {
+          msg += `  • \`${row.ip_address}\`${row.note ? ` — ${row.note}` : ""}\n`;
+        }
+      }
+
+      msg += `\n`;
+
+      if (blocked.rows.length === 0) {
+        msg += `⛔ *IPs bloquées :* _Aucune_\n`;
+      } else {
+        msg += `⛔ *IPs bloquées (${blocked.rows.length}) :*\n`;
+        for (const row of blocked.rows) {
+          msg += `  • \`${row.ip_address}\`${row.reason ? ` — ${row.reason}` : ""}\n`;
+        }
+      }
+
+      msg += `\n━━━━━━━━━━━━━━━━\n`;
+      msg += `📌 Commandes :\n`;
+      msg += `/autoriserip <ip> [note]\n`;
+      msg += `/bloquerip <ip> [raison]\n`;
+      msg += `/debloquerip <ip>`;
+
+      await ctx.reply(msg, { parse_mode: "Markdown" });
+    } catch (err: any) {
+      await ctx.reply(`❌ Erreur : ${err.message}`);
+    }
   });
 
   // ─── Messages non reconnus (DM uniquement) ─────────────────────────────────
