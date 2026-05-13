@@ -5414,36 +5414,43 @@ function SecurityIpsPanel() {
       {/* ── IPs Bloquées ──────────────────────────────────────────────────────── */}
       {secTab === "blocked" && (
         <div className="space-y-5">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm text-muted-foreground">IPs interdites d'accès à la plateforme</p>
-            <Button size="sm" variant="destructive" onClick={() => setAddingBlock(true)} className="gap-2" data-testid="button-add-blocked-ip">
-              <Plus className="w-4 h-4" /> Bloquer une IP
-            </Button>
-          </div>
-
-          {addingBlock && (
-            <Card className="border-destructive/30">
-              <CardHeader><CardTitle className="text-base flex items-center gap-2 text-destructive"><Shield className="w-4 h-4" />Bloquer une IP</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label>Adresse IP *</Label>
-                    <Input placeholder="192.168.1.1" value={blockForm.ipAddress} onChange={(e) => setBlockForm({ ...blockForm, ipAddress: e.target.value })} data-testid="input-block-ip" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Raison</Label>
-                    <Input placeholder="Ex: Comportement suspect" value={blockForm.reason} onChange={(e) => setBlockForm({ ...blockForm, reason: e.target.value })} data-testid="input-block-reason" />
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="destructive" onClick={() => addBlockMutation.mutate(blockForm)} disabled={!blockForm.ipAddress || addBlockMutation.isPending} className="gap-2" data-testid="button-confirm-block-ip">
-                    {addBlockMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />} Bloquer
-                  </Button>
-                  <Button variant="outline" onClick={() => setAddingBlock(false)}>Annuler</Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+          {/* Formulaire toujours visible */}
+          <Card className="border-destructive/30 bg-destructive/5">
+            <CardContent className="p-4">
+              <p className="text-xs font-semibold text-destructive uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5" /> Bloquer une adresse IP
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Input
+                  placeholder="Adresse IP ex: 105.235.26.127"
+                  value={blockForm.ipAddress}
+                  onChange={(e) => setBlockForm({ ...blockForm, ipAddress: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === "Enter" && blockForm.ipAddress) addBlockMutation.mutate(blockForm); }}
+                  className="font-mono flex-1"
+                  data-testid="input-block-ip"
+                />
+                <Input
+                  placeholder="Raison (optionnel)"
+                  value={blockForm.reason}
+                  onChange={(e) => setBlockForm({ ...blockForm, reason: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === "Enter" && blockForm.ipAddress) addBlockMutation.mutate(blockForm); }}
+                  className="flex-1 sm:max-w-[220px]"
+                  data-testid="input-block-reason"
+                />
+                <Button
+                  variant="destructive"
+                  onClick={() => addBlockMutation.mutate(blockForm)}
+                  disabled={!blockForm.ipAddress.trim() || addBlockMutation.isPending}
+                  className="gap-2 shrink-0"
+                  data-testid="button-confirm-block-ip"
+                >
+                  {addBlockMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
+                  Bloquer
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">Appuyez sur Entrée ou cliquez Bloquer · Via Telegram : <span className="font-mono">/bloquerip 1.2.3.4 raison</span></p>
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader className="pb-3">
