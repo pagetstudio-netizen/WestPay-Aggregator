@@ -46,8 +46,13 @@ export default function IpVerificationPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="ip-float inline-block mb-5">
-            <div className="w-20 h-20 rounded-2xl flex items-center justify-center mx-auto relative" style={{ background: "linear-gradient(135deg, #6366f1, #4f46e5)", boxShadow: "0 0 40px rgba(99,102,241,0.4)" }}>
-              <Shield className="w-10 h-10 text-white" />
+            <div className="relative mx-auto w-24 h-24">
+              <img
+                src="/robotpay-logo.jpg"
+                alt="WestPay"
+                className="w-24 h-24 rounded-2xl object-cover"
+                style={{ boxShadow: "0 0 40px rgba(99,102,241,0.4)" }}
+              />
               <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "#10b981" }}>
                 <Lock className="w-2.5 h-2.5 text-white" />
               </div>
