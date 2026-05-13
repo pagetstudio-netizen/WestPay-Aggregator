@@ -1790,6 +1790,48 @@ export async function notifyAdminMerchantLogin(data: {
   }
 }
 
+export async function notifyAdminNewMerchantIp(data: {
+  email: string;
+  merchantName: string;
+  merchantId: number;
+  ip: string;
+  device: string;
+}): Promise<void> {
+  const dateStr = new Date().toLocaleString("fr-FR", {
+    day: "2-digit", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC",
+  });
+  const geo = await getGeoInfo(data.ip).catch(() => null);
+  const { browser, os, device } = parseUserAgent(data.device);
+  const cleanIp = data.ip.replace(/^::ffff:/, "");
+
+  const geoFlags: string[] = [];
+  if (geo?.isProxy) geoFlags.push("⚠️ *VPN/Proxy/TOR détecté*");
+  if (geo?.isHosting) geoFlags.push("🖥️ *IP hébergeur / datacenter*");
+
+  const msg = [
+    `🆕 *Nouvelle IP — Connexion Marchand*`,
+    ``,
+    `🏪 *Marchand :* ${data.merchantName}`,
+    `👤 *Email :* \`${data.email}\``,
+    `🌐 *Nouvelle IP :* \`${cleanIp}\``,
+    geo && geo.city !== "Inconnue" ? `📍 *Localisation :* ${geo.city}${geo.country ? ", " + geo.country : ""}` : null,
+    geo?.isp ? `🏢 *FAI :* ${geo.isp}` : null,
+    `💻 *Navigateur :* ${browser} (${os})`,
+    `📱 *Appareil :* ${device}`,
+    ...geoFlags,
+    `🕒 *Date :* ${dateStr} UTC`,
+    ``,
+    `⚠️ _Cette IP n'a jamais été utilisée pour ce compte._`,
+  ].filter(Boolean).join("\n");
+
+  const buttons = [[
+    { text: "✅ IP connue", callback_data: `sec:allow:${cleanIp}` },
+    { text: "⛔ Bloquer IP", callback_data: `sec:block:${cleanIp}` },
+  ]];
+  await alertAdminGroupWithButtons(msg, buttons);
+}
+
 export async function notifyAdminIpBlocked(data: {
   ip: string;
   path: string;
@@ -2022,6 +2064,23 @@ async function sendDailyReport(): Promise<void> {
     [dayStart.toISOString(), dayEnd.toISOString()]
   ).then(r => r.rows);
 
+  // ── Statistiques sécurité / bots du jour ────────────────────────────────
+  const [secRow] = await pool.query(
+    `SELECT
+       COUNT(*) FILTER (WHERE event_type = 'bot_blocked') AS bots_blocked,
+       COUNT(*) FILTER (WHERE event_type = 'brute_force') AS brute_force,
+       COUNT(*) FILTER (WHERE event_type = 'bad_origin') AS bad_origin,
+       COUNT(*) FILTER (WHERE event_type = 'rate_limit') AS rate_limited,
+       COUNT(DISTINCT ip) FILTER (WHERE event_type IN ('bot_blocked','brute_force','bad_origin','rate_limit')) AS unique_attacker_ips
+     FROM security_logs WHERE created_at >= $1 AND created_at <= $2`,
+    [dayStart.toISOString(), dayEnd.toISOString()]
+  ).then(r => r.rows).catch(() => [{ bots_blocked: 0, brute_force: 0, bad_origin: 0, rate_limited: 0, unique_attacker_ips: 0 }]);
+
+  const [blockedRow] = await pool.query(
+    `SELECT COUNT(*) AS new_blocked FROM blocked_ips WHERE created_at >= $1 AND created_at <= $2`,
+    [dayStart.toISOString(), dayEnd.toISOString()]
+  ).then(r => r.rows).catch(() => [{ new_blocked: 0 }]);
+
   const dateLabel = yesterday.toLocaleDateString("fr-FR", {
     day: "2-digit", month: "long", year: "numeric", timeZone: "UTC",
   });
@@ -2030,6 +2089,25 @@ async function sendDailyReport(): Promise<void> {
   const totalWd = Number(wdRow.total_withdrawals);
   const totalFees = Number(wdRow.total_fees);
   const txCount = Number(txRow.total_count) + Number(wdRow.wd_count);
+
+  const botsBlocked = Number(secRow?.bots_blocked || 0);
+  const bruteForce = Number(secRow?.brute_force || 0);
+  const badOrigin = Number(secRow?.bad_origin || 0);
+  const rateLimited = Number(secRow?.rate_limited || 0);
+  const uniqueAttackers = Number(secRow?.unique_attacker_ips || 0);
+  const newBlocked = Number(blockedRow?.new_blocked || 0);
+  const totalThreats = botsBlocked + bruteForce + badOrigin + rateLimited;
+
+  const secLines = totalThreats > 0 ? [
+    ``,
+    `🔐 *Sécurité & Bots*`,
+    botsBlocked > 0 ? `🤖 Bots bloqués : *${botsBlocked.toLocaleString("fr-FR")}*` : null,
+    bruteForce > 0 ? `🔨 Brute-force : *${bruteForce.toLocaleString("fr-FR")}*` : null,
+    badOrigin > 0 ? `🌐 Origines invalides : *${badOrigin.toLocaleString("fr-FR")}*` : null,
+    rateLimited > 0 ? `⏱️ Rate-limités : *${rateLimited.toLocaleString("fr-FR")}*` : null,
+    uniqueAttackers > 0 ? `🕵️ IPs attaquantes uniques : *${uniqueAttackers.toLocaleString("fr-FR")}*` : null,
+    newBlocked > 0 ? `⛔ Nouvelles IPs bloquées : *${newBlocked.toLocaleString("fr-FR")}*` : null,
+  ].filter(Boolean) : [``, `🔐 *Sécurité :* ✅ Aucune menace détectée`];
 
   const msg = [
     `📊 *Rapport journalier WestPay*`,
@@ -2041,6 +2119,7 @@ async function sendDailyReport(): Promise<void> {
     `💵 *Frais collectés :* ${formatAmount(totalFees)}`,
     `📋 *Nombre de transactions :* ${txCount.toLocaleString("fr-FR")}`,
     `📈 *Volume total traité :* ${formatAmount(totalPay + totalWd)}`,
+    ...secLines,
   ].join("\n");
 
   await safeSend(groupId, msg);

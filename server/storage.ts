@@ -75,6 +75,7 @@ export interface IStorage {
   createLoginLog(log: InsertLoginLog): Promise<void>;
   getFailedLoginCount(userId: number, role: string): Promise<number>;
   getRecentLoginLogs(limit?: number): Promise<LoginLog[]>;
+  hasMerchantSeenIp(merchantId: number, ip: string): Promise<boolean>;
 
   getStats(): Promise<{ merchantCount: number; transactionCount: number; totalVolume: number; activeNumbers: number }>;
   getAdminDetailedStats(): Promise<{
@@ -448,6 +449,18 @@ export class DatabaseStorage implements IStorage {
 
   async getRecentLoginLogs(limit = 20): Promise<LoginLog[]> {
     return db.select().from(loginLogs).orderBy(desc(loginLogs.createdAt)).limit(limit);
+  }
+
+  async hasMerchantSeenIp(merchantId: number, ip: string): Promise<boolean> {
+    const cleanIp = ip.replace(/^::ffff:/, "");
+    const hit = await db.select({ id: loginLogs.id }).from(loginLogs)
+      .where(and(
+        eq(loginLogs.userId, merchantId),
+        eq(loginLogs.role, "merchant"),
+        eq(loginLogs.ip, cleanIp),
+        eq(loginLogs.success, true),
+      )).limit(1);
+    return hit.length > 0;
   }
 
   async getFailedLoginCount(userId: number, role: string): Promise<number> {

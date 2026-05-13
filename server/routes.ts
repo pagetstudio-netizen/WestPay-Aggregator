@@ -7,7 +7,7 @@ import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, notifyAdminMerchantCreated, notifyAdminAdminCreated, getGeoInfo, notifyAdminMerchantLogin, notifyAdminIpBlocked, notifyAdminBruteForce, notifyAdminDeviceBlocked, notifyAdminNewDevice, notifyAdminOtp, notifyAdminVpn, notifyAdminCountryBlocked, notifyAdminLocationJump } from "./telegram-bot";
+import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, notifyAdminMerchantCreated, notifyAdminAdminCreated, getGeoInfo, notifyAdminMerchantLogin, notifyAdminIpBlocked, notifyAdminBruteForce, notifyAdminDeviceBlocked, notifyAdminNewDevice, notifyAdminOtp, notifyAdminVpn, notifyAdminCountryBlocked, notifyAdminLocationJump, notifyAdminNewMerchantIp } from "./telegram-bot";
 import {
   initiatePayment as omnipayInitiatePayment,
   initiateTransfer as omnipayInitiateTransfer,
@@ -589,7 +589,7 @@ export async function registerRoutes(
   const MERCHANT_BRUTE_MAX = 5;
   const MERCHANT_BRUTE_WINDOW = 10 * 60 * 1000; // 10 min
 
-  // User-agents automatisés interdits sur le login marchand
+  // User-agents automatisés interdits sur le login marchand et les endpoints sensibles
   const BLOCKED_UA_PATTERNS = [
     /Deno\//i,
     /SupabaseEdgeRuntime/i,
@@ -601,6 +601,64 @@ export async function registerRoutes(
     /undici/i,
   ];
 
+  // Origines autorisées pour le login marchand
+  const ALLOWED_ORIGINS = (() => {
+    const base = ["https://westpay.cloud", "https://www.westpay.cloud"];
+    if (process.env.NODE_ENV !== "production") {
+      base.push("http://localhost:5000", "http://localhost:3000", "http://127.0.0.1:5000", "http://127.0.0.1:3000");
+    }
+    return base;
+  })();
+
+  // ── Middleware bot-guard (UA + Origin) pour /api/merchant/* et /api/payment/* ──
+  const botGuard = (req: Request, res: Response, next: NextFunction) => {
+    const ua = req.headers["user-agent"] || "";
+    const origin = req.headers["origin"] as string | undefined;
+
+    // Skip OPTIONS (CORS preflight)
+    if (req.method === "OPTIONS") return next();
+
+    // Block automated user-agents
+    if (ua && BLOCKED_UA_PATTERNS.some(p => p.test(ua))) {
+      const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+      storage.createSecurityLog({ eventType: "bot_blocked", ip: clientIp, action: "ua_blocked_middleware", details: `${ua.substring(0, 120)} — ${req.path}` }).catch(() => {});
+      return res.status(403).json({ message: "Accès refusé" });
+    }
+
+    // Origin validation on state-changing requests (POST/PUT/PATCH/DELETE)
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
+      if (origin && !ALLOWED_ORIGINS.includes(origin)) {
+        const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+        storage.createSecurityLog({ eventType: "bad_origin", ip: clientIp, action: "origin_rejected", details: `${origin} — ${req.path}` }).catch(() => {});
+        return res.status(403).json({ message: "Accès refusé" });
+      }
+    }
+
+    next();
+  };
+
+  app.use("/api/merchant", botGuard);
+  app.use("/api/payment", botGuard);
+
+  // ── Rate-limit store pour les endpoints de paiement ──────────────────────────
+  const paymentInitiateAttempts = new Map<string, { count: number; firstReq: number }>();
+  const PAYMENT_RATE_MAX = 10;
+  const PAYMENT_RATE_WINDOW = 60 * 1000; // 1 min
+
+  const paymentRateLimit = (req: Request, res: Response, next: NextFunction) => {
+    const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+    const now = Date.now();
+    const entry = paymentInitiateAttempts.get(clientIp) || { count: 0, firstReq: now };
+    if (now - entry.firstReq > PAYMENT_RATE_WINDOW) { entry.count = 0; entry.firstReq = now; }
+    entry.count++;
+    paymentInitiateAttempts.set(clientIp, entry);
+    if (entry.count > PAYMENT_RATE_MAX) {
+      storage.createSecurityLog({ eventType: "rate_limit", ip: clientIp, action: "payment_rate_limited", details: `${entry.count} requêtes/min — ${req.path}` }).catch(() => {});
+      return res.status(429).json({ message: "Trop de requêtes. Réessayez dans un moment." });
+    }
+    next();
+  };
+
   app.post("/api/auth/merchant/login", async (req, res) => {
     try {
       const { email, password } = req.body;
@@ -609,9 +667,16 @@ export async function registerRoutes(
       const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
       const ua = req.headers["user-agent"] || "?";
 
-      // Bloquer les bots / scripts automatisés
+      // Bloquer les bots / scripts automatisés (double-check au niveau de la route)
       if (BLOCKED_UA_PATTERNS.some(p => p.test(ua))) {
         storage.createSecurityLog({ eventType: "bot_blocked", ip: clientIp, userEmail: email, action: "ua_blocked", details: ua.substring(0, 120) }).catch(() => {});
+        return res.status(403).json({ message: "Accès refusé" });
+      }
+
+      // Validation de l'Origin
+      const origin = req.headers["origin"] as string | undefined;
+      if (origin && !ALLOWED_ORIGINS.includes(origin)) {
+        storage.createSecurityLog({ eventType: "bad_origin", ip: clientIp, userEmail: email, action: "origin_rejected_login", details: origin }).catch(() => {});
         return res.status(403).json({ message: "Accès refusé" });
       }
 
@@ -644,7 +709,15 @@ export async function registerRoutes(
 
       merchantLoginAttempts.delete(clientIp);
       await storage.createLoginLog({ userId: merchant.id, role: "merchant", ip: clientIp, device: ua, success: true });
-      notifyAdminMerchantLogin({ email: merchant.email, merchantName: merchant.name, ip: clientIp, device: ua, success: true }).catch(() => {});
+
+      // Alerte Telegram si nouvelle IP jamais vue pour ce marchand
+      const seenBefore = await storage.hasMerchantSeenIp(merchant.id, clientIp).catch(() => true);
+      if (!seenBefore) {
+        notifyAdminNewMerchantIp({ email: merchant.email, merchantName: merchant.name, merchantId: merchant.id, ip: clientIp, device: ua }).catch(() => {});
+      } else {
+        notifyAdminMerchantLogin({ email: merchant.email, merchantName: merchant.name, ip: clientIp, device: ua, success: true }).catch(() => {});
+      }
+
       const token = signToken({ id: merchant.id, role: "merchant", email: merchant.email });
       res.json({ token, user: { id: merchant.id, email: merchant.email, name: merchant.name, slug: merchant.slug } });
     } catch (err: any) {
@@ -2214,7 +2287,7 @@ export async function registerRoutes(
   });
 
   // ==================== PAYMENT WIZARD (public) ====================
-  app.post("/api/payment/initiate", async (req, res) => {
+  app.post("/api/payment/initiate", paymentRateLimit, async (req, res) => {
     try {
       const { merchantSlug, country, amount, payerPhone, payerName, paymentMethod, redirectUrl, firstName, lastName, otp, operator } = req.body;
       if (!merchantSlug || !country || !amount || !paymentMethod) {
@@ -4713,7 +4786,7 @@ export async function registerRoutes(
 
   // ─── Crypto : initiation paiement public (page de paiement WestPay) ─────
 
-  app.post("/api/payment/crypto/initiate", async (req, res) => {
+  app.post("/api/payment/crypto/initiate", paymentRateLimit, async (req, res) => {
     try {
       const { merchantSlug, amount, currency, description, orderId, returnUrl, amountFcfa } = req.body;
       if (!merchantSlug) {
