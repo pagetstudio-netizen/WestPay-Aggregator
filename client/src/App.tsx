@@ -18,11 +18,13 @@ import CryptoPaymentPage from "@/pages/crypto-payment";
 import CryptoDocsPage from "@/pages/crypto-docs";
 import CryptoLinkPage from "@/pages/crypto-link-page";
 import NotFound from "@/pages/not-found";
+import IpVerificationPage from "@/pages/ip-verification";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={RestrictedPage} />
+      <Route path="/ip-verify" component={IpVerificationPage} />
       <Route path="/admin-access-958425546648484886646634808526522886433" component={AdminLogin} />
       <Route path="/admin-access-958425546648484886646634808526522886433/dashboard" component={AdminDashboard} />
       <Route path="/merchant-login" component={MerchantLogin} />

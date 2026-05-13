@@ -421,3 +421,19 @@ export const cryptoPaymentLinks = pgTable("crypto_payment_links", {
 export const insertCryptoPaymentLinkSchema = createInsertSchema(cryptoPaymentLinks).omit({ id: true, createdAt: true });
 export type CryptoPaymentLink = typeof cryptoPaymentLinks.$inferSelect;
 export type InsertCryptoPaymentLink = z.infer<typeof insertCryptoPaymentLinkSchema>;
+
+export const allowedIps = pgTable("allowed_ips", {
+  id: serial("id").primaryKey(),
+  ipAddress: text("ip_address").notNull().unique(),
+  userEmail: text("user_email"),
+  role: text("role"),
+  country: text("country"),
+  city: text("city"),
+  note: text("note"),
+  createdBy: text("created_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertAllowedIpSchema = createInsertSchema(allowedIps).omit({ id: true, createdAt: true });
+export type AllowedIp = typeof allowedIps.$inferSelect;
+export type InsertAllowedIp = z.infer<typeof insertAllowedIpSchema>;

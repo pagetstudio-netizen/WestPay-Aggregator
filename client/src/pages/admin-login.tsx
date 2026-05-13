@@ -1,17 +1,31 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { Eye, EyeOff, Loader2, Shield } from "lucide-react";
 
 export default function AdminLogin() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [ipStatus, setIpStatus] = useState<"checking" | "allowed" | "denied">("checking");
   const { login } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+
+  useEffect(() => {
+    fetch("/api/auth/check-ip")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.allowed === false) {
+          setLocation("/ip-verify");
+        } else {
+          setIpStatus("allowed");
+        }
+      })
+      .catch(() => setIpStatus("allowed"));
+  }, [setLocation]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,6 +47,22 @@ export default function AdminLogin() {
       setIsLoading(false);
     }
   };
+
+  if (ipStatus === "checking") {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "#f5f5f5" }}>
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: "#00b050" }}>
+            <Shield className="w-6 h-6 text-white" />
+          </div>
+          <div className="flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" style={{ color: "#00b050" }} />
+            <span className="text-sm font-medium" style={{ color: "#64748b" }}>Vérification de sécurité...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4" style={{ background: "#f5f5f5" }}>

@@ -350,6 +350,33 @@ export async function registerRoutes(
     res.type("text/plain").send("User-agent: *\nDisallow: /\n");
   });
 
+  // ==================== IP SECURITY ====================
+  app.get("/api/auth/my-ip", (req, res) => {
+    const ip = req.ip || req.socket.remoteAddress || "unknown";
+    res.json({ ip });
+  });
+
+  app.get("/api/auth/check-ip", async (req, res) => {
+    try {
+      const ip = req.ip || req.socket.remoteAddress || "";
+      const allowed = await storage.isIpAllowed(ip);
+      res.json({ allowed, ip });
+    } catch {
+      res.json({ allowed: true, ip: "" });
+    }
+  });
+
+  const ipGuard = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const ip = req.ip || req.socket.remoteAddress || "";
+      const allowed = await storage.isIpAllowed(ip);
+      if (!allowed) return res.status(403).json({ error: "access_denied" });
+      next();
+    } catch {
+      next();
+    }
+  };
+
   // ==================== AUTH ====================
   app.post("/api/auth/admin/login", async (req, res) => {
     try {
@@ -399,6 +426,56 @@ export async function registerRoutes(
   });
 
   // ==================== ADMIN ROUTES ====================
+  app.use("/api/admin", ipGuard);
+
+  app.get("/api/admin/security/ips", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const ips = await storage.getAllowedIps();
+      res.json(ips);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/security/ips", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { ipAddress, userEmail, role, note } = req.body;
+      if (!ipAddress) return res.status(400).json({ message: "IP requise" });
+      const geo = await getGeoInfo(ipAddress).catch(() => ({ country: null, city: null }));
+      const row = await storage.addAllowedIp({
+        ipAddress,
+        userEmail: userEmail || null,
+        role: role || "merchant",
+        country: geo.country || null,
+        city: geo.city || null,
+        note: note || null,
+        createdBy: (req as any).adminId ? String((req as any).adminId) : "admin",
+      });
+      res.json(row);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/admin/security/ips/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      await storage.removeAllowedIp(Number(req.params.id));
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/login-logs", authMiddleware("admin"), async (req, res) => {
+    try {
+      const limit = Math.min(Number(req.query.limit) || 20, 100);
+      const logs = await storage.getRecentLoginLogs(limit);
+      res.json(logs);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/admin/profile", authMiddleware("admin"), async (req, res) => {
     try {
       const admin = await storage.getAdminById((req as any).user.id);

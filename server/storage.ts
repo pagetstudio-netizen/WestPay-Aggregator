@@ -3,6 +3,7 @@ import {
   merchantPins, apiLogs, pendingPayments, webhookLogs, telegramActivationCodes, paymentLinks,
   walletTransfers, walletTransferCountries, withdrawals, withdrawalOperators, statsBaselines,
   cryptoAggregators, cryptoAggregatorCountries, cryptoAggregatorMerchants, cryptoTransactions, cryptoBalances, cryptoWithdrawalRequests, cryptoPaymentLinks,
+  allowedIps,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
@@ -22,6 +23,7 @@ import {
   type CryptoBalance, type InsertCryptoBalance,
   type CryptoWithdrawalRequest, type InsertCryptoWithdrawalRequest,
   type CryptoPaymentLink, type InsertCryptoPaymentLink,
+  type AllowedIp, type InsertAllowedIp,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and, gte, lt, inArray, isNull } from "drizzle-orm";
@@ -68,6 +70,7 @@ export interface IStorage {
 
   createLoginLog(log: InsertLoginLog): Promise<void>;
   getFailedLoginCount(userId: number, role: string): Promise<number>;
+  getRecentLoginLogs(limit?: number): Promise<LoginLog[]>;
 
   getStats(): Promise<{ merchantCount: number; transactionCount: number; totalVolume: number; activeNumbers: number }>;
   getAdminDetailedStats(): Promise<{
@@ -202,6 +205,11 @@ export interface IStorage {
     country: string;
     collectionBenefit: number; withdrawalBenefit: number; totalBenefit: number;
   }[]>;
+
+  getAllowedIps(): Promise<AllowedIp[]>;
+  isIpAllowed(ip: string): Promise<boolean>;
+  addAllowedIp(data: InsertAllowedIp): Promise<AllowedIp>;
+  removeAllowedIp(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -405,6 +413,10 @@ export class DatabaseStorage implements IStorage {
 
   async createLoginLog(log: InsertLoginLog): Promise<void> {
     await db.insert(loginLogs).values(log);
+  }
+
+  async getRecentLoginLogs(limit = 20): Promise<LoginLog[]> {
+    return db.select().from(loginLogs).orderBy(desc(loginLogs.createdAt)).limit(limit);
   }
 
   async getFailedLoginCount(userId: number, role: string): Promise<number> {
@@ -1319,6 +1331,29 @@ export class DatabaseStorage implements IStorage {
     return Array.from(map.values())
       .map(r => ({ ...r, totalBenefit: r.collectionBenefit + r.withdrawalBenefit }))
       .sort((a, b) => b.totalBenefit - a.totalBenefit);
+  }
+
+  async getAllowedIps(): Promise<AllowedIp[]> {
+    return db.select().from(allowedIps).orderBy(desc(allowedIps.createdAt));
+  }
+
+  async isIpAllowed(ip: string): Promise<boolean> {
+    const all = await db.select({ id: allowedIps.id }).from(allowedIps);
+    if (all.length === 0) return true;
+    const hit = await db.select({ id: allowedIps.id }).from(allowedIps).where(eq(allowedIps.ipAddress, ip)).limit(1);
+    return hit.length > 0;
+  }
+
+  async addAllowedIp(data: InsertAllowedIp): Promise<AllowedIp> {
+    const [row] = await db.insert(allowedIps).values(data).onConflictDoUpdate({
+      target: allowedIps.ipAddress,
+      set: { userEmail: data.userEmail, role: data.role, note: data.note, createdBy: data.createdBy },
+    }).returning();
+    return row;
+  }
+
+  async removeAllowedIp(id: number): Promise<void> {
+    await db.delete(allowedIps).where(eq(allowedIps.id, id));
   }
 }
 

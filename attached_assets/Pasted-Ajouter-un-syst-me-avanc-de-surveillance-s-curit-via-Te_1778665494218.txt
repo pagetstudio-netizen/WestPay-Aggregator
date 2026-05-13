@@ -1,0 +1,167 @@
+Ajouter un système avancé de surveillance sécurité via Telegram pour WestPay.
+
+━━━━━━━━━━━━━━━━━━━
+ALERTES TÉLÉGRAM ADMIN
+━━━━━━━━━━━━━━━━━━━
+
+Créer un système de notifications temps réel envoyé automatiquement dans le groupe Telegram des administrateurs.
+
+Le groupe Telegram admin doit recevoir des alertes automatiques pour :
+
+- nouvelle connexion admin
+- nouvelle connexion marchand
+- nouvelle IP détectée
+- création administrateur
+- payout lancé
+- tentative de connexion refusée
+- changement webhook
+- génération API key
+- suppression API key
+- connexion depuis nouveau pays
+- activité suspecte
+- tentative VPN/Proxy/TOR
+- blocage sécurité
+
+━━━━━━━━━━━━━━━━━━━
+MESSAGE TÉLÉGRAM
+━━━━━━━━━━━━━━━━━━━
+
+Format moderne :
+
+🛡️ Nouvelle connexion — WestPay
+
+👤 Compte : {email}
+🔐 Rôle : {role}
+🌐 IP : {ip}
+📍 Localisation : {ville}, {pays}
+💻 Navigateur : {browser}
+📱 Appareil : {device}
+🕒 Date : {date}
+
+Ajouter des boutons inline Telegram :
+
+✅ Autoriser
+⛔ Bloquer
+🔍 Voir détails
+
+━━━━━━━━━━━━━━━━━━━
+SYSTÈME DE BLOCAGE
+━━━━━━━━━━━━━━━━━━━
+
+Quand un administrateur clique :
+⛔ Bloquer
+
+Le système doit :
+
+- blacklist automatiquement l’IP
+- invalider toutes les sessions liées
+- bloquer les JWT actifs
+- empêcher toute nouvelle connexion
+- enregistrer le blocage dans security_logs
+
+━━━━━━━━━━━━━━━━━━━
+BLOCAGE APPAREIL
+━━━━━━━━━━━━━━━━━━━
+
+IMPORTANT :
+
+Le blocage ne doit pas uniquement utiliser l’adresse IP.
+
+Créer aussi un système de fingerprint appareil :
+
+- IP
+- navigateur
+- système
+- user-agent
+- device fingerprint
+- cookies sécurité
+- token appareil
+- localisation approximative
+
+Si un appareil blacklisté tente encore :
+
+→ accès refusé immédiatement
+
+Même si :
+
+- VPN activé
+- IP changée
+- proxy utilisé
+
+━━━━━━━━━━━━━━━━━━━
+TABLES DATABASE
+━━━━━━━━━━━━━━━━━━━
+
+blocked_devices
+
+- id
+- fingerprint
+- ip_address
+- reason
+- blocked_by
+- created_at
+
+blocked_ips
+
+- id
+- ip_address
+- country
+- reason
+- blocked_by
+- created_at
+
+telegram_security_logs
+
+- id
+- event_type
+- user_email
+- ip
+- action
+- telegram_admin
+- created_at
+
+━━━━━━━━━━━━━━━━━━━
+SÉCURITÉ RENFORCÉE
+━━━━━━━━━━━━━━━━━━━
+
+Ajouter :
+
+- détection VPN
+- détection proxy
+- détection TOR
+- anti brute-force
+- limitation des tentatives
+- blocage automatique après échecs multiples
+- déconnexion forcée
+- rotation sessions
+- audit logs complets
+
+━━━━━━━━━━━━━━━━━━━
+IMPORTANT
+━━━━━━━━━━━━━━━━━━━
+
+Ne jamais afficher publiquement :
+
+- forbidden
+- access denied
+- pagetstudio
+- stack trace
+- erreur backend
+- informations serveur
+
+Toujours afficher une page professionnelle de vérification sécurité.
+
+━━━━━━━━━━━━━━━━━━━
+ROUTES PUBLIQUES
+━━━━━━━━━━━━━━━━━━━
+
+Ne jamais protéger :
+
+- /pay
+- pages de paiement
+- callbacks opérateurs
+- webhooks opérateurs
+- notifications paiement
+- pages succès paiement
+
+Les paiements clients doivent continuer à fonctionner normalement.

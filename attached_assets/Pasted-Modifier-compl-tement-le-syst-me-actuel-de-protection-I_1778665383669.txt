@@ -1,0 +1,189 @@
+Modifier complètement le système actuel de protection IP.
+
+IMPORTANT :
+ afficher :
+
+- “IP Forbidden”
+- “403”
+- ”
+- erreurs techniques
+
+Le système doit être totalement professionnel et discret.
+
+━━━━━━━━━━━━━━━━━━━
+OBJECTIF
+━━━━━━━━━━━━━━━━━━━
+
+Quand un utilisateur clique sur le lien de connexion :
+
+- il ne doit PAS voir directement le formulaire login
+- il doit d’abord passer par une page de vérification IP
+
+Cette page doit simplement afficher :
+
+- son adresse IP
+- un message de vérification
+- un bouton copier IP
+
+Ensuite :
+l’utilisateur envoie son IP à l’administrateur via Telegram/WhatsApp/support.
+
+Puis :
+l’administrateur ajoute manuellement l’IP dans le dashboard sécurité et clique :
+“Donner accès”
+
+Après validation :
+→ l’utilisateur peut accéder normalement à la page login.
+
+━━━━━━━━━━━━━━━━━━━
+PAGE DE VÉRIFICATION
+━━━━━━━━━━━━━━━━━━━
+
+Créer une page moderne et professionnelle.
+
+Texte principal :
+
+🔐 Vérification de sécurité WestPay
+
+Texte secondaire :
+
+Pour protéger les comptes marchands et les opérations financières, l’accès à cette plateforme nécessite une autorisation préalable de votre adresse IP.
+
+Votre adresse IP détectée :
+
+{IP_UTILISATEUR}
+
+Ajouter :
+
+- bouton “Copier mon IP”
+- animation de chargement légère
+- icône sécurité
+- design fintech moderne
+- responsive mobile
+
+IMPORTANT :
+afficher :
+
+- forbidden
+- denied
+- blocked
+- pagetstudio
+- erreur technique
+- stack trace
+- informations serveur
+
+━━━━━━━━━━━━━━━━━━━
+FONCTIONNEMENT
+━━━━━━━━━━━━━━━━━━━
+
+1. L’utilisateur ouvre :
+   /merchant/login
+   ou
+   /admin/login
+
+2. Le système vérifie :
+   si l’IP existe dans allowed_ips
+
+3. Si OUI :
+   → afficher la vraie page de connexion
+
+4. Si NON :
+   → afficher uniquement la page de vérification IP
+
+━━━━━━━━━━━━━━━━━━━
+DASHBOARD ADMIN
+━━━━━━━━━━━━━━━━━━━
+
+Créer une section :
+
+Sécurité IP
+
+Fonctionnalités :
+
+- rechercher une IP
+- ajouter une IP
+- supprimer une IP
+- voir les dernières connexions
+- voir le compte lié
+- voir le pays
+- voir la date
+
+Ajouter un bouton :
+
+✅ Donner accès
+
+Quand l’admin clique :
+→ l’IP devient autorisée immédiatement
+
+━━━━━━━━━━━━━━━━━━━
+TABLE DATABASE
+━━━━━━━━━━━━━━━━━━━
+
+allowed_ips
+
+Colonnes :
+
+- id
+- ip_address
+- user_email
+- role
+- country
+- city
+- created_at
+- created_by
+
+━━━━━━━━━━━━━━━━━━━
+ROUTES À PROTÉGER
+━━━━━━━━━━━━━━━━━━━
+
+Protéger :
+
+- dashboard admin
+- dashboard marchand
+- payout
+- API privées
+- génération API keys
+- modification webhook
+- transferts
+- paramètres sécurité
+- historique transactions
+
+━━━━━━━━━━━━━━━━━━━
+NE PAS PROTÉGER
+━━━━━━━━━━━━━━━━━━━
+
+Ne jamais bloquer :
+
+- /pay
+- pages de paiement
+- callbacks opérateurs
+- webhooks opérateurs
+- pages succès paiement
+- notifications publiques
+
+Les clients doivent continuer à payer normalement.
+
+━━━━━━━━━━━━━━━━━━━
+DESIGN
+━━━━━━━━━━━━━━━━━━━
+
+Style :
+
+- Stripe
+- Flutterwave
+- Paystack
+
+Couleurs :
+
+- bleu foncé
+- blanc
+- vert sécurité
+
+Utiliser :
+
+- TailwindCSS
+- animations modernes
+- cartes premium
+- responsive mobile
+- interface propre
+- aucune erreur brute visible publiquement

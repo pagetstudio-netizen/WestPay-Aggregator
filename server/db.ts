@@ -299,6 +299,18 @@ export async function runMigrations() {
         active boolean NOT NULL DEFAULT true,
         created_at timestamp DEFAULT now() NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS allowed_ips (
+        id serial PRIMARY KEY,
+        ip_address text NOT NULL UNIQUE,
+        user_email text,
+        role text,
+        country text,
+        city text,
+        note text,
+        created_by text,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
     `);
 
     // ── Colonnes ajoutées progressivement (idempotentes) ──────────────────────────
