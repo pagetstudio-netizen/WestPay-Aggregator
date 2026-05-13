@@ -7,7 +7,7 @@ import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, notifyAdminMerchantCreated, notifyAdminAdminCreated, getGeoInfo, notifyAdminMerchantLogin, notifyAdminIpBlocked, notifyAdminBruteForce, notifyAdminDeviceBlocked } from "./telegram-bot";
+import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, notifyAdminMerchantCreated, notifyAdminAdminCreated, getGeoInfo, notifyAdminMerchantLogin, notifyAdminIpBlocked, notifyAdminBruteForce, notifyAdminDeviceBlocked, notifyAdminNewDevice, notifyAdminOtp, notifyAdminVpn, notifyAdminCountryBlocked, notifyAdminLocationJump } from "./telegram-bot";
 import {
   initiatePayment as omnipayInitiatePayment,
   initiateTransfer as omnipayInitiateTransfer,
@@ -411,6 +411,30 @@ export async function registerRoutes(
     }
   };
 
+  // ── Helpers sécurité ─────────────────────────────────────────────────────────
+  function parseUa(ua: string): { browser: string; os: string } {
+    const browser = ua.includes("Firefox") ? "Firefox" : ua.includes("Edg") ? "Edge" : ua.includes("Chrome") ? "Chrome" : ua.includes("Safari") ? "Safari" : "Autre";
+    const os = ua.includes("Windows") ? "Windows" : ua.includes("Mac") ? "macOS" : ua.includes("Linux") ? "Linux" : ua.includes("Android") ? "Android" : ua.includes("iPhone") || ua.includes("iPad") ? "iOS" : "Autre";
+    return { browser, os };
+  }
+
+  async function getSecuritySettings(): Promise<{ twoFa: boolean; deviceCheck: boolean; vpnBlock: boolean; blockedCountries: string[] }> {
+    try {
+      const [twoFaRaw, deviceCheckRaw, vpnBlockRaw, countriesRaw] = await Promise.all([
+        storage.getSetting("security_2fa_enabled"),
+        storage.getSetting("security_device_check"),
+        storage.getSetting("security_vpn_block"),
+        storage.getSetting("security_blocked_countries"),
+      ]);
+      return {
+        twoFa: twoFaRaw === "true",
+        deviceCheck: deviceCheckRaw === "true",
+        vpnBlock: vpnBlockRaw === "true",
+        blockedCountries: countriesRaw ? JSON.parse(countriesRaw) : [],
+      };
+    } catch { return { twoFa: false, deviceCheck: false, vpnBlock: false, blockedCountries: [] }; }
+  }
+
   // ==================== AUTH ====================
   app.post("/api/auth/admin/login", async (req, res) => {
     try {
@@ -419,8 +443,9 @@ export async function registerRoutes(
 
       const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
       const ua = req.headers["user-agent"] || "?";
+      const fp = (req.headers["x-device-fp"] as string || "").trim();
 
-      // Check if IP is blocked before even validating credentials
+      // 1. Check if IP is explicitly blocked
       const ipBlocked = await storage.isIpBlocked(clientIp);
       if (ipBlocked) {
         storage.createSecurityLog({ eventType: "blocked_login_attempt", ip: clientIp, userEmail: email, action: "ip_blocked", details: "Admin login blocked" }).catch(() => {});
@@ -434,33 +459,128 @@ export async function registerRoutes(
       if (!valid) {
         await storage.createLoginLog({ userId: admin.id, role: "admin", ip: clientIp, device: ua, success: false });
         notifyAdminLogin({ email: admin.email, ip: clientIp, device: ua, success: false }).catch(() => {});
-
-        // Brute force tracking
         const now = Date.now();
         const attempt = loginAttempts.get(clientIp) || { count: 0, firstFail: now, lastEmail: email };
         if (now - attempt.firstFail > BRUTE_FORCE_WINDOW) { attempt.count = 0; attempt.firstFail = now; }
         attempt.count++;
         attempt.lastEmail = email;
         loginAttempts.set(clientIp, attempt);
-
         if (attempt.count >= BRUTE_FORCE_MAX) {
           storage.addBlockedIp({ ipAddress: clientIp, reason: `Brute force — ${attempt.count} tentatives admin`, blockedBy: "système" }).catch(() => {});
           storage.createSecurityLog({ eventType: "brute_force", ip: clientIp, userEmail: email, action: "auto_blocked", details: `${attempt.count} tentatives` }).catch(() => {});
           notifyAdminBruteForce({ ip: clientIp, email, attempts: attempt.count }).catch(() => {});
           loginAttempts.delete(clientIp);
         }
-
         return res.status(401).json({ message: "Identifiants invalides" });
       }
 
-      // Successful login — reset brute force counter
+      // Password correct — now run enhanced security checks
       loginAttempts.delete(clientIp);
+      const [geo, secSettings] = await Promise.all([
+        getGeoInfo(clientIp).catch(() => ({ country: "", city: "", isp: "", isProxy: false, isHosting: false })),
+        getSecuritySettings(),
+      ]);
+      const { browser, os } = parseUa(ua);
+
+      // 2. Country blacklist check
+      if (secSettings.blockedCountries.length > 0 && geo.country) {
+        const isBlocked = secSettings.blockedCountries.some((c: string) =>
+          geo.country.toLowerCase().includes(c.toLowerCase()) || c.toLowerCase().includes(geo.country.toLowerCase())
+        );
+        if (isBlocked) {
+          storage.createSecurityLog({ eventType: "country_blocked", ip: clientIp, userEmail: email, action: "login_refused", details: geo.country }).catch(() => {});
+          notifyAdminCountryBlocked({ ip: clientIp, country: geo.country, email }).catch(() => {});
+          return res.status(403).json({ message: "Accès refusé" });
+        }
+      }
+
+      // 3. VPN / Proxy / Hosting detection
+      if ((geo as any).isProxy || (geo as any).isHosting) {
+        const vpnType = (geo as any).isProxy ? "proxy" : "hosting";
+        storage.createSecurityLog({ eventType: "vpn_detected", ip: clientIp, userEmail: email, action: secSettings.vpnBlock ? "blocked" : "alert_only", details: `${vpnType} — ${(geo as any).isp}` }).catch(() => {});
+        notifyAdminVpn({ email, ip: clientIp, isp: (geo as any).isp || "", vpnType, country: geo.country }).catch(() => {});
+        if (secSettings.vpnBlock) return res.status(403).json({ message: "Accès refusé" });
+      }
+
+      // 4. Location jump detection (compare with last successful login)
+      try {
+        const lastLogs = await storage.getRecentLoginLogs(5);
+        const lastSuccess = lastLogs.find((l: any) => l.role === "admin" && l.success && l.ip && l.ip !== clientIp);
+        if (lastSuccess && geo.country && lastSuccess.ip) {
+          const lastGeo = await getGeoInfo(String(lastSuccess.ip)).catch(() => null);
+          if (lastGeo && lastGeo.country && lastGeo.country !== geo.country) {
+            const minutesApart = Math.round((Date.now() - new Date(lastSuccess.createdAt).getTime()) / 60000);
+            if (minutesApart < 120) {
+              storage.createSecurityLog({ eventType: "location_jump", ip: clientIp, userEmail: email, action: "alert_sent", details: `${lastGeo.country} → ${geo.country} en ${minutesApart}min` }).catch(() => {});
+              notifyAdminLocationJump({ email, fromCountry: lastGeo.country, toCountry: geo.country, fromCity: lastGeo.city || "", toCity: geo.city || "", minutesApart }).catch(() => {});
+            }
+          }
+        }
+      } catch { /* non bloquant */ }
+
+      // 5. Device fingerprint trust check
+      if (fp && secSettings.deviceCheck) {
+        const deviceBlocked = await storage.isDeviceBlocked(fp);
+        if (deviceBlocked) {
+          storage.createSecurityLog({ eventType: "blocked_device", ip: clientIp, fingerprint: fp, userEmail: email, action: "login_refused", details: "device_blocked" }).catch(() => {});
+          return res.status(403).json({ message: "Accès refusé" });
+        }
+        const existingDevice = await storage.getDeviceByFingerprint(admin.id, "admin", fp);
+        if (!existingDevice) {
+          const newDev = await storage.upsertDevice({ userId: admin.id, userRole: "admin", deviceId: fp, browser, os, country: geo.country, city: geo.city, ipAddress: clientIp, isTrusted: false });
+          notifyAdminNewDevice({ email, ip: clientIp, deviceId: fp, browser, os, country: geo.country, city: geo.city, deviceDbId: newDev.id }).catch(() => {});
+          storage.createSecurityLog({ eventType: "new_device", ip: clientIp, fingerprint: fp, userEmail: email, action: "pending_trust", details: `${browser} / ${os}` }).catch(() => {});
+          return res.status(403).json({ message: "Nouvel appareil détecté — validation requise via Telegram", code: "NEW_DEVICE" });
+        } else if (!existingDevice.isTrusted) {
+          return res.status(403).json({ message: "Appareil en attente de validation", code: "DEVICE_PENDING" });
+        } else {
+          storage.upsertDevice({ userId: admin.id, userRole: "admin", deviceId: fp, browser, os, country: geo.country, city: geo.city, ipAddress: clientIp, isTrusted: true }).catch(() => {});
+        }
+      } else if (fp) {
+        // Even if device check is off, record the device silently
+        storage.upsertDevice({ userId: admin.id, userRole: "admin", deviceId: fp, browser, os, country: geo.country, city: geo.city, ipAddress: clientIp, isTrusted: true }).catch(() => {});
+      }
+
+      // 6. 2FA via Telegram OTP
+      if (secSettings.twoFa) {
+        const code = String(Math.floor(100000 + Math.random() * 900000));
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        await storage.createAdminOtp(email, code, expiresAt);
+        notifyAdminOtp({ email, code, ip: clientIp }).catch(() => {});
+        const tempToken = jwt.sign({ email, purpose: "otp_verify", adminId: admin.id }, process.env.JWT_SECRET || "westpay-secret", { expiresIn: "6m" });
+        return res.json({ requires2fa: true, tempToken });
+      }
+
+      // 7. All checks passed — issue JWT
       await storage.createLoginLog({ userId: admin.id, role: "admin", ip: clientIp, device: ua, success: true });
       notifyAdminLogin({ email: admin.email, ip: clientIp, device: ua, success: true }).catch(() => {});
       const token = signToken({ id: admin.id, role: "admin", email: admin.email });
       res.json({ token, user: { id: admin.id, email: admin.email } });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: "Erreur interne" });
+    }
+  });
+
+  app.post("/api/auth/admin/verify-2fa", async (req, res) => {
+    try {
+      const { tempToken, code } = req.body;
+      if (!tempToken || !code) return res.status(400).json({ message: "Données manquantes" });
+      let payload: any;
+      try { payload = jwt.verify(tempToken, process.env.JWT_SECRET || "westpay-secret"); } catch { return res.status(401).json({ message: "Session expirée" }); }
+      if (payload.purpose !== "otp_verify") return res.status(401).json({ message: "Token invalide" });
+      const otp = await storage.getAdminOtp(payload.email);
+      if (!otp || otp.code !== String(code).trim() || new Date() > otp.expiresAt) {
+        return res.status(401).json({ message: "Code invalide ou expiré" });
+      }
+      await storage.deleteAdminOtp(payload.email);
+      const admin = await storage.getAdminByEmail(payload.email);
+      if (!admin) return res.status(401).json({ message: "Compte introuvable" });
+      const token = signToken({ id: admin.id, role: "admin", email: admin.email });
+      const clientIp = (req.ip || "").replace(/^::ffff:/, "");
+      await storage.createLoginLog({ userId: admin.id, role: "admin", ip: clientIp, device: req.headers["user-agent"] || "", success: true });
+      res.json({ token, user: { id: admin.id, email: admin.email } });
+    } catch (err: any) {
+      res.status(500).json({ message: "Erreur interne" });
     }
   });
 
@@ -624,6 +744,48 @@ export async function registerRoutes(
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
+  });
+
+  // ── Devices ──────────────────────────────────────────────────────────────────
+  app.get("/api/admin/security/devices", authMiddleware("admin"), async (_req, res) => {
+    try {
+      res.json(await storage.getAllDevices(200));
+    } catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
+
+  app.post("/api/admin/security/devices/:id/trust", authMiddleware("admin"), async (req, res) => {
+    try {
+      await storage.trustDevice(Number(req.params.id));
+      storage.createSecurityLog({ eventType: "device_trusted", action: "manual_trust", details: `ID ${req.params.id}`, telegramAdmin: (req as any).user?.email }).catch(() => {});
+      res.json({ ok: true });
+    } catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
+
+  app.delete("/api/admin/security/devices/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      await storage.blockDeviceById(Number(req.params.id));
+      storage.createSecurityLog({ eventType: "device_blocked", action: "manual_block", details: `ID ${req.params.id}`, telegramAdmin: (req as any).user?.email }).catch(() => {});
+      res.json({ ok: true });
+    } catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
+
+  // ── Security Settings (2FA, Device Check, VPN Block, Country Blacklist) ─────
+  app.get("/api/admin/security/config", authMiddleware("admin"), async (_req, res) => {
+    try {
+      res.json(await getSecuritySettings());
+    } catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
+
+  app.put("/api/admin/security/config", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { twoFa, deviceCheck, vpnBlock, blockedCountries } = req.body;
+      if (typeof twoFa === "boolean") await storage.setSetting("security_2fa_enabled", String(twoFa));
+      if (typeof deviceCheck === "boolean") await storage.setSetting("security_device_check", String(deviceCheck));
+      if (typeof vpnBlock === "boolean") await storage.setSetting("security_vpn_block", String(vpnBlock));
+      if (Array.isArray(blockedCountries)) await storage.setSetting("security_blocked_countries", JSON.stringify(blockedCountries));
+      storage.createSecurityLog({ eventType: "security_config_updated", action: "config_change", details: JSON.stringify({ twoFa, deviceCheck, vpnBlock }), telegramAdmin: (req as any).user?.email }).catch(() => {});
+      res.json(await getSecuritySettings());
+    } catch (err: any) { res.status(500).json({ message: err.message }); }
   });
 
   app.get("/api/admin/profile", authMiddleware("admin"), async (req, res) => {

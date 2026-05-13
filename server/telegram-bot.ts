@@ -976,6 +976,33 @@ export function initTelegramBot(): Telegraf | null {
     await ctx.answerCbQuery();
   });
 
+  // ─── Inline callbacks appareils ──────────────────────────────────────────────
+  bot.action(/^dev:trust:(\d+)$/, async (ctx) => {
+    const id = Number(ctx.match![1]);
+    const admin = formatUser(ctx);
+    try {
+      await storage.trustDevice(id);
+      await storage.createSecurityLog({ eventType: "device_trusted", action: "trusted_via_telegram", details: `ID ${id}`, telegramAdmin: admin }).catch(() => {});
+      await ctx.answerCbQuery("✅ Appareil autorisé");
+      await ctx.editMessageReplyMarkup({ inline_keyboard: [[{ text: `✅ Autorisé par ${admin}`, callback_data: "sec:noop" }]] }).catch(() => {});
+    } catch (err: any) {
+      await ctx.answerCbQuery(`❌ Erreur: ${err.message.substring(0, 50)}`);
+    }
+  });
+
+  bot.action(/^dev:block:(\d+)$/, async (ctx) => {
+    const id = Number(ctx.match![1]);
+    const admin = formatUser(ctx);
+    try {
+      await storage.blockDeviceById(id);
+      await storage.createSecurityLog({ eventType: "device_blocked", action: "blocked_via_telegram", details: `ID ${id}`, telegramAdmin: admin }).catch(() => {});
+      await ctx.answerCbQuery("🚫 Appareil bloqué");
+      await ctx.editMessageReplyMarkup({ inline_keyboard: [[{ text: `🚫 Bloqué par ${admin}`, callback_data: "sec:noop" }]] }).catch(() => {});
+    } catch (err: any) {
+      await ctx.answerCbQuery(`❌ Erreur: ${err.message.substring(0, 50)}`);
+    }
+  });
+
   // ─── Gestion des IPs depuis le groupe admin ─────────────────────────────────
 
   bot.command("autoriserip", async (ctx) => {
@@ -1844,6 +1871,130 @@ export async function notifyAdminDeviceBlocked(data: {
     `🕒 *Date :* ${dateStr} UTC`,
   ].join("\n");
   await alertAdminGroup(msg);
+}
+
+export async function notifyAdminNewDevice(data: {
+  email: string;
+  ip: string;
+  deviceId: string;
+  browser: string;
+  os: string;
+  country: string;
+  city: string;
+  deviceDbId: number;
+}): Promise<void> {
+  const dateStr = new Date().toLocaleString("fr-FR", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+  const loc = [data.city, data.country].filter(Boolean).join(", ") || "Inconnue";
+  const msg = [
+    `🆕 *Nouvel appareil détecté — WestPay*`,
+    ``,
+    `👤 *Compte :* ${data.email}`,
+    `🌐 *IP :* \`${data.ip}\``,
+    `📍 *Localisation :* ${loc}`,
+    `🖥️ *Navigateur :* ${data.browser || "Inconnu"}`,
+    `💻 *OS :* ${data.os || "Inconnu"}`,
+    `🔑 *Empreinte :* \`${data.deviceId.substring(0, 20)}…\``,
+    `🕒 *Date :* ${dateStr} UTC`,
+    ``,
+    `⚠️ _Connexion depuis un appareil jamais vu. Validez ou bloquez ci-dessous._`,
+  ].join("\n");
+  await alertAdminGroupWithButtons(msg, [
+    [
+      { text: "✅ Autoriser", callback_data: `dev:trust:${data.deviceDbId}` },
+      { text: "🚫 Bloquer", callback_data: `dev:block:${data.deviceDbId}` },
+    ],
+  ]);
+}
+
+export async function notifyAdminOtp(data: {
+  email: string;
+  code: string;
+  ip: string;
+}): Promise<void> {
+  const msg = [
+    `🔐 *Code 2FA — WestPay Admin*`,
+    ``,
+    `👤 *Compte :* ${data.email}`,
+    `🌐 *IP :* \`${data.ip}\``,
+    ``,
+    `🔑 *Code OTP :*`,
+    ``,
+    `\`\`\``,
+    `  ${data.code}`,
+    `\`\`\``,
+    ``,
+    `⏱️ _Valide 5 minutes — ne jamais partager ce code._`,
+  ].join("\n");
+  await alertAdminGroup(msg);
+}
+
+export async function notifyAdminVpn(data: {
+  email: string;
+  ip: string;
+  isp: string;
+  vpnType: string;
+  country: string;
+}): Promise<void> {
+  const typeLabel: Record<string, string> = { vpn: "🔒 VPN", proxy: "🔄 Proxy", hosting: "☁️ Hébergeur Cloud", tor: "🧅 Tor" };
+  const loc = data.country || "Inconnu";
+  const msg = [
+    `🕵️ *${typeLabel[data.vpnType] || "Connexion suspecte"} détecté — WestPay*`,
+    ``,
+    `👤 *Compte :* ${data.email}`,
+    `🌐 *IP :* \`${data.ip}\``,
+    `📍 *Pays :* ${loc}`,
+    `🏢 *FAI/Hébergeur :* ${data.isp}`,
+    `🔍 *Type :* ${typeLabel[data.vpnType] || data.vpnType}`,
+    `🕒 *Date :* ${new Date().toLocaleString("fr-FR", { hour: "2-digit", minute: "2-digit" })} UTC`,
+  ].join("\n");
+  await alertAdminGroupWithButtons(msg, [
+    [
+      { text: "⛔ Bloquer IP", callback_data: `sec:block:${data.ip}` },
+      { text: "✅ Ignorer", callback_data: "sec:noop" },
+    ],
+  ]);
+}
+
+export async function notifyAdminCountryBlocked(data: {
+  ip: string;
+  country: string;
+  email?: string;
+}): Promise<void> {
+  const msg = [
+    `🌍 *Pays bloqué — Accès refusé — WestPay*`,
+    ``,
+    ...(data.email ? [`👤 *Email tenté :* ${data.email}`] : []),
+    `🌐 *IP :* \`${data.ip}\``,
+    `📍 *Pays :* ${data.country}`,
+    `🕒 *Date :* ${new Date().toLocaleString("fr-FR", { hour: "2-digit", minute: "2-digit" })} UTC`,
+  ].join("\n");
+  await alertAdminGroup(msg);
+}
+
+export async function notifyAdminLocationJump(data: {
+  email: string;
+  fromCountry: string;
+  toCountry: string;
+  fromCity: string;
+  toCity: string;
+  minutesApart: number;
+}): Promise<void> {
+  const msg = [
+    `🚨 *Saut de localisation suspect — WestPay*`,
+    ``,
+    `👤 *Compte :* ${data.email}`,
+    `📍 *De :* ${[data.fromCity, data.fromCountry].filter(Boolean).join(", ")}`,
+    `📍 *Vers :* ${[data.toCity, data.toCountry].filter(Boolean).join(", ")}`,
+    `⏱️ *Délai :* ${data.minutesApart} minute(s)`,
+    ``,
+    `⚠️ _Connexion impossible à cette vitesse géographiquement — session suspendue._`,
+  ].join("\n");
+  await alertAdminGroupWithButtons(msg, [
+    [
+      { text: "✅ Valider session", callback_data: "sec:noop" },
+      { text: "⛔ Bloquer IP", callback_data: "sec:noop" },
+    ],
+  ]);
 }
 
 async function sendDailyReport(): Promise<void> {

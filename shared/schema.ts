@@ -478,3 +478,29 @@ export const securityLogs = pgTable("security_logs", {
 export const insertSecurityLogSchema = createInsertSchema(securityLogs).omit({ id: true, createdAt: true });
 export type SecurityLog = typeof securityLogs.$inferSelect;
 export type InsertSecurityLog = z.infer<typeof insertSecurityLogSchema>;
+
+export const devices = pgTable("devices", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  userRole: text("user_role").notNull().default("admin"),
+  deviceId: text("device_id").notNull(),
+  browser: text("browser"),
+  os: text("os"),
+  country: text("country"),
+  city: text("city"),
+  ipAddress: text("ip_address"),
+  isTrusted: boolean("is_trusted").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  lastSeen: timestamp("last_seen").defaultNow().notNull(),
+});
+export const insertDeviceSchema = createInsertSchema(devices).omit({ id: true, createdAt: true, lastSeen: true });
+export type Device = typeof devices.$inferSelect;
+export type InsertDevice = z.infer<typeof insertDeviceSchema>;
+
+export const adminOtpCodes = pgTable("admin_otp_codes", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(),
+  code: text("code").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});

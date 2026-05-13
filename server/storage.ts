@@ -3,7 +3,7 @@ import {
   merchantPins, apiLogs, pendingPayments, webhookLogs, telegramActivationCodes, paymentLinks,
   walletTransfers, walletTransferCountries, withdrawals, withdrawalOperators, statsBaselines,
   cryptoAggregators, cryptoAggregatorCountries, cryptoAggregatorMerchants, cryptoTransactions, cryptoBalances, cryptoWithdrawalRequests, cryptoPaymentLinks,
-  allowedIps, blockedIps, blockedDevices, securityLogs,
+  allowedIps, blockedIps, blockedDevices, securityLogs, devices, adminOtpCodes,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
@@ -27,6 +27,7 @@ import {
   type BlockedIp, type InsertBlockedIp,
   type BlockedDevice, type InsertBlockedDevice,
   type SecurityLog, type InsertSecurityLog,
+  type Device, type InsertDevice,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and, gte, lt, inArray, isNull } from "drizzle-orm";
@@ -226,6 +227,20 @@ export interface IStorage {
 
   createSecurityLog(data: InsertSecurityLog): Promise<SecurityLog>;
   getSecurityLogs(limit?: number): Promise<SecurityLog[]>;
+
+  // Devices (trusted/untrusted)
+  getDeviceByFingerprint(userId: number, userRole: string, deviceId: string): Promise<Device | undefined>;
+  upsertDevice(data: InsertDevice & { userId: number; userRole: string }): Promise<Device>;
+  trustDevice(id: number): Promise<void>;
+  blockDeviceById(id: number): Promise<void>;
+  getDevicesForUser(userId: number, userRole: string): Promise<Device[]>;
+  getAllDevices(limit?: number): Promise<Device[]>;
+  deleteDevice(id: number): Promise<void>;
+
+  // Admin 2FA OTP
+  createAdminOtp(email: string, code: string, expiresAt: Date): Promise<void>;
+  getAdminOtp(email: string): Promise<{ code: string; expiresAt: Date } | undefined>;
+  deleteAdminOtp(email: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1424,6 +1439,75 @@ export class DatabaseStorage implements IStorage {
 
   async getSecurityLogs(limit = 50): Promise<SecurityLog[]> {
     return db.select().from(securityLogs).orderBy(desc(securityLogs.createdAt)).limit(limit);
+  }
+
+  // ── Devices ──────────────────────────────────────────────────────────────────
+  async getDeviceByFingerprint(userId: number, userRole: string, deviceId: string): Promise<Device | undefined> {
+    const [row] = await db.select().from(devices)
+      .where(and(eq(devices.userId, userId), eq(devices.userRole, userRole), eq(devices.deviceId, deviceId)))
+      .limit(1);
+    return row;
+  }
+
+  async upsertDevice(data: InsertDevice & { userId: number; userRole: string }): Promise<Device> {
+    const existing = await this.getDeviceByFingerprint(data.userId, data.userRole, data.deviceId);
+    if (existing) {
+      const [updated] = await db.update(devices)
+        .set({ lastSeen: new Date(), ipAddress: data.ipAddress, country: data.country, city: data.city })
+        .where(eq(devices.id, existing.id))
+        .returning();
+      return updated;
+    }
+    const [row] = await db.insert(devices).values({ ...data, lastSeen: new Date() }).returning();
+    return row;
+  }
+
+  async trustDevice(id: number): Promise<void> {
+    await db.update(devices).set({ isTrusted: true }).where(eq(devices.id, id));
+  }
+
+  async blockDeviceById(id: number): Promise<void> {
+    const [d] = await db.select().from(devices).where(eq(devices.id, id));
+    if (d) {
+      await db.insert(blockedDevices).values({
+        fingerprint: d.deviceId,
+        ipAddress: d.ipAddress,
+        userAgent: d.browser,
+        reason: "Bloqué via dashboard",
+        blockedBy: "admin",
+      }).onConflictDoNothing();
+    }
+    await db.delete(devices).where(eq(devices.id, id));
+  }
+
+  async getDevicesForUser(userId: number, userRole: string): Promise<Device[]> {
+    return db.select().from(devices)
+      .where(and(eq(devices.userId, userId), eq(devices.userRole, userRole)))
+      .orderBy(desc(devices.lastSeen));
+  }
+
+  async getAllDevices(limit = 100): Promise<Device[]> {
+    return db.select().from(devices).orderBy(desc(devices.lastSeen)).limit(limit);
+  }
+
+  async deleteDevice(id: number): Promise<void> {
+    await db.delete(devices).where(eq(devices.id, id));
+  }
+
+  // ── Admin OTP ─────────────────────────────────────────────────────────────────
+  async createAdminOtp(email: string, code: string, expiresAt: Date): Promise<void> {
+    await db.delete(adminOtpCodes).where(eq(adminOtpCodes.email, email));
+    await db.insert(adminOtpCodes).values({ email, code, expiresAt });
+  }
+
+  async getAdminOtp(email: string): Promise<{ code: string; expiresAt: Date } | undefined> {
+    const [row] = await db.select().from(adminOtpCodes).where(eq(adminOtpCodes.email, email)).limit(1);
+    if (!row) return undefined;
+    return { code: row.code, expiresAt: row.expiresAt };
+  }
+
+  async deleteAdminOtp(email: string): Promise<void> {
+    await db.delete(adminOtpCodes).where(eq(adminOtpCodes.email, email));
   }
 }
 

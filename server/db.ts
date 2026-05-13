@@ -343,6 +343,29 @@ export async function runMigrations() {
         telegram_admin text,
         created_at timestamp DEFAULT now() NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS devices (
+        id serial PRIMARY KEY,
+        user_id integer NOT NULL,
+        user_role text NOT NULL DEFAULT 'admin',
+        device_id text NOT NULL,
+        browser text,
+        os text,
+        country text,
+        city text,
+        ip_address text,
+        is_trusted boolean NOT NULL DEFAULT false,
+        created_at timestamp DEFAULT now() NOT NULL,
+        last_seen timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS admin_otp_codes (
+        id serial PRIMARY KEY,
+        email text NOT NULL,
+        code text NOT NULL,
+        expires_at timestamp NOT NULL,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
     `);
 
     // ── Colonnes ajoutées progressivement (idempotentes) ──────────────────────────

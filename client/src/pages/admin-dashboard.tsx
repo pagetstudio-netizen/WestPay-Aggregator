@@ -26,7 +26,8 @@ import {
   MessageSquare, Key, DollarSign, Hash, Calendar, Search, Clock,
   RefreshCw, Lock, BookOpen, FileText, Webhook, Zap, ToggleLeft, ToggleRight, Link2,
   Link, BarChart3, TrendingUp, Eye, ToggleLeft as Toggle, ExternalLink, Filter,
-  Check, ChevronsUpDown, ArrowUpRight, Edit3, Wallet, AlertTriangle, RotateCcw, Bitcoin
+  Check, ChevronsUpDown, ArrowUpRight, Edit3, Wallet, AlertTriangle, RotateCcw, Bitcoin,
+  Monitor, EyeOff, KeyRound
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
@@ -5107,7 +5108,7 @@ function AnalyticsPanel() {
 function SecurityIpsPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
-  const [secTab, setSecTab] = useState<"allowed" | "blocked" | "devices" | "logs">("allowed");
+  const [secTab, setSecTab] = useState<"allowed" | "blocked" | "devices" | "trusted-devices" | "countries" | "settings" | "logs">("allowed");
   const [search, setSearch] = useState("");
   const [form, setForm] = useState({ ipAddress: "", userEmail: "", role: "merchant", note: "" });
   const [blockForm, setBlockForm] = useState({ ipAddress: "", reason: "" });
@@ -5146,6 +5147,23 @@ function SecurityIpsPanel() {
     staleTime: 20_000,
     enabled: secTab === "logs",
   });
+
+  const { data: trustedDevices = [], isLoading: trustedDevicesLoading, refetch: refetchTrustedDevices } = useQuery<any[]>({
+    queryKey: ["/api/admin/security/devices"],
+    queryFn: () => fetchWith("/api/admin/security/devices"),
+    staleTime: 15_000,
+    enabled: secTab === "trusted-devices",
+  });
+
+  const { data: secConfig = { twoFa: false, deviceCheck: false, vpnBlock: false, blockedCountries: [] }, isLoading: configLoading, refetch: refetchConfig } = useQuery<any>({
+    queryKey: ["/api/admin/security/config"],
+    queryFn: () => fetchWith("/api/admin/security/config"),
+    staleTime: 30_000,
+    enabled: secTab === "settings" || secTab === "countries",
+  });
+
+  const [newCountry, setNewCountry] = useState("");
+  const [savingConfig, setSavingConfig] = useState(false);
 
   const { data: loginLogs = [], isLoading: loginLogsLoading } = useQuery<any[]>({
     queryKey: ["/api/admin/login-logs"],
@@ -5219,6 +5237,39 @@ function SecurityIpsPanel() {
     onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
   });
 
+  const trustDeviceMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const r = await fetch(`/api/admin/security/devices/${id}/trust`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) throw new Error("Erreur");
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/security/devices"] }); toast({ title: "Appareil autorisé" }); },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
+
+  const blockTrustedDeviceMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const r = await fetch(`/api/admin/security/devices/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) throw new Error("Erreur");
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/security/devices"] }); toast({ title: "Appareil bloqué" }); },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
+
+  const saveSecConfig = async (patch: Partial<{ twoFa: boolean; deviceCheck: boolean; vpnBlock: boolean; blockedCountries: string[] }>) => {
+    setSavingConfig(true);
+    try {
+      const r = await fetch("/api/admin/security/config", {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!r.ok) throw new Error("Erreur");
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/security/config"] });
+      toast({ title: "Configuration sauvegardée" });
+    } catch (e: any) { toast({ title: "Erreur", description: e.message, variant: "destructive" }); }
+    finally { setSavingConfig(false); }
+  };
+
   const getField = (row: any, ...keys: string[]) => { for (const k of keys) if (row[k]) return row[k]; return ""; };
 
   const filtered = ips.filter((ip: any) =>
@@ -5254,15 +5305,24 @@ function SecurityIpsPanel() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex flex-wrap gap-1 p-1 bg-muted rounded-lg w-fit">
+      <div className="flex flex-wrap gap-1 p-1 bg-muted rounded-lg">
         <button className={tabBtnClass("allowed")} onClick={() => setSecTab("allowed")} data-testid="tab-sec-allowed">
           ✅ IPs Autorisées
         </button>
         <button className={tabBtnClass("blocked")} onClick={() => setSecTab("blocked")} data-testid="tab-sec-blocked">
           ⛔ IPs Bloquées
         </button>
+        <button className={tabBtnClass("trusted-devices")} onClick={() => setSecTab("trusted-devices")} data-testid="tab-sec-trusted-devices">
+          📱 Appareils
+        </button>
         <button className={tabBtnClass("devices")} onClick={() => setSecTab("devices")} data-testid="tab-sec-devices">
-          🖥️ Appareils
+          🚫 Appareils Bloqués
+        </button>
+        <button className={tabBtnClass("countries")} onClick={() => setSecTab("countries")} data-testid="tab-sec-countries">
+          🌍 Pays Bloqués
+        </button>
+        <button className={tabBtnClass("settings")} onClick={() => setSecTab("settings")} data-testid="tab-sec-settings">
+          ⚙️ Paramètres
         </button>
         <button className={tabBtnClass("logs")} onClick={() => setSecTab("logs")} data-testid="tab-sec-logs">
           📋 Logs
@@ -5555,6 +5615,247 @@ function SecurityIpsPanel() {
               )}
             </CardContent>
           </Card>
+        </div>
+      )}
+
+      {/* ── Appareils Connus (trust/block) ────────────────────────────────────── */}
+      {secTab === "trusted-devices" && (
+        <div className="space-y-5">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">Appareils détectés lors des connexions admin. Les appareils non-fiables bloquent la connexion si la vérification est activée.</p>
+            <Button variant="outline" size="icon" onClick={() => refetchTrustedDevices()} data-testid="button-refresh-trusted-devices"><RefreshCw className="w-4 h-4" /></Button>
+          </div>
+          <Card>
+            <CardContent className="p-0">
+              {trustedDevicesLoading ? <div className="p-8 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+              : trustedDevices.length === 0 ? (
+                <div className="p-8 text-center"><Shield className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" /><p className="text-sm text-muted-foreground">Aucun appareil enregistré</p></div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="border-b bg-muted/30">
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Statut</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Navigateur / OS</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">Dernière IP</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">Localisation</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">Vu le</th>
+                      <th className="text-right px-4 py-3 font-medium text-muted-foreground">Actions</th>
+                    </tr></thead>
+                    <tbody>
+                      {trustedDevices.map((d: any) => {
+                        const trusted = d.isTrusted || d.is_trusted;
+                        const loc = [d.city, d.country].filter(Boolean).join(", ") || "—";
+                        const seenAt = d.lastSeen || d.last_seen;
+                        return (
+                          <tr key={d.id} className="border-b hover:bg-muted/20 transition-colors" data-testid={`row-trusted-device-${d.id}`}>
+                            <td className="px-4 py-3">
+                              <Badge variant={trusted ? "default" : "secondary"} className={`text-xs ${trusted ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"}`}>
+                                {trusted ? "✅ Autorisé" : "⏳ En attente"}
+                              </Badge>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="font-medium text-xs">{d.browser || "—"}</div>
+                              <div className="text-muted-foreground text-xs">{d.os || "—"}</div>
+                            </td>
+                            <td className="px-4 py-3 hidden md:table-cell text-muted-foreground text-xs font-mono">{d.ipAddress || d.ip_address || "—"}</td>
+                            <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground text-xs">{loc}</td>
+                            <td className="px-4 py-3 hidden sm:table-cell text-muted-foreground text-xs">
+                              {seenAt ? new Date(seenAt).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—"}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                {!trusted && (
+                                  <Button variant="outline" size="sm" className="text-green-600 hover:bg-green-50 dark:hover:bg-green-950/20 text-xs gap-1"
+                                    onClick={() => trustDeviceMutation.mutate(d.id)} disabled={trustDeviceMutation.isPending} data-testid={`button-trust-device-${d.id}`}>
+                                    <CheckCircle className="w-3.5 h-3.5" /> Autoriser
+                                  </Button>
+                                )}
+                                <Button variant="ghost" size="sm" className="text-destructive hover:bg-destructive/10 text-xs"
+                                  onClick={() => blockTrustedDeviceMutation.mutate(d.id)} disabled={blockTrustedDeviceMutation.isPending} data-testid={`button-block-trusted-device-${d.id}`}>
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ── Pays Bloqués ──────────────────────────────────────────────────────── */}
+      {secTab === "countries" && (
+        <div className="space-y-5">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">Les connexions depuis ces pays seront automatiquement refusées lors du login admin.</p>
+            <Button variant="outline" size="icon" onClick={() => refetchConfig()} data-testid="button-refresh-countries"><RefreshCw className="w-4 h-4" /></Button>
+          </div>
+
+          <Card className="border-destructive/20 bg-destructive/5">
+            <CardContent className="p-4">
+              <p className="text-xs font-semibold text-destructive uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5" /> Ajouter un pays à bloquer
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Ex: Nigeria, Russie, Iran..."
+                  value={newCountry}
+                  onChange={(e) => setNewCountry(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && newCountry.trim()) {
+                      const updated = [...(secConfig.blockedCountries || []), newCountry.trim()];
+                      saveSecConfig({ blockedCountries: updated });
+                      setNewCountry("");
+                    }
+                  }}
+                  className="flex-1"
+                  data-testid="input-new-country"
+                />
+                <Button
+                  variant="destructive"
+                  onClick={() => {
+                    if (!newCountry.trim()) return;
+                    const updated = [...(secConfig.blockedCountries || []), newCountry.trim()];
+                    saveSecConfig({ blockedCountries: updated });
+                    setNewCountry("");
+                  }}
+                  disabled={!newCountry.trim() || savingConfig}
+                  className="gap-2 shrink-0"
+                  data-testid="button-add-country"
+                >
+                  {savingConfig ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Bloquer
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-0">
+              {configLoading ? <div className="p-8 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+              : !secConfig.blockedCountries?.length ? (
+                <div className="p-8 text-center">
+                  <Globe className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" />
+                  <p className="text-sm text-muted-foreground">Aucun pays bloqué — toutes les connexions sont autorisées</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="border-b bg-muted/30">
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Pays</th>
+                      <th className="text-right px-4 py-3 font-medium text-muted-foreground">Action</th>
+                    </tr></thead>
+                    <tbody>
+                      {secConfig.blockedCountries.map((c: string, i: number) => (
+                        <tr key={i} className="border-b hover:bg-muted/20 transition-colors" data-testid={`row-blocked-country-${i}`}>
+                          <td className="px-4 py-3">
+                            <span className="font-medium text-red-500">🌍 {c}</span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <Button variant="ghost" size="sm" className="text-destructive hover:bg-destructive/10"
+                              onClick={() => {
+                                const updated = secConfig.blockedCountries.filter((_: string, idx: number) => idx !== i);
+                                saveSecConfig({ blockedCountries: updated });
+                              }}
+                              disabled={savingConfig}
+                              data-testid={`button-remove-country-${i}`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ── Paramètres Sécurité ────────────────────────────────────────────────── */}
+      {secTab === "settings" && (
+        <div className="space-y-5">
+          <p className="text-sm text-muted-foreground">Activez ou désactivez les protections avancées pour le login administrateur.</p>
+          {configLoading ? <div className="p-8 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div> : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* 2FA */}
+              <Card className={secConfig.twoFa ? "border-green-300 dark:border-green-700" : ""}>
+                <CardContent className="p-5 flex items-start gap-4">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${secConfig.twoFa ? "bg-green-100 dark:bg-green-900/30" : "bg-muted"}`}>
+                    <KeyRound className={`w-5 h-5 ${secConfig.twoFa ? "text-green-600" : "text-muted-foreground"}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <p className="font-semibold text-sm">2FA via Telegram</p>
+                      <Badge variant={secConfig.twoFa ? "default" : "secondary"} className="text-xs">{secConfig.twoFa ? "Actif" : "Inactif"}</Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-3">Envoie un code OTP sur Telegram après le mot de passe.</p>
+                    <Button size="sm" variant={secConfig.twoFa ? "destructive" : "default"} onClick={() => saveSecConfig({ twoFa: !secConfig.twoFa })} disabled={savingConfig} data-testid="button-toggle-2fa">
+                      {savingConfig ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+                      {secConfig.twoFa ? "Désactiver" : "Activer"}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Device Check */}
+              <Card className={secConfig.deviceCheck ? "border-blue-300 dark:border-blue-700" : ""}>
+                <CardContent className="p-5 flex items-start gap-4">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${secConfig.deviceCheck ? "bg-blue-100 dark:bg-blue-900/30" : "bg-muted"}`}>
+                    <Monitor className={`w-5 h-5 ${secConfig.deviceCheck ? "text-blue-600" : "text-muted-foreground"}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <p className="font-semibold text-sm">Vérification d'appareil</p>
+                      <Badge variant={secConfig.deviceCheck ? "default" : "secondary"} className="text-xs">{secConfig.deviceCheck ? "Actif" : "Inactif"}</Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-3">Bloque les nouveaux appareils jusqu'à validation Telegram.</p>
+                    <Button size="sm" variant={secConfig.deviceCheck ? "destructive" : "default"} onClick={() => saveSecConfig({ deviceCheck: !secConfig.deviceCheck })} disabled={savingConfig} data-testid="button-toggle-device-check">
+                      {savingConfig ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+                      {secConfig.deviceCheck ? "Désactiver" : "Activer"}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* VPN Block */}
+              <Card className={secConfig.vpnBlock ? "border-orange-300 dark:border-orange-700" : ""}>
+                <CardContent className="p-5 flex items-start gap-4">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${secConfig.vpnBlock ? "bg-orange-100 dark:bg-orange-900/30" : "bg-muted"}`}>
+                    <EyeOff className={`w-5 h-5 ${secConfig.vpnBlock ? "text-orange-600" : "text-muted-foreground"}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <p className="font-semibold text-sm">Blocage VPN / Proxy</p>
+                      <Badge variant={secConfig.vpnBlock ? "default" : "secondary"} className="text-xs">{secConfig.vpnBlock ? "Actif" : "Inactif"}</Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-3">Refuse automatiquement les connexions via VPN ou proxy.</p>
+                    <Button size="sm" variant={secConfig.vpnBlock ? "destructive" : "default"} onClick={() => saveSecConfig({ vpnBlock: !secConfig.vpnBlock })} disabled={savingConfig} data-testid="button-toggle-vpn-block">
+                      {savingConfig ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+                      {secConfig.vpnBlock ? "Désactiver" : "Activer"}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Info card */}
+              <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 sm:col-span-1">
+                <CardContent className="p-5 flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-800 dark:text-amber-400 mb-1">Important</p>
+                    <p className="text-xs text-amber-700 dark:text-amber-500">La 2FA et la vérification d'appareils nécessitent que le groupe Telegram admin soit configuré. Les alertes de localisation sont toujours envoyées.</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
         </div>
       )}
 
