@@ -311,6 +311,38 @@ export async function runMigrations() {
         created_by text,
         created_at timestamp DEFAULT now() NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS blocked_ips (
+        id serial PRIMARY KEY,
+        ip_address text NOT NULL UNIQUE,
+        country text,
+        city text,
+        reason text,
+        blocked_by text,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS blocked_devices (
+        id serial PRIMARY KEY,
+        fingerprint text NOT NULL UNIQUE,
+        ip_address text,
+        user_agent text,
+        reason text,
+        blocked_by text,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS security_logs (
+        id serial PRIMARY KEY,
+        event_type text NOT NULL,
+        user_email text,
+        ip text,
+        fingerprint text,
+        action text,
+        details text,
+        telegram_admin text,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
     `);
 
     // ── Colonnes ajoutées progressivement (idempotentes) ──────────────────────────

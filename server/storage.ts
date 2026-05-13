@@ -3,7 +3,7 @@ import {
   merchantPins, apiLogs, pendingPayments, webhookLogs, telegramActivationCodes, paymentLinks,
   walletTransfers, walletTransferCountries, withdrawals, withdrawalOperators, statsBaselines,
   cryptoAggregators, cryptoAggregatorCountries, cryptoAggregatorMerchants, cryptoTransactions, cryptoBalances, cryptoWithdrawalRequests, cryptoPaymentLinks,
-  allowedIps,
+  allowedIps, blockedIps, blockedDevices, securityLogs,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
@@ -24,6 +24,9 @@ import {
   type CryptoWithdrawalRequest, type InsertCryptoWithdrawalRequest,
   type CryptoPaymentLink, type InsertCryptoPaymentLink,
   type AllowedIp, type InsertAllowedIp,
+  type BlockedIp, type InsertBlockedIp,
+  type BlockedDevice, type InsertBlockedDevice,
+  type SecurityLog, type InsertSecurityLog,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql, and, gte, lt, inArray, isNull } from "drizzle-orm";
@@ -210,6 +213,19 @@ export interface IStorage {
   isIpAllowed(ip: string): Promise<boolean>;
   addAllowedIp(data: InsertAllowedIp): Promise<AllowedIp>;
   removeAllowedIp(id: number): Promise<void>;
+
+  getBlockedIps(): Promise<BlockedIp[]>;
+  isIpBlocked(ip: string): Promise<boolean>;
+  addBlockedIp(data: InsertBlockedIp): Promise<BlockedIp>;
+  removeBlockedIp(id: number): Promise<void>;
+
+  getBlockedDevices(): Promise<BlockedDevice[]>;
+  isDeviceBlocked(fingerprint: string): Promise<boolean>;
+  addBlockedDevice(data: InsertBlockedDevice): Promise<BlockedDevice>;
+  removeBlockedDevice(id: number): Promise<void>;
+
+  createSecurityLog(data: InsertSecurityLog): Promise<SecurityLog>;
+  getSecurityLogs(limit?: number): Promise<SecurityLog[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1354,6 +1370,60 @@ export class DatabaseStorage implements IStorage {
 
   async removeAllowedIp(id: number): Promise<void> {
     await db.delete(allowedIps).where(eq(allowedIps.id, id));
+  }
+
+  async getBlockedIps(): Promise<BlockedIp[]> {
+    return db.select().from(blockedIps).orderBy(desc(blockedIps.createdAt));
+  }
+
+  async isIpBlocked(ip: string): Promise<boolean> {
+    const cleanIp = ip.replace(/^::ffff:/, "");
+    const hit = await db.select({ id: blockedIps.id }).from(blockedIps)
+      .where(eq(blockedIps.ipAddress, cleanIp)).limit(1);
+    return hit.length > 0;
+  }
+
+  async addBlockedIp(data: InsertBlockedIp): Promise<BlockedIp> {
+    const [row] = await db.insert(blockedIps).values(data).onConflictDoUpdate({
+      target: blockedIps.ipAddress,
+      set: { reason: data.reason, blockedBy: data.blockedBy, country: data.country, city: data.city },
+    }).returning();
+    return row;
+  }
+
+  async removeBlockedIp(id: number): Promise<void> {
+    await db.delete(blockedIps).where(eq(blockedIps.id, id));
+  }
+
+  async getBlockedDevices(): Promise<BlockedDevice[]> {
+    return db.select().from(blockedDevices).orderBy(desc(blockedDevices.createdAt));
+  }
+
+  async isDeviceBlocked(fingerprint: string): Promise<boolean> {
+    const hit = await db.select({ id: blockedDevices.id }).from(blockedDevices)
+      .where(eq(blockedDevices.fingerprint, fingerprint)).limit(1);
+    return hit.length > 0;
+  }
+
+  async addBlockedDevice(data: InsertBlockedDevice): Promise<BlockedDevice> {
+    const [row] = await db.insert(blockedDevices).values(data).onConflictDoUpdate({
+      target: blockedDevices.fingerprint,
+      set: { reason: data.reason, blockedBy: data.blockedBy, ipAddress: data.ipAddress, userAgent: data.userAgent },
+    }).returning();
+    return row;
+  }
+
+  async removeBlockedDevice(id: number): Promise<void> {
+    await db.delete(blockedDevices).where(eq(blockedDevices.id, id));
+  }
+
+  async createSecurityLog(data: InsertSecurityLog): Promise<SecurityLog> {
+    const [row] = await db.insert(securityLogs).values(data).returning();
+    return row;
+  }
+
+  async getSecurityLogs(limit = 50): Promise<SecurityLog[]> {
+    return db.select().from(securityLogs).orderBy(desc(securityLogs.createdAt)).limit(limit);
   }
 }
 

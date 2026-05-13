@@ -437,3 +437,44 @@ export const allowedIps = pgTable("allowed_ips", {
 export const insertAllowedIpSchema = createInsertSchema(allowedIps).omit({ id: true, createdAt: true });
 export type AllowedIp = typeof allowedIps.$inferSelect;
 export type InsertAllowedIp = z.infer<typeof insertAllowedIpSchema>;
+
+export const blockedIps = pgTable("blocked_ips", {
+  id: serial("id").primaryKey(),
+  ipAddress: text("ip_address").notNull().unique(),
+  country: text("country"),
+  city: text("city"),
+  reason: text("reason"),
+  blockedBy: text("blocked_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export const insertBlockedIpSchema = createInsertSchema(blockedIps).omit({ id: true, createdAt: true });
+export type BlockedIp = typeof blockedIps.$inferSelect;
+export type InsertBlockedIp = z.infer<typeof insertBlockedIpSchema>;
+
+export const blockedDevices = pgTable("blocked_devices", {
+  id: serial("id").primaryKey(),
+  fingerprint: text("fingerprint").notNull().unique(),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  reason: text("reason"),
+  blockedBy: text("blocked_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export const insertBlockedDeviceSchema = createInsertSchema(blockedDevices).omit({ id: true, createdAt: true });
+export type BlockedDevice = typeof blockedDevices.$inferSelect;
+export type InsertBlockedDevice = z.infer<typeof insertBlockedDeviceSchema>;
+
+export const securityLogs = pgTable("security_logs", {
+  id: serial("id").primaryKey(),
+  eventType: text("event_type").notNull(),
+  userEmail: text("user_email"),
+  ip: text("ip"),
+  fingerprint: text("fingerprint"),
+  action: text("action"),
+  details: text("details"),
+  telegramAdmin: text("telegram_admin"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export const insertSecurityLogSchema = createInsertSchema(securityLogs).omit({ id: true, createdAt: true });
+export type SecurityLog = typeof securityLogs.$inferSelect;
+export type InsertSecurityLog = z.infer<typeof insertSecurityLogSchema>;

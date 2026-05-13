@@ -7,7 +7,7 @@ import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, notifyAdminMerchantCreated, notifyAdminAdminCreated, getGeoInfo } from "./telegram-bot";
+import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, notifyAdminMerchantCreated, notifyAdminAdminCreated, getGeoInfo, notifyAdminMerchantLogin, notifyAdminIpBlocked, notifyAdminBruteForce, notifyAdminDeviceBlocked } from "./telegram-bot";
 import {
   initiatePayment as omnipayInitiatePayment,
   initiateTransfer as omnipayInitiateTransfer,
@@ -366,10 +366,44 @@ export async function registerRoutes(
     }
   });
 
+  // ── Brute force tracker (in-memory) ─────────────────────────────────────────
+  const loginAttempts = new Map<string, { count: number; firstFail: number; lastEmail: string }>();
+  const BRUTE_FORCE_MAX = 5;
+  const BRUTE_FORCE_WINDOW = 15 * 60 * 1000;
+  // Debounce for blocked-IP Telegram notifications (avoid spam)
+  const blockedIpNotifyCache = new Map<string, number>();
+  const BLOCKED_NOTIFY_COOLDOWN = 5 * 60 * 1000;
+
   const ipGuard = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const ip = req.ip || req.socket.remoteAddress || "";
-      const allowed = await storage.isIpAllowed(ip);
+      const rawIp = req.ip || req.socket.remoteAddress || "";
+      const cleanIp = rawIp.replace(/^::ffff:/, "");
+
+      // 1. Check if IP is explicitly blocked
+      const blocked = await storage.isIpBlocked(cleanIp);
+      if (blocked) {
+        storage.createSecurityLog({ eventType: "blocked_access", ip: cleanIp, action: "ip_blocked_middleware", details: req.path }).catch(() => {});
+        const lastNotify = blockedIpNotifyCache.get(cleanIp) || 0;
+        if (Date.now() - lastNotify > BLOCKED_NOTIFY_COOLDOWN) {
+          blockedIpNotifyCache.set(cleanIp, Date.now());
+          notifyAdminIpBlocked({ ip: cleanIp, path: req.path, device: req.headers["user-agent"] }).catch(() => {});
+        }
+        return res.status(403).json({ error: "access_denied" });
+      }
+
+      // 2. Check device fingerprint if provided
+      const fp = req.headers["x-device-fp"] as string | undefined;
+      if (fp && fp.length > 8) {
+        const deviceBlocked = await storage.isDeviceBlocked(fp);
+        if (deviceBlocked) {
+          storage.createSecurityLog({ eventType: "blocked_device", ip: cleanIp, fingerprint: fp, action: "device_blocked_middleware", details: req.path }).catch(() => {});
+          notifyAdminDeviceBlocked({ ip: cleanIp, fingerprint: fp, path: req.path }).catch(() => {});
+          return res.status(403).json({ error: "access_denied" });
+        }
+      }
+
+      // 3. Check allowed IPs whitelist
+      const allowed = await storage.isIpAllowed(rawIp);
       if (!allowed) return res.status(403).json({ error: "access_denied" });
       next();
     } catch {
@@ -383,18 +417,46 @@ export async function registerRoutes(
       const { email, password } = req.body;
       if (!email || !password) return res.status(400).json({ message: "Email et mot de passe requis" });
 
+      const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+      const ua = req.headers["user-agent"] || "?";
+
+      // Check if IP is blocked before even validating credentials
+      const ipBlocked = await storage.isIpBlocked(clientIp);
+      if (ipBlocked) {
+        storage.createSecurityLog({ eventType: "blocked_login_attempt", ip: clientIp, userEmail: email, action: "ip_blocked", details: "Admin login blocked" }).catch(() => {});
+        return res.status(403).json({ message: "Accès refusé" });
+      }
+
       const admin = await storage.getAdminByEmail(email);
       if (!admin || email.toLowerCase() === "admin@westpay.com") return res.status(401).json({ message: "Identifiants invalides" });
 
       const valid = await bcrypt.compare(password, admin.passwordHash);
       if (!valid) {
-        await storage.createLoginLog({ userId: admin.id, role: "admin", ip: req.ip || "", device: req.headers["user-agent"] || "", success: false });
-        notifyAdminLogin({ email: admin.email, ip: req.ip || "?", device: req.headers["user-agent"] || "?", success: false }).catch(() => {});
+        await storage.createLoginLog({ userId: admin.id, role: "admin", ip: clientIp, device: ua, success: false });
+        notifyAdminLogin({ email: admin.email, ip: clientIp, device: ua, success: false }).catch(() => {});
+
+        // Brute force tracking
+        const now = Date.now();
+        const attempt = loginAttempts.get(clientIp) || { count: 0, firstFail: now, lastEmail: email };
+        if (now - attempt.firstFail > BRUTE_FORCE_WINDOW) { attempt.count = 0; attempt.firstFail = now; }
+        attempt.count++;
+        attempt.lastEmail = email;
+        loginAttempts.set(clientIp, attempt);
+
+        if (attempt.count >= BRUTE_FORCE_MAX) {
+          storage.addBlockedIp({ ipAddress: clientIp, reason: `Brute force — ${attempt.count} tentatives admin`, blockedBy: "système" }).catch(() => {});
+          storage.createSecurityLog({ eventType: "brute_force", ip: clientIp, userEmail: email, action: "auto_blocked", details: `${attempt.count} tentatives` }).catch(() => {});
+          notifyAdminBruteForce({ ip: clientIp, email, attempts: attempt.count }).catch(() => {});
+          loginAttempts.delete(clientIp);
+        }
+
         return res.status(401).json({ message: "Identifiants invalides" });
       }
 
-      await storage.createLoginLog({ userId: admin.id, role: "admin", ip: req.ip || "", device: req.headers["user-agent"] || "", success: true });
-      notifyAdminLogin({ email: admin.email, ip: req.ip || "?", device: req.headers["user-agent"] || "?", success: true }).catch(() => {});
+      // Successful login — reset brute force counter
+      loginAttempts.delete(clientIp);
+      await storage.createLoginLog({ userId: admin.id, role: "admin", ip: clientIp, device: ua, success: true });
+      notifyAdminLogin({ email: admin.email, ip: clientIp, device: ua, success: true }).catch(() => {});
       const token = signToken({ id: admin.id, role: "admin", email: admin.email });
       res.json({ token, user: { id: admin.id, email: admin.email } });
     } catch (err: any) {
@@ -407,17 +469,22 @@ export async function registerRoutes(
       const { email, password } = req.body;
       if (!email || !password) return res.status(400).json({ message: "Email et mot de passe requis" });
 
+      const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+      const ua = req.headers["user-agent"] || "?";
+
       const merchant = await storage.getMerchantByEmail(email);
       if (!merchant) return res.status(401).json({ message: "Identifiants invalides" });
       if (merchant.suspended) return res.status(403).json({ message: "Compte suspendu" });
 
       const valid = await bcrypt.compare(password, merchant.passwordHash);
       if (!valid) {
-        await storage.createLoginLog({ userId: merchant.id, role: "merchant", ip: req.ip || "", device: req.headers["user-agent"] || "", success: false });
+        await storage.createLoginLog({ userId: merchant.id, role: "merchant", ip: clientIp, device: ua, success: false });
+        notifyAdminMerchantLogin({ email: merchant.email, merchantName: merchant.name, ip: clientIp, device: ua, success: false }).catch(() => {});
         return res.status(401).json({ message: "Identifiants invalides" });
       }
 
-      await storage.createLoginLog({ userId: merchant.id, role: "merchant", ip: req.ip || "", device: req.headers["user-agent"] || "", success: true });
+      await storage.createLoginLog({ userId: merchant.id, role: "merchant", ip: clientIp, device: ua, success: true });
+      notifyAdminMerchantLogin({ email: merchant.email, merchantName: merchant.name, ip: clientIp, device: ua, success: true }).catch(() => {});
       const token = signToken({ id: merchant.id, role: "merchant", email: merchant.email });
       res.json({ token, user: { id: merchant.id, email: merchant.email, name: merchant.name, slug: merchant.slug } });
     } catch (err: any) {
@@ -471,6 +538,89 @@ export async function registerRoutes(
       const limit = Math.min(Number(req.query.limit) || 20, 100);
       const logs = await storage.getRecentLoginLogs(limit);
       res.json(logs);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Blocked IPs ──────────────────────────────────────────────────────────────
+  app.get("/api/admin/security/blocked-ips", authMiddleware("admin"), async (_req, res) => {
+    try {
+      res.json(await storage.getBlockedIps());
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/security/blocked-ips", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { ipAddress, reason } = req.body;
+      if (!ipAddress) return res.status(400).json({ message: "IP requise" });
+      const geo = await getGeoInfo(ipAddress).catch(() => ({ country: null, city: null }));
+      const row = await storage.addBlockedIp({
+        ipAddress,
+        country: geo.country || null,
+        city: geo.city || null,
+        reason: reason || "Bloqué manuellement",
+        blockedBy: (req as any).user?.email || "admin",
+      });
+      storage.createSecurityLog({ eventType: "ip_blocked", ip: ipAddress, action: "manual_block", details: reason || "Bloqué manuellement", telegramAdmin: (req as any).user?.email }).catch(() => {});
+      res.json(row);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/admin/security/blocked-ips/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      await storage.removeBlockedIp(Number(req.params.id));
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Blocked Devices ──────────────────────────────────────────────────────────
+  app.get("/api/admin/security/blocked-devices", authMiddleware("admin"), async (_req, res) => {
+    try {
+      res.json(await storage.getBlockedDevices());
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/security/blocked-devices", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { fingerprint, ipAddress, reason } = req.body;
+      if (!fingerprint) return res.status(400).json({ message: "Empreinte requise" });
+      const row = await storage.addBlockedDevice({
+        fingerprint,
+        ipAddress: ipAddress || null,
+        userAgent: null,
+        reason: reason || "Bloqué manuellement",
+        blockedBy: (req as any).user?.email || "admin",
+      });
+      storage.createSecurityLog({ eventType: "device_blocked", fingerprint, ip: ipAddress, action: "manual_block", details: reason || "Bloqué manuellement" }).catch(() => {});
+      res.json(row);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/admin/security/blocked-devices/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      await storage.removeBlockedDevice(Number(req.params.id));
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Security Logs ────────────────────────────────────────────────────────────
+  app.get("/api/admin/security/logs", authMiddleware("admin"), async (req, res) => {
+    try {
+      const limit = Math.min(Number(req.query.limit) || 50, 200);
+      res.json(await storage.getSecurityLogs(limit));
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

@@ -5107,18 +5107,51 @@ function AnalyticsPanel() {
 function SecurityIpsPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
+  const [secTab, setSecTab] = useState<"allowed" | "blocked" | "devices" | "logs">("allowed");
   const [search, setSearch] = useState("");
   const [form, setForm] = useState({ ipAddress: "", userEmail: "", role: "merchant", note: "" });
+  const [blockForm, setBlockForm] = useState({ ipAddress: "", reason: "" });
   const [adding, setAdding] = useState(false);
+  const [addingBlock, setAddingBlock] = useState(false);
 
-  const { data: ips = [], isLoading, refetch } = useQuery<any[]>({
+  const fetchWith = async (url: string) => {
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok) throw new Error("Erreur");
+    return r.json();
+  };
+
+  const { data: ips = [], isLoading: ipsLoading, refetch: refetchIps } = useQuery<any[]>({
     queryKey: ["/api/admin/security/ips"],
-    queryFn: async () => {
-      const r = await fetch("/api/admin/security/ips", { headers: { Authorization: `Bearer ${token}` } });
-      if (!r.ok) throw new Error("Erreur");
-      return r.json();
-    },
+    queryFn: () => fetchWith("/api/admin/security/ips"),
     staleTime: 15_000,
+  });
+
+  const { data: blockedIpsList = [], isLoading: blockedLoading, refetch: refetchBlocked } = useQuery<any[]>({
+    queryKey: ["/api/admin/security/blocked-ips"],
+    queryFn: () => fetchWith("/api/admin/security/blocked-ips"),
+    staleTime: 15_000,
+    enabled: secTab === "blocked",
+  });
+
+  const { data: blockedDevices = [], isLoading: devicesLoading, refetch: refetchDevices } = useQuery<any[]>({
+    queryKey: ["/api/admin/security/blocked-devices"],
+    queryFn: () => fetchWith("/api/admin/security/blocked-devices"),
+    staleTime: 15_000,
+    enabled: secTab === "devices",
+  });
+
+  const { data: secLogs = [], isLoading: logsLoading, refetch: refetchLogs } = useQuery<any[]>({
+    queryKey: ["/api/admin/security/logs"],
+    queryFn: () => fetchWith("/api/admin/security/logs?limit=50"),
+    staleTime: 20_000,
+    enabled: secTab === "logs",
+  });
+
+  const { data: loginLogs = [], isLoading: loginLogsLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/login-logs"],
+    queryFn: () => fetchWith("/api/admin/login-logs?limit=30"),
+    staleTime: 30_000,
+    enabled: secTab === "allowed",
   });
 
   const addMutation = useMutation({
@@ -5133,7 +5166,7 @@ function SecurityIpsPanel() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/security/ips"] });
-      toast({ title: "IP autorisée", description: `${form.ipAddress} a été ajoutée avec succès.` });
+      toast({ title: "IP autorisée", description: `${form.ipAddress} ajoutée avec succès.` });
       setForm({ ipAddress: "", userEmail: "", role: "merchant", note: "" });
       setAdding(false);
     },
@@ -5142,261 +5175,433 @@ function SecurityIpsPanel() {
 
   const removeMutation = useMutation({
     mutationFn: async (id: number) => {
-      const r = await fetch(`/api/admin/security/ips/${id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const r = await fetch(`/api/admin/security/ips/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
       if (!r.ok) throw new Error("Erreur");
     },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/security/ips"] }); toast({ title: "IP retirée" }); },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
+
+  const addBlockMutation = useMutation({
+    mutationFn: async (data: typeof blockForm) => {
+      const r = await fetch("/api/admin/security/blocked-ips", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!r.ok) { const e = await r.json(); throw new Error(e.message || "Erreur"); }
+      return r.json();
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/security/ips"] });
-      toast({ title: "IP supprimée" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/security/blocked-ips"] });
+      toast({ title: "IP bloquée", description: `${blockForm.ipAddress} bloquée avec succès.` });
+      setBlockForm({ ipAddress: "", reason: "" });
+      setAddingBlock(false);
     },
     onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
   });
 
+  const removeBlockMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const r = await fetch(`/api/admin/security/blocked-ips/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) throw new Error("Erreur");
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/security/blocked-ips"] }); toast({ title: "IP débloquée" }); },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
+
+  const removeDeviceMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const r = await fetch(`/api/admin/security/blocked-devices/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) throw new Error("Erreur");
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/security/blocked-devices"] }); toast({ title: "Appareil débloqué" }); },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
+
+  const getField = (row: any, ...keys: string[]) => { for (const k of keys) if (row[k]) return row[k]; return ""; };
+
   const filtered = ips.filter((ip: any) =>
-    ip.ip_address?.includes(search) ||
-    ip.ipAddress?.includes(search) ||
-    ip.user_email?.toLowerCase().includes(search.toLowerCase()) ||
-    ip.userEmail?.toLowerCase().includes(search.toLowerCase())
+    getField(ip, "ipAddress", "ip_address").includes(search) ||
+    getField(ip, "userEmail", "user_email").toLowerCase().includes(search.toLowerCase())
   );
 
-  const getIpAddress = (ip: any) => ip.ipAddress || ip.ip_address || "";
-  const getUserEmail = (ip: any) => ip.userEmail || ip.user_email || "";
-  const getRole = (ip: any) => ip.role || "";
-  const getCountry = (ip: any) => ip.country || "";
-  const getCity = (ip: any) => ip.city || "";
-  const getNote = (ip: any) => ip.note || "";
-  const getCreatedAt = (ip: any) => ip.createdAt || ip.created_at || "";
+  const filteredBlocked = blockedIpsList.filter((ip: any) =>
+    getField(ip, "ipAddress", "ip_address").includes(search)
+  );
+
+  const EVENT_LABELS: Record<string, { label: string; color: string }> = {
+    ip_blocked: { label: "IP bloquée", color: "bg-red-500" },
+    ip_allowed: { label: "IP autorisée", color: "bg-green-500" },
+    ip_unblocked: { label: "IP débloquée", color: "bg-blue-500" },
+    device_blocked: { label: "Appareil bloqué", color: "bg-orange-500" },
+    brute_force: { label: "Brute Force", color: "bg-red-600" },
+    blocked_access: { label: "Accès bloqué", color: "bg-red-400" },
+    blocked_device: { label: "Appareil bloqué", color: "bg-orange-400" },
+    blocked_login_attempt: { label: "Login bloqué", color: "bg-red-500" },
+  };
+
+  const tabBtnClass = (t: string) =>
+    `px-4 py-2 text-sm font-medium rounded-md transition-colors ${secTab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-xl font-bold text-foreground">Sécurité IP</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Gérez les adresses IP autorisées à accéder à la plateforme
-          </p>
+          <h2 className="text-xl font-bold text-foreground">Sécurité avancée</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">Surveillance et contrôle d'accès à la plateforme</p>
         </div>
-        <Button onClick={() => setAdding(true)} className="gap-2" data-testid="button-add-ip">
-          <Plus className="w-4 h-4" />
-          Donner accès
-        </Button>
       </div>
 
-      {ips.length === 0 && !isLoading && (
-        <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800">
-          <CardContent className="p-4 flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-semibold text-amber-800 dark:text-amber-400">Mode ouvert — aucune IP enregistrée</p>
-              <p className="text-xs text-amber-700 dark:text-amber-500 mt-0.5">
-                Tant qu'aucune IP n'est ajoutée, toutes les adresses peuvent accéder à la plateforme. Ajoutez votre IP en premier pour activer la protection.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/* Tab bar */}
+      <div className="flex flex-wrap gap-1 p-1 bg-muted rounded-lg w-fit">
+        <button className={tabBtnClass("allowed")} onClick={() => setSecTab("allowed")} data-testid="tab-sec-allowed">
+          ✅ IPs Autorisées
+        </button>
+        <button className={tabBtnClass("blocked")} onClick={() => setSecTab("blocked")} data-testid="tab-sec-blocked">
+          ⛔ IPs Bloquées
+        </button>
+        <button className={tabBtnClass("devices")} onClick={() => setSecTab("devices")} data-testid="tab-sec-devices">
+          🖥️ Appareils
+        </button>
+        <button className={tabBtnClass("logs")} onClick={() => setSecTab("logs")} data-testid="tab-sec-logs">
+          📋 Logs
+        </button>
+      </div>
 
-      {adding && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Shield className="w-4 h-4 text-primary" />
-              Autoriser une nouvelle IP
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Adresse IP *</Label>
-                <Input
-                  placeholder="192.168.1.1"
-                  value={form.ipAddress}
-                  onChange={(e) => setForm({ ...form, ipAddress: e.target.value })}
-                  data-testid="input-new-ip"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Email (optionnel)</Label>
-                <Input
-                  placeholder="marchand@exemple.com"
-                  value={form.userEmail}
-                  onChange={(e) => setForm({ ...form, userEmail: e.target.value })}
-                  data-testid="input-ip-email"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Rôle</Label>
-                <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v })}>
-                  <SelectTrigger data-testid="select-ip-role">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="admin">Administrateur</SelectItem>
-                    <SelectItem value="merchant">Marchand</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Note (optionnel)</Label>
-                <Input
-                  placeholder="Ex: Bureau principal"
-                  value={form.note}
-                  onChange={(e) => setForm({ ...form, note: e.target.value })}
-                  data-testid="input-ip-note"
-                />
-              </div>
-            </div>
-            <div className="flex gap-2 pt-1">
-              <Button
-                onClick={() => addMutation.mutate(form)}
-                disabled={!form.ipAddress || addMutation.isPending}
-                className="gap-2"
-                data-testid="button-confirm-add-ip"
-              >
-                {addMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-                Autoriser cette IP
-              </Button>
-              <Button variant="outline" onClick={() => setAdding(false)} data-testid="button-cancel-add-ip">
-                Annuler
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                className="pl-9"
-                placeholder="Rechercher une IP ou un email..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                data-testid="input-search-ip"
-              />
-            </div>
-            <Button variant="outline" size="icon" onClick={() => refetch()} data-testid="button-refresh-ips">
-              <RefreshCw className="w-4 h-4" />
+      {/* ── IPs Autorisées ─────────────────────────────────────────────────────── */}
+      {secTab === "allowed" && (
+        <div className="space-y-5">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">IPs pouvant accéder au dashboard admin</p>
+            <Button size="sm" onClick={() => setAdding(true)} className="gap-2" data-testid="button-add-ip">
+              <Plus className="w-4 h-4" /> Donner accès
             </Button>
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-8 flex justify-center">
-              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="p-8 text-center">
-              <Shield className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" />
-              <p className="text-sm text-muted-foreground">
-                {search ? "Aucune IP ne correspond à votre recherche" : "Aucune IP autorisée pour l'instant"}
-              </p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/30">
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Adresse IP</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">Email</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">Rôle</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">Localisation</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden xl:table-cell">Note</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">Date</th>
-                    <th className="text-right px-4 py-3 font-medium text-muted-foreground">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((ip: any) => (
-                    <tr key={ip.id} className="border-b hover:bg-muted/20 transition-colors" data-testid={`row-ip-${ip.id}`}>
-                      <td className="px-4 py-3">
-                        <span className="font-mono font-semibold text-foreground" data-testid={`text-ip-address-${ip.id}`}>{getIpAddress(ip)}</span>
-                      </td>
-                      <td className="px-4 py-3 hidden sm:table-cell text-muted-foreground">{getUserEmail(ip) || "—"}</td>
-                      <td className="px-4 py-3 hidden md:table-cell">
-                        <Badge variant={getRole(ip) === "admin" ? "default" : "secondary"} className="text-xs">
-                          {getRole(ip) === "admin" ? "Admin" : "Marchand"}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground text-xs">
-                        {getCity(ip) && getCountry(ip) ? `${getCity(ip)}, ${getCountry(ip)}` : getCountry(ip) || "—"}
-                      </td>
-                      <td className="px-4 py-3 hidden xl:table-cell text-muted-foreground text-xs">{getNote(ip) || "—"}</td>
-                      <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground text-xs">
-                        {getCreatedAt(ip) ? new Date(getCreatedAt(ip)).toLocaleDateString("fr-FR") : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                          onClick={() => removeMutation.mutate(ip.id)}
-                          disabled={removeMutation.isPending}
-                          data-testid={`button-remove-ip-${ip.id}`}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+
+          {ips.length === 0 && !ipsLoading && (
+            <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800">
+              <CardContent className="p-4 flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-400">Mode ouvert</p>
+                  <p className="text-xs text-amber-700 dark:text-amber-500 mt-0.5">Tant qu'aucune IP n'est ajoutée, toutes les adresses peuvent accéder. Ajoutez votre IP en premier pour activer la protection.</p>
+                </div>
+              </CardContent>
+            </Card>
           )}
-        </CardContent>
-      </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Clock className="w-4 h-4 text-muted-foreground" />
-            Dernières connexions
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <RecentLoginLogs />
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
+          {adding && (
+            <Card>
+              <CardHeader><CardTitle className="text-base flex items-center gap-2"><Shield className="w-4 h-4 text-primary" />Autoriser une nouvelle IP</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Adresse IP *</Label>
+                    <Input placeholder="192.168.1.1" value={form.ipAddress} onChange={(e) => setForm({ ...form, ipAddress: e.target.value })} data-testid="input-new-ip" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Email (optionnel)</Label>
+                    <Input placeholder="user@exemple.com" value={form.userEmail} onChange={(e) => setForm({ ...form, userEmail: e.target.value })} data-testid="input-ip-email" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Rôle</Label>
+                    <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v })}>
+                      <SelectTrigger data-testid="select-ip-role"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="admin">Administrateur</SelectItem>
+                        <SelectItem value="merchant">Marchand</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Note</Label>
+                    <Input placeholder="Ex: Bureau principal" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} data-testid="input-ip-note" />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={() => addMutation.mutate(form)} disabled={!form.ipAddress || addMutation.isPending} className="gap-2" data-testid="button-confirm-add-ip">
+                    {addMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />} Autoriser
+                  </Button>
+                  <Button variant="outline" onClick={() => setAdding(false)} data-testid="button-cancel-add-ip">Annuler</Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
-function RecentLoginLogs() {
-  const { token } = useAuth();
-  const { data: logs = [], isLoading } = useQuery<any[]>({
-    queryKey: ["/api/admin/login-logs"],
-    queryFn: async () => {
-      const r = await fetch("/api/admin/login-logs?limit=20", { headers: { Authorization: `Bearer ${token}` } });
-      if (!r.ok) return [];
-      return r.json();
-    },
-    staleTime: 30_000,
-  });
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="relative flex-1 min-w-[200px]">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input className="pl-9" placeholder="Rechercher..." value={search} onChange={(e) => setSearch(e.target.value)} data-testid="input-search-ip" />
+                </div>
+                <Button variant="outline" size="icon" onClick={() => refetchIps()} data-testid="button-refresh-ips"><RefreshCw className="w-4 h-4" /></Button>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {ipsLoading ? <div className="p-8 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+              : filtered.length === 0 ? (
+                <div className="p-8 text-center"><Shield className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" /><p className="text-sm text-muted-foreground">{search ? "Aucun résultat" : "Aucune IP autorisée"}</p></div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="border-b bg-muted/30">
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">IP</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">Email</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">Rôle</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">Localisation</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">Date</th>
+                      <th className="text-right px-4 py-3 font-medium text-muted-foreground">Action</th>
+                    </tr></thead>
+                    <tbody>
+                      {filtered.map((ip: any) => (
+                        <tr key={ip.id} className="border-b hover:bg-muted/20 transition-colors" data-testid={`row-ip-${ip.id}`}>
+                          <td className="px-4 py-3"><span className="font-mono font-semibold text-foreground">{getField(ip, "ipAddress", "ip_address")}</span></td>
+                          <td className="px-4 py-3 hidden sm:table-cell text-muted-foreground text-xs">{getField(ip, "userEmail", "user_email") || "—"}</td>
+                          <td className="px-4 py-3 hidden md:table-cell">
+                            <Badge variant={(ip.role === "admin") ? "default" : "secondary"} className="text-xs">{ip.role === "admin" ? "Admin" : "Marchand"}</Badge>
+                          </td>
+                          <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground text-xs">
+                            {[getField(ip, "city"), getField(ip, "country")].filter(Boolean).join(", ") || "—"}
+                          </td>
+                          <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground text-xs">
+                            {(ip.createdAt || ip.created_at) ? new Date(ip.createdAt || ip.created_at).toLocaleDateString("fr-FR") : "—"}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <Button variant="ghost" size="sm" className="text-destructive hover:bg-destructive/10" onClick={() => removeMutation.mutate(ip.id)} disabled={removeMutation.isPending} data-testid={`button-remove-ip-${ip.id}`}>
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
-  if (isLoading) return <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>;
-  if (!logs.length) return <p className="text-sm text-muted-foreground">Aucune connexion enregistrée.</p>;
-
-  return (
-    <div className="space-y-2">
-      {logs.map((log: any, i: number) => (
-        <div key={i} className="flex items-center justify-between gap-3 py-2 border-b last:border-0 text-sm">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className={`w-2 h-2 rounded-full shrink-0 ${log.success ? "bg-green-500" : "bg-red-500"}`} />
-            <span className="font-mono text-xs text-muted-foreground truncate">{log.ip || "—"}</span>
-          </div>
-          <div className="flex items-center gap-3 shrink-0">
-            <Badge variant={log.role === "admin" ? "default" : "secondary"} className="text-xs">{log.role}</Badge>
-            <span className="text-xs text-muted-foreground hidden sm:block">
-              {log.created_at ? new Date(log.created_at).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—"}
-            </span>
-          </div>
+          {/* Dernières connexions */}
+          <Card>
+            <CardHeader><CardTitle className="text-base flex items-center gap-2"><Clock className="w-4 h-4 text-muted-foreground" />Dernières connexions</CardTitle></CardHeader>
+            <CardContent>
+              {loginLogsLoading ? <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+              : !loginLogs.length ? <p className="text-sm text-muted-foreground">Aucune connexion enregistrée.</p>
+              : (
+                <div className="space-y-1">
+                  {loginLogs.map((log: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between gap-3 py-2 border-b last:border-0 text-sm">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${log.success ? "bg-green-500" : "bg-red-500"}`} />
+                        <span className="font-mono text-xs text-muted-foreground truncate">{log.ip || "—"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Badge variant={log.role === "admin" ? "default" : "secondary"} className="text-xs">{log.role}</Badge>
+                        <span className="text-xs text-muted-foreground hidden sm:block">
+                          {log.created_at ? new Date(log.created_at).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—"}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
-      ))}
+      )}
+
+      {/* ── IPs Bloquées ──────────────────────────────────────────────────────── */}
+      {secTab === "blocked" && (
+        <div className="space-y-5">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">IPs interdites d'accès à la plateforme</p>
+            <Button size="sm" variant="destructive" onClick={() => setAddingBlock(true)} className="gap-2" data-testid="button-add-blocked-ip">
+              <Plus className="w-4 h-4" /> Bloquer une IP
+            </Button>
+          </div>
+
+          {addingBlock && (
+            <Card className="border-destructive/30">
+              <CardHeader><CardTitle className="text-base flex items-center gap-2 text-destructive"><Shield className="w-4 h-4" />Bloquer une IP</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Adresse IP *</Label>
+                    <Input placeholder="192.168.1.1" value={blockForm.ipAddress} onChange={(e) => setBlockForm({ ...blockForm, ipAddress: e.target.value })} data-testid="input-block-ip" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Raison</Label>
+                    <Input placeholder="Ex: Comportement suspect" value={blockForm.reason} onChange={(e) => setBlockForm({ ...blockForm, reason: e.target.value })} data-testid="input-block-reason" />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="destructive" onClick={() => addBlockMutation.mutate(blockForm)} disabled={!blockForm.ipAddress || addBlockMutation.isPending} className="gap-2" data-testid="button-confirm-block-ip">
+                    {addBlockMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />} Bloquer
+                  </Button>
+                  <Button variant="outline" onClick={() => setAddingBlock(false)}>Annuler</Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="relative flex-1 min-w-[200px]">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input className="pl-9" placeholder="Rechercher une IP..." value={search} onChange={(e) => setSearch(e.target.value)} />
+                </div>
+                <Button variant="outline" size="icon" onClick={() => refetchBlocked()}><RefreshCw className="w-4 h-4" /></Button>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {blockedLoading ? <div className="p-8 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+              : filteredBlocked.length === 0 ? (
+                <div className="p-8 text-center"><Shield className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" /><p className="text-sm text-muted-foreground">Aucune IP bloquée</p></div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="border-b bg-muted/30">
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">IP</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">Localisation</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">Raison</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">Bloqué par</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">Date</th>
+                      <th className="text-right px-4 py-3 font-medium text-muted-foreground">Action</th>
+                    </tr></thead>
+                    <tbody>
+                      {filteredBlocked.map((ip: any) => (
+                        <tr key={ip.id} className="border-b hover:bg-muted/20 transition-colors" data-testid={`row-blocked-ip-${ip.id}`}>
+                          <td className="px-4 py-3">
+                            <span className="font-mono font-semibold text-red-500">{getField(ip, "ipAddress", "ip_address")}</span>
+                          </td>
+                          <td className="px-4 py-3 hidden md:table-cell text-muted-foreground text-xs">
+                            {[getField(ip, "city"), getField(ip, "country")].filter(Boolean).join(", ") || "—"}
+                          </td>
+                          <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground text-xs">{ip.reason || "—"}</td>
+                          <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground text-xs">{getField(ip, "blockedBy", "blocked_by") || "—"}</td>
+                          <td className="px-4 py-3 hidden sm:table-cell text-muted-foreground text-xs">
+                            {(ip.createdAt || ip.created_at) ? new Date(ip.createdAt || ip.created_at).toLocaleDateString("fr-FR") : "—"}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <Button variant="outline" size="sm" className="text-green-600 hover:bg-green-50 dark:hover:bg-green-950/20 hover:text-green-700 text-xs gap-1"
+                              onClick={() => removeBlockMutation.mutate(ip.id)} disabled={removeBlockMutation.isPending} data-testid={`button-unblock-ip-${ip.id}`}>
+                              <CheckCircle className="w-3.5 h-3.5" /> Débloquer
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ── Appareils Bloqués ─────────────────────────────────────────────────── */}
+      {secTab === "devices" && (
+        <div className="space-y-5">
+          <p className="text-sm text-muted-foreground">Appareils dont l'empreinte numérique est bloquée, même en cas de changement d'IP ou VPN.</p>
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex justify-end">
+                <Button variant="outline" size="icon" onClick={() => refetchDevices()}><RefreshCw className="w-4 h-4" /></Button>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {devicesLoading ? <div className="p-8 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+              : blockedDevices.length === 0 ? (
+                <div className="p-8 text-center"><Shield className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" /><p className="text-sm text-muted-foreground">Aucun appareil bloqué</p></div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="border-b bg-muted/30">
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Empreinte</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">Dernière IP</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">Raison</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">Date</th>
+                      <th className="text-right px-4 py-3 font-medium text-muted-foreground">Action</th>
+                    </tr></thead>
+                    <tbody>
+                      {blockedDevices.map((d: any) => (
+                        <tr key={d.id} className="border-b hover:bg-muted/20 transition-colors" data-testid={`row-blocked-device-${d.id}`}>
+                          <td className="px-4 py-3"><span className="font-mono text-xs text-orange-500">{(d.fingerprint || "").substring(0, 20)}…</span></td>
+                          <td className="px-4 py-3 hidden md:table-cell text-muted-foreground text-xs font-mono">{getField(d, "ipAddress", "ip_address") || "—"}</td>
+                          <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground text-xs">{d.reason || "—"}</td>
+                          <td className="px-4 py-3 hidden sm:table-cell text-muted-foreground text-xs">
+                            {(d.createdAt || d.created_at) ? new Date(d.createdAt || d.created_at).toLocaleDateString("fr-FR") : "—"}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <Button variant="outline" size="sm" className="text-green-600 hover:bg-green-50 dark:hover:bg-green-950/20 text-xs gap-1"
+                              onClick={() => removeDeviceMutation.mutate(d.id)} disabled={removeDeviceMutation.isPending} data-testid={`button-unblock-device-${d.id}`}>
+                              <CheckCircle className="w-3.5 h-3.5" /> Débloquer
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ── Logs Sécurité ─────────────────────────────────────────────────────── */}
+      {secTab === "logs" && (
+        <div className="space-y-5">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">Historique des événements de sécurité</p>
+            <Button variant="outline" size="icon" onClick={() => refetchLogs()}><RefreshCw className="w-4 h-4" /></Button>
+          </div>
+          <Card>
+            <CardContent className="p-0">
+              {logsLoading ? <div className="p-8 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+              : secLogs.length === 0 ? (
+                <div className="p-8 text-center"><Shield className="w-10 h-10 mx-auto text-muted-foreground/30 mb-3" /><p className="text-sm text-muted-foreground">Aucun événement enregistré</p></div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="border-b bg-muted/30">
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Événement</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">IP</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">Détails</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">Admin Telegram</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">Date</th>
+                    </tr></thead>
+                    <tbody>
+                      {secLogs.map((log: any) => {
+                        const evType = log.eventType || log.event_type || "";
+                        const evInfo = EVENT_LABELS[evType] || { label: evType, color: "bg-gray-400" };
+                        return (
+                          <tr key={log.id} className="border-b hover:bg-muted/20 transition-colors" data-testid={`row-seclog-${log.id}`}>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full shrink-0 ${evInfo.color}`} />
+                                <span className="text-xs font-medium">{evInfo.label}</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 hidden sm:table-cell text-muted-foreground text-xs font-mono">{log.ip || "—"}</td>
+                            <td className="px-4 py-3 hidden md:table-cell text-muted-foreground text-xs max-w-[200px] truncate">{log.details || log.action || "—"}</td>
+                            <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground text-xs">{getField(log, "telegramAdmin", "telegram_admin") || "—"}</td>
+                            <td className="px-4 py-3 text-muted-foreground text-xs">
+                              {(log.createdAt || log.created_at) ? new Date(log.createdAt || log.created_at).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

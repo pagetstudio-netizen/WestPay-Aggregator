@@ -9,6 +9,9 @@ export interface GeoInfo {
   region: string;
   country: string;
   isp: string;
+  isProxy?: boolean;
+  isHosting?: boolean;
+  isMobile?: boolean;
 }
 
 export async function getGeoInfo(ip: string): Promise<GeoInfo> {
@@ -18,14 +21,41 @@ export async function getGeoInfo(ip: string): Promise<GeoInfo> {
     if (cleanIp === "127.0.0.1" || cleanIp === "::1" || cleanIp.startsWith("192.168.") || cleanIp.startsWith("10.")) {
       return { ...fallback, ip: cleanIp, city: "Local" };
     }
-    const res = await fetch(`http://ip-api.com/json/${cleanIp}?fields=status,city,regionName,country,isp,query`, { signal: AbortSignal.timeout(4000) });
+    const res = await fetch(`http://ip-api.com/json/${cleanIp}?fields=status,city,regionName,country,isp,query,proxy,hosting,mobile`, { signal: AbortSignal.timeout(4000) });
     if (!res.ok) return { ...fallback, ip: cleanIp };
     const data = await res.json() as any;
     if (data.status !== "success") return { ...fallback, ip: cleanIp };
-    return { ip: cleanIp, city: data.city || "?", region: data.regionName || "", country: data.country || "", isp: data.isp || "" };
+    return {
+      ip: cleanIp,
+      city: data.city || "?",
+      region: data.regionName || "",
+      country: data.country || "",
+      isp: data.isp || "",
+      isProxy: data.proxy || false,
+      isHosting: data.hosting || false,
+      isMobile: data.mobile || false,
+    };
   } catch {
     return fallback;
   }
+}
+
+function parseUserAgent(ua: string): { browser: string; os: string; device: string } {
+  const browser =
+    ua.includes("Edg/") ? "Edge" :
+    ua.includes("OPR/") || ua.includes("Opera") ? "Opera" :
+    ua.includes("Firefox") ? "Firefox" :
+    ua.includes("Chrome") ? "Chrome" :
+    ua.includes("Safari") ? "Safari" : "Autre";
+  const os =
+    ua.includes("Windows NT") ? "Windows" :
+    ua.includes("Macintosh") ? "macOS" :
+    ua.includes("Android") ? "Android" :
+    ua.includes("iPhone") || ua.includes("iPad") ? "iOS" :
+    ua.includes("Linux") ? "Linux" : "Autre";
+  const device =
+    ua.includes("Mobile") || ua.includes("Android") || ua.includes("iPhone") ? "📱 Mobile" : "💻 Bureau";
+  return { browser, os, device };
 }
 
 let bot: Telegraf | null = null;
@@ -140,6 +170,22 @@ async function alertAdminGroup(message: string): Promise<void> {
   const groupId = await getAdminGroupId();
   if (!groupId) return;
   await bot.telegram.sendMessage(groupId, message, { parse_mode: "Markdown" }).catch(() => {});
+}
+
+async function alertAdminGroupWithButtons(
+  message: string,
+  buttons: Array<Array<{ text: string; callback_data: string }>>
+): Promise<void> {
+  if (!bot) return;
+  const groupId = await getAdminGroupId();
+  if (!groupId) {
+    await alertAdminGroup(message);
+    return;
+  }
+  await bot.telegram.sendMessage(groupId, message, {
+    parse_mode: "Markdown",
+    reply_markup: { inline_keyboard: buttons },
+  }).catch(() => alertAdminGroup(message).catch(() => {}));
 }
 
 function formatUser(ctx: any): string {
@@ -829,6 +875,102 @@ export function initTelegramBot(): Telegraf | null {
     await alertAdminGroup(`ℹ️ *Bot ajouté à un nouveau groupe*\n\n👥 Groupe : *${groupTitle}*\n🆔 Chat ID : \`${chatId}\`\n👤 Par : ${formatUser(ctx)}`);
   });
 
+  // ─── Inline callbacks sécurité ───────────────────────────────────────────────
+  bot.action(/^sec:block:(.+)$/, async (ctx) => {
+    const ip = ctx.match![1];
+    const admin = formatUser(ctx);
+    try {
+      const geo = await getGeoInfo(ip).catch(() => null);
+      await storage.addBlockedIp({
+        ipAddress: ip,
+        country: geo?.country || null,
+        city: geo?.city || null,
+        reason: "Bloqué via Telegram",
+        blockedBy: admin,
+      });
+      await storage.createSecurityLog({
+        eventType: "ip_blocked",
+        ip,
+        action: "blocked_via_telegram",
+        details: `Bloqué par ${admin}`,
+        telegramAdmin: admin,
+      });
+      await ctx.answerCbQuery(`⛔ IP ${ip} bloquée`);
+      await ctx.editMessageReplyMarkup({ inline_keyboard: [[{ text: `⛔ Bloqué par ${admin}`, callback_data: "sec:noop" }]] }).catch(() => {});
+    } catch (err: any) {
+      await ctx.answerCbQuery(`❌ Erreur: ${err.message.substring(0, 50)}`);
+    }
+  });
+
+  bot.action(/^sec:allow:(.+)$/, async (ctx) => {
+    const ip = ctx.match![1];
+    const admin = formatUser(ctx);
+    try {
+      await storage.addAllowedIp({
+        ipAddress: ip,
+        userEmail: null,
+        role: null,
+        country: null,
+        city: null,
+        note: "Autorisé via Telegram",
+        createdBy: admin,
+      });
+      await storage.createSecurityLog({
+        eventType: "ip_allowed",
+        ip,
+        action: "allowed_via_telegram",
+        details: `Autorisé par ${admin}`,
+        telegramAdmin: admin,
+      });
+      await ctx.answerCbQuery(`✅ IP ${ip} autorisée`);
+      await ctx.editMessageReplyMarkup({ inline_keyboard: [[{ text: `✅ Autorisé par ${admin}`, callback_data: "sec:noop" }]] }).catch(() => {});
+    } catch (err: any) {
+      await ctx.answerCbQuery(`❌ Erreur: ${err.message.substring(0, 50)}`);
+    }
+  });
+
+  bot.action(/^sec:unblock:(.+)$/, async (ctx) => {
+    const ip = ctx.match![1];
+    const admin = formatUser(ctx);
+    try {
+      const blocked = await storage.getBlockedIps();
+      const entry = blocked.find(b => b.ipAddress === ip);
+      if (entry) {
+        await storage.removeBlockedIp(entry.id);
+        await storage.createSecurityLog({
+          eventType: "ip_unblocked",
+          ip,
+          action: "unblocked_via_telegram",
+          details: `Débloqué par ${admin}`,
+          telegramAdmin: admin,
+        });
+        await ctx.answerCbQuery(`✅ IP ${ip} débloquée`);
+        await ctx.editMessageReplyMarkup({ inline_keyboard: [[{ text: `✅ Débloqué par ${admin}`, callback_data: "sec:noop" }]] }).catch(() => {});
+      } else {
+        await ctx.answerCbQuery("IP non trouvée dans la liste de blocage");
+      }
+    } catch (err: any) {
+      await ctx.answerCbQuery(`❌ Erreur: ${err.message.substring(0, 50)}`);
+    }
+  });
+
+  bot.action(/^sec:info:(.+)$/, async (ctx) => {
+    const ip = ctx.match![1];
+    try {
+      const geo = await getGeoInfo(ip);
+      const proxyLabel = geo.isProxy ? "⚠️ Oui (VPN/Proxy/TOR)" : "✅ Non";
+      const msg = `🔍 *Info IP : \`${ip}\`*\n\n📍 ${geo.city}${geo.country ? ", " + geo.country : ""}\n🔌 ${geo.isp || "?"}\n🛡️ Proxy: ${proxyLabel}\n🖥️ Hébergeur: ${geo.isHosting ? "Oui" : "Non"}`;
+      await ctx.answerCbQuery();
+      await ctx.reply(msg, { parse_mode: "Markdown" });
+    } catch {
+      await ctx.answerCbQuery("Erreur récupération infos");
+    }
+  });
+
+  bot.action("sec:noop", async (ctx) => {
+    await ctx.answerCbQuery();
+  });
+
   // ─── Messages non reconnus (DM uniquement) ─────────────────────────────────
   bot.on("message", async (ctx) => {
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
@@ -1391,26 +1533,174 @@ export async function notifyAdminLogin(data: {
   ip: string;
   device: string;
   success: boolean;
+  fingerprint?: string;
 }): Promise<void> {
   const dateStr = new Date().toLocaleString("fr-FR", {
     day: "2-digit", month: "long", year: "numeric",
     hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC",
   });
-  const icon = data.success ? "🔐" : "⚠️";
+  const geo = await getGeoInfo(data.ip).catch(() => null);
+  const { browser, os, device } = parseUserAgent(data.device);
+  const cleanIp = data.ip.replace(/^::ffff:/, "");
+  const icon = data.success ? "🛡️" : "⚠️";
   const statusLabel = data.success ? "✅ Connexion réussie" : "❌ Tentative échouée";
-  const deviceShort = data.device.length > 80 ? data.device.substring(0, 80) + "…" : data.device;
+
+  const geoFlags: string[] = [];
+  if (geo?.isProxy) geoFlags.push("⚠️ *VPN/Proxy/TOR détecté*");
+  if (geo?.isHosting) geoFlags.push("🖥️ *Serveur hébergeur détecté*");
 
   const msg = [
-    `${icon} *Connexion Admin WestPay*`,
+    `${icon} *Connexion Admin — WestPay*`,
     ``,
-    `📧 *Email :* \`${data.email}\``,
-    `📊 *Statut :* ${statusLabel}`,
-    `🌐 *IP :* \`${data.ip}\``,
-    `📱 *Appareil :* ${deviceShort}`,
-    `📅 *Date :* ${dateStr} UTC`,
-  ].join("\n");
+    `👤 *Compte :* \`${data.email}\``,
+    `🔐 *Statut :* ${statusLabel}`,
+    `🌐 *IP :* \`${cleanIp}\``,
+    geo && geo.city !== "Inconnue" ? `📍 *Localisation :* ${geo.city}${geo.country ? ", " + geo.country : ""}` : null,
+    geo?.isp ? `🔌 *FAI :* ${geo.isp}` : null,
+    `💻 *Navigateur :* ${browser} (${os})`,
+    `📱 *Appareil :* ${device}`,
+    ...geoFlags,
+    `🕒 *Date :* ${dateStr} UTC`,
+  ].filter(Boolean).join("\n");
 
-  await notifyAdminGroup(msg);
+  const buttons = [[
+    { text: "✅ Autoriser IP", callback_data: `sec:allow:${cleanIp}` },
+    { text: "⛔ Bloquer IP", callback_data: `sec:block:${cleanIp}` },
+  ]];
+
+  if (data.success || geo?.isProxy) {
+    await alertAdminGroupWithButtons(msg, buttons);
+  } else {
+    await alertAdminGroup(msg);
+  }
+}
+
+export async function notifyAdminMerchantLogin(data: {
+  email: string;
+  merchantName: string;
+  ip: string;
+  device: string;
+  success: boolean;
+}): Promise<void> {
+  const dateStr = new Date().toLocaleString("fr-FR", {
+    day: "2-digit", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC",
+  });
+  const geo = await getGeoInfo(data.ip).catch(() => null);
+  const { browser, os, device } = parseUserAgent(data.device);
+  const cleanIp = data.ip.replace(/^::ffff:/, "");
+  const icon = data.success ? "🏪" : "⚠️";
+  const statusLabel = data.success ? "✅ Connexion réussie" : "❌ Tentative échouée";
+
+  const geoFlags: string[] = [];
+  if (geo?.isProxy) geoFlags.push("⚠️ *VPN/Proxy/TOR détecté*");
+
+  const msg = [
+    `${icon} *Connexion Marchand — WestPay*`,
+    ``,
+    `🏪 *Marchand :* ${data.merchantName}`,
+    `👤 *Email :* \`${data.email}\``,
+    `🔐 *Statut :* ${statusLabel}`,
+    `🌐 *IP :* \`${cleanIp}\``,
+    geo && geo.city !== "Inconnue" ? `📍 *Localisation :* ${geo.city}${geo.country ? ", " + geo.country : ""}` : null,
+    `💻 *Navigateur :* ${browser} (${os})`,
+    `📱 *Appareil :* ${device}`,
+    ...geoFlags,
+    `🕒 *Date :* ${dateStr} UTC`,
+  ].filter(Boolean).join("\n");
+
+  if (data.success || geo?.isProxy) {
+    const buttons = [[
+      { text: "✅ Autoriser IP", callback_data: `sec:allow:${cleanIp}` },
+      { text: "⛔ Bloquer IP", callback_data: `sec:block:${cleanIp}` },
+    ]];
+    await alertAdminGroupWithButtons(msg, buttons);
+  } else {
+    await alertAdminGroup(msg);
+  }
+}
+
+export async function notifyAdminIpBlocked(data: {
+  ip: string;
+  path: string;
+  device?: string;
+}): Promise<void> {
+  const dateStr = new Date().toLocaleString("fr-FR", {
+    day: "2-digit", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC",
+  });
+  const geo = await getGeoInfo(data.ip).catch(() => null);
+  const cleanIp = data.ip.replace(/^::ffff:/, "");
+
+  const msg = [
+    `🚫 *Accès refusé — WestPay*`,
+    ``,
+    `🌐 *IP :* \`${cleanIp}\``,
+    geo && geo.city !== "Inconnue" ? `📍 *Localisation :* ${geo.city}${geo.country ? ", " + geo.country : ""}` : null,
+    geo?.isp ? `🔌 *FAI :* ${geo.isp}` : null,
+    geo?.isProxy ? `⚠️ *VPN/Proxy/TOR détecté*` : null,
+    `📂 *Route :* ${data.path}`,
+    `🕒 *Date :* ${dateStr} UTC`,
+  ].filter(Boolean).join("\n");
+
+  const buttons = [[
+    { text: "✅ Autoriser IP", callback_data: `sec:allow:${cleanIp}` },
+    { text: "🔍 Info", callback_data: `sec:info:${cleanIp}` },
+  ]];
+  await alertAdminGroupWithButtons(msg, buttons);
+}
+
+export async function notifyAdminBruteForce(data: {
+  ip: string;
+  email: string;
+  attempts: number;
+}): Promise<void> {
+  const dateStr = new Date().toLocaleString("fr-FR", {
+    day: "2-digit", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC",
+  });
+  const geo = await getGeoInfo(data.ip).catch(() => null);
+  const cleanIp = data.ip.replace(/^::ffff:/, "");
+
+  const msg = [
+    `🚨 *Brute Force détecté — WestPay*`,
+    ``,
+    `🌐 *IP :* \`${cleanIp}\``,
+    `👤 *Email ciblé :* \`${data.email}\``,
+    `🔢 *Tentatives :* ${data.attempts}`,
+    geo && geo.city !== "Inconnue" ? `📍 *Localisation :* ${geo.city}${geo.country ? ", " + geo.country : ""}` : null,
+    geo?.isp ? `🔌 *FAI :* ${geo.isp}` : null,
+    geo?.isProxy ? `⚠️ *VPN/Proxy/TOR détecté*` : null,
+    `⛔ *IP bloquée automatiquement*`,
+    `🕒 *Date :* ${dateStr} UTC`,
+  ].filter(Boolean).join("\n");
+
+  const buttons = [[
+    { text: "✅ Débloquer IP", callback_data: `sec:unblock:${cleanIp}` },
+    { text: "🔍 Info", callback_data: `sec:info:${cleanIp}` },
+  ]];
+  await alertAdminGroupWithButtons(msg, buttons);
+}
+
+export async function notifyAdminDeviceBlocked(data: {
+  ip: string;
+  fingerprint: string;
+  path: string;
+}): Promise<void> {
+  const dateStr = new Date().toLocaleString("fr-FR", {
+    day: "2-digit", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC",
+  });
+  const cleanIp = data.ip.replace(/^::ffff:/, "");
+  const msg = [
+    `🖥️ *Appareil bloqué — tentative d'accès — WestPay*`,
+    ``,
+    `🌐 *IP :* \`${cleanIp}\``,
+    `🔑 *Empreinte :* \`${data.fingerprint.substring(0, 16)}…\``,
+    `📂 *Route :* ${data.path}`,
+    `🕒 *Date :* ${dateStr} UTC`,
+  ].join("\n");
+  await alertAdminGroup(msg);
 }
 
 async function sendDailyReport(): Promise<void> {

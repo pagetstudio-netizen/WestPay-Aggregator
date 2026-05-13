@@ -27,13 +27,39 @@ export default function AdminLogin() {
       .catch(() => setIpStatus("allowed"));
   }, [setLocation]);
 
+  const getDeviceFingerprint = (): string => {
+    try {
+      const stored = localStorage.getItem("_wp_dfp");
+      if (stored) return stored;
+      const parts = [
+        navigator.userAgent,
+        navigator.language,
+        `${screen.width}x${screen.height}`,
+        navigator.platform,
+        Intl.DateTimeFormat().resolvedOptions().timeZone,
+        navigator.hardwareConcurrency || "",
+        (navigator as any).deviceMemory || "",
+      ].join("|");
+      let hash = 0;
+      for (let i = 0; i < parts.length; i++) {
+        const char = parts.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash |= 0;
+      }
+      const fp = Math.abs(hash).toString(16).padStart(8, "0") + Date.now().toString(16);
+      localStorage.setItem("_wp_dfp", fp);
+      return fp;
+    } catch { return ""; }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     try {
+      const fp = getDeviceFingerprint();
       const res = await fetch("/api/auth/admin/login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(fp ? { "X-Device-FP": fp } : {}) },
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
