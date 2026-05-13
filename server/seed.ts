@@ -14,15 +14,16 @@ function generateSecureApiKey(country: string): string {
 }
 
 export async function seedDatabase() {
-  const existingAdmin = await storage.getAdminByEmail("admin@westpay.com");
-  if (existingAdmin) {
+  const existingAdmin = await storage.getAdminByEmail("devappmanagement40@gmail.com");
+  const legacyAdmin = await storage.getAdminByEmail("admin@westpay.com");
+  if (existingAdmin || legacyAdmin) {
     await ensurePinsExist();
     return;
   }
 
   const adminHash = await bcrypt.hash("Admin@2026!", 10);
   await storage.createAdmin({
-    email: "admin@westpay.com",
+    email: "devappmanagement40@gmail.com",
     passwordHash: adminHash,
     apiKey: "WP-ADMIN-" + crypto.randomBytes(16).toString("hex").toUpperCase(),
   });

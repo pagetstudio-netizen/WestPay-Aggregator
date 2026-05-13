@@ -926,9 +926,9 @@ export async function registerRoutes(
 
   app.delete("/api/admin/delete-admin/:id", authMiddleware("admin"), async (req, res) => {
     try {
-      const currentAdmin = (req as any).admin;
+      const currentAdmin = (req as any).user;
       const id = Number(req.params.id);
-      if (currentAdmin.id === id) return res.status(400).json({ message: "Vous ne pouvez pas supprimer votre propre compte" });
+      if (currentAdmin && currentAdmin.id === id) return res.status(400).json({ message: "Vous ne pouvez pas supprimer votre propre compte" });
       await db.delete(admins).where(eq(admins.id, id));
       res.json({ success: true });
     } catch (err: any) {

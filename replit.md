@@ -21,7 +21,7 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 - `/pay/:slug` - Legacy payment page (backwards compatible)
 
 ## Default Credentials (Seeded)
-- **Admin**: admin@westpay.com / Admin@2026!
+- **Admin**: devappmanagement40@gmail.com / Admin@2026!
 - **Merchant (EcoMat)**: contact@ecomat.com / Merchant@2026! (PIN: 123456)
 - **Merchant (PayFast)**: info@payfast.bj / Merchant@2026! (PIN: 654321)
 
