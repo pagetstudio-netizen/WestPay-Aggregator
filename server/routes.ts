@@ -625,11 +625,32 @@ export async function registerRoutes(
       return res.status(403).json({ message: "Accès refusé" });
     }
 
-    // Origin validation on state-changing requests (POST/PUT/PATCH/DELETE)
+    // Origin + Referer validation on state-changing requests (POST/PUT/PATCH/DELETE)
+    // Reject if: Origin present and invalid, OR Referer present and invalid
+    // Reject if: BOTH Origin and Referer are absent (bot/script without browser context)
     if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
-      if (origin && !ALLOWED_ORIGINS.includes(origin)) {
+      const referer = req.headers["referer"] as string | undefined;
+      const hasValidOrigin = origin && ALLOWED_ORIGINS.includes(origin);
+      const hasValidReferer = referer && ALLOWED_ORIGINS.some(o => referer.startsWith(o));
+
+      // Explicit invalid origin header
+      if (origin && !hasValidOrigin) {
         const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
-        storage.createSecurityLog({ eventType: "bad_origin", ip: clientIp, action: "origin_rejected", details: `${origin} — ${req.path}` }).catch(() => {});
+        storage.createSecurityLog({ eventType: "bad_origin", ip: clientIp, action: "origin_rejected", details: `origin=${origin} — ${req.path}` }).catch(() => {});
+        return res.status(403).json({ message: "Accès refusé" });
+      }
+
+      // Explicit invalid referer header
+      if (referer && !hasValidReferer) {
+        const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+        storage.createSecurityLog({ eventType: "bad_origin", ip: clientIp, action: "referer_rejected", details: `referer=${referer.substring(0, 100)} — ${req.path}` }).catch(() => {});
+        return res.status(403).json({ message: "Accès refusé" });
+      }
+
+      // Both absent — headless bot/script with no browser context
+      if (!origin && !referer) {
+        const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+        storage.createSecurityLog({ eventType: "bad_origin", ip: clientIp, action: "missing_origin_referer", details: req.path }).catch(() => {});
         return res.status(403).json({ message: "Accès refusé" });
       }
     }
@@ -653,7 +674,9 @@ export async function registerRoutes(
     entry.count++;
     paymentInitiateAttempts.set(clientIp, entry);
     if (entry.count > PAYMENT_RATE_MAX) {
-      storage.createSecurityLog({ eventType: "rate_limit", ip: clientIp, action: "payment_rate_limited", details: `${entry.count} requêtes/min — ${req.path}` }).catch(() => {});
+      // Auto-block IP in DB and log the event
+      storage.addBlockedIp({ ipAddress: clientIp, reason: `Rate limit paiement — ${entry.count} req/min`, blockedBy: "système" }).catch(() => {});
+      storage.createSecurityLog({ eventType: "rate_limit", ip: clientIp, action: "payment_rate_autoblock", details: `${entry.count} req/min — ${req.path}` }).catch(() => {});
       return res.status(429).json({ message: "Trop de requêtes. Réessayez dans un moment." });
     }
     next();
@@ -673,10 +696,22 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Accès refusé" });
       }
 
-      // Validation de l'Origin
+      // Validation stricte Origin + Referer (obligatoire pour login marchand)
       const origin = req.headers["origin"] as string | undefined;
-      if (origin && !ALLOWED_ORIGINS.includes(origin)) {
-        storage.createSecurityLog({ eventType: "bad_origin", ip: clientIp, userEmail: email, action: "origin_rejected_login", details: origin }).catch(() => {});
+      const referer = req.headers["referer"] as string | undefined;
+      const hasValidOrigin = origin && ALLOWED_ORIGINS.includes(origin);
+      const hasValidReferer = referer && ALLOWED_ORIGINS.some(o => referer.startsWith(o));
+
+      if (origin && !hasValidOrigin) {
+        storage.createSecurityLog({ eventType: "bad_origin", ip: clientIp, userEmail: email, action: "origin_rejected_login", details: `origin=${origin}` }).catch(() => {});
+        return res.status(403).json({ message: "Accès refusé" });
+      }
+      if (referer && !hasValidReferer) {
+        storage.createSecurityLog({ eventType: "bad_origin", ip: clientIp, userEmail: email, action: "referer_rejected_login", details: `referer=${referer.substring(0, 100)}` }).catch(() => {});
+        return res.status(403).json({ message: "Accès refusé" });
+      }
+      if (!origin && !referer) {
+        storage.createSecurityLog({ eventType: "bad_origin", ip: clientIp, userEmail: email, action: "missing_origin_referer_login", details: "no origin/referer" }).catch(() => {});
         return res.status(403).json({ message: "Accès refusé" });
       }
 
@@ -708,11 +743,15 @@ export async function registerRoutes(
       }
 
       merchantLoginAttempts.delete(clientIp);
+
+      // Vérifier AVANT d'enregistrer le log si l'IP a déjà été vue pour ce compte
+      const seenBefore = await storage.hasMerchantSeenIp(merchant.id, clientIp).catch(() => true);
+
       await storage.createLoginLog({ userId: merchant.id, role: "merchant", ip: clientIp, device: ua, success: true });
 
-      // Alerte Telegram si nouvelle IP jamais vue pour ce marchand
-      const seenBefore = await storage.hasMerchantSeenIp(merchant.id, clientIp).catch(() => true);
       if (!seenBefore) {
+        // Nouvelle IP jamais vue — log sécurité + alerte Telegram dédiée
+        storage.createSecurityLog({ eventType: "new_ip_login", ip: clientIp, userEmail: merchant.email, action: "new_merchant_ip", details: merchant.name }).catch(() => {});
         notifyAdminNewMerchantIp({ email: merchant.email, merchantName: merchant.name, merchantId: merchant.id, ip: clientIp, device: ua }).catch(() => {});
       } else {
         notifyAdminMerchantLogin({ email: merchant.email, merchantName: merchant.name, ip: clientIp, device: ua, success: true }).catch(() => {});

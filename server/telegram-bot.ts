@@ -2071,10 +2071,11 @@ async function sendDailyReport(): Promise<void> {
        COUNT(*) FILTER (WHERE event_type = 'brute_force') AS brute_force,
        COUNT(*) FILTER (WHERE event_type = 'bad_origin') AS bad_origin,
        COUNT(*) FILTER (WHERE event_type = 'rate_limit') AS rate_limited,
+       COUNT(*) FILTER (WHERE event_type = 'new_ip_login') AS new_ip_logins,
        COUNT(DISTINCT ip) FILTER (WHERE event_type IN ('bot_blocked','brute_force','bad_origin','rate_limit')) AS unique_attacker_ips
      FROM security_logs WHERE created_at >= $1 AND created_at <= $2`,
     [dayStart.toISOString(), dayEnd.toISOString()]
-  ).then(r => r.rows).catch(() => [{ bots_blocked: 0, brute_force: 0, bad_origin: 0, rate_limited: 0, unique_attacker_ips: 0 }]);
+  ).then(r => r.rows).catch(() => [{ bots_blocked: 0, brute_force: 0, bad_origin: 0, rate_limited: 0, new_ip_logins: 0, unique_attacker_ips: 0 }]);
 
   const [blockedRow] = await pool.query(
     `SELECT COUNT(*) AS new_blocked FROM blocked_ips WHERE created_at >= $1 AND created_at <= $2`,
@@ -2094,17 +2095,19 @@ async function sendDailyReport(): Promise<void> {
   const bruteForce = Number(secRow?.brute_force || 0);
   const badOrigin = Number(secRow?.bad_origin || 0);
   const rateLimited = Number(secRow?.rate_limited || 0);
+  const newIpLogins = Number(secRow?.new_ip_logins || 0);
   const uniqueAttackers = Number(secRow?.unique_attacker_ips || 0);
   const newBlocked = Number(blockedRow?.new_blocked || 0);
   const totalThreats = botsBlocked + bruteForce + badOrigin + rateLimited;
 
-  const secLines = totalThreats > 0 ? [
+  const secLines = (totalThreats > 0 || newIpLogins > 0) ? [
     ``,
     `🔐 *Sécurité & Bots*`,
     botsBlocked > 0 ? `🤖 Bots bloqués : *${botsBlocked.toLocaleString("fr-FR")}*` : null,
     bruteForce > 0 ? `🔨 Brute-force : *${bruteForce.toLocaleString("fr-FR")}*` : null,
     badOrigin > 0 ? `🌐 Origines invalides : *${badOrigin.toLocaleString("fr-FR")}*` : null,
     rateLimited > 0 ? `⏱️ Rate-limités : *${rateLimited.toLocaleString("fr-FR")}*` : null,
+    newIpLogins > 0 ? `🆕 Connexions depuis nouvelle IP : *${newIpLogins.toLocaleString("fr-FR")}*` : null,
     uniqueAttackers > 0 ? `🕵️ IPs attaquantes uniques : *${uniqueAttackers.toLocaleString("fr-FR")}*` : null,
     newBlocked > 0 ? `⛔ Nouvelles IPs bloquées : *${newBlocked.toLocaleString("fr-FR")}*` : null,
   ].filter(Boolean) : [``, `🔐 *Sécurité :* ✅ Aucune menace détectée`];
