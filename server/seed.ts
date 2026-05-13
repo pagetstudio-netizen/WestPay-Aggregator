@@ -25,12 +25,39 @@ const COMPROMISED_MERCHANT_EMAILS = [
 ];
 
 async function enforceCompromisedAccountSuspensions(): Promise<void> {
+  // One-time API key rotation flag — only executed once per environment
+  const rotationDone = await storage.getSetting("incident_task12_api_keys_rotated");
+
   for (const email of COMPROMISED_MERCHANT_EMAILS) {
     const merchant = await storage.getMerchantByEmail(email);
-    if (merchant && !merchant.suspended) {
+    if (!merchant) continue;
+
+    // Always keep suspended
+    if (!merchant.suspended) {
       await storage.updateMerchant(merchant.id, { suspended: true });
-      console.log(`[SECURITY] Compte compromis re-suspendu au démarrage: ${email} (${merchant.slug})`);
+      console.log(`[SECURITY] Compte compromis re-suspendu: ${email} (${merchant.slug})`);
     }
+
+    // One-time: invalidate password hash so account cannot log in even if un-suspended without reset
+    if (!rotationDone) {
+      const invalidHash = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
+      await storage.updateMerchant(merchant.id, { passwordHash: invalidHash });
+
+      // Regenerate all country API keys
+      const countries = await storage.getMerchantCountries(merchant.id);
+      for (const mc of countries) {
+        const prefix = mc.country.substring(0, 3).toUpperCase();
+        const newKey = `${prefix}-${crypto.randomBytes(20).toString("hex").toUpperCase()}`;
+        await storage.updateMerchantCountryApiKey(mc.id, newKey);
+      }
+      console.log(`[SECURITY] Clés API + mot de passe invalidés: ${email} (${countries.length} pays)`);
+    }
+  }
+
+  // Mark rotation as done so it doesn't re-run on subsequent startups
+  if (!rotationDone) {
+    await storage.setSetting("incident_task12_api_keys_rotated", new Date().toISOString());
+    console.log("[SECURITY] Rotation clés incident Task#12 marquée comme complète");
   }
 }
 

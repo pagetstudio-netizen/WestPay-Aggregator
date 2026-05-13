@@ -601,14 +601,23 @@ export async function registerRoutes(
     /undici/i,
   ];
 
-  // Origines autorisées pour le login marchand
-  const ALLOWED_ORIGINS = (() => {
-    const base = ["https://westpay.cloud", "https://www.westpay.cloud"];
+  // Hôtes autorisés pour la validation Origin/Referer du login marchand
+  const ALLOWED_HOSTS = (() => {
+    const base = ["westpay.cloud", "www.westpay.cloud"];
     if (process.env.NODE_ENV !== "production") {
-      base.push("http://localhost:5000", "http://localhost:3000", "http://127.0.0.1:5000", "http://127.0.0.1:3000");
+      base.push("localhost", "127.0.0.1");
     }
     return base;
   })();
+
+  // Helper : extrait le hostname d'une Origin ou Referer (strict, pas de startsWith)
+  function parseHost(headerValue: string): string | null {
+    try {
+      return new URL(headerValue).hostname;
+    } catch {
+      return null;
+    }
+  }
 
   // ── Middleware bot-guard (UA + Origin) pour /api/merchant/* et /api/payment/* ──
   // botGuard : UA blocking uniquement (s'applique à /api/merchant/* et /api/payment/*)
@@ -630,8 +639,27 @@ export async function registerRoutes(
     next();
   };
 
-  app.use("/api/merchant", botGuard);
-  app.use("/api/payment", botGuard);
+  // ── Lightweight blocked-IP middleware for merchant + payment routes ──────────
+  // Ensures IPs auto-blocked by rate-limiter or brute-force are also rejected here.
+  // (ipGuard covers /api/admin only, which includes allowed-IP whitelist; this simpler
+  //  version checks only blocked_ips without the admin whitelist requirement.)
+  const blockedIpGuard = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (req.method === "OPTIONS") return next();
+      const cleanIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+      const blocked = await storage.isIpBlocked(cleanIp);
+      if (blocked) {
+        storage.createSecurityLog({ eventType: "blocked_access", ip: cleanIp, action: "ip_blocked_merchant_payment", details: req.path }).catch(() => {});
+        return res.status(403).json({ message: "Accès refusé" });
+      }
+      next();
+    } catch {
+      next();
+    }
+  };
+
+  app.use("/api/merchant", blockedIpGuard, botGuard);
+  app.use("/api/payment", blockedIpGuard, botGuard);
 
   // ── Rate-limit store pour les endpoints de paiement ──────────────────────────
   const paymentInitiateAttempts = new Map<string, { count: number; firstReq: number }>();
@@ -669,10 +697,13 @@ export async function registerRoutes(
       }
 
       // Validation stricte Origin + Referer (obligatoire pour login marchand)
+      // Utilise new URL().hostname pour éviter le bypass via westpay.cloud.attacker.tld
       const origin = req.headers["origin"] as string | undefined;
       const referer = req.headers["referer"] as string | undefined;
-      const hasValidOrigin = origin && ALLOWED_ORIGINS.includes(origin);
-      const hasValidReferer = referer && ALLOWED_ORIGINS.some(o => referer.startsWith(o));
+      const originHost = origin ? parseHost(origin) : null;
+      const refererHost = referer ? parseHost(referer) : null;
+      const hasValidOrigin = originHost && ALLOWED_HOSTS.includes(originHost);
+      const hasValidReferer = refererHost && ALLOWED_HOSTS.includes(refererHost);
 
       if (origin && !hasValidOrigin) {
         storage.createSecurityLog({ eventType: "bad_origin", ip: clientIp, userEmail: email, action: "origin_rejected_login", details: `origin=${origin}` }).catch(() => {});
