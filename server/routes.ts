@@ -611,9 +611,11 @@ export async function registerRoutes(
   })();
 
   // ── Middleware bot-guard (UA + Origin) pour /api/merchant/* et /api/payment/* ──
+  // botGuard : UA blocking uniquement (s'applique à /api/merchant/* et /api/payment/*)
+  // La validation Origin/Referer est réservée au seul endpoint /api/auth/merchant/login
+  // pour ne pas bloquer les appels API server-to-server légitimes des marchands.
   const botGuard = (req: Request, res: Response, next: NextFunction) => {
     const ua = req.headers["user-agent"] || "";
-    const origin = req.headers["origin"] as string | undefined;
 
     // Skip OPTIONS (CORS preflight)
     if (req.method === "OPTIONS") return next();
@@ -623,36 +625,6 @@ export async function registerRoutes(
       const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
       storage.createSecurityLog({ eventType: "bot_blocked", ip: clientIp, action: "ua_blocked_middleware", details: `${ua.substring(0, 120)} — ${req.path}` }).catch(() => {});
       return res.status(403).json({ message: "Accès refusé" });
-    }
-
-    // Origin + Referer validation on state-changing requests (POST/PUT/PATCH/DELETE)
-    // Reject if: Origin present and invalid, OR Referer present and invalid
-    // Reject if: BOTH Origin and Referer are absent (bot/script without browser context)
-    if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
-      const referer = req.headers["referer"] as string | undefined;
-      const hasValidOrigin = origin && ALLOWED_ORIGINS.includes(origin);
-      const hasValidReferer = referer && ALLOWED_ORIGINS.some(o => referer.startsWith(o));
-
-      // Explicit invalid origin header
-      if (origin && !hasValidOrigin) {
-        const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
-        storage.createSecurityLog({ eventType: "bad_origin", ip: clientIp, action: "origin_rejected", details: `origin=${origin} — ${req.path}` }).catch(() => {});
-        return res.status(403).json({ message: "Accès refusé" });
-      }
-
-      // Explicit invalid referer header
-      if (referer && !hasValidReferer) {
-        const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
-        storage.createSecurityLog({ eventType: "bad_origin", ip: clientIp, action: "referer_rejected", details: `referer=${referer.substring(0, 100)} — ${req.path}` }).catch(() => {});
-        return res.status(403).json({ message: "Accès refusé" });
-      }
-
-      // Both absent — headless bot/script with no browser context
-      if (!origin && !referer) {
-        const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
-        storage.createSecurityLog({ eventType: "bad_origin", ip: clientIp, action: "missing_origin_referer", details: req.path }).catch(() => {});
-        return res.status(403).json({ message: "Accès refusé" });
-      }
     }
 
     next();

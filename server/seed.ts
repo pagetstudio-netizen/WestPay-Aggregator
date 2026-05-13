@@ -13,7 +13,33 @@ function generateSecureApiKey(country: string): string {
   return `${prefix}-${randomPart}`;
 }
 
+// ── Incident response: Task #12 — 2025-05-13 ────────────────────────────────
+// Three merchant accounts were compromised by an automated bot (Deno/SupabaseEdgeRuntime)
+// that made 4,700+ successful logins using credential stuffing across 60+ AWS IPs.
+// These accounts MUST remain suspended until admin manually re-enables them after
+// verifying merchant identity. API keys were also rotated as part of incident response.
+const COMPROMISED_MERCHANT_EMAILS = [
+  "Alvyqe7@gmail.com",   // teslaplus — confirmed bot credential stuffing
+  "kingobs71@gmail.com", // e-livre   — confirmed bot credential stuffing
+  "kenkorodriguez7@gmail.com", // avenix — confirmed bot credential stuffing
+];
+
+async function enforceCompromisedAccountSuspensions(): Promise<void> {
+  for (const email of COMPROMISED_MERCHANT_EMAILS) {
+    const merchant = await storage.getMerchantByEmail(email);
+    if (merchant && !merchant.suspended) {
+      await storage.updateMerchant(merchant.id, { suspended: true });
+      console.log(`[SECURITY] Compte compromis re-suspendu au démarrage: ${email} (${merchant.slug})`);
+    }
+  }
+}
+
 export async function seedDatabase() {
+  // Enforce suspension of compromised accounts on every startup
+  await enforceCompromisedAccountSuspensions().catch(err =>
+    console.error("[SECURITY] Erreur vérification comptes compromis:", err.message)
+  );
+
   const existingAdmin = await storage.getAdminByEmail("devappmanagement40@gmail.com");
   if (existingAdmin) {
     // Verify password hash is correct — fix if desynchronized across environments
