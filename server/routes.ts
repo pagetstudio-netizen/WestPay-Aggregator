@@ -584,6 +584,23 @@ export async function registerRoutes(
     }
   });
 
+  // ── Rate-limit store pour login marchands ────────────────────────────────────
+  const merchantLoginAttempts = new Map<string, { count: number; firstFail: number }>();
+  const MERCHANT_BRUTE_MAX = 5;
+  const MERCHANT_BRUTE_WINDOW = 10 * 60 * 1000; // 10 min
+
+  // User-agents automatisés interdits sur le login marchand
+  const BLOCKED_UA_PATTERNS = [
+    /Deno\//i,
+    /SupabaseEdgeRuntime/i,
+    /python-requests/i,
+    /Go-http-client/i,
+    /curl\//i,
+    /axios\//i,
+    /node-fetch/i,
+    /undici/i,
+  ];
+
   app.post("/api/auth/merchant/login", async (req, res) => {
     try {
       const { email, password } = req.body;
@@ -592,17 +609,40 @@ export async function registerRoutes(
       const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
       const ua = req.headers["user-agent"] || "?";
 
+      // Bloquer les bots / scripts automatisés
+      if (BLOCKED_UA_PATTERNS.some(p => p.test(ua))) {
+        storage.createSecurityLog({ eventType: "bot_blocked", ip: clientIp, userEmail: email, action: "ua_blocked", details: ua.substring(0, 120) }).catch(() => {});
+        return res.status(403).json({ message: "Accès refusé" });
+      }
+
+      // Rate-limit brute-force par IP
+      const now = Date.now();
+      const attempt = merchantLoginAttempts.get(clientIp) || { count: 0, firstFail: now };
+      if (now - attempt.firstFail > MERCHANT_BRUTE_WINDOW) { attempt.count = 0; attempt.firstFail = now; }
+      if (attempt.count >= MERCHANT_BRUTE_MAX) {
+        storage.addBlockedIp({ ipAddress: clientIp, reason: `Brute force marchand — ${attempt.count} tentatives`, blockedBy: "système" }).catch(() => {});
+        storage.createSecurityLog({ eventType: "brute_force", ip: clientIp, userEmail: email, action: "merchant_auto_blocked", details: `${attempt.count} tentatives` }).catch(() => {});
+        return res.status(429).json({ message: "Trop de tentatives. Réessayez plus tard." });
+      }
+
       const merchant = await storage.getMerchantByEmail(email);
-      if (!merchant) return res.status(401).json({ message: "Identifiants invalides" });
+      if (!merchant) {
+        attempt.count++;
+        merchantLoginAttempts.set(clientIp, attempt);
+        return res.status(401).json({ message: "Identifiants invalides" });
+      }
       if (merchant.suspended) return res.status(403).json({ message: "Compte suspendu" });
 
       const valid = await bcrypt.compare(password, merchant.passwordHash);
       if (!valid) {
+        attempt.count++;
+        merchantLoginAttempts.set(clientIp, attempt);
         await storage.createLoginLog({ userId: merchant.id, role: "merchant", ip: clientIp, device: ua, success: false });
         notifyAdminMerchantLogin({ email: merchant.email, merchantName: merchant.name, ip: clientIp, device: ua, success: false }).catch(() => {});
         return res.status(401).json({ message: "Identifiants invalides" });
       }
 
+      merchantLoginAttempts.delete(clientIp);
       await storage.createLoginLog({ userId: merchant.id, role: "merchant", ip: clientIp, device: ua, success: true });
       notifyAdminMerchantLogin({ email: merchant.email, merchantName: merchant.name, ip: clientIp, device: ua, success: true }).catch(() => {});
       const token = signToken({ id: merchant.id, role: "merchant", email: merchant.email });
