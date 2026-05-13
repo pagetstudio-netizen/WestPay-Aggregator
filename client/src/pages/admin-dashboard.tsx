@@ -31,7 +31,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
 
-type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "settings" | "sdk";
+type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk";
 
 function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: { staleTime?: number; refetchOnWindowFocus?: boolean }) {
   const { token, logout } = useAuth();
@@ -3007,6 +3007,166 @@ function AdminWalletTransfersPanel() {
   );
 }
 
+function AdminsPanel() {
+  const { token, user } = useAuth();
+  const { toast } = useToast();
+  const { data: adminList = [], isLoading } = useAdminFetch("/api/admin/admins", ["/api/admin/admins"]);
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [form, setForm] = useState({ email: "", password: "" });
+  const [showPwd, setShowPwd] = useState(false);
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/create-admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/admins"] });
+      toast({ title: "Administrateur créé", description: `${form.email} peut maintenant se connecter.` });
+      setForm({ email: "", password: "" });
+      setCreateOpen(false);
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/admin/delete-admin/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur suppression"); }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/admins"] });
+      toast({ title: "Administrateur supprimé" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const allAdmins = adminList as { id: number; email: string; createdAt: string }[];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="text-lg font-semibold">Administrateurs</h2>
+          <p className="text-sm text-muted-foreground">{allAdmins.length} compte{allAdmins.length !== 1 ? "s" : ""} administrateur</p>
+        </div>
+        <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5" data-testid="button-add-admin">
+          <Plus className="w-3.5 h-3.5" /> Ajouter un admin
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-16 w-full" />)}</div>
+      ) : allAdmins.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-8">Aucun administrateur trouvé.</p>
+      ) : (
+        <div className="space-y-2">
+          {allAdmins.map((a) => {
+            const isSelf = user?.email === a.email;
+            return (
+              <div key={a.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border bg-muted/20" data-testid={`admin-row-${a.id}`}>
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <Shield className="w-4 h-4 text-primary" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-sm truncate" data-testid={`text-admin-email-${a.id}`}>{a.email}</span>
+                      {isSelf && <Badge variant="secondary" className="text-xs py-0">Vous</Badge>}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Créé le {new Date(a.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" })}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Badge variant="outline" className="text-xs hidden sm:inline-flex">ID #{a.id}</Badge>
+                  {!isSelf && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      disabled={deleteMutation.isPending}
+                      onClick={() => {
+                        if (confirm(`Supprimer le compte admin ${a.email} ?`)) deleteMutation.mutate(a.id);
+                      }}
+                      data-testid={`button-delete-admin-${a.id}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Nouvel administrateur</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Adresse email</Label>
+              <Input
+                type="email"
+                value={form.email}
+                onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                placeholder="admin@example.com"
+                data-testid="input-admin-email"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Mot de passe</Label>
+              <div className="relative">
+                <Input
+                  type={showPwd ? "text" : "password"}
+                  value={form.password}
+                  onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                  placeholder="Minimum 6 caractères"
+                  data-testid="input-admin-password"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0"
+                  onClick={() => setShowPwd(v => !v)}
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">Ce compte aura accès à tous les outils d'administration.</p>
+            </div>
+            <div className="flex gap-2 justify-end pt-1">
+              <Button variant="outline" onClick={() => setCreateOpen(false)}>Annuler</Button>
+              <Button
+                onClick={() => createMutation.mutate()}
+                disabled={createMutation.isPending || !form.email || form.password.length < 6}
+                data-testid="button-create-admin"
+              >
+                {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                Créer
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 const COUNTRIES_LIST = [
   "Togo", "Benin", "Burkina Faso", "Cote d'Ivoire", "Senegal", "Mali",
   "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon", "Guinee", "Niger", "Guinee-Bissau",
@@ -4974,6 +5134,7 @@ export default function AdminDashboard() {
     { title: "Retraits Crypto", icon: Download, tab: "cryptowithdrawals" },
     { title: "Virements", icon: ArrowUpRight, tab: "virements" },
     { title: "Reversements", icon: Download, tab: "reversements" },
+    { title: "Administrateurs", icon: Shield, tab: "admins" },
     { title: "Parametres", icon: Settings, tab: "settings" },
     { title: "SDK API", icon: BookOpen, tab: "sdk" },
   ];
@@ -5055,6 +5216,7 @@ export default function AdminDashboard() {
             {activeTab === "cryptowithdrawals" && <CryptoWithdrawalsAdminPanel />}
             {activeTab === "virements" && <AdminWalletTransfersPanel />}
             {activeTab === "reversements" && <AdminWithdrawalsPanel />}
+            {activeTab === "admins" && <AdminsPanel />}
             {activeTab === "settings" && <SettingsPanel />}
             {activeTab === "sdk" && <SdkPanel />}
           </main>

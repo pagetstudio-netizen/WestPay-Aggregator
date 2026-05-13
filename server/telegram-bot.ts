@@ -1265,6 +1265,33 @@ export async function notifyAdminBalanceUpdate(data: {
   await notifyAdminGroup(msg);
 }
 
+export async function notifyAdminLogin(data: {
+  email: string;
+  ip: string;
+  device: string;
+  success: boolean;
+}): Promise<void> {
+  const dateStr = new Date().toLocaleString("fr-FR", {
+    day: "2-digit", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC",
+  });
+  const icon = data.success ? "🔐" : "⚠️";
+  const statusLabel = data.success ? "✅ Connexion réussie" : "❌ Tentative échouée";
+  const deviceShort = data.device.length > 80 ? data.device.substring(0, 80) + "…" : data.device;
+
+  const msg = [
+    `${icon} *Connexion Admin WestPay*`,
+    ``,
+    `📧 *Email :* \`${data.email}\``,
+    `📊 *Statut :* ${statusLabel}`,
+    `🌐 *IP :* \`${data.ip}\``,
+    `📱 *Appareil :* ${deviceShort}`,
+    `📅 *Date :* ${dateStr} UTC`,
+  ].join("\n");
+
+  await notifyAdminGroup(msg);
+}
+
 async function sendDailyReport(): Promise<void> {
   const groupId = await storage.getSetting("telegram_group_id");
   if (!groupId || !bot) return;

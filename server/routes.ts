@@ -7,7 +7,7 @@ import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer } from "./telegram-bot";
+import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin } from "./telegram-bot";
 import {
   initiatePayment as omnipayInitiatePayment,
   initiateTransfer as omnipayInitiateTransfer,
@@ -362,10 +362,12 @@ export async function registerRoutes(
       const valid = await bcrypt.compare(password, admin.passwordHash);
       if (!valid) {
         await storage.createLoginLog({ userId: admin.id, role: "admin", ip: req.ip || "", device: req.headers["user-agent"] || "", success: false });
+        notifyAdminLogin({ email: admin.email, ip: req.ip || "?", device: req.headers["user-agent"] || "?", success: false }).catch(() => {});
         return res.status(401).json({ message: "Identifiants invalides" });
       }
 
       await storage.createLoginLog({ userId: admin.id, role: "admin", ip: req.ip || "", device: req.headers["user-agent"] || "", success: true });
+      notifyAdminLogin({ email: admin.email, ip: req.ip || "?", device: req.headers["user-agent"] || "?", success: true }).catch(() => {});
       const token = signToken({ id: admin.id, role: "admin", email: admin.email });
       res.json({ token, user: { id: admin.id, email: admin.email } });
     } catch (err: any) {
