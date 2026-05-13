@@ -7,7 +7,7 @@ import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin } from "./telegram-bot";
+import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, getGeoInfo } from "./telegram-bot";
 import {
   initiatePayment as omnipayInitiatePayment,
   initiateTransfer as omnipayInitiateTransfer,
@@ -712,7 +712,30 @@ export async function registerRoutes(
       const updatedMC = await storage.getMerchantCountryById(id);
       if (updatedMC) {
         const balMerchant = await storage.getMerchantById(updatedMC.merchantId);
-        notifyAdminBalanceUpdate({ merchantName: balMerchant?.name || `#${updatedMC.merchantId}`, country: updatedMC.country, newBalance: balance }).catch(() => {});
+        const adminUser = (req as any).user;
+        const rawIp = (req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "").split(",")[0].trim();
+        getGeoInfo(rawIp).then(geo => {
+          notifyAdminBalanceUpdate({
+            merchantName: balMerchant?.name || `#${updatedMC.merchantId}`,
+            merchantEmail: balMerchant?.email,
+            country: updatedMC.country,
+            newBalance: balance,
+            adminEmail: adminUser?.email,
+            adminId: adminUser?.id,
+            ip: geo.ip || rawIp,
+            geo,
+          }).catch(() => {});
+        }).catch(() => {
+          notifyAdminBalanceUpdate({
+            merchantName: balMerchant?.name || `#${updatedMC.merchantId}`,
+            merchantEmail: balMerchant?.email,
+            country: updatedMC.country,
+            newBalance: balance,
+            adminEmail: adminUser?.email,
+            adminId: adminUser?.id,
+            ip: rawIp,
+          }).catch(() => {});
+        });
       }
       res.json({ success: true });
     } catch (err: any) {
@@ -3698,7 +3721,12 @@ export async function registerRoutes(
       });
       await storage.decrementMerchantCountryBalance(mc.id, amount);
 
-      notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "pending", mode: "auto" }).catch(() => {});
+      const wdRawIp = (req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "").split(",")[0].trim();
+      getGeoInfo(wdRawIp).then(wdGeo => {
+        notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, merchantEmail: merchant.email, merchantId, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "pending", mode: "auto", ip: wdGeo.ip || wdRawIp, geo: wdGeo }).catch(() => {});
+      }).catch(() => {
+        notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, merchantEmail: merchant.email, merchantId, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "pending", mode: "auto", ip: wdRawIp }).catch(() => {});
+      });
       notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "pending" }).catch(() => {});
 
       const withdrawalFee = merchant.feeExempt ? 0 : calcWithdrawalFee(amount, mc.country);

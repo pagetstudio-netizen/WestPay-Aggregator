@@ -3,6 +3,31 @@ import type { Express, Request, Response } from "express";
 import { storage } from "./storage";
 import { pool } from "./db";
 
+export interface GeoInfo {
+  ip: string;
+  city: string;
+  region: string;
+  country: string;
+  isp: string;
+}
+
+export async function getGeoInfo(ip: string): Promise<GeoInfo> {
+  const fallback: GeoInfo = { ip, city: "Inconnue", region: "", country: "", isp: "" };
+  try {
+    const cleanIp = ip.replace(/^::ffff:/, "");
+    if (cleanIp === "127.0.0.1" || cleanIp === "::1" || cleanIp.startsWith("192.168.") || cleanIp.startsWith("10.")) {
+      return { ...fallback, ip: cleanIp, city: "Local" };
+    }
+    const res = await fetch(`http://ip-api.com/json/${cleanIp}?fields=status,city,regionName,country,isp,query`, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) return { ...fallback, ip: cleanIp };
+    const data = await res.json() as any;
+    if (data.status !== "success") return { ...fallback, ip: cleanIp };
+    return { ip: cleanIp, city: data.city || "?", region: data.regionName || "", country: data.country || "", isp: data.isp || "" };
+  } catch {
+    return fallback;
+  }
+}
+
 let bot: Telegraf | null = null;
 
 const COUNTRIES_FR: Record<string, string> = {
@@ -1086,6 +1111,8 @@ export async function notifyAdminPayment(data: {
 export async function notifyAdminWithdrawal(data: {
   id: number;
   merchantName: string;
+  merchantEmail?: string;
+  merchantId?: number;
   country: string;
   amount: number;
   fees: number;
@@ -1093,6 +1120,8 @@ export async function notifyAdminWithdrawal(data: {
   operator?: string | null;
   status: "pending" | "approved" | "failed" | "rejected";
   mode: "auto" | "manual";
+  ip?: string;
+  geo?: GeoInfo;
 }): Promise<void> {
   const dateStr = new Date().toLocaleString("fr-FR", {
     day: "2-digit", month: "long", year: "numeric",
@@ -1102,12 +1131,23 @@ export async function notifyAdminWithdrawal(data: {
   const statusLabel = data.status === "approved" ? "Effectué" : data.status === "rejected" ? "Rejeté" : data.status === "pending" ? "En attente" : "Échoué";
   const net = data.amount - data.fees;
 
+  const geoLine = data.geo && data.status === "pending"
+    ? `📍 *Localisation :* ${[data.geo.city, data.geo.region, data.geo.country].filter(Boolean).join(", ")}`
+    : null;
+  const ispLine = data.geo?.isp && data.status === "pending" ? `🌐 *FAI :* ${data.geo.isp}` : null;
+
   const lines = [
     `${icon} *Retrait WestPay*`,
     ``,
     `📋 *Type :* Retrait`,
     `🔖 *ID :* \`WD-${data.id}\``,
     `🏪 *Marchand :* ${data.merchantName}`,
+    data.merchantEmail ? `📧 *Email :* \`${data.merchantEmail}\`` : null,
+    data.merchantId ? `🆔 *ID Marchand :* ${data.merchantId}` : null,
+    data.ip && data.status === "pending" ? `🌐 *IP :* \`${data.ip}\`` : null,
+    geoLine,
+    ispLine,
+    ``,
     `📞 *Numéro réception :* ${data.phone}`,
     `🌍 *Pays :* ${countryLabel(data.country)}`,
     `💰 *Montant demandé :* ${formatAmount(data.amount)}`,
@@ -1116,7 +1156,7 @@ export async function notifyAdminWithdrawal(data: {
     data.operator ? `📱 *Opérateur :* ${data.operator}` : null,
     `⚙️ *Mode :* ${data.mode === "auto" ? "Automatique" : "Manuel"}`,
     `📊 *Statut :* ${statusLabel}`,
-    `📅 *Date :* ${dateStr}`,
+    `📅 *Date :* ${dateStr} UTC`,
   ].filter(Boolean) as string[];
 
   await notifyAdminGroup(lines.join("\n"));
@@ -1243,24 +1283,39 @@ export async function notifyMerchantWalletTransfer(merchantId: number, data: {
 
 export async function notifyAdminBalanceUpdate(data: {
   merchantName: string;
+  merchantEmail?: string;
   country: string;
   newBalance: number;
+  adminEmail?: string;
+  adminId?: number;
+  ip?: string;
+  geo?: GeoInfo;
 }): Promise<void> {
   const dateStr = new Date().toLocaleString("fr-FR", {
     day: "2-digit", month: "long", year: "numeric",
     hour: "2-digit", minute: "2-digit", timeZone: "UTC",
   });
 
+  const geoLine = data.geo
+    ? `📍 *Localisation admin :* ${[data.geo.city, data.geo.region, data.geo.country].filter(Boolean).join(", ")}`
+    : null;
+  const ispLine = data.geo?.isp ? `🌐 *FAI :* ${data.geo.isp}` : null;
+
   const msg = [
     `🛠️ *Ajustement de solde WestPay*`,
     ``,
-    `📋 *Type :* Dépôt / Ajustement admin`,
+    `👤 *Admin :* ${data.adminEmail ? `\`${data.adminEmail}\`` : "Inconnu"}${data.adminId ? ` (ID ${data.adminId})` : ""}`,
+    data.ip ? `🌐 *IP admin :* \`${data.ip}\`` : null,
+    geoLine,
+    ispLine,
+    ``,
     `🏪 *Marchand :* ${data.merchantName}`,
-    `🌍 *Pays :* ${countryLabel(data.country)}`,
+    data.merchantEmail ? `📧 *Email marchand :* \`${data.merchantEmail}\`` : null,
+    `🌍 *Pays wallet :* ${countryLabel(data.country)}`,
     `💰 *Nouveau solde :* ${formatAmount(data.newBalance)}`,
     `📊 *Statut :* Effectué`,
-    `📅 *Date :* ${dateStr}`,
-  ].join("\n");
+    `📅 *Date :* ${dateStr} UTC`,
+  ].filter(Boolean).join("\n");
 
   await notifyAdminGroup(msg);
 }
