@@ -12,8 +12,8 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 
 ## Key URLs
 - `/` - Restricted access page (public)
-- `/admin-access-9584` - Admin login (hidden)
-- `/admin-access-9584/dashboard` - Admin dashboard
+- `/admin-access-958425546648484886646634808526522886433` - Admin login (hidden)
+- `/admin-access-958425546648484886646634808526522886433/dashboard` - Admin dashboard
 - `/merchant-login` - Merchant login
 - `/merchant/:slug` - Merchant dashboard
 - `/api-docs` - PIN-protected API documentation

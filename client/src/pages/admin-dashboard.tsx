@@ -44,7 +44,7 @@ function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: {
       });
       if (res.status === 401 || res.status === 403) {
         logout();
-        setLocation("/admin-access-9584");
+        setLocation("/admin-access-958425546648484886646634808526522886433");
         throw new Error("Session expiree");
       }
       if (!res.ok) throw new Error("Erreur de chargement");
@@ -5111,7 +5111,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     if (!authLoading && (!user || user.role !== "admin")) {
-      setLocation("/admin-access-9584");
+      setLocation("/admin-access-958425546648484886646634808526522886433");
     }
   }, [authLoading, user, setLocation]);
 

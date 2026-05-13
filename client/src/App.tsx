@@ -23,8 +23,8 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={RestrictedPage} />
-      <Route path="/admin-access-9584" component={AdminLogin} />
-      <Route path="/admin-access-9584/dashboard" component={AdminDashboard} />
+      <Route path="/admin-access-958425546648484886646634808526522886433" component={AdminLogin} />
+      <Route path="/admin-access-958425546648484886646634808526522886433/dashboard" component={AdminDashboard} />
       <Route path="/merchant-login" component={MerchantLogin} />
       <Route path="/merchant/:slug" component={MerchantDashboard} />
       <Route path="/api-docs" component={ApiDocsPage} />
