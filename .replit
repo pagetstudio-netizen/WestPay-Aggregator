@@ -57,3 +57,4 @@ timeoutMs = 20000
 
 [agent]
 stack = "FULLSTACK_JS"
+expertMode = true
