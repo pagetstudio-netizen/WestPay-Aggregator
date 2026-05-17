@@ -67,18 +67,28 @@ export async function seedDatabase() {
     console.error("[SECURITY] Erreur vérification comptes compromis:", err.message)
   );
 
-  // Vérifier si des admins légitimes existent déjà — ne jamais recréer de compte admin automatiquement
-  const { db } = await import("./db");
-  const { admins } = await import("@shared/schema");
-  const existingAdmins = await db.select({ id: admins.id }).from(admins);
-  if (existingAdmins.length > 0) {
+  // Protection permanente : ne JAMAIS recréer de compte admin automatiquement
+  // Ce flag est posé une fois en DB et ne peut pas être retiré par un redémarrage
+  const adminSeedDisabled = await storage.getSetting("admin_seed_permanently_disabled");
+  if (adminSeedDisabled) {
     await ensurePinsExist();
     return;
   }
 
-  // Aucun admin en base — cas de première installation uniquement
-  // Ne pas créer de compte admin par défaut pour des raisons de sécurité
-  console.log("[SEED] Aucun admin trouvé — veuillez créer un compte admin manuellement via la CLI.");
+  // Vérifier si des admins existent déjà (double protection)
+  const { db } = await import("./db");
+  const { admins } = await import("@shared/schema");
+  const existingAdmins = await db.select({ id: admins.id }).from(admins);
+  if (existingAdmins.length > 0) {
+    // Poser le flag pour les prochains démarrages
+    await storage.setSetting("admin_seed_permanently_disabled", "true");
+    await ensurePinsExist();
+    return;
+  }
+
+  // Aucun admin — première installation uniquement, pas de création automatique
+  console.log("[SEED] Aucun admin trouvé — création manuelle requise.");
+  await storage.setSetting("admin_seed_permanently_disabled", "true");
   await ensurePinsExist();
 
   const merchantHash = await bcrypt.hash("Merchant@2026!", 10);
