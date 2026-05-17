@@ -1,9 +1,9 @@
-modules = ["nodejs-20", "web", "python-3.11", "postgresql-16"]
+modules = ["nodejs-20", "web", "bash"]
 run = "npm run dev"
 hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
 
 [nix]
-channel = "stable-24_05"
+channel = "stable-25_05"
 
 [[ports]]
 localPort = 5000
@@ -18,7 +18,7 @@ PORT = "5000"
 
 [deployment]
 deploymentTarget = "autoscale"
-run = ["npm", "run", "start"]
+run = ["node", "./dist/index.cjs"]
 build = ["npm", "run", "build"]
 
 [workflows]
@@ -47,7 +47,11 @@ waitForPort = 5000
 [userenv.shared]
 OMNIPAY_API_KEY = "omnipay_api_key_07eee5343c379e1f296b760d11a0d2c4b913cd98"
 OMNIPAY_CALLBACK_KEY = "omnipay_ck_c2140d316db2ba922e7aa76f6131ec2ca37cec6b"
+TELEGRAM_BOT_TOKEN = "8275119458:AAEBoT5CLb8dAURo29yysQ5CA3wCSXMGeSE"
 
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[agent]
+stack = "FULLSTACK_JS"
