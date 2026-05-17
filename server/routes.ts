@@ -464,6 +464,13 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Accès refusé" });
       }
 
+      // 1b. Check allowed IPs whitelist — seules les IPs autorisées peuvent se connecter
+      const ipAllowed = await storage.isIpAllowed(clientIp);
+      if (!ipAllowed) {
+        storage.createSecurityLog({ eventType: "blocked_login_attempt", ip: clientIp, userEmail: email, action: "ip_not_whitelisted", details: "Admin login — IP non autorisée" }).catch(() => {});
+        return res.status(403).json({ message: "Accès refusé" });
+      }
+
       const admin = await storage.getAdminByEmail(email);
       if (!admin || email.toLowerCase() === "admin@westpay.com") return res.status(401).json({ message: "Identifiants invalides" });
 
