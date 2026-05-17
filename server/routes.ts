@@ -187,7 +187,7 @@ function signToken(payload: { id: number; role: string; email: string }) {
 }
 
 function authMiddleware(role: "admin" | "merchant") {
-  return (req: Request, res: Response, next: NextFunction) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
     const auth = req.headers.authorization;
     if (!auth || !auth.startsWith("Bearer ")) {
       return res.status(401).json({ message: "Non autorise" });
@@ -196,6 +196,18 @@ function authMiddleware(role: "admin" | "merchant") {
       const decoded = jwt.verify(auth.split(" ")[1], JWT_SECRET) as any;
       if (decoded.role !== role) {
         return res.status(403).json({ message: "Acces interdit" });
+      }
+      // Vérification critique : s'assurer que le compte existe toujours en base
+      if (role === "admin") {
+        const admin = await storage.getAdminById(decoded.id);
+        if (!admin) {
+          return res.status(401).json({ message: "Compte administrateur introuvable ou supprimé" });
+        }
+      } else if (role === "merchant") {
+        const merchant = await storage.getMerchantById(decoded.id);
+        if (!merchant || merchant.suspended) {
+          return res.status(401).json({ message: "Compte marchand introuvable ou suspendu" });
+        }
       }
       (req as any).user = decoded;
       next();
