@@ -67,25 +67,19 @@ export async function seedDatabase() {
     console.error("[SECURITY] Erreur vérification comptes compromis:", err.message)
   );
 
-  const existingAdmin = await storage.getAdminByEmail("devappmanagement40@gmail.com");
-  if (existingAdmin) {
-    // Verify password hash is correct — fix if desynchronized across environments
-    const passwordOk = await bcrypt.compare("Admin@2026!", existingAdmin.passwordHash);
-    if (!passwordOk) {
-      const fixedHash = await bcrypt.hash("Admin@2026!", 10);
-      await storage.updateAdminPassword(existingAdmin.id, fixedHash);
-      console.log("[SEED] Admin password hash resynchronisé");
-    }
+  // Vérifier si des admins légitimes existent déjà — ne jamais recréer de compte admin automatiquement
+  const { db } = await import("./db");
+  const { admins } = await import("@shared/schema");
+  const existingAdmins = await db.select({ id: admins.id }).from(admins);
+  if (existingAdmins.length > 0) {
     await ensurePinsExist();
     return;
   }
 
-  const adminHash = await bcrypt.hash("Admin@2026!", 10);
-  await storage.createAdmin({
-    email: "devappmanagement40@gmail.com",
-    passwordHash: adminHash,
-    apiKey: "WP-ADMIN-" + crypto.randomBytes(16).toString("hex").toUpperCase(),
-  });
+  // Aucun admin en base — cas de première installation uniquement
+  // Ne pas créer de compte admin par défaut pour des raisons de sécurité
+  console.log("[SEED] Aucun admin trouvé — veuillez créer un compte admin manuellement via la CLI.");
+  await ensurePinsExist();
 
   const merchantHash = await bcrypt.hash("Merchant@2026!", 10);
   const pinHash = await bcrypt.hash("123456", 10);
