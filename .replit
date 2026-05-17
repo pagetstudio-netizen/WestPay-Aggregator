@@ -50,6 +50,7 @@ OMNIPAY_CALLBACK_KEY = "omnipay_ck_c2140d316db2ba922e7aa76f6131ec2ca37cec6b"
 TELEGRAM_BOT_TOKEN = "8275119458:AAEBoT5CLb8dAURo29yysQ5CA3wCSXMGeSE"
 SUPABASE_DATABASE_URL = "postgresql://postgres.upmpugfczbduuytivlyq:JsaIVs3k9hkqbnsA@aws-1-eu-west-1.pooler.supabase.com:6543/postgres"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVwbXB1Z2ZjemJkdXV5dGl2bHlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5NTk1MTgsImV4cCI6MjA4ODUzNTUxOH0.0fvOwpOgmHJjlf2cJ51k6er72J2RRR0Z0aevq_FqtCw"
+OXAPAY_API_KEY = "UDL11Z-VBHWHL-GGHZGZ-YOAG0D"
 
 [postMerge]
 path = "scripts/post-merge.sh"
