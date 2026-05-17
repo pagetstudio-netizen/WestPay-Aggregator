@@ -1548,9 +1548,23 @@ export async function registerRoutes(
 
   app.post("/api/admin/create-admin", authMiddleware("admin"), async (req, res) => {
     try {
-      const { email, password } = req.body;
+      const { email, password, masterKey } = req.body;
       if (!email || !password) return res.status(400).json({ message: "Email et mot de passe requis" });
-      if (password.length < 6) return res.status(400).json({ message: "Mot de passe trop court (6 caractères minimum)" });
+
+      // Clé maître obligatoire pour créer un admin — définie via ADMIN_MASTER_KEY
+      const expectedKey = process.env.ADMIN_MASTER_KEY;
+      if (!expectedKey || !masterKey || masterKey !== expectedKey) {
+        storage.createSecurityLog({ eventType: "unauthorized_admin_creation", ip: (req.ip || "").replace(/^::ffff:/, ""), userEmail: email, action: "master_key_invalid", details: "Tentative de création admin sans clé maître" }).catch(() => {});
+        return res.status(403).json({ message: "Clé maître requise pour créer un administrateur" });
+      }
+
+      // Limite stricte : maximum 3 admins simultanés
+      const allAdmins = await db.select({ id: admins.id }).from(admins);
+      if (allAdmins.length >= 3) {
+        return res.status(403).json({ message: "Nombre maximum d'administrateurs atteint (3). Supprimez un compte existant d'abord." });
+      }
+
+      if (password.length < 10) return res.status(400).json({ message: "Mot de passe trop court (10 caractères minimum)" });
       const existing = await storage.getAdminByEmail(email);
       if (existing) return res.status(400).json({ message: "Un compte admin avec cet email existe déjà" });
       const passwordHash = await bcrypt.hash(password, 10);
