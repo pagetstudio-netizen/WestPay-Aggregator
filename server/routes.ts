@@ -629,6 +629,22 @@ export async function registerRoutes(
     return base;
   })();
 
+  // Pays autorisés pour la connexion marchand (Afrique de l'Ouest + Centrale uniquement)
+  const ALLOWED_MERCHANT_COUNTRIES = new Set([
+    // Afrique de l'Ouest
+    "Togo", "Benin", "Ivory Coast", "Côte d'Ivoire", "Senegal", "Mali",
+    "Burkina Faso", "Ghana", "Nigeria", "Guinea", "Niger", "Mauritania",
+    "Sierra Leone", "Liberia", "Cape Verde", "Gambia", "Guinea-Bissau",
+    // Afrique Centrale
+    "Cameroon", "Democratic Republic of the Congo", "Republic of the Congo",
+    "Congo", "Gabon", "Chad", "Central African Republic", "Equatorial Guinea",
+    "São Tomé and Príncipe", "Angola", "Rwanda", "Burundi",
+  ]);
+
+  // Cache géo pour le login marchand (évite de surcharger ip-api.com)
+  const geoLoginCache = new Map<string, { country: string; ts: number }>();
+  const GEO_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 heures par IP
+
   // Helper : extrait le hostname d'une Origin ou Referer (strict, pas de startsWith)
   function parseHost(headerValue: string): string | null {
     try {
@@ -718,6 +734,28 @@ export async function registerRoutes(
       if (isBlocked) {
         storage.createSecurityLog({ eventType: "blocked_access", ip: clientIp, userEmail: email, action: "ip_blocked_login", details: "blocked_ips check" }).catch(() => {});
         return res.status(403).json({ message: "Accès refusé" });
+      }
+
+      // Restriction géographique — login marchand réservé à l'Afrique de l'Ouest et Centrale
+      const isLocalIp = clientIp === "127.0.0.1" || clientIp === "::1" || clientIp.startsWith("192.168.") || clientIp.startsWith("10.");
+      if (!isLocalIp) {
+        let geoCountry = "";
+        const cached = geoLoginCache.get(clientIp);
+        if (cached && Date.now() - cached.ts < GEO_CACHE_TTL) {
+          geoCountry = cached.country;
+        } else {
+          const geo = await getGeoInfo(clientIp).catch(() => null);
+          geoCountry = geo?.country || "";
+          if (geoCountry) geoLoginCache.set(clientIp, { country: geoCountry, ts: Date.now() });
+        }
+
+        if (geoCountry && !ALLOWED_MERCHANT_COUNTRIES.has(geoCountry)) {
+          // Auto-bloquer l'IP immédiatement + log + Telegram
+          storage.addBlockedIp({ ipAddress: clientIp, reason: `Zone géographique non autorisée: ${geoCountry}`, blockedBy: "système" }).catch(() => {});
+          storage.createSecurityLog({ eventType: "geo_blocked", ip: clientIp, userEmail: email, action: "country_not_allowed", details: `${geoCountry} — tentative login marchand` }).catch(() => {});
+          notifyAdminCountryBlocked({ ip: clientIp, country: geoCountry, email }).catch(() => {});
+          return res.status(403).json({ message: "Ce service n'est pas disponible dans votre région." });
+        }
       }
 
       // Bloquer les bots / scripts automatisés (double-check au niveau de la route)
