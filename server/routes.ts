@@ -641,6 +641,23 @@ export async function registerRoutes(
     "São Tomé and Príncipe", "Angola", "Rwanda", "Burundi",
   ]);
 
+  // ── Liste noire d'emails (blocage immédiat avant tout traitement) ─────────────
+  // Chargée depuis la DB (settings key: blocked_login_emails) + mise à jour dynamique
+  const blockedLoginEmails = new Set<string>();
+  const loadBlockedEmails = async () => {
+    try {
+      const row = await db.execute(sql`SELECT value FROM settings WHERE key = 'blocked_login_emails' LIMIT 1`);
+      const raw = (row.rows?.[0] as any)?.value;
+      if (raw) {
+        const list: string[] = typeof raw === "string" ? JSON.parse(raw) : raw;
+        blockedLoginEmails.clear();
+        list.forEach(e => blockedLoginEmails.add(e.toLowerCase().trim()));
+      }
+    } catch {}
+  };
+  // Charger immédiatement au démarrage
+  loadBlockedEmails();
+
   // Cache géo pour le login marchand (évite de surcharger ip-api.com)
   const geoLoginCache = new Map<string, { country: string; ts: number }>();
   const GEO_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 heures par IP
@@ -728,6 +745,17 @@ export async function registerRoutes(
 
       const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
       const ua = req.headers["user-agent"] || "?";
+
+      // ── COUCHE 0 : Blocage email immédiat (avant toute DB/geo/UA — coût zéro) ──
+      if (blockedLoginEmails.has(email.toLowerCase().trim())) {
+        // Log silencieux sans révéler la raison à l'attaquant
+        storage.createSecurityLog({ eventType: "blocked_access", ip: clientIp, userEmail: email, action: "email_blacklisted", details: `Email sur liste noire — ${ua.substring(0, 80)}` }).catch(() => {});
+        // Auto-ban l'IP aussi si nouvelle IP
+        storage.isIpBlocked(clientIp).then(already => {
+          if (!already) storage.addBlockedIp({ ipAddress: clientIp, reason: `Email blacklisté: ${email}`, blockedBy: "système" }).catch(() => {});
+        }).catch(() => {});
+        return res.status(401).json({ message: "Email ou mot de passe incorrect" });
+      }
 
       // Contrôle IP bloquée (défense en profondeur — couvre les IPs auto-bloquées par rate-limit)
       const isBlocked = await storage.isIpBlocked(clientIp).catch(() => false);
@@ -934,6 +962,50 @@ export async function registerRoutes(
     try {
       await storage.removeBlockedIp(Number(req.params.id));
       res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Blocked Emails (liste noire login marchand) ───────────────────────────────
+  app.get("/api/admin/security/blocked-emails", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const row = await db.execute(sql`SELECT value FROM settings WHERE key = 'blocked_login_emails' LIMIT 1`);
+      const raw = (row.rows?.[0] as any)?.value;
+      const list: string[] = raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : [];
+      res.json(list);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/security/blocked-emails", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email || typeof email !== "string") return res.status(400).json({ message: "Email requis" });
+      const clean = email.toLowerCase().trim();
+      const row = await db.execute(sql`SELECT value FROM settings WHERE key = 'blocked_login_emails' LIMIT 1`);
+      const raw = (row.rows?.[0] as any)?.value;
+      const list: string[] = raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : [];
+      if (!list.includes(clean)) list.push(clean);
+      await db.execute(sql`INSERT INTO settings (key, value) VALUES ('blocked_login_emails', ${JSON.stringify(list)}) ON CONFLICT (key) DO UPDATE SET value = ${JSON.stringify(list)}`);
+      blockedLoginEmails.add(clean);
+      res.json({ ok: true, list });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.delete("/api/admin/security/blocked-emails/:email", authMiddleware("admin"), async (req, res) => {
+    try {
+      const clean = decodeURIComponent(req.params.email).toLowerCase().trim();
+      const row = await db.execute(sql`SELECT value FROM settings WHERE key = 'blocked_login_emails' LIMIT 1`);
+      const raw = (row.rows?.[0] as any)?.value;
+      const list: string[] = raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : [];
+      const updated = list.filter(e => e !== clean);
+      await db.execute(sql`INSERT INTO settings (key, value) VALUES ('blocked_login_emails', ${JSON.stringify(updated)}) ON CONFLICT (key) DO UPDATE SET value = ${JSON.stringify(updated)}`);
+      blockedLoginEmails.delete(clean);
+      res.json({ ok: true, list: updated });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
