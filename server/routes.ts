@@ -764,17 +764,27 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Accès refusé" });
       }
 
-      // Restriction géographique — login marchand réservé à l'Afrique de l'Ouest et Centrale
+      // Restriction géographique + blocage datacenter/VPS
       const isLocalIp = clientIp === "127.0.0.1" || clientIp === "::1" || clientIp.startsWith("192.168.") || clientIp.startsWith("10.");
       if (!isLocalIp) {
         let geoCountry = "";
+        let isDatacenter = false;
         const cached = geoLoginCache.get(clientIp);
         if (cached && Date.now() - cached.ts < GEO_CACHE_TTL) {
           geoCountry = cached.country;
+          isDatacenter = (cached as any).isHosting || false;
         } else {
           const geo = await getGeoInfo(clientIp).catch(() => null);
           geoCountry = geo?.country || "";
-          if (geoCountry) geoLoginCache.set(clientIp, { country: geoCountry, ts: Date.now() });
+          isDatacenter = geo?.isHosting || false;
+          if (geoCountry) geoLoginCache.set(clientIp, { country: geoCountry, ts: Date.now(), isHosting: isDatacenter } as any);
+        }
+
+        // Bloquer les IPs de datacenter / VPS / serveurs cloud (jamais un vrai marchand)
+        if (isDatacenter) {
+          storage.addBlockedIp({ ipAddress: clientIp, reason: `IP datacenter/VPS: ${geoCountry || "inconnu"}`, blockedBy: "système" }).catch(() => {});
+          storage.createSecurityLog({ eventType: "datacenter_blocked", ip: clientIp, userEmail: email, action: "hosting_ip_blocked", details: `Datacenter ${geoCountry || "?"} — ${ua.substring(0, 60)}` }).catch(() => {});
+          return res.status(403).json({ message: "Accès refusé" });
         }
 
         if (geoCountry && !ALLOWED_MERCHANT_COUNTRIES.has(geoCountry)) {
