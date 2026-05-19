@@ -423,6 +423,47 @@ export async function registerRoutes(
     }
   };
 
+  // ── Extraction IP réelle — résistante au spoofing X-Forwarded-For ────────────
+  // L'attaquant peut injecter de fausses IPs dans X-Forwarded-For (ex: 198.51.100.x)
+  // Cette fonction détecte les plages réservées/RFC-5737 et les marque comme spoofées.
+  function isReservedIp(ip: string): boolean {
+    if (!ip) return false;
+    // Plages IANA réservées qui ne peuvent jamais être de vraies IPs client publiques
+    // (incluant les plages privées utilisées pour contourner le check géo)
+    const reserved = [
+      /^0\./,                          // 0.0.0.0/8
+      /^10\./,                         // 10.0.0.0/8 — privé (spoofé pour bypass geo)
+      /^127\./,                        // loopback
+      /^169\.254\./,                   // link-local
+      /^172\.(1[6-9]|2\d|3[01])\./,   // 172.16.0.0/12 — privé (spoofé pour bypass geo)
+      /^192\.0\.2\./,                  // TEST-NET-1 (RFC 5737)
+      /^192\.168\./,                   // 192.168.0.0/16 — privé
+      /^198\.51\.100\./,               // TEST-NET-2 (RFC 5737) ← utilisé par l'attaquant
+      /^203\.0\.113\./,                // TEST-NET-3 (RFC 5737) ← utilisé par l'attaquant
+      /^224\./,                        // multicast
+      /^240\./,                        // réservé
+      /^255\.255\.255\.255$/,          // broadcast
+    ];
+    return reserved.some(r => r.test(ip));
+  }
+
+  function getClientIp(req: Request): string {
+    const raw = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+    // Si l'IP est dans une plage réservée (jamais légitime depuis Internet), c'est du spoofing
+    if (isReservedIp(raw)) return `SPOOFED:${raw}`;
+    return raw;
+  }
+
+  // ── Validation email — rejette les payloads d'injection ───────────────────────
+  function isValidEmailInput(email: unknown): email is string {
+    if (typeof email !== "string") return false;
+    if (email.length > 254) return false;
+    // Rejette tout ce qui ressemble à du JSON, NoSQL injection, ou script
+    if (/[{}<>$]/.test(email)) return false;
+    // Validation basique format email
+    return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
+  }
+
   // ── Helpers sécurité ─────────────────────────────────────────────────────────
   function parseUa(ua: string): { browser: string; os: string } {
     const browser = ua.includes("Firefox") ? "Firefox" : ua.includes("Edg") ? "Edge" : ua.includes("Chrome") ? "Chrome" : ua.includes("Safari") ? "Safari" : "Autre";
@@ -451,11 +492,24 @@ export async function registerRoutes(
   app.post("/api/auth/admin/login", async (req, res) => {
     try {
       const { email, password } = req.body;
-      if (!email || !password) return res.status(400).json({ message: "Email et mot de passe requis" });
+      // Validation stricte du format email — rejette injections JSON/NoSQL/script
+      if (!isValidEmailInput(email) || !password) return res.status(400).json({ message: "Email et mot de passe requis" });
 
-      const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+      const clientIp = getClientIp(req);
       const ua = req.headers["user-agent"] || "?";
       const fp = (req.headers["x-device-fp"] as string || "").trim();
+
+      // 0. Blocage immédiat : IP spoofée (plage réservée RFC 5737)
+      if (clientIp.startsWith("SPOOFED:")) {
+        storage.createSecurityLog({ eventType: "blocked_access", ip: clientIp, userEmail: email, action: "spoofed_ip_admin", details: `IP réservée injectée via X-Forwarded-For — ${ua.substring(0, 60)}` }).catch(() => {});
+        return res.status(403).json({ message: "Accès refusé" });
+      }
+
+      // 0b. Blocage email immédiat (liste noire en mémoire)
+      if (blockedLoginEmails.has(email.toLowerCase().trim())) {
+        storage.createSecurityLog({ eventType: "blocked_access", ip: clientIp, userEmail: email, action: "email_blacklisted_admin", details: `Email sur liste noire — admin login` }).catch(() => {});
+        return res.status(401).json({ message: "Identifiants invalides" });
+      }
 
       // 1. Check if IP is explicitly blocked
       const ipBlocked = await storage.isIpBlocked(clientIp);
@@ -741,12 +795,19 @@ export async function registerRoutes(
   app.post("/api/auth/merchant/login", async (req, res) => {
     try {
       const { email, password } = req.body;
-      if (!email || !password) return res.status(400).json({ message: "Email et mot de passe requis" });
+      // Validation stricte du format email — rejette injections JSON/NoSQL/script
+      if (!isValidEmailInput(email) || !password) return res.status(400).json({ message: "Email et mot de passe requis" });
 
-      const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+      const clientIp = getClientIp(req);
       const ua = req.headers["user-agent"] || "?";
 
-      // ── COUCHE 0 : Blocage email immédiat (avant toute DB/geo/UA — coût zéro) ──
+      // ── COUCHE 0a : IP spoofée (plage réservée RFC 5737 injectée dans X-Forwarded-For) ──
+      if (clientIp.startsWith("SPOOFED:")) {
+        storage.createSecurityLog({ eventType: "blocked_access", ip: clientIp, userEmail: email, action: "spoofed_ip_merchant", details: `IP réservée — ${ua.substring(0, 60)}` }).catch(() => {});
+        return res.status(403).json({ message: "Accès refusé" });
+      }
+
+      // ── COUCHE 0b : Blocage email immédiat (avant toute DB/geo/UA — coût zéro) ──
       if (blockedLoginEmails.has(email.toLowerCase().trim())) {
         // Log silencieux sans révéler la raison à l'attaquant
         storage.createSecurityLog({ eventType: "blocked_access", ip: clientIp, userEmail: email, action: "email_blacklisted", details: `Email sur liste noire — ${ua.substring(0, 80)}` }).catch(() => {});
