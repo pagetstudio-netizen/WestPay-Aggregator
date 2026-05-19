@@ -1184,9 +1184,14 @@ export function initTelegramBot(): Telegraf | null {
       const geo = await getGeoInfo(candidate);
 
       if (!geo.country || !AFRICAN_COUNTRIES.has(geo.country)) {
-        await ctx.reply(
-          `❌ Impossible — cette adresse IP vient de *${geo.country || "pays inconnu"}*, qui n'est pas en Afrique.\n\nSeules les IPs africaines peuvent être autorisées.`,
-          { parse_mode: "Markdown" }
+        await ctx.reply("❌fake ip 该IP地址无法添加到我们的白名单中。");
+        await alertAdminGroup(
+          `⚠️ *IP non africaine refusée*\n\n` +
+          `👤 Marchand : *${merchant.name}*\n` +
+          `🌐 IP : \`${candidate}\`\n` +
+          `📍 ${geo.city || "?"}${geo.country ? ", " + geo.country : " — pays inconnu"}\n` +
+          `🔌 ${geo.isp || "?"}\n\n` +
+          `❌ Impossible — cette IP vient de *${geo.country || "pays inconnu"}*, qui n'est pas en Afrique.`
         );
         return;
       }
