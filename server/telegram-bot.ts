@@ -1142,11 +1142,85 @@ export function initTelegramBot(): Telegraf | null {
   });
 
   // ─── Messages non reconnus (DM uniquement) ─────────────────────────────────
+  // ─── Détection IP dans les groupes marchands ────────────────────────────────
+  // Quand un marchand envoie une adresse IP dans son groupe, le bot la whitelist
+  // automatiquement si elle vient d'Afrique, sinon refuse.
+  const AFRICAN_COUNTRIES = new Set([
+    // Afrique de l'Ouest
+    "Togo", "Benin", "Ivory Coast", "Côte d'Ivoire", "Senegal", "Mali",
+    "Burkina Faso", "Ghana", "Nigeria", "Guinea", "Niger", "Mauritania",
+    "Sierra Leone", "Liberia", "Cape Verde", "Gambia", "Guinea-Bissau",
+    // Afrique Centrale
+    "Cameroon", "Democratic Republic of the Congo", "Republic of the Congo",
+    "Congo", "Gabon", "Chad", "Central African Republic", "Equatorial Guinea",
+    "São Tomé and Príncipe", "Angola", "Rwanda", "Burundi",
+    // Afrique de l'Est
+    "Kenya", "Tanzania", "Uganda", "Ethiopia", "Somalia", "Eritrea",
+    "Djibouti", "South Sudan", "Sudan", "Mozambique", "Madagascar",
+    "Comoros", "Seychelles", "Mauritius", "Zambia", "Zimbabwe",
+    "Malawi", "Botswana", "Namibia", "Lesotho", "Eswatini", "South Africa",
+    // Afrique du Nord
+    "Morocco", "Algeria", "Tunisia", "Libya", "Egypt",
+  ]);
+
+  const IP_REGEX = /^(\d{1,3}\.){3}\d{1,3}$/;
+
   bot.on("message", async (ctx) => {
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
-    if (isGroup) return;
-
     const chatId = String(ctx.chat.id);
+
+    if (isGroup) {
+      const merchant = await getMerchantForGroup(chatId);
+      if (!merchant) return;
+
+      const text = ("text" in ctx.message ? ctx.message.text : "") || "";
+      const candidate = text.trim();
+
+      if (!IP_REGEX.test(candidate)) return;
+
+      // Réponse immédiate en chinois
+      await ctx.reply("请稍等，我这就帮你添加。");
+
+      const geo = await getGeoInfo(candidate);
+
+      if (!geo.country || !AFRICAN_COUNTRIES.has(geo.country)) {
+        await ctx.reply(
+          `❌ Impossible — cette adresse IP vient de *${geo.country || "pays inconnu"}*, qui n'est pas en Afrique.\n\nSeules les IPs africaines peuvent être autorisées.`,
+          { parse_mode: "Markdown" }
+        );
+        return;
+      }
+
+      try {
+        await storage.addAllowedIp({
+          ipAddress: candidate,
+          userEmail: merchant.email,
+          role: "merchant",
+          country: geo.country,
+          city: geo.city || null,
+          note: `Ajouté via Telegram — ${merchant.name}`,
+          createdBy: `Telegram/${merchant.name}`,
+        });
+        await storage.createSecurityLog({
+          eventType: "ip_allowed",
+          ip: candidate,
+          action: "allowed_via_merchant_telegram",
+          details: `IP ajoutée par le marchand ${merchant.name} via Telegram — ${geo.city}, ${geo.country}`,
+        });
+        await ctx.reply("done ✅");
+        await alertAdminGroup(
+          `✅ *IP autorisée via Telegram marchand*\n\n` +
+          `👤 Marchand : *${merchant.name}*\n` +
+          `🌐 IP : \`${candidate}\`\n` +
+          `📍 ${geo.city}${geo.country ? ", " + geo.country : ""}\n` +
+          `🔌 ${geo.isp || "?"}`
+        );
+      } catch {
+        await ctx.reply("❌ Erreur lors de l'ajout. Contactez l'administrateur.");
+      }
+      return;
+    }
+
     const merchant = await storage.getMerchantByTelegramChatId(chatId);
     if (!merchant) {
       await ctx.reply("🔒 Ce bot est réservé aux marchands WestPay autorisés.\n\nSi vous êtes marchand, demandez votre code d'activation à votre administrateur.");
