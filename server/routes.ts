@@ -4406,7 +4406,6 @@ export async function registerRoutes(
         .where(eq(merchantCountries.id, fromMC.id));
 
       notifyAdminWalletTransfer({ id: transfer.id, merchantName: wtMerchantForFee?.name || `#${merchantId}`, fromCountry: fromMC.country, toCountry: toMC.country, amount: parsedAmount, fee, currency: fromZone, status: "pending" }).catch(() => {});
-      notifyMerchantWalletTransfer(merchantId, { id: transfer.id, fromCountry: fromMC.country, toCountry: toMC.country, amount: parsedAmount, fee, currency: fromZone, status: "pending" }).catch(() => {});
 
       res.json(transfer);
     } catch (err: any) {
@@ -4557,7 +4556,6 @@ export async function registerRoutes(
       }).catch(() => {
         notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, merchantEmail: merchant.email, merchantId, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "pending", mode: "auto", ip: wdRawIp }).catch(() => {});
       });
-      notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "pending" }).catch(() => {});
 
       const withdrawalFee = merchant.feeExempt ? 0 : calcWithdrawalFee(amount, mc.country);
       const netAmount = amount - withdrawalFee;
