@@ -3436,12 +3436,29 @@ export async function registerRoutes(
         return res.json({ status: "already_processed" });
       }
 
-      const wdMerchant = await storage.getMerchantById(withdrawal.merchantId);
       const wdFees = Math.round(parseFloat(String(payload.fee || 0)) || 0);
-
       const wdStatusLower = (payload.status || "").toLowerCase();
       const wdIsSuccess = ["successful", "success", "paid", "completed"].includes(wdStatusLower);
       const wdIsFailure = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(wdStatusLower);
+
+      // ── Protection anti-race-condition : mise à jour atomique ─────────────────
+      // Si deux callbacks Mbiyo arrivent simultanément, un seul peut passer cette
+      // clause WHERE status = 'pending'. L'autre recevra 0 lignes et sera ignoré.
+      if (wdIsSuccess || wdIsFailure) {
+        const newStatus = wdIsSuccess ? "approved" : "failed";
+        const locked = await pool.query(
+          `UPDATE withdrawals SET status = $1 WHERE id = $2 AND status = 'pending' RETURNING id`,
+          [newStatus, withdrawal.id]
+        );
+        if (locked.rowCount === 0) {
+          console.log(`[MBIYO PAYOUT CALLBACK] Retrait #${withdrawal.id} déjà traité (race condition évitée)`);
+          return res.json({ status: "already_processed" });
+        }
+        // Le verrou est acquis — continuer le traitement normalement
+        // (updateWithdrawalStatus mettra à jour les champs supplémentaires)
+      }
+
+      const wdMerchant = await storage.getMerchantById(withdrawal.merchantId);
 
       // Reconciliation : retrait marqué failed chez nous mais confirmé par Mbiyo
       if (withdrawal.status === "failed" && wdIsSuccess) {
@@ -4754,6 +4771,12 @@ export async function registerRoutes(
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
       if (w.status !== "pending") return res.status(400).json({ message: "Reversement deja traite" });
+      // ── PROTECTION ANTI-DOUBLE-ENVOI ──────────────────────────────────────────
+      // Si omnipayRef est déjà rempli, ce retrait a déjà été envoyé au prestataire
+      // (flow auto). Approuver à nouveau enverrait l'argent une deuxième fois.
+      if (w.omnipayRef) return res.status(400).json({
+        message: `Ce retrait est déjà en cours de traitement chez le prestataire (réf: ${w.omnipayRef}). Attendez la confirmation automatique.`
+      });
 
       const mc = await storage.getMerchantCountryById(w.merchantCountryId);
       const merchant = await storage.getMerchantById(w.merchantId);
