@@ -3040,6 +3040,7 @@ export async function registerRoutes(
               status: "confirmed",
               provider: "omnipay",
               omnipayTxId: payload.id || null,
+              omnipayReference: pending.omnipayReference || payload.reference || null,
               providerFee: payload.fees != null ? parseInt(String(payload.fees)) || 0 : 0,
             });
 
@@ -4551,6 +4552,27 @@ export async function registerRoutes(
       // Montant minimum pour Mbiyo (Mbiyo rejette les montants trop faibles)
       if (useMbiyoPayout && amount < 500) {
         return res.status(400).json({ message: "Le montant minimum de retrait est de 500 FCFA." });
+      }
+
+      // ── PROTECTION ANTI-DOUBLON ────────────────────────────────────────────────
+      // Bloquer si un retrait identique (même marchand + phone + montant + pays)
+      // est déjà en cours (pending) ou approuvé dans les dernières 2 heures.
+      // Évite les doubles envois quand le marchand relance rapidement après un échec.
+      const recentDuplicate = await pool.query(
+        `SELECT id, status, created_at FROM withdrawals
+         WHERE merchant_id = $1 AND phone = $2 AND amount = $3 AND country = $4
+           AND status IN ('pending', 'approved')
+           AND created_at > NOW() - INTERVAL '2 hours'
+         ORDER BY created_at DESC LIMIT 1`,
+        [merchantId, phone, amount, mc.country]
+      );
+      if (recentDuplicate.rowCount && recentDuplicate.rowCount > 0) {
+        const dup = recentDuplicate.rows[0];
+        const dupDate = new Date(dup.created_at).toLocaleString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+        return res.status(409).json({
+          message: `Un retrait identique (${amount} FCFA → ${phone}) est déjà ${dup.status === "approved" ? "approuvé" : "en cours"} depuis ${dupDate}. Attendez 2 heures avant de réessayer.`,
+          duplicateId: dup.id,
+        });
       }
 
       const w = await storage.createWithdrawal({
