@@ -186,6 +186,7 @@ function OverviewPanel({ token, onTabChange }: { token: string | null; onTabChan
 }
 
 function WalletPanel({ token }: { token: string | null }) {
+  const { t, lang } = useLanguage();
   const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
   const { data: cryptoBalances = [], isLoading: cryptoLoading } = useMerchantFetch("/api/merchant/crypto/balances", ["/api/merchant/crypto/balances"], token);
 
@@ -193,19 +194,20 @@ function WalletPanel({ token }: { token: string | null }) {
   const totalBalance = countries.reduce((sum, c) => sum + (c.balance || 0), 0);
   const cryptoList = cryptoBalances as { currency: string; balance: string }[];
   const hasCryptoBalance = cryptoList.some(c => parseFloat(c.balance) > 0);
+  const locale = lang === "pt" ? "pt-BR" : lang === "en" ? "en-US" : "fr-FR";
 
   return (
     <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full overflow-y-auto" style={{ background: "#e8eaed" }}>
       <div className="mb-5">
-        <h2 className="text-xl font-bold" style={{ color: "#1a1a1a" }}>Solde Wallet</h2>
-        <p className="text-xs mt-0.5" style={{ color: "#888" }}>Vue d'ensemble de vos soldes par pays</p>
+        <h2 className="text-xl font-bold" style={{ color: "#1a1a1a" }}>{t("walletTitle")}</h2>
+        <p className="text-xs mt-0.5" style={{ color: "#888" }}>{t("walletDesc")}</p>
       </div>
 
       {/* Total balance summary */}
       <div className="rounded-2xl p-5 mb-5 relative overflow-hidden" style={{ background: "linear-gradient(135deg,#1a237e,#3949ab)" }}>
-        <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: "rgba(255,255,255,0.65)" }}>Solde total consolidé</p>
+        <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: "rgba(255,255,255,0.65)" }}>{t("totalConsolidatedBalance")}</p>
         <p className="text-4xl font-black text-white leading-none mb-1" data-testid="text-wallet-total">
-          {balLoading ? "—" : totalBalance.toLocaleString("fr-FR")}
+          {balLoading ? "—" : totalBalance.toLocaleString(locale)}
         </p>
         <p className="text-sm font-semibold" style={{ color: "rgba(255,255,255,0.7)" }}>FCFA</p>
         <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-10 pointer-events-none">
@@ -215,7 +217,7 @@ function WalletPanel({ token }: { token: string | null }) {
 
       {/* Country balances */}
       <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-        Solde par pays — {countries.length}
+        {t("balanceByCountry")} — {countries.length}
       </p>
 
       {balLoading ? (
@@ -225,7 +227,7 @@ function WalletPanel({ token }: { token: string | null }) {
       ) : countries.length === 0 ? (
         <div className="bg-white rounded-2xl p-8 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
           <Wallet className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
-          <p className="text-sm" style={{ color: "#aaa" }}>Aucun pays configuré</p>
+          <p className="text-sm" style={{ color: "#aaa" }}>{t("noCountriesConfigured")}</p>
         </div>
       ) : (
         <div className="space-y-3 mb-5">
@@ -245,18 +247,18 @@ function WalletPanel({ token }: { token: string | null }) {
                   className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
                   style={{ background: c.active ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.25)", color: "white" }}
                 >
-                  {c.active ? "Actif" : "Désactivé"}
+                  {c.active ? t("active") : t("disabled")}
                 </span>
               </div>
               <div className="flex items-end justify-between">
                 <div>
                   <p className="text-3xl font-black text-white leading-none">
-                    {(c.balance ?? 0).toLocaleString("fr-FR")}
+                    {(c.balance ?? 0).toLocaleString(locale)}
                   </p>
                   <p className="text-xs font-semibold text-white/70 mt-0.5">{countryToCurrency(c.country)}</p>
                 </div>
                 {!c.active && (
-                  <p className="text-xs text-white/50 max-w-28 text-right">Pays désactivé</p>
+                  <p className="text-xs text-white/50 max-w-28 text-right">{t("countryDisabled")}</p>
                 )}
               </div>
             </div>
@@ -268,7 +270,7 @@ function WalletPanel({ token }: { token: string | null }) {
       {(hasCryptoBalance || cryptoLoading) && (
         <>
           <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-            Soldes Crypto
+            {t("cryptoBalances")}
           </p>
           {cryptoLoading ? (
             <div className="space-y-3">
@@ -296,81 +298,84 @@ function WalletPanel({ token }: { token: string | null }) {
 }
 
 function AnalysePanel({ token }: { token: string | null }) {
+  const { t, lang } = useLanguage();
   const { data: stats } = useMerchantFetch("/api/merchant/stats", ["/api/merchant/stats"], token);
   const { data: transactions = [], isLoading: txLoading } = useMerchantFetch("/api/merchant/transactions", ["/api/merchant/transactions"], token);
   const { data: balance = [] } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
 
   const allTx = transactions as (Transaction & { payerName?: string | null })[];
   const countries = balance as MerchantCountry[];
+  const locale = lang === "pt" ? "pt-BR" : lang === "en" ? "en-US" : "fr-FR";
+  const dateLocale = lang === "pt" ? "pt-BR" : lang === "en" ? "en-GB" : "fr-FR";
 
-  const confirmedTx = allTx.filter(t => t.status === "confirmed");
-  const pendingTx = allTx.filter(t => t.status === "pending");
-  const failedTx = allTx.filter(t => t.status === "failed");
-  const confirmedTotal = confirmedTx.reduce((s, t) => s + t.amount, 0);
+  const confirmedTx = allTx.filter(tx => tx.status === "confirmed");
+  const pendingTx = allTx.filter(tx => tx.status === "pending");
+  const failedTx = allTx.filter(tx => tx.status === "failed");
+  const confirmedTotal = confirmedTx.reduce((s, tx) => s + tx.amount, 0);
   const successRate = allTx.length > 0 ? Math.round((confirmedTx.length / allTx.length) * 100) : 0;
 
   const last7Days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (6 - i));
-    const label = d.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
-    const dayTx = confirmedTx.filter(t => {
-      const txDate = new Date(t.createdAt);
+    const label = d.toLocaleDateString(dateLocale, { day: "2-digit", month: "short" });
+    const dayTx = confirmedTx.filter(tx => {
+      const txDate = new Date(tx.createdAt);
       return txDate.toDateString() === d.toDateString();
     });
-    return { label, count: dayTx.length, volume: dayTx.reduce((s, t) => s + t.amount, 0) };
+    return { label, count: dayTx.length, volume: dayTx.reduce((s, tx) => s + tx.amount, 0) };
   });
 
   const maxVolume = Math.max(...last7Days.map(d => d.volume), 1);
 
   const countryStats = countries.map(c => ({
     country: c.country,
-    count: confirmedTx.filter(t => t.country === c.country).length,
-    volume: confirmedTx.filter(t => t.country === c.country).reduce((s, t) => s + t.amount, 0),
+    count: confirmedTx.filter(tx => tx.country === c.country).length,
+    volume: confirmedTx.filter(tx => tx.country === c.country).reduce((s, tx) => s + tx.amount, 0),
   })).filter(c => c.count > 0).sort((a, b) => b.volume - a.volume);
 
   return (
     <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full overflow-y-auto" style={{ background: "#e8eaed" }}>
       <div className="mb-5">
-        <h2 className="text-xl font-bold" style={{ color: "#1a1a1a" }}>Analyse</h2>
-        <p className="text-xs mt-0.5" style={{ color: "#888" }}>Performance et statistiques de vos paiements</p>
+        <h2 className="text-xl font-bold" style={{ color: "#1a1a1a" }}>{t("analyseTitle")}</h2>
+        <p className="text-xs mt-0.5" style={{ color: "#888" }}>{t("analyseDesc")}</p>
       </div>
 
       {/* KPI cards row */}
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Statistiques globales</p>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("globalStats")}</p>
       <div className="grid grid-cols-2 gap-3 mb-5">
         <div className="rounded-2xl p-4" style={{ background: "#1a237e" }} data-testid="card-analyse-total">
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Total</p>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("total")}</p>
           <p className="text-3xl font-black text-white">{allTx.length}</p>
-          <p className="text-xs text-white/60 mt-0.5">transactions</p>
+          <p className="text-xs text-white/60 mt-0.5">{t("transactionPlural")}</p>
         </div>
         <div className="rounded-2xl p-4" style={{ background: "#2e7d32" }} data-testid="card-analyse-success">
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Taux succès</p>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("successRate")}</p>
           <p className="text-3xl font-black text-white">{successRate}%</p>
-          <p className="text-xs text-white/60 mt-0.5">{confirmedTx.length} confirmées</p>
+          <p className="text-xs text-white/60 mt-0.5">{confirmedTx.length} {t("confirmedLabel")}</p>
         </div>
         <div className="rounded-2xl p-4 bg-white" style={{ border: "1.5px solid #e8ecf0" }} data-testid="card-analyse-volume">
-          <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: "#888" }}>Volume confirmé</p>
-          <p className="text-xl font-black" style={{ color: "#1a1a1a" }}>{confirmedTotal.toLocaleString("fr-FR")}</p>
+          <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: "#888" }}>{t("confirmedVolume")}</p>
+          <p className="text-xl font-black" style={{ color: "#1a1a1a" }}>{confirmedTotal.toLocaleString(locale)}</p>
           <p className="text-xs mt-0.5" style={{ color: "#aaa" }}>FCFA</p>
         </div>
         <div className="rounded-2xl p-4 bg-white" style={{ border: "1.5px solid #e8ecf0" }} data-testid="card-analyse-pending">
-          <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: "#888" }}>En attente</p>
+          <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: "#888" }}>{t("pending")}</p>
           <p className="text-3xl font-black" style={{ color: pendingTx.length > 0 ? "#fb8c00" : "#1a1a1a" }}>{pendingTx.length}</p>
-          <p className="text-xs mt-0.5" style={{ color: "#aaa" }}>transactions</p>
+          <p className="text-xs mt-0.5" style={{ color: "#aaa" }}>{t("transactionPlural")}</p>
         </div>
       </div>
 
       {/* Status breakdown */}
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Répartition des statuts</p>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("statusBreakdown")}</p>
       <div className="bg-white rounded-2xl p-4 mb-5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
         {allTx.length === 0 ? (
-          <p className="text-sm text-center py-2" style={{ color: "#aaa" }}>Aucune donnée</p>
+          <p className="text-sm text-center py-2" style={{ color: "#aaa" }}>{t("noData")}</p>
         ) : (
           <div className="space-y-3">
             {[
-              { label: "Confirmées", count: confirmedTx.length, color: "#00b050" },
-              { label: "En attente", count: pendingTx.length, color: "#fb8c00" },
-              { label: "Échouées", count: failedTx.length, color: "#e53935" },
+              { label: t("statusConfirmed"), count: confirmedTx.length, color: "#00b050" },
+              { label: t("statusPending"), count: pendingTx.length, color: "#fb8c00" },
+              { label: t("statusFailed"), count: failedTx.length, color: "#e53935" },
             ].map(s => (
               <div key={s.label}>
                 <div className="flex items-center justify-between mb-1">
@@ -393,7 +398,7 @@ function AnalysePanel({ token }: { token: string | null }) {
       </div>
 
       {/* 7-day chart */}
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Volume 7 derniers jours</p>
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("last7daysVolume")}</p>
       <div className="bg-white rounded-2xl p-4 mb-5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
         {txLoading ? (
           <Skeleton className="h-24 w-full" />
@@ -416,7 +421,7 @@ function AnalysePanel({ token }: { token: string | null }) {
       {/* Performance by country */}
       {countryStats.length > 0 && (
         <>
-          <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Performance par pays</p>
+          <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("performanceByCountry")}</p>
           <div className="space-y-2">
             {countryStats.map((c, idx) => (
               <div key={c.country} className="bg-white rounded-2xl p-4 flex items-center justify-between shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
@@ -426,11 +431,11 @@ function AnalysePanel({ token }: { token: string | null }) {
                   </div>
                   <div>
                     <p className="text-sm font-bold" style={{ color: "#1a1a1a" }}>{c.country}</p>
-                    <p className="text-xs" style={{ color: "#888" }}>{c.count} transaction{c.count > 1 ? "s" : ""}</p>
+                    <p className="text-xs" style={{ color: "#888" }}>{c.count} {c.count > 1 ? t("transactionPlural") : t("transactionSingular")}</p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-black" style={{ color: "#00b050" }}>{c.volume.toLocaleString("fr-FR")}</p>
+                  <p className="text-sm font-black" style={{ color: "#00b050" }}>{c.volume.toLocaleString(locale)}</p>
                   <p className="text-xs" style={{ color: "#aaa" }}>FCFA</p>
                 </div>
               </div>
@@ -440,16 +445,16 @@ function AnalysePanel({ token }: { token: string | null }) {
       )}
 
       {/* Today / yesterday */}
-      <p className="text-xs font-bold uppercase tracking-widest mt-5 mb-3" style={{ color: "#888" }}>Aujourd'hui & hier</p>
+      <p className="text-xs font-bold uppercase tracking-widest mt-5 mb-3" style={{ color: "#888" }}>{t("todayAndYesterday")}</p>
       <div className="grid grid-cols-2 gap-3">
         <div className="rounded-2xl p-4" style={{ background: "#ef5350" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Aujourd'hui</p>
-          <p className="text-2xl font-black text-white">{(stats?.todayVolume || 0).toLocaleString("fr-FR")}</p>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("today")}</p>
+          <p className="text-2xl font-black text-white">{(stats?.todayVolume || 0).toLocaleString(locale)}</p>
           <p className="text-xs text-white/60">FCFA</p>
         </div>
         <div className="rounded-2xl p-4" style={{ background: "#7e57c2" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Hier</p>
-          <p className="text-2xl font-black text-white">{(stats?.yesterdayVolume || 0).toLocaleString("fr-FR")}</p>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("yesterday")}</p>
+          <p className="text-2xl font-black text-white">{(stats?.yesterdayVolume || 0).toLocaleString(locale)}</p>
           <p className="text-xs text-white/60">FCFA</p>
         </div>
       </div>
@@ -3943,10 +3948,10 @@ export default function MerchantDashboard() {
               <Menu className="w-5 h-5" />
             </button>
             <span className="text-base font-bold text-white tracking-wide">
-              {activeTab === "overview" ? "Overview"
-                : activeTab === "wallet" ? "Solde wallet"
-                : activeTab === "analyse" ? "Analyse"
-                : activeTab === "transactions" ? "Transactions"
+              {activeTab === "overview" ? t("overview")
+                : activeTab === "wallet" ? t("walletTitle")
+                : activeTab === "analyse" ? t("analyseTitle")
+                : activeTab === "transactions" ? t("transactions")
                 : activeTab === "virements" ? t("transfers")
                 : activeTab === "reversements" ? t("withdrawals")
                 : activeTab === "paymentlinks" ? t("paymentlinks")
@@ -3960,6 +3965,8 @@ export default function MerchantDashboard() {
           </div>
 
           <div className="flex items-center gap-1">
+            {/* Language selector */}
+            <LanguageDropdown />
             {/* Help / Info */}
             <button
               className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors hover:bg-white/15"

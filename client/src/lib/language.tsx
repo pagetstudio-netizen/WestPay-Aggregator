@@ -285,6 +285,32 @@ const translations: Record<Lang, Record<string, string>> = {
     yourLinks: "Vos liens",
     expired: "Expiré",
     unlimited: "Illimité",
+
+    // Wallet panel
+    walletTitle: "Solde Wallet",
+    walletDesc: "Vue d'ensemble de vos soldes par pays",
+    totalConsolidatedBalance: "Solde total consolidé",
+    noCountriesConfigured: "Aucun pays configuré",
+    countryDisabled: "Pays désactivé",
+    cryptoBalances: "Soldes Crypto",
+    disabled: "Désactivé",
+
+    // Analyse panel
+    analyseTitle: "Analyse",
+    analyseDesc: "Performance et statistiques de vos paiements",
+    globalStats: "Statistiques globales",
+    successRate: "Taux succès",
+    confirmedVolume: "Volume confirmé",
+    statusBreakdown: "Répartition des statuts",
+    statusConfirmed: "Confirmées",
+    statusPending: "En attente",
+    statusFailed: "Échouées",
+    last7daysVolume: "Volume 7 derniers jours",
+    performanceByCountry: "Performance par pays",
+    todayAndYesterday: "Aujourd'hui & hier",
+    transactionSingular: "transaction",
+    transactionPlural: "transactions",
+    confirmedLabel: "confirmées",
   },
 
   en: {
@@ -563,6 +589,32 @@ const translations: Record<Lang, Record<string, string>> = {
     yourLinks: "Your links",
     expired: "Expired",
     unlimited: "Unlimited",
+
+    // Wallet panel
+    walletTitle: "Wallet Balance",
+    walletDesc: "Overview of your balances by country",
+    totalConsolidatedBalance: "Total consolidated balance",
+    noCountriesConfigured: "No countries configured",
+    countryDisabled: "Country disabled",
+    cryptoBalances: "Crypto Balances",
+    disabled: "Disabled",
+
+    // Analyse panel
+    analyseTitle: "Analytics",
+    analyseDesc: "Payment performance and statistics",
+    globalStats: "Global statistics",
+    successRate: "Success rate",
+    confirmedVolume: "Confirmed volume",
+    statusBreakdown: "Status breakdown",
+    statusConfirmed: "Confirmed",
+    statusPending: "Pending",
+    statusFailed: "Failed",
+    last7daysVolume: "Volume over last 7 days",
+    performanceByCountry: "Performance by country",
+    todayAndYesterday: "Today & yesterday",
+    transactionSingular: "transaction",
+    transactionPlural: "transactions",
+    confirmedLabel: "confirmed",
   },
 
   pt: {
@@ -841,6 +893,32 @@ const translations: Record<Lang, Record<string, string>> = {
     yourLinks: "Seus links",
     expired: "Expirado",
     unlimited: "Ilimitado",
+
+    // Wallet panel
+    walletTitle: "Saldo Wallet",
+    walletDesc: "Visão geral dos seus saldos por país",
+    totalConsolidatedBalance: "Saldo total consolidado",
+    noCountriesConfigured: "Nenhum país configurado",
+    countryDisabled: "País desativado",
+    cryptoBalances: "Saldos Cripto",
+    disabled: "Desativado",
+
+    // Analyse panel
+    analyseTitle: "Análise",
+    analyseDesc: "Desempenho e estatísticas dos seus pagamentos",
+    globalStats: "Estatísticas globais",
+    successRate: "Taxa de sucesso",
+    confirmedVolume: "Volume confirmado",
+    statusBreakdown: "Distribuição de estados",
+    statusConfirmed: "Confirmadas",
+    statusPending: "Pendentes",
+    statusFailed: "Falhas",
+    last7daysVolume: "Volume últimos 7 dias",
+    performanceByCountry: "Desempenho por país",
+    todayAndYesterday: "Hoje & ontem",
+    transactionSingular: "transação",
+    transactionPlural: "transações",
+    confirmedLabel: "confirmadas",
   },
 };
 
@@ -857,7 +935,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(() => {
     const saved = localStorage.getItem("westpay_lang");
     if (saved === "fr" || saved === "en" || saved === "pt") return saved;
-    return "fr";
+    return "en";
   });
 
   const setLang = (newLang: Lang) => {
