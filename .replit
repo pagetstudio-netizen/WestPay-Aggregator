@@ -45,6 +45,9 @@ waitForPort = 5000
 [userenv]
 
 [userenv.shared]
+PORT = "5000"
+NODE_ENV = "development"
+XOF_PER_USD = "600"
 
 [postMerge]
 path = "scripts/post-merge.sh"
