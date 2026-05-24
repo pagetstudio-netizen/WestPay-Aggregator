@@ -4393,12 +4393,7 @@ function NavItem({
         <img
           src={img}
           alt={label}
-          className="w-5 h-5 object-contain transition-all duration-150"
-          style={{
-            filter: active
-              ? "brightness(0) invert(1)"
-              : "brightness(0) saturate(0%) opacity(55%)",
-          }}
+          className="w-5 h-5 object-contain"
         />
       </div>
       {!collapsed && (
