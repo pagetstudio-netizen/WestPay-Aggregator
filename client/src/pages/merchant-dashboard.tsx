@@ -21,7 +21,8 @@ import {
   Copy, Globe, DollarSign, Hash, TrendingUp, Search, RefreshCw, BookOpen, Lock, ExternalLink,
   Webhook, Send, CheckCircle2, XCircle, Clock, ArrowUpRight, Zap, Link, QrCode, Eye, EyeOff,
   Trash2, Plus, ToggleLeft, ToggleRight, Edit3, BarChart3, MessageCircle, Phone, Receipt, User, Calendar, CreditCard, Filter,
-  Bell, Mail, HelpCircle, Power, Menu, X, ChevronLeft, ChevronRight, Bitcoin, Share2
+  Bell, Mail, HelpCircle, Power, Menu, X, ChevronLeft, ChevronRight, Bitcoin, Share2,
+  Shield, Building2, AlertCircle
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry, Withdrawal } from "@shared/schema";
@@ -1499,24 +1500,49 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
   const pendingCount = (withdrawalList as Withdrawal[]).filter(w => w.status === "pending").length;
 
   return (
-    <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
-      <h2 className="text-xl font-bold mb-5" style={{ color: "#333" }}>{t("withdrawalsTitle")}</h2>
-
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("summary")}</p>
-      <div className="grid grid-cols-2 gap-3 mb-6">
-        <div className="rounded-xl p-4" style={{ background: "#26a69a" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("totalWithdrawn")}</p>
-          <p className="text-2xl font-bold text-white">{totalWithdrawn.toLocaleString("fr-FR")}<span className="text-sm ml-1 text-white/80">FCFA</span></p>
+    <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#f2f3f5" }}>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h2 className="text-xl font-bold" style={{ color: "#1a1a1a" }}>{t("withdrawalsTitle")}</h2>
+          <p className="text-xs mt-0.5" style={{ color: "#888" }}>Demandez un reversement vers votre compte mobile money</p>
         </div>
-        <div className="rounded-xl p-4" style={{ background: pendingCount > 0 ? "#fb8c00" : "#7e57c2" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("pending")}</p>
-          <p className="text-2xl font-bold text-white">{pendingCount}</p>
+        <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: "#00b050" }}>
+          <Download className="w-5 h-5 text-white" />
         </div>
       </div>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("requestWithdrawal")}</p>
-      <div className="bg-white rounded-2xl p-5 mb-6 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-        <div className="space-y-5">
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        <div className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "#e8f5e9" }}>
+              <Download className="w-3.5 h-3.5" style={{ color: "#00b050" }} />
+            </div>
+            <p className="text-xs font-semibold" style={{ color: "#888" }}>{t("totalWithdrawn")}</p>
+          </div>
+          <p className="text-xl font-bold" style={{ color: "#1a1a1a" }}>{totalWithdrawn.toLocaleString("fr-FR")}<span className="text-sm ml-1 font-semibold" style={{ color: "#aaa" }}>F</span></p>
+        </div>
+        <div className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: pendingCount > 0 ? "#fff8e1" : "#f3e5f5" }}>
+              <Clock className="w-3.5 h-3.5" style={{ color: pendingCount > 0 ? "#f59e0b" : "#9c27b0" }} />
+            </div>
+            <p className="text-xs font-semibold" style={{ color: "#888" }}>{t("pending")}</p>
+          </div>
+          <p className="text-xl font-bold" style={{ color: "#1a1a1a" }}>{pendingCount}</p>
+        </div>
+      </div>
+
+      {/* Form card */}
+      <div className="bg-white rounded-2xl overflow-hidden mb-5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+        <div className="px-5 py-4 flex items-center gap-2.5" style={{ borderBottom: "1px solid #f5f5f5" }}>
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#e8f5e9" }}>
+            <Send className="w-4 h-4" style={{ color: "#00b050" }} />
+          </div>
+          <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>{t("requestWithdrawal")}</span>
+        </div>
+        <div className="p-5 space-y-5">
           <div>
             <p className="text-sm font-bold mb-3" style={{ color: "#333" }}>
               <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs mr-2" style={{ background: "#00b050" }}>1</span>
@@ -1682,39 +1708,70 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
         </div>
       </div>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-        {t("withdrawalHistory")} — {(withdrawalList as Withdrawal[]).length}
-      </p>
-      <div className="space-y-3">
+      {/* History */}
+      <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+        <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: "1px solid #f5f5f5" }}>
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#e3f2fd" }}>
+              <BarChart3 className="w-4 h-4" style={{ color: "#1976d2" }} />
+            </div>
+            <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>{t("withdrawalHistory")}</span>
+          </div>
+          <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "#f0f4ff", color: "#3949ab" }}>
+            {(withdrawalList as Withdrawal[]).length}
+          </span>
+        </div>
         {wdLoading ? (
-          [1,2,3].map(i => <Skeleton key={i} className="h-20 w-full rounded-2xl" />)
+          <div className="p-4 space-y-3">
+            {[1,2,3].map(i => <Skeleton key={i} className="h-16 w-full rounded-xl" />)}
+          </div>
         ) : (withdrawalList as Withdrawal[]).length === 0 ? (
-          <div className="bg-white rounded-2xl p-6 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-            <Download className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
-            <p className="text-sm" style={{ color: "#aaa" }}>{t("noWithdrawals")}</p>
+          <div className="p-10 text-center">
+            <div className="w-12 h-12 rounded-2xl mx-auto mb-3 flex items-center justify-center" style={{ background: "#f5f5f5" }}>
+              <Download className="w-6 h-6" style={{ color: "#ccc" }} />
+            </div>
+            <p className="text-sm font-medium mb-1" style={{ color: "#888" }}>{t("noWithdrawals")}</p>
+            <p className="text-xs" style={{ color: "#bbb" }}>Vos demandes de reversement apparaîtront ici</p>
           </div>
         ) : (
-          (withdrawalList as Withdrawal[]).map((w) => (
-            <div key={w.id} className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }} data-testid={`withdrawal-row-${w.id}`}>
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <p className="text-lg font-bold" style={{ color: "#1a1a1a" }}>{w.amount.toLocaleString("fr-FR")} <span className="text-sm font-semibold" style={{ color: "#888" }}>{countryToCurrency(w.country)}</span></p>
-                <StatusPill status={w.status} />
-              </div>
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: "#888" }}>
-                <span className="font-medium" style={{ color: "#555" }}>{w.country}</span>
-                {(w as any).operator && <span style={{ color: "#1e88e5", fontWeight: 600 }}>{(w as any).operator}</span>}
-                {(w as any).recipientName && <span className="font-medium" style={{ color: "#333" }}><User className="w-3 h-3 inline mr-0.5" />{(w as any).recipientName}</span>}
-                <span><Phone className="w-3 h-3 inline mr-0.5" />{w.phone}</span>
-                <span>{new Date(w.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" })}</span>
-                <span className="px-1.5 py-0.5 rounded-full text-xs" style={{ background: "#f0f0f0", color: "#666" }}>{w.withdrawalMode === "auto" ? t("autoMode") : t("manualMode")}</span>
-              </div>
-              {w.adminNote && (
-                <p className="text-xs mt-2 px-2 py-1 rounded-lg italic" style={{ background: "#f8f9fa", color: "#666" }}>
-                  {t("adminNote")} : {w.adminNote}
-                </p>
-              )}
-            </div>
-          ))
+          <div className="divide-y" style={{ borderColor: "#f5f5f5" }}>
+            {(withdrawalList as Withdrawal[]).map((w) => {
+              const statusConfig = w.status === "approved"
+                ? { bg: "#e8f5e9", color: "#2e7d32", label: "Approuvé" }
+                : w.status === "rejected"
+                ? { bg: "#fce4ec", color: "#ad1457", label: "Refusé" }
+                : { bg: "#fff8e1", color: "#e65100", label: "En attente" };
+              return (
+                <div key={w.id} className="px-5 py-4" data-testid={`withdrawal-row-${w.id}`}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0" style={{ background: "#f5f6f8" }}>
+                      <Download className="w-5 h-5" style={{ color: "#888" }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2 mb-0.5">
+                        <p className="font-bold text-sm" style={{ color: "#1a1a1a" }}>
+                          {w.amount.toLocaleString("fr-FR")} <span className="font-semibold text-xs" style={{ color: "#888" }}>{countryToCurrency(w.country)}</span>
+                        </p>
+                        <span className="text-xs px-2 py-0.5 rounded-full font-semibold shrink-0" style={{ background: statusConfig.bg, color: statusConfig.color }}>{statusConfig.label}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs" style={{ color: "#888" }}>
+                        <span className="font-medium" style={{ color: "#555" }}>{w.country}</span>
+                        {(w as any).operator && <span style={{ color: "#1e88e5", fontWeight: 600 }}>{(w as any).operator}</span>}
+                        {(w as any).recipientName && <span><User className="w-3 h-3 inline mr-0.5" />{(w as any).recipientName}</span>}
+                        <span><Phone className="w-3 h-3 inline mr-0.5" />{w.phone}</span>
+                        <span>{new Date(w.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</span>
+                      </div>
+                      {w.adminNote && (
+                        <p className="text-xs mt-1.5 px-2.5 py-1.5 rounded-lg italic" style={{ background: "#fffbea", color: "#78350f", border: "1px solid #fef3c7" }}>
+                          💬 {w.adminNote}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>
@@ -2034,12 +2091,27 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
   const { user, logout } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const [activeTab, setActiveTab] = useState<"info" | "password" | "support">("info");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew, setShowNew] = useState(false);
   const [isChanging, setIsChanging] = useState(false);
+
+  const { data: contacts } = useQuery<{
+    telegram1: string; telegram2: string;
+    whatsapp1: string; whatsapp2: string; hours: string; hours2: string;
+  }>({
+    queryKey: ["/api/public/support-contacts"],
+    staleTime: 5 * 60 * 1000,
+  });
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (newPassword !== confirmPassword) {
+      toast({ title: "Les mots de passe ne correspondent pas", variant: "destructive" }); return;
+    }
     setIsChanging(true);
     try {
       const res = await fetch("/api/merchant/change-password", {
@@ -2049,91 +2121,304 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || t("error")); }
       toast({ title: t("passwordChanged") });
-      setCurrentPassword(""); setNewPassword("");
+      setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
     } catch (err: any) {
       toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" });
     } finally { setIsChanging(false); }
   };
 
-  return (
-    <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
-      <h2 className="text-xl font-bold mb-5" style={{ color: "#333" }}>{t("settingsTitle")}</h2>
+  const tabs = [
+    { key: "info" as const, label: "Informations personnelles", icon: User },
+    { key: "password" as const, label: "Mot de passe", icon: Shield },
+    { key: "support" as const, label: "Contacts SAV", icon: MessageCircle },
+  ];
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("myProfile")}</p>
-      <div className="bg-white rounded-2xl p-5 mb-5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-        <div className="flex items-center gap-4 mb-4">
-          <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-bold text-white shrink-0" style={{ background: "#1976d2" }}>
+  return (
+    <div className="-m-4 md:-m-6 min-h-full" style={{ background: "#f2f3f5" }}>
+
+      {/* Profile hero */}
+      <div className="px-5 pt-6 pb-5" style={{ background: "#fff", borderBottom: "1px solid #f0f0f0" }}>
+        <div className="flex items-center gap-4">
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold text-white shrink-0 shadow-sm" style={{ background: "linear-gradient(135deg, #00b050 0%, #00852e 100%)" }}>
             {user?.name?.charAt(0)?.toUpperCase() || "M"}
           </div>
-          <div>
-            <p className="text-lg font-bold" style={{ color: "#1a1a1a" }}>{user?.name}</p>
-            <p className="text-sm" style={{ color: "#888" }}>{user?.email}</p>
+          <div className="flex-1 min-w-0">
+            <p className="text-lg font-bold leading-tight truncate" style={{ color: "#1a1a1a" }}>{user?.name}</p>
+            <p className="text-sm mt-0.5 truncate" style={{ color: "#888" }}>{user?.email}</p>
+            <div className="flex gap-1.5 mt-2">
+              <span className="text-xs px-2.5 py-0.5 rounded-full font-semibold" style={{ background: "#e8f5e9", color: "#2e7d32" }}>Marchand</span>
+              <span className="text-xs px-2.5 py-0.5 rounded-full font-semibold" style={{ background: "#e3f2fd", color: "#1565c0" }}>Actif</span>
+            </div>
           </div>
-        </div>
-        <div className="flex gap-2">
-          <span className="text-xs px-3 py-1 rounded-full font-semibold" style={{ background: "#e8f5e9", color: "#2e7d32" }}>{t("merchant")}</span>
-          <span className="text-xs px-3 py-1 rounded-full font-semibold" style={{ background: "#e3f2fd", color: "#1565c0" }}>{t("statusActive")}</span>
         </div>
       </div>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("security")}</p>
-      <div className="bg-white rounded-2xl p-5 mb-5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-        <p className="text-sm font-bold mb-4" style={{ color: "#1a1a1a" }}>{t("changePassword")}</p>
-        <form onSubmit={handleChangePassword} className="space-y-3">
-          <div>
-            <label className="block text-xs font-semibold mb-1.5" style={{ color: "#555" }}>{t("currentPassword")}</label>
-            <input
-              type="password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              required
-              className="w-full rounded-xl px-4 py-2.5 text-sm outline-none"
-              style={{ border: "1.5px solid #e2e8f0", background: "#f9fafb", color: "#1a1a1a" }}
-              data-testid="input-merchant-current-password"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold mb-1.5" style={{ color: "#555" }}>{t("newPassword")}</label>
-            <input
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              required
-              className="w-full rounded-xl px-4 py-2.5 text-sm outline-none"
-              style={{ border: "1.5px solid #e2e8f0", background: "#f9fafb", color: "#1a1a1a" }}
-              data-testid="input-merchant-new-password"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={isChanging}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold"
-            style={{ background: "#00b050", color: "#fff", border: "none" }}
-            data-testid="button-merchant-change-password"
-          >
-            {isChanging ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            {t("changePassword")}
-          </button>
-        </form>
+      {/* Tab navigation */}
+      <div className="px-4 pt-4 pb-0">
+        <div className="flex gap-1 p-1 rounded-2xl" style={{ background: "#e8ecf0" }}>
+          {tabs.map(tab => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className="flex-1 flex flex-col items-center gap-1 py-2.5 px-1 rounded-xl text-xs font-semibold transition-all"
+                style={{
+                  background: activeTab === tab.key ? "#fff" : "transparent",
+                  color: activeTab === tab.key ? "#00b050" : "#888",
+                  boxShadow: activeTab === tab.key ? "0 1px 4px rgba(0,0,0,0.08)" : "none",
+                }}
+                data-testid={`tab-settings-${tab.key}`}
+              >
+                <Icon className="w-4 h-4" />
+                <span className="leading-none text-center" style={{ fontSize: "10px" }}>{tab.label.split(" ")[0]}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("session")}</p>
-      <div className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #ffcdd2" }}>
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#fff0f0" }}>
-            <LogOut className="w-5 h-5" style={{ color: "#e53935" }} />
+      {/* Tab content */}
+      <div className="p-4 space-y-3">
+
+        {/* ── INFO TAB ── */}
+        {activeTab === "info" && (
+          <>
+            <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+              <div className="px-5 py-4 flex items-center gap-2.5" style={{ borderBottom: "1px solid #f5f5f5" }}>
+                <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#e8f5e9" }}>
+                  <User className="w-4 h-4" style={{ color: "#00b050" }} />
+                </div>
+                <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Informations du compte</span>
+              </div>
+              <div className="divide-y" style={{ borderColor: "#f8f9fa" }}>
+                {/* Nom commercial */}
+                <div className="flex items-center px-5 py-4 gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold mb-0.5" style={{ color: "#888" }}>Nom commercial</p>
+                    <p className="text-sm font-bold truncate" style={{ color: "#1a1a1a" }}>{user?.name || "—"}</p>
+                  </div>
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#f5f6f8" }}>
+                    <Building2 className="w-4 h-4" style={{ color: "#888" }} />
+                  </div>
+                </div>
+                {/* Email */}
+                <div className="flex items-center px-5 py-4 gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold mb-0.5" style={{ color: "#888" }}>Adresse e-mail</p>
+                    <p className="text-sm font-medium truncate" style={{ color: "#1a1a1a" }}>{user?.email || "—"}</p>
+                  </div>
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#fce4ec" }}>
+                    <Mail className="w-4 h-4" style={{ color: "#e91e63" }} />
+                  </div>
+                </div>
+                {/* Role */}
+                <div className="flex items-center px-5 py-4 gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold mb-0.5" style={{ color: "#888" }}>Rôle</p>
+                    <p className="text-sm font-medium" style={{ color: "#1a1a1a" }}>Marchand WestPay</p>
+                  </div>
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#e3f2fd" }}>
+                    <Shield className="w-4 h-4" style={{ color: "#1976d2" }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-2xl p-4 flex items-start gap-3" style={{ background: "#fffbea", border: "1.5px solid #fef3c7" }}>
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "#d97706" }} />
+              <p className="text-xs leading-relaxed" style={{ color: "#92400e" }}>
+                Pour modifier votre nom commercial ou votre adresse e-mail, veuillez contacter votre administrateur WestPay.
+              </p>
+            </div>
+          </>
+        )}
+
+        {/* ── PASSWORD TAB ── */}
+        {activeTab === "password" && (
+          <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+            <div className="px-5 py-4 flex items-center gap-2.5" style={{ borderBottom: "1px solid #f5f5f5" }}>
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#f3e5f5" }}>
+                <Shield className="w-4 h-4" style={{ color: "#9c27b0" }} />
+              </div>
+              <div>
+                <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>{t("changePassword")}</span>
+                <p className="text-xs" style={{ color: "#aaa" }}>Choisissez un mot de passe fort et unique</p>
+              </div>
+            </div>
+            <form onSubmit={handleChangePassword} className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-bold mb-2" style={{ color: "#555" }}>{t("currentPassword")}</label>
+                <div className="flex items-center rounded-xl px-3.5 py-2.5 gap-2" style={{ border: "1.5px solid #e2e8f0", background: "#f9fafb" }}>
+                  <input
+                    type={showCurrent ? "text" : "password"}
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    required
+                    placeholder="••••••••"
+                    className="flex-1 text-sm outline-none bg-transparent"
+                    style={{ color: "#1a1a1a" }}
+                    data-testid="input-merchant-current-password"
+                  />
+                  <button type="button" onClick={() => setShowCurrent(v => !v)} className="shrink-0" style={{ color: "#bbb" }}>
+                    {showCurrent ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold mb-2" style={{ color: "#555" }}>{t("newPassword")}</label>
+                <div className="flex items-center rounded-xl px-3.5 py-2.5 gap-2" style={{ border: "1.5px solid #e2e8f0", background: "#f9fafb" }}>
+                  <input
+                    type={showNew ? "text" : "password"}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    required
+                    placeholder="••••••••"
+                    className="flex-1 text-sm outline-none bg-transparent"
+                    style={{ color: "#1a1a1a" }}
+                    data-testid="input-merchant-new-password"
+                  />
+                  <button type="button" onClick={() => setShowNew(v => !v)} className="shrink-0" style={{ color: "#bbb" }}>
+                    {showNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold mb-2" style={{ color: "#555" }}>Confirmer le nouveau mot de passe</label>
+                <div className="flex items-center rounded-xl px-3.5 py-2.5 gap-2" style={{
+                  border: `1.5px solid ${confirmPassword && confirmPassword !== newPassword ? "#f44336" : "#e2e8f0"}`,
+                  background: "#f9fafb"
+                }}>
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    required
+                    placeholder="••••••••"
+                    className="flex-1 text-sm outline-none bg-transparent"
+                    style={{ color: "#1a1a1a" }}
+                    data-testid="input-merchant-confirm-password"
+                  />
+                  {confirmPassword && (
+                    confirmPassword === newPassword
+                      ? <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: "#00b050" }} />
+                      : <AlertCircle className="w-4 h-4 shrink-0" style={{ color: "#f44336" }} />
+                  )}
+                </div>
+              </div>
+              <button
+                type="submit"
+                disabled={isChanging || !currentPassword || !newPassword || !confirmPassword}
+                className="w-full py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all"
+                style={{
+                  background: isChanging || !currentPassword || !newPassword || !confirmPassword ? "#ccc" : "#00b050",
+                  color: "#fff", border: "none"
+                }}
+                data-testid="button-merchant-change-password"
+              >
+                {isChanging ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
+                {isChanging ? "Modification..." : t("changePassword")}
+              </button>
+            </form>
           </div>
-          <div className="flex-1">
-            <p className="text-sm font-bold" style={{ color: "#1a1a1a" }}>{t("logout")}</p>
-            <p className="text-xs" style={{ color: "#aaa" }}>{t("logoutDesc")}</p>
+        )}
+
+        {/* ── SUPPORT TAB ── */}
+        {activeTab === "support" && (
+          <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+            <div className="px-5 py-4 flex items-center gap-2.5" style={{ borderBottom: "1px solid #f5f5f5" }}>
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#e3f2fd" }}>
+                <MessageCircle className="w-4 h-4" style={{ color: "#1976d2" }} />
+              </div>
+              <div>
+                <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Contacts du support</span>
+                <p className="text-xs" style={{ color: "#aaa" }}>Nous sommes disponibles pour vous aider</p>
+              </div>
+            </div>
+            {contacts ? (
+              <div className="divide-y p-0" style={{ borderColor: "#f8f9fa" }}>
+                {contacts.telegram1 && (
+                  <a href={`https://t.me/${contacts.telegram1.replace("@","")}`} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-4 px-5 py-4 transition-all hover:bg-gray-50"
+                    data-testid="link-support-telegram1">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#e3f2fd" }}>
+                      <MessageCircle className="w-5 h-5" style={{ color: "#039be5" }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold mb-0.5" style={{ color: "#888" }}>Telegram</p>
+                      <p className="text-sm font-bold truncate" style={{ color: "#039be5" }}>{contacts.telegram1}</p>
+                      {contacts.hours && <p className="text-xs mt-0.5" style={{ color: "#aaa" }}>{contacts.hours}</p>}
+                    </div>
+                    <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "#ccc" }} />
+                  </a>
+                )}
+                {contacts.telegram2 && (
+                  <a href={`https://t.me/${contacts.telegram2.replace("@","")}`} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-4 px-5 py-4 transition-all hover:bg-gray-50"
+                    data-testid="link-support-telegram2">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#e3f2fd" }}>
+                      <MessageCircle className="w-5 h-5" style={{ color: "#039be5" }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold mb-0.5" style={{ color: "#888" }}>Telegram (2)</p>
+                      <p className="text-sm font-bold truncate" style={{ color: "#039be5" }}>{contacts.telegram2}</p>
+                      {contacts.hours2 && <p className="text-xs mt-0.5" style={{ color: "#aaa" }}>{contacts.hours2}</p>}
+                    </div>
+                    <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "#ccc" }} />
+                  </a>
+                )}
+                {contacts.whatsapp1 && (
+                  <a href={`https://wa.me/${contacts.whatsapp1.replace(/\D/g,"")}`} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-4 px-5 py-4 transition-all hover:bg-gray-50"
+                    data-testid="link-support-whatsapp1">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#e8f5e9" }}>
+                      <Phone className="w-5 h-5" style={{ color: "#25d366" }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold mb-0.5" style={{ color: "#888" }}>WhatsApp</p>
+                      <p className="text-sm font-bold truncate" style={{ color: "#25d366" }}>{contacts.whatsapp1}</p>
+                    </div>
+                    <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "#ccc" }} />
+                  </a>
+                )}
+                {contacts.whatsapp2 && (
+                  <a href={`https://wa.me/${contacts.whatsapp2.replace(/\D/g,"")}`} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-4 px-5 py-4 transition-all hover:bg-gray-50"
+                    data-testid="link-support-whatsapp2">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#e8f5e9" }}>
+                      <Phone className="w-5 h-5" style={{ color: "#25d366" }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold mb-0.5" style={{ color: "#888" }}>WhatsApp (2)</p>
+                      <p className="text-sm font-bold truncate" style={{ color: "#25d366" }}>{contacts.whatsapp2}</p>
+                    </div>
+                    <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "#ccc" }} />
+                  </a>
+                )}
+              </div>
+            ) : (
+              <div className="p-8 text-center">
+                <MessageCircle className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
+                <p className="text-sm" style={{ color: "#aaa" }}>Aucun contact configuré</p>
+              </div>
+            )}
           </div>
+        )}
+
+        {/* Logout — always visible */}
+        <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #ffcdd2" }}>
           <button
             onClick={() => { logout(); setLocation("/merchant-login"); }}
-            className="px-4 py-2 rounded-xl text-sm font-bold"
-            style={{ background: "#fff0f0", color: "#c62828", border: "1px solid #ffcdd2" }}
+            className="w-full flex items-center gap-4 px-5 py-4 transition-all hover:bg-red-50"
             data-testid="button-merchant-logout"
           >
-            {t("logout")}
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#fff0f0" }}>
+              <LogOut className="w-5 h-5" style={{ color: "#e53935" }} />
+            </div>
+            <div className="flex-1 text-left">
+              <p className="text-sm font-bold" style={{ color: "#c62828" }}>{t("logout")}</p>
+              <p className="text-xs mt-0.5" style={{ color: "#aaa" }}>{t("logoutDesc")}</p>
+            </div>
+            <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "#ffcdd2" }} />
           </button>
         </div>
       </div>
@@ -2617,15 +2902,16 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
 
   // ─── LIST VIEW ───────────────────────────────────────────────────────────────
   return (
-    <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
+    <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#f2f3f5" }}>
+      {/* Header */}
       <div className="flex items-center justify-between gap-2 mb-5">
         <div>
-          <h2 className="text-xl font-bold" style={{ color: "#333" }}>{t("paymentLinksTitle")}</h2>
+          <h2 className="text-xl font-bold" style={{ color: "#1a1a1a" }}>{t("paymentLinksTitle")}</h2>
           <p className="text-xs mt-0.5" style={{ color: "#888" }}>{t("paymentLinksDesc")}</p>
         </div>
         <button
           onClick={openCreate}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold"
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm"
           style={{ background: "#00b050", color: "#fff", border: "none" }}
           data-testid="button-create-payment-link"
         >
@@ -2633,24 +2919,30 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
         </button>
       </div>
 
+      {/* Stats */}
       <div className="grid grid-cols-3 gap-3 mb-5">
-        <div className="rounded-xl p-4" style={{ background: "#1976d2" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("links")}</p>
-          <p className="text-2xl font-bold text-white">{links.length}</p>
+        <div className="bg-white rounded-2xl p-3.5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+          <div className="w-7 h-7 rounded-xl flex items-center justify-center mb-2" style={{ background: "#e3f2fd" }}>
+            <Link className="w-3.5 h-3.5" style={{ color: "#1976d2" }} />
+          </div>
+          <p className="text-2xl font-bold" style={{ color: "#1a1a1a" }}>{links.length}</p>
+          <p className="text-xs font-semibold mt-0.5" style={{ color: "#888" }}>{t("links")}</p>
         </div>
-        <div className="rounded-xl p-4" style={{ background: "#26a69a" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("payments")}</p>
-          <p className="text-2xl font-bold text-white">{totalPayments}</p>
+        <div className="bg-white rounded-2xl p-3.5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+          <div className="w-7 h-7 rounded-xl flex items-center justify-center mb-2" style={{ background: "#e8f5e9" }}>
+            <CheckCircle2 className="w-3.5 h-3.5" style={{ color: "#00b050" }} />
+          </div>
+          <p className="text-2xl font-bold" style={{ color: "#1a1a1a" }}>{totalPayments}</p>
+          <p className="text-xs font-semibold mt-0.5" style={{ color: "#888" }}>{t("payments")}</p>
         </div>
-        <div className="rounded-xl p-4" style={{ background: "#7e57c2" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("volume")}</p>
-          <p className="text-lg font-bold text-white">{totalRevenue.toLocaleString()}<span className="text-xs ml-1 text-white/70">F</span></p>
+        <div className="bg-white rounded-2xl p-3.5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+          <div className="w-7 h-7 rounded-xl flex items-center justify-center mb-2" style={{ background: "#f3e5f5" }}>
+            <BarChart3 className="w-3.5 h-3.5" style={{ color: "#9c27b0" }} />
+          </div>
+          <p className="text-lg font-bold leading-tight" style={{ color: "#1a1a1a" }}>{totalRevenue.toLocaleString()}<span className="text-xs ml-0.5 font-semibold" style={{ color: "#aaa" }}>F</span></p>
+          <p className="text-xs font-semibold mt-0.5" style={{ color: "#888" }}>{t("volume")}</p>
         </div>
       </div>
-
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-        {t("yourLinks")} — {links.length}
-      </p>
 
       {isLoading ? <MerchantLoadingSkeleton /> : links.length === 0 ? (
         <div className="bg-white rounded-2xl p-10 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
@@ -2671,10 +2963,10 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
             const isExpired = link.expiresAt && new Date() > new Date(link.expiresAt as any);
             const isLimited = link.paymentLimit && link.paymentCount >= link.paymentLimit;
             const inactive = !link.active || isExpired || isLimited;
-            let statusStyle = { bg: "#d4edda", color: "#155724", label: t("statusActive") };
-            if (isExpired) statusStyle = { bg: "#f8d7da", color: "#721c24", label: t("expired") };
-            else if (isLimited) statusStyle = { bg: "#f8d7da", color: "#721c24", label: t("limitReached") };
-            else if (!link.active) statusStyle = { bg: "#e9ecef", color: "#495057", label: t("inactive") };
+            let statusStyle = { bg: "#e8f5e9", color: "#2e7d32", label: t("statusActive") };
+            if (isExpired) statusStyle = { bg: "#fce4ec", color: "#ad1457", label: t("expired") };
+            else if (isLimited) statusStyle = { bg: "#fce4ec", color: "#ad1457", label: t("limitReached") };
+            else if (!link.active) statusStyle = { bg: "#f5f5f5", color: "#757575", label: t("inactive") };
             const l = link as any;
             return (
               <div key={link.id} className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #e8ecf0", opacity: inactive ? 0.65 : 1 }} data-testid={`card-payment-link-${link.id}`}>
