@@ -88,6 +88,12 @@ export default function PaymentPage() {
   const [cryptoEnabled, setCryptoEnabled] = useState(false);
   const [isCryptoLoading, setIsCryptoLoading] = useState(false);
 
+  const [sendavaOtpRequired, setSendavaOtpRequired] = useState(false);
+  const [sendavaUssdCode, setSendavaUssdCode] = useState<string | null>(null);
+  const [sendavaOtp, setSendavaOtp] = useState("");
+  const [sendavaOtpConfirming, setSendavaOtpConfirming] = useState(false);
+  const [sendavaOtpConfirmed, setSendavaOtpConfirmed] = useState(false);
+
   useEffect(() => {
     if (omnipayStatusParam === "complete" && refParam) {
       setIsLoading(false);
@@ -272,7 +278,13 @@ export default function PaymentPage() {
       setOmnipayReference(data.omnipayReference);
       setOmnipayFees(data.fees || 0);
 
-      if (data.paymentUrl) {
+      if (data.sendavapay && data.otpRequired) {
+        setSendavaOtpRequired(true);
+        setSendavaUssdCode(data.ussdCode || null);
+        setSendavaOtpConfirmed(false);
+        setSendavaOtp("");
+        setStep(2);
+      } else if (data.paymentUrl) {
         setOmnipayPaymentUrl(data.paymentUrl);
         setStep(2);
       } else {
@@ -283,6 +295,26 @@ export default function PaymentPage() {
       toast({ title: "Paiement non abouti", description: "Une erreur est survenue. Veuillez vérifier vos informations et réessayer.", variant: "destructive" });
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleSendavaConfirmOtp = async () => {
+    if (!paymentId || !sendavaOtp.trim()) return;
+    setSendavaOtpConfirming(true);
+    try {
+      const res = await fetch("/api/payment/sendavapay/confirm-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentId, otp: sendavaOtp.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setSendavaOtpConfirmed(true);
+      startOmnipayPolling(paymentId);
+    } catch (err: any) {
+      toast({ title: "Code OTP invalide", description: err.message || "Le code est invalide ou a expiré. Veuillez réessayer.", variant: "destructive" });
+    } finally {
+      setSendavaOtpConfirming(false);
     }
   };
 
@@ -710,7 +742,91 @@ export default function PaymentPage() {
 
           {step === 2 && (
             <div className="space-y-3" data-testid="step-2-omnipay-content">
-              {omnipayPaymentUrl ? (
+              {sendavaOtpRequired && !sendavaOtpConfirmed ? (
+                <>
+                  <div
+                    className="p-3 rounded-md text-center text-sm font-medium"
+                    style={{ backgroundColor: "#fff7ed", color: "#92400e" }}
+                  >
+                    Validation Orange Money — Code OTP requis
+                  </div>
+                  {sendavaUssdCode && (
+                    <div
+                      className="p-3 rounded-md space-y-2"
+                      style={{ backgroundColor: "#fff7ed", border: "1px solid #fed7aa" }}
+                      data-testid="sendava-ussd-block"
+                    >
+                      <p className="text-xs font-semibold" style={{ color: "#c2410c" }}>
+                        Etape 1 — Obtenez votre code OTP
+                      </p>
+                      <p className="text-xs" style={{ color: "#92400e" }}>
+                        Composez <span className="font-bold font-mono">{sendavaUssdCode}</span> sur votre telephone pour recevoir votre code OTP par SMS.
+                      </p>
+                    </div>
+                  )}
+                  <div
+                    className="p-3 rounded-md space-y-2"
+                    style={{ backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0" }}
+                    data-testid="sendava-otp-input-block"
+                  >
+                    <p className="text-xs font-semibold" style={{ color: "#166534" }}>
+                      Etape 2 — Entrez votre code OTP
+                    </p>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={8}
+                      value={sendavaOtp}
+                      onChange={(e) => setSendavaOtp(e.target.value.replace(/\D/g, ""))}
+                      placeholder="Code OTP recu par SMS"
+                      className="w-full py-2 px-3 text-sm border rounded-md outline-none"
+                      style={{ borderColor: "#86efac", backgroundColor: "#ffffff", color: "#111827" }}
+                      data-testid="input-sendava-otp"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSendavaConfirmOtp}
+                      disabled={sendavaOtpConfirming || !sendavaOtp.trim()}
+                      className="pay-btn pay-btn-green w-full"
+                      data-testid="button-sendava-confirm-otp"
+                    >
+                      {sendavaOtpConfirming ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                      Confirmer le paiement
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-start pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (pollingRef.current) clearInterval(pollingRef.current);
+                        setOmnipayPolling(false);
+                        setSendavaOtpRequired(false);
+                        setSendavaOtp("");
+                        setStep(1);
+                      }}
+                      className="pay-btn pay-btn-primary"
+                      data-testid="button-step2-sendava-prev"
+                    >
+                      Retour
+                    </button>
+                  </div>
+                </>
+              ) : sendavaOtpRequired && sendavaOtpConfirmed ? (
+                <>
+                  <div
+                    className="p-3 rounded-md text-center text-sm font-medium"
+                    style={{ backgroundColor: "#dcfce7", color: "#166534" }}
+                  >
+                    Code OTP confirme — Paiement en cours de traitement
+                  </div>
+                  <div className="text-center py-4">
+                    <Loader2 className="w-8 h-8 animate-spin mx-auto" style={{ color: "#00b050" }} />
+                    <p className="text-sm mt-2" style={{ color: "#6b7280" }}>
+                      Verification du paiement en cours...
+                    </p>
+                  </div>
+                </>
+              ) : omnipayPaymentUrl ? (
                 <>
                   <div
                     className="p-3 rounded-md text-center text-sm font-medium"

@@ -32,7 +32,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
 
-type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security";
+type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "sendavapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security";
 
 function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: { staleTime?: number; refetchOnWindowFocus?: boolean }) {
   const { token, logout } = useAuth();
@@ -2602,6 +2602,192 @@ function MbiyoManualConfirmCard({ token }: { token: string | null }) {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function SendavaPayPanel() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const [apiKey, setApiKey] = useState("");
+  const [apiSecret, setApiSecret] = useState("");
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  const { data: settings, isLoading: settingsLoading } = useAdminFetch("/api/admin/sendavapay/settings", ["/api/admin/sendavapay/settings"]);
+
+  useEffect(() => {
+    if (settings && !isInitialized) {
+      setApiKey(settings.apiKey || "");
+      setApiSecret(settings.apiSecret || "");
+      setIsInitialized(true);
+    }
+  }, [settings, isInitialized]);
+
+  const { data: balanceData, isLoading: balanceLoading, refetch: refetchBalance } = useQuery({
+    queryKey: ["/api/admin/sendavapay/balance"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/sendavapay/balance", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!settings?.configured,
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/sendavapay/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ apiKey, apiSecret }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/sendavapay/settings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/sendavapay/balance"] });
+      toast({ title: "Configuration SendavaPay sauvegardee" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const callbackUrl = "https://westpay.cloud/api/sendavapay/callback";
+
+  if (settingsLoading) return <LoadingSkeleton />;
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold text-foreground">Configuration SendavaPay</h2>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Zap className="w-4 h-4" />Statut
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-sm text-muted-foreground">Configuration</span>
+              <Badge variant={settings?.configured ? "default" : "destructive"} data-testid="badge-sendavapay-status">
+                {settings?.configured ? "Configure" : "Non configure"}
+              </Badge>
+            </div>
+            {settings?.configured && (
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-sm text-muted-foreground">Solde</span>
+                <div className="flex items-center gap-2">
+                  {balanceLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : balanceData?.balance !== undefined ? (
+                    <span className="text-sm font-bold text-foreground" data-testid="text-sendavapay-balance">
+                      {typeof balanceData.balance === "number"
+                        ? `${Number(balanceData.balance).toLocaleString("fr-FR")} F CFA`
+                        : JSON.stringify(balanceData.balance)}
+                    </span>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">Indisponible</span>
+                  )}
+                  <Button variant="ghost" size="icon" onClick={() => refetchBalance()} data-testid="button-refresh-sendavapay-balance">
+                    <RefreshCw className="w-3 h-3" />
+                  </Button>
+                </div>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              SendavaPay — collectes mobiles (TMoney, Moov, MTN, Orange, Wave). Activez par operateur dans l'onglet Pays &amp; API.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Link2 className="w-4 h-4" />URL de callback
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Configurez cette URL dans votre tableau de bord SendavaPay pour recevoir les notifications de paiement.
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="text-xs bg-muted px-3 py-2 rounded-md font-mono flex-1 break-all text-foreground" data-testid="text-sendavapay-callback-url">
+                {callbackUrl}
+              </code>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => { navigator.clipboard.writeText(callbackUrl); toast({ title: "URL copiee" }); }}
+                data-testid="button-copy-sendavapay-callback-url"
+              >
+                <Copy className="w-3 h-3" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Globe className="w-4 h-4" />Pays supportes
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-1.5">
+              {["Togo", "Benin", "Cameroun", "Burkina Faso", "Cote d'Ivoire", "Mali", "Senegal", "Congo RDC", "Congo Brazzaville"].map(c => (
+                <Badge key={c} variant="secondary" className="text-xs">{c}</Badge>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              OTP requis pour Orange Money en Burkina Faso, Cote d'Ivoire, Mali et Senegal.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Key className="w-4 h-4" />Cles API SendavaPay
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">API Key</label>
+              <input
+                type="password"
+                value={apiKey}
+                onChange={e => setApiKey(e.target.value)}
+                placeholder="Votre cle API SendavaPay"
+                className="w-full px-3 py-2 text-sm border border-input rounded-md bg-background text-foreground outline-none focus:ring-2 focus:ring-ring"
+                data-testid="input-sendavapay-api-key"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">API Secret</label>
+              <input
+                type="password"
+                value={apiSecret}
+                onChange={e => setApiSecret(e.target.value)}
+                placeholder="Votre secret API SendavaPay"
+                className="w-full px-3 py-2 text-sm border border-input rounded-md bg-background text-foreground outline-none focus:ring-2 focus:ring-ring"
+                data-testid="input-sendavapay-api-secret"
+              />
+            </div>
+          </div>
+          <Button
+            onClick={() => saveMutation.mutate()}
+            disabled={saveMutation.isPending}
+            data-testid="button-save-sendavapay-settings"
+          >
+            {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+            Sauvegarder
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -5953,6 +6139,7 @@ export default function AdminDashboard() {
     { title: "API & PIN", icon: Key, tab: "apikeys" },
     { title: "Paiement", icon: Zap, tab: "omnipay" },
     { title: "Mbiyo", icon: Globe, tab: "mbiyo" },
+    { title: "SendavaPay", icon: Zap, tab: "sendavapay" },
     { title: "Crypto", icon: Bitcoin, tab: "cryptoagg" },
     { title: "Retraits Crypto", icon: Download, tab: "cryptowithdrawals" },
     { title: "Virements", icon: ArrowUpRight, tab: "virements" },
@@ -6036,6 +6223,7 @@ export default function AdminDashboard() {
             {activeTab === "apikeys" && <ApiKeysManagementPanel />}
             {activeTab === "omnipay" && <OmniPayPanel />}
             {activeTab === "mbiyo" && <MbiyoPanel />}
+            {activeTab === "sendavapay" && <SendavaPayPanel />}
             {activeTab === "cryptoagg" && <CryptoAggPanel />}
             {activeTab === "cryptowithdrawals" && <CryptoWithdrawalsAdminPanel />}
             {activeTab === "virements" && <AdminWalletTransfersPanel />}

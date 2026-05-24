@@ -1469,7 +1469,7 @@ export async function notifyAdminPayment(data: {
   payerNumber?: string | null;
   country: string;
   amount: number;
-  provider: "omnipay" | "sms";
+  provider: string;
   status: "confirmed" | "failed";
 }): Promise<void> {
   const dateStr = new Date().toLocaleString("fr-FR", {

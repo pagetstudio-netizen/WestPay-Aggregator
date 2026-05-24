@@ -40,6 +40,19 @@ import {
   type MbiyoWebhookPayload,
   type MbiyoPayoutWebhookPayload,
 } from "./mbiyo";
+import {
+  initiatePayment as sendavaInitiatePayment,
+  confirmOtp as sendavaConfirmOtp,
+  verifyPayment as sendavaVerifyPayment,
+  getBalance as sendavaGetBalance,
+  generateReference as sendavaGenerateRef,
+  verifyWebhookSignature as sendavaVerifySignature,
+  toSendavaOperator,
+  isSendavaOtpRequired,
+  getSendavaUssdCode,
+  SENDAVAPAY_COUNTRY_CODES,
+  type SendavaPayWebhookPayload,
+} from "./sendavapay";
 
 const JWT_SECRET = process.env.SESSION_SECRET || "westpay-secret-key-change-me";
 
@@ -61,6 +74,14 @@ async function getMbiyoApiKey(): Promise<string | undefined> {
 
 async function getMbiyoWebhookSecret(): Promise<string | undefined> {
   return process.env.MBIYO_WEBHOOK_SECRET || await storage.getSetting("mbiyo_webhook_secret");
+}
+
+async function getSendavaApiKey(): Promise<string | undefined> {
+  return process.env.SENDAVAPAY_API_KEY || await storage.getSetting("sendavapay_api_key");
+}
+
+async function getSendavaApiSecret(): Promise<string | undefined> {
+  return process.env.SENDAVAPAY_API_SECRET || await storage.getSetting("sendavapay_api_secret");
 }
 
 const COLLECTION_FEE_RATE = 0.055;
@@ -2616,9 +2637,96 @@ export async function registerRoutes(
       const msisdn = localPhone.startsWith(dialCode) ? localPhone : `${dialCode}${localPhone}`;
 
       const operatorRecord = await storage.getWithdrawalOperatorByNameAndCountry(paymentMethod, country);
-      const useMbiyo = operatorRecord?.gateway?.toLowerCase() === "mbiyo";
+      const gatewayLower = operatorRecord?.gateway?.toLowerCase();
+      const useMbiyo = gatewayLower === "mbiyo";
+      const useSendava = gatewayLower === "sendavapay";
 
-      if (useMbiyo) {
+      if (useSendava) {
+        const sendavaApiKey = await getSendavaApiKey();
+        const sendavaApiSecret = await getSendavaApiSecret();
+        if (!sendavaApiKey || !sendavaApiSecret) {
+          return res.status(500).json({ message: "Systeme de paiement SendavaPay non configure. Contactez l'administrateur." });
+        }
+
+        const reference = sendavaGenerateRef();
+        const countryCode = SENDAVAPAY_COUNTRY_CODES[country] || "";
+        const sendavaOperator = toSendavaOperator(paymentMethod);
+        const otpRequired = countryCode ? isSendavaOtpRequired(countryCode, paymentMethod) : false;
+        const callbackUrl = `${callbackBaseUrl}/api/sendavapay/callback`;
+
+        try {
+          const sendavaResult = await sendavaInitiatePayment(sendavaApiKey, sendavaApiSecret, {
+            amount: parsedAmount,
+            phoneNumber: msisdn,
+            operator: sendavaOperator,
+            country: countryCode,
+            customerName: payerName || undefined,
+            description: `Paiement WestPay - ${merchantSlug}`,
+            callbackUrl,
+          });
+
+          if (!sendavaResult.success) {
+            const errorMsg = sendavaResult.message || "Erreur de paiement SendavaPay";
+            storage.createTransaction({
+              merchantId: merchant.id,
+              country,
+              txId: reference,
+              amount: parsedAmount,
+              payerNumber: msisdn || null,
+              payerName: payerName || null,
+              status: "failed",
+              provider: "sendavapay",
+              omnipayTxId: null,
+              operator: sendavaOperator || null,
+              omnipayReference: reference,
+              errorMessage: errorMsg,
+            }).catch(() => {});
+            return res.status(400).json({ message: errorMsg });
+          }
+
+          const spReference = sendavaResult.reference || reference;
+          const ussdCode = otpRequired ? getSendavaUssdCode(countryCode, parsedAmount) : undefined;
+
+          const pending = await storage.createPendingPayment({
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerPhone: payerPhone || null,
+            payerName: payerName || null,
+            paymentMethod,
+            txId: null,
+            status: "omnipay_pending",
+            redirectUrl: redirectUrl || null,
+            omnipayReference: spReference,
+            omnipayTxId: sendavaResult.txid || null,
+            omnipayPaymentUrl: sendavaResult.redirectUrl || null,
+            gateway: "sendavapay",
+            expiresAt,
+          });
+
+          await storage.createApiLog({
+            merchantId: merchant.id,
+            action: "sendavapay_payment_initiated",
+            ip: req.ip || "",
+            description: `Paiement SendavaPay initie - Ref: ${spReference} - Montant: ${parsedAmount} - Tel: ${msisdn} - OTP requis: ${otpRequired}`,
+          });
+
+          return res.json({
+            success: true,
+            paymentId: pending.id,
+            omnipay: true,
+            omnipayReference: spReference,
+            sendavapay: true,
+            otpRequired,
+            ussdCode: ussdCode || null,
+            paymentUrl: sendavaResult.redirectUrl || null,
+            fees: sendavaResult.fee ? parseInt(String(sendavaResult.fee)) : 0,
+          });
+        } catch (sendavaErr: any) {
+          console.error("[SENDAVAPAY] Erreur initiation:", sendavaErr.message);
+          return res.status(500).json({ message: "Erreur de connexion au service de paiement SendavaPay. Veuillez reessayer." });
+        }
+      } else if (useMbiyo) {
         const mbiyoApiKey = await getMbiyoApiKey();
         if (!mbiyoApiKey) {
           return res.status(500).json({ message: "Systeme de paiement Mbiyo non configure. Contactez l'administrateur." });
@@ -3205,6 +3313,57 @@ export async function registerRoutes(
               }
             } catch {}
           }
+        } else if (pending.gateway === "sendavapay") {
+          const sendavaKey = await getSendavaApiKey();
+          const sendavaSecret = await getSendavaApiSecret();
+          if (sendavaKey && sendavaSecret) {
+            try {
+              const statusResult = await sendavaVerifyPayment(sendavaKey, sendavaSecret, pending.omnipayReference);
+              const spStatus = (statusResult.status || "").toLowerCase();
+              const spSuccess = ["successful", "success", "paid", "completed", "approved"].includes(spStatus);
+              const spFailed = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(spStatus);
+
+              if (spSuccess) {
+                const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
+                const merchant = await storage.getMerchantById(pending.merchantId);
+                if (mc) {
+                  const credit = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount, pending.country);
+                  await storage.incrementMerchantCountryBalance(mc.id, credit);
+                  await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
+                  const txRef = `SP-${statusResult.txid || pending.omnipayReference}`;
+                  const existingTx = await storage.getTransactionByTxId(txRef);
+                  if (!existingTx) {
+                    await storage.createTransaction({
+                      merchantId: pending.merchantId,
+                      country: pending.country,
+                      txId: txRef,
+                      amount: pending.amount,
+                      payerNumber: pending.payerPhone || null,
+                      payerName: pending.payerName || null,
+                      status: "confirmed",
+                      provider: "sendavapay",
+                      omnipayTxId: statusResult.txid || null,
+                      operator: pending.paymentMethod || null,
+                      omnipayReference: pending.omnipayReference,
+                      errorMessage: null,
+                      providerFee: statusResult.fee != null ? parseInt(String(statusResult.fee)) || 0 : 0,
+                    });
+                  }
+                  console.log(`[POLL SENDAVAPAY] Paiement credite via polling — ref=${pending.omnipayReference} montant=${pending.amount} credit=${credit}`);
+                  notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "sendavapay" }).catch(() => {});
+                  notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "sendavapay", status: "confirmed" }).catch(() => {});
+                }
+                return res.json({ status: "confirmed", paymentId: pending.id });
+              }
+
+              if (spFailed) {
+                await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+                return res.json({ status: "failed", paymentId: pending.id });
+              }
+
+              return res.json({ status: "pending", paymentId: pending.id });
+            } catch {}
+          }
         } else {
           const omnipayApiKey = await getOmnipayApiKey();
           if (omnipayApiKey) {
@@ -3533,6 +3692,196 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== SENDAVAPAY ROUTES ====================
+
+  app.post("/api/sendavapay/callback", async (req, res) => {
+    try {
+      const rawBody = (req.rawBody as Buffer)?.toString() || JSON.stringify(req.body);
+      const signature = (
+        req.headers["x-signature"] ||
+        req.headers["x-sendavapay-signature"] ||
+        ""
+      ) as string;
+
+      console.log(`[SENDAVAPAY CALLBACK] Headers: ${JSON.stringify(req.headers)}`);
+      console.log(`[SENDAVAPAY CALLBACK] Body: ${rawBody}`);
+
+      const apiSecret = await getSendavaApiSecret();
+      if (apiSecret && signature) {
+        const isValid = sendavaVerifySignature(apiSecret, signature, rawBody);
+        if (!isValid) {
+          console.error(`[SENDAVAPAY CALLBACK] Signature invalide`);
+          return res.status(401).json({ message: "Signature invalide" });
+        }
+      }
+
+      const payload = req.body as SendavaPayWebhookPayload;
+      const reference = payload.reference || payload.txid;
+      console.log(`[SENDAVAPAY CALLBACK] Recu: ref=${reference} status=${payload.status}`);
+
+      if (!reference) {
+        return res.status(400).json({ message: "reference manquante" });
+      }
+
+      const pending = await storage.getPendingPaymentByOmnipayReference(reference);
+      if (!pending) {
+        console.warn(`[SENDAVAPAY CALLBACK] Paiement non trouve: ${reference}`);
+        return res.status(200).json({ received: true });
+      }
+
+      if (pending.status === "omnipay_confirmed" || pending.status === "omnipay_failed") {
+        return res.json({ status: "already_processed" });
+      }
+
+      const statusLower = (payload.status || "").toLowerCase();
+      const isSuccess = ["successful", "success", "paid", "completed", "approved"].includes(statusLower);
+      const isFailure = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(statusLower);
+
+      if (isSuccess) {
+        const merchant = await storage.getMerchantById(pending.merchantId);
+        const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
+
+        if (!mc) {
+          console.error(`[SENDAVAPAY CALLBACK] MerchantCountry introuvable pour marchand #${pending.merchantId} pays ${pending.country}`);
+          await storage.updatePendingPaymentStatus(pending.id, "omnipay_error");
+          return res.status(500).json({ message: "Configuration marchand/pays introuvable" });
+        }
+
+        await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
+
+        const txId = `SP-${payload.txid || reference}`;
+        const existingTx = await storage.getTransactionByTxId(txId);
+        if (!existingTx) {
+          const credit = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount, pending.country);
+          await storage.createTransaction({
+            merchantId: pending.merchantId,
+            country: pending.country,
+            txId,
+            amount: pending.amount,
+            payerNumber: payload.phoneNumber || pending.payerPhone || null,
+            payerName: pending.payerName || null,
+            status: "confirmed",
+            provider: "sendavapay",
+            omnipayTxId: payload.txid || null,
+            omnipayReference: pending.omnipayReference || reference,
+            providerFee: payload.fee != null ? parseInt(String(payload.fee)) || 0 : 0,
+          });
+          await storage.incrementMerchantCountryBalance(mc.id, credit);
+          console.log(`[SENDAVAPAY CALLBACK] Paiement confirme: ${txId} - Brut: ${pending.amount} - Net marchand: ${credit}`);
+
+          sendWebhookNotification(pending.merchantId, {
+            event: "payment.confirmed",
+            txId,
+            amount: pending.amount,
+            currency: pending.country,
+            payer: payload.phoneNumber || pending.payerPhone,
+            country: pending.country,
+            merchantSlug: merchant?.slug || "",
+            provider: "sendavapay",
+            timestamp: new Date().toISOString(),
+          }).catch(() => {});
+
+          notifyMerchantPayment(pending.merchantId, { txId, amount: pending.amount, payerNumber: payload.phoneNumber || pending.payerPhone, country: pending.country, provider: "sendavapay" }).catch(() => {});
+          notifyAdminPayment({ txId, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: payload.phoneNumber || pending.payerPhone, country: pending.country, amount: pending.amount, provider: "sendavapay", status: "confirmed" }).catch(() => {});
+        }
+
+        return res.json({ status: "confirmed" });
+
+      } else if (isFailure) {
+        await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+        console.log(`[SENDAVAPAY CALLBACK] Paiement echoue: ref=${reference} status=${payload.status}`);
+        return res.json({ status: "failed" });
+
+      } else {
+        console.log(`[SENDAVAPAY CALLBACK] Paiement en cours: ref=${reference} status=${payload.status}`);
+        return res.json({ status: "pending" });
+      }
+    } catch (err: any) {
+      console.error("[SENDAVAPAY CALLBACK] Erreur:", err.message);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/payment/sendavapay/confirm-otp", async (req, res) => {
+    try {
+      const { paymentId, otp } = req.body;
+      if (!paymentId || !otp) {
+        return res.status(400).json({ message: "paymentId et otp requis" });
+      }
+
+      const pending = await storage.getPendingPaymentById(parseInt(paymentId));
+      if (!pending) {
+        return res.status(404).json({ message: "Paiement introuvable" });
+      }
+      if (pending.gateway !== "sendavapay") {
+        return res.status(400).json({ message: "Ce paiement n'utilise pas SendavaPay" });
+      }
+      if (pending.status !== "omnipay_pending") {
+        return res.status(400).json({ message: "Ce paiement a deja ete traite" });
+      }
+      if (!pending.omnipayReference) {
+        return res.status(400).json({ message: "Reference SendavaPay manquante" });
+      }
+
+      const apiKey = await getSendavaApiKey();
+      const apiSecret = await getSendavaApiSecret();
+      if (!apiKey || !apiSecret) {
+        return res.status(500).json({ message: "SendavaPay non configure" });
+      }
+
+      const result = await sendavaConfirmOtp(apiKey, apiSecret, {
+        reference: pending.omnipayReference,
+        otp: otp.trim(),
+      });
+
+      if (!result.success) {
+        return res.status(400).json({ message: result.message || "Code OTP invalide ou expire" });
+      }
+
+      res.json({ success: true, status: result.status });
+    } catch (err: any) {
+      console.error("[SENDAVAPAY OTP] Erreur:", err.message);
+      res.status(500).json({ message: "Erreur de connexion SendavaPay. Veuillez reessayer." });
+    }
+  });
+
+  app.get("/api/admin/sendavapay/settings", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const apiKey = await getSendavaApiKey();
+      const apiSecret = await getSendavaApiSecret();
+      res.json({
+        apiKey: apiKey || "",
+        apiSecret: apiSecret || "",
+        configured: !!(apiKey && apiSecret),
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/sendavapay/settings", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { apiKey, apiSecret } = req.body;
+      if (apiKey !== undefined) await storage.setSetting("sendavapay_api_key", apiKey);
+      if (apiSecret !== undefined) await storage.setSetting("sendavapay_api_secret", apiSecret);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/sendavapay/balance", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const apiKey = await getSendavaApiKey();
+      const apiSecret = await getSendavaApiSecret();
+      if (!apiKey || !apiSecret) return res.status(400).json({ message: "SendavaPay non configure" });
+      const result = await sendavaGetBalance(apiKey, apiSecret);
+      res.json({ balance: result.balance, success: result.success, message: result.message });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.post("/api/admin/mbiyo/confirm-payment", authMiddleware("admin"), async (req, res) => {
     try {
       const { reference, txId } = req.body;
@@ -3588,8 +3937,8 @@ export async function registerRoutes(
     try {
       const id = parseInt(req.params.id);
       const { payinGateway } = req.body;
-      if (!["omnipay", "mbiyo"].includes(payinGateway)) {
-        return res.status(400).json({ message: "Gateway invalide. Valeurs acceptees: omnipay, mbiyo" });
+      if (!["omnipay", "mbiyo", "sendavapay"].includes(payinGateway)) {
+        return res.status(400).json({ message: "Gateway invalide. Valeurs acceptees: omnipay, mbiyo, sendavapay" });
       }
       await storage.updateMerchantCountryPayinGateway(id, payinGateway);
       res.json({ success: true });
