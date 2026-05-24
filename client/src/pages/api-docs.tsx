@@ -9,8 +9,10 @@ import { Separator } from "@/components/ui/separator";
 import {
   Shield, Lock, Loader2, BookOpen, Code, Server, Key,
   ArrowRight, CheckCircle, AlertTriangle, Globe, Zap, Copy, Check,
-  Send, ArrowDownCircle, Bell, Menu, X, ShieldCheck, FileText, Hash, Download
+  Send, ArrowDownCircle, Bell, Menu, X, ShieldCheck, FileText, Hash, Download,
+  Eye, EyeOff
 } from "lucide-react";
+import Captcha, { generateCaptchaCode } from "@/components/Captcha";
 
 const BASE_URL = "https://westpay.cloud";
 
@@ -77,14 +79,36 @@ function LangTabs({ tabs }: { tabs: { lang: string; label: string; code: string 
   );
 }
 
+const DOC_FEATURES = [
+  { icon: BookOpen, label: "Documentation complète de l'API RobotPay" },
+  { icon: Code, label: "Exemples de code prêts à intégrer" },
+  { icon: Key, label: "Gestion de vos clés API par pays" },
+  { icon: Shield, label: "Accès sécurisé par PIN personnel" },
+];
+
 function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { name: string; email: string } }) => void }) {
   const [email, setEmail] = useState("");
   const [pin, setPin] = useState("");
+  const [showPin, setShowPin] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [captchaCode, setCaptchaCode] = useState(() => generateCaptchaCode());
+  const [captchaInput, setCaptchaInput] = useState("");
+  const [captchaError, setCaptchaError] = useState(false);
   const { toast } = useToast();
 
-  const handleSubmit = async (e: { preventDefault: () => void }) => {
+  const refreshCaptcha = useCallback(() => {
+    setCaptchaCode(generateCaptchaCode());
+    setCaptchaInput("");
+    setCaptchaError(false);
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (captchaInput.toUpperCase() !== captchaCode) {
+      setCaptchaError(true);
+      refreshCaptcha();
+      return;
+    }
     setIsLoading(true);
     try {
       const res = await fetch("/api/docs/access", {
@@ -93,47 +117,196 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
         body: JSON.stringify({ email, pin }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Acces refuse");
+      if (!res.ok) throw new Error(data.message || "Accès refusé");
       onAccess(data);
     } catch (err: any) {
-      toast({ title: "Acces refuse", description: err.message, variant: "destructive" });
+      toast({ title: "Accès refusé", description: err.message, variant: "destructive" });
+      refreshCaptcha();
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader className="text-center space-y-2 pb-4">
-          <div className="flex justify-center">
-            <div className="w-12 h-12 rounded-md bg-primary/10 flex items-center justify-center">
-              <Lock className="w-6 h-6 text-primary" />
+    <div className="min-h-screen flex bg-white">
+      <style>{`
+        .pg-input {
+          width:100%;padding:0.7rem 0.9rem;font-size:0.9rem;
+          border:1.5px solid #e2e8f0;border-radius:10px;
+          background:#fafafa;color:#1a1a1a;outline:none;
+          transition:border-color 0.15s,box-shadow 0.15s,background 0.15s;
+          font-family:inherit;
+        }
+        .pg-input:focus { border-color:#00b050;box-shadow:0 0 0 3px rgba(0,176,80,0.1);background:#fff; }
+        .pg-input::placeholder { color:#b0bec5; }
+        .pg-input-error { border-color:#ef4444 !important; box-shadow:0 0 0 3px rgba(239,68,68,0.1) !important; }
+        .pg-btn {
+          width:100%;padding:0.8rem;font-size:0.95rem;font-weight:700;
+          background:linear-gradient(135deg,#00b050,#009a45);color:#fff;
+          border:none;border-radius:10px;cursor:pointer;
+          transition:opacity 0.15s,transform 0.1s,box-shadow 0.15s;
+          display:flex;align-items:center;justify-content:center;gap:0.5rem;
+          box-shadow:0 4px 14px rgba(0,176,80,0.3);letter-spacing:0.01em;
+        }
+        .pg-btn:hover:not(:disabled) { opacity:0.92;box-shadow:0 6px 20px rgba(0,176,80,0.35); }
+        .pg-btn:active:not(:disabled) { transform:scale(0.98); }
+        .pg-btn:disabled { opacity:0.45;cursor:not-allowed;box-shadow:none; }
+      `}</style>
+
+      {/* Left brand panel */}
+      <div className="hidden lg:flex lg:w-[52%] xl:w-[55%] flex-col justify-between p-12 relative overflow-hidden"
+        style={{ background: "linear-gradient(145deg,#00b050 0%,#005c2e 60%,#003d1e 100%)" }}>
+        <div className="absolute inset-0 opacity-10"
+          style={{ backgroundImage: "radial-gradient(circle at 25% 75%,#ffffff 0%,transparent 55%),radial-gradient(circle at 75% 25%,#ffffff 0%,transparent 45%)" }} />
+
+        <div className="relative z-10">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-white/20 backdrop-blur flex items-center justify-center">
+              <img src="/robotpay-logo.jpg" alt="RobotPay" className="w-9 h-9 rounded-lg object-cover"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+            </div>
+            <span className="text-2xl font-black text-white tracking-tight">RobotPay</span>
+          </div>
+          <p className="text-white/60 text-sm mt-2">Documentation API</p>
+        </div>
+
+        <div className="relative z-10 space-y-6">
+          <div>
+            <h2 className="text-3xl xl:text-4xl font-black text-white leading-tight mb-3">
+              Intégrez RobotPay dans vos applications
+            </h2>
+            <p className="text-white/70 text-base leading-relaxed">
+              Accédez à la documentation complète de notre API de paiement Mobile Money pour l'Afrique de l'Ouest et du Centre.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            {DOC_FEATURES.map(({ icon: Icon, label }) => (
+              <div key={label} className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center flex-shrink-0">
+                  <Icon className="w-4 h-4 text-white" />
+                </div>
+                <span className="text-white/85 text-sm font-medium">{label}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="bg-white/10 backdrop-blur rounded-2xl p-5 border border-white/15">
+            <p className="text-white/70 text-xs font-medium uppercase tracking-widest mb-2">Accès sécurisé</p>
+            <p className="text-white text-sm font-semibold">Votre PIN est configuré par l'administrateur. Chaque accès est journalisé.</p>
+          </div>
+        </div>
+
+        <div className="relative z-10 flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse" />
+          <span className="text-white/50 text-xs">Documentation sécurisée</span>
+        </div>
+      </div>
+
+      {/* Right form panel */}
+      <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-10 bg-white">
+        <div className="w-full max-w-[420px]">
+          {/* Mobile logo */}
+          <div className="flex lg:hidden items-center justify-center gap-3 mb-8">
+            <div className="w-10 h-10 rounded-xl overflow-hidden shadow">
+              <img src="/robotpay-logo.jpg" alt="RobotPay" className="w-full h-full object-cover"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+            </div>
+            <span className="text-xl font-black text-slate-900">RobotPay</span>
+          </div>
+
+          <div className="mb-8">
+            <h1 className="text-2xl font-black text-slate-900 mb-1" data-testid="text-docs-title">Accès Documentation</h1>
+            <p className="text-slate-500 text-sm">Entrez vos identifiants marchands pour accéder à la documentation API.</p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Email */}
+            <div className="space-y-1.5">
+              <label className="block text-sm font-semibold text-slate-700">Adresse email</label>
+              <input
+                type="email"
+                className="pg-input"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="vous@exemple.com"
+                required
+                autoComplete="username"
+                data-testid="input-docs-email"
+              />
+            </div>
+
+            {/* PIN */}
+            <div className="space-y-1.5">
+              <label className="block text-sm font-semibold text-slate-700">Code PIN (6 chiffres)</label>
+              <div className="relative">
+                <input
+                  type={showPin ? "text" : "password"}
+                  className="pg-input"
+                  style={{ paddingRight: "2.75rem", letterSpacing: showPin ? "normal" : "0.3em" }}
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="••••••"
+                  maxLength={6}
+                  required
+                  autoComplete="current-password"
+                  data-testid="input-docs-pin"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPin(!showPin)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                  style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
+                  data-testid="button-toggle-pin-visibility"
+                >
+                  {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* CAPTCHA */}
+            <div className="space-y-2">
+              <label className="block text-sm font-semibold text-slate-700">Code de sécurité</label>
+              <Captcha code={captchaCode} onRefresh={refreshCaptcha} />
+              <input
+                type="text"
+                className={`pg-input ${captchaError ? "pg-input-error" : ""}`}
+                value={captchaInput}
+                onChange={(e) => { setCaptchaInput(e.target.value.toUpperCase()); setCaptchaError(false); }}
+                placeholder="Entrez le code ci-dessus"
+                maxLength={5}
+                autoComplete="off"
+                spellCheck={false}
+                required
+                data-testid="input-docs-captcha"
+              />
+              {captchaError && (
+                <p className="text-xs text-red-500 font-medium">Code incorrect, un nouveau code a été généré.</p>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoading || !email || pin.length !== 6 || captchaInput.length < 5}
+              className="pg-btn"
+              style={{ marginTop: "0.75rem" }}
+              data-testid="button-docs-access"
+            >
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
+              {isLoading ? "Vérification..." : "Accéder à la documentation"}
+            </button>
+          </form>
+
+          <div className="mt-6 pt-5 border-t border-slate-100">
+            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-100">
+              <Lock className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Votre PIN d'accès est fourni par l'administrateur RobotPay. Chaque connexion est enregistrée à des fins de sécurité.
+              </p>
             </div>
           </div>
-          <h1 className="text-xl font-bold text-foreground" data-testid="text-docs-title">Documentation API WestPay</h1>
-          <p className="text-xs text-muted-foreground">Entrez vos identifiants pour acceder a la documentation</p>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="doc-email">Email du marchand</Label>
-              <Input id="doc-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                placeholder="contact@votreboite.com" required data-testid="input-docs-email" />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="doc-pin">Code PIN (6 chiffres)</Label>
-              <Input id="doc-pin" type="password" value={pin}
-                onChange={(e) => { const v = e.target.value.replace(/\D/g, "").slice(0, 6); setPin(v); }}
-                placeholder="------" maxLength={6} required data-testid="input-docs-pin" />
-            </div>
-            <Button type="submit" className="w-full" disabled={isLoading || pin.length !== 6} data-testid="button-docs-access">
-              {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Shield className="w-4 h-4 mr-2" />}
-              Acceder a la documentation
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }
