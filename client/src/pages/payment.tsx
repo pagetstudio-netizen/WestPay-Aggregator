@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Smartphone, ExternalLink, Bitcoin, X, RefreshCw, Clock, CreditCard } from "lucide-react";
 
-import waveIcon    from "@assets/zOMoVcU_1779635321598.png";
-import moovIcon    from "@assets/ZJCa7PK_1779635321640.jpg";
-import mtnIcon     from "@assets/XzQ5b64_1779635321616.png";
-import tmoneyIcon  from "@assets/ruU3bQe_1779635321485.png";
-import robotpayLogo from "@assets/20260524_144646_1779635303879.png";
+import waveIcon      from "@assets/zOMoVcU_1779635321598.png";
+import moovIcon      from "@assets/ZJCa7PK_1779635321640.jpg";
+import mtnIcon       from "@assets/XzQ5b64_1779635321616.png";
+import tmoneyIcon    from "@assets/ruU3bQe_1779635321485.png";
+import orangeIcon    from "@assets/ctVnv9i_1779636596458.png";
+import robotpayLogo  from "@assets/20260524_144646_1779635303879.png";
 
 /* ── types ─────────────────────────────────────────────────────────────── */
 type MerchantInfo = { name: string; slug: string; countries: string[] };
@@ -47,6 +48,7 @@ const OPERATOR_IMAGES: Record<string, string> = {
   "Moov Money":       moovIcon,
   "MTN Mobile Money": mtnIcon,
   "TMoney":           tmoneyIcon,
+  "Orange Money":     orangeIcon,
 };
 const OPERATOR_META: Record<string, { bg: string; abbr: string }> = {
   "Orange Money":  { bg: "#FF6600", abbr: "OM" },
@@ -376,10 +378,7 @@ export default function PaymentPage() {
             <div style={{ width:40, height:40, borderRadius:10, background:"#e8f0fe", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
               <CreditCard style={{ width:22, height:22, color:"#2563eb" }} />
             </div>
-            <div>
-              <p style={{ fontWeight:600, fontSize:16, color:"#111827", lineHeight:1.2 }} data-testid="text-title">Effectuer un paiement</p>
-              {merchantInfo && <p style={{ fontSize:12, color:"#9ca3af", marginTop:1 }}>{merchantInfo.name}</p>}
-            </div>
+            <p style={{ fontWeight:600, fontSize:16, color:"#111827", lineHeight:1.2 }} data-testid="text-title">Effectuer un paiement</p>
           </div>
           <button onClick={() => window.history.back()} data-testid="button-close"
             style={{ background:"none", border:"none", cursor:"pointer", padding:4, color:"#374151", fontSize:18, fontWeight:700, lineHeight:1 }}>
