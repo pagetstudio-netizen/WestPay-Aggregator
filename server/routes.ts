@@ -702,6 +702,11 @@ export async function registerRoutes(
     const base = ["westpay.cloud", "www.westpay.cloud"];
     if (process.env.NODE_ENV !== "production") {
       base.push("localhost", "127.0.0.1");
+      // Replit dev preview domains
+      const replitDomains = process.env.REPLIT_DOMAINS || "";
+      const devDomain = process.env.REPLIT_DEV_DOMAIN || "";
+      if (devDomain) base.push(devDomain);
+      replitDomains.split(",").map(d => d.trim()).filter(Boolean).forEach(d => base.push(d));
     }
     return base;
   })();
