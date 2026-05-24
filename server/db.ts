@@ -400,6 +400,12 @@ export async function runMigrations() {
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS recipient_name text;
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS omnipay_code text;
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS mbiyo_code text;
+      ALTER TABLE payment_links ADD COLUMN IF NOT EXISTS description text;
+      ALTER TABLE payment_links ADD COLUMN IF NOT EXISTS countries text[];
+      ALTER TABLE payment_links ADD COLUMN IF NOT EXISTS confirmation_message text;
+      ALTER TABLE payment_links ADD COLUMN IF NOT EXISTS collect_billing_address boolean NOT NULL DEFAULT false;
+      ALTER TABLE payment_links ADD COLUMN IF NOT EXISTS show_share_button boolean NOT NULL DEFAULT true;
+      ALTER TABLE payment_links ADD COLUMN IF NOT EXISTS notification_email text;
     `);
 
     // ── Merchant login OTP table ────────────────────────────────────────────────

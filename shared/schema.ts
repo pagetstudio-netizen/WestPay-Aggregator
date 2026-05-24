@@ -158,6 +158,7 @@ export const paymentLinks = pgTable("payment_links", {
   merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),
   uniqueId: text("unique_id").notNull().unique(),
   name: text("name").notNull(),
+  description: text("description"),
   amountType: text("amount_type").notNull().default("fixed"),
   amount: integer("amount"),
   redirectUrl: text("redirect_url"),
@@ -168,6 +169,11 @@ export const paymentLinks = pgTable("payment_links", {
   lastPaymentAt: timestamp("last_payment_at"),
   active: boolean("active").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  countries: text("countries").array(),
+  confirmationMessage: text("confirmation_message"),
+  collectBillingAddress: boolean("collect_billing_address").default(false).notNull(),
+  showShareButton: boolean("show_share_button").default(true).notNull(),
+  notificationEmail: text("notification_email"),
 });
 
 export const withdrawals = pgTable("withdrawals", {

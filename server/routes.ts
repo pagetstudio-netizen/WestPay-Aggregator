@@ -4573,7 +4573,7 @@ export async function registerRoutes(
   app.post("/api/merchant/payment-links", authMiddleware("merchant"), async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
-      const { name, amountType, amount, redirectUrl, expiresAt, paymentLimit, active } = req.body;
+      const { name, description, amountType, amount, redirectUrl, expiresAt, paymentLimit, active, countries, confirmationMessage, collectBillingAddress, showShareButton, notificationEmail } = req.body;
       if (!name || !amountType) return res.status(400).json({ message: "name et amountType requis" });
       if (amountType === "fixed" && !amount) return res.status(400).json({ message: "amount requis pour un lien fixe" });
       const uniqueId = Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
@@ -4581,12 +4581,18 @@ export async function registerRoutes(
         merchantId: merchantId,
         uniqueId,
         name,
+        description: description || null,
         amountType,
         amount: amount ? Number(amount) : null,
         redirectUrl: redirectUrl || null,
         expiresAt: expiresAt ? new Date(expiresAt) : null,
         paymentLimit: paymentLimit ? Number(paymentLimit) : null,
         active: active !== false,
+        countries: Array.isArray(countries) && countries.length > 0 ? countries : null,
+        confirmationMessage: confirmationMessage || null,
+        collectBillingAddress: collectBillingAddress === true,
+        showShareButton: showShareButton !== false,
+        notificationEmail: notificationEmail || null,
       });
       res.json(link);
     } catch (err: any) {
@@ -4600,15 +4606,21 @@ export async function registerRoutes(
       const id = Number(req.params.id);
       const existing = await storage.getPaymentLinkById(id);
       if (!existing || existing.merchantId !== merchantId) return res.status(404).json({ message: "Lien introuvable" });
-      const { name, amountType, amount, redirectUrl, expiresAt, paymentLimit, active } = req.body;
+      const { name, description, amountType, amount, redirectUrl, expiresAt, paymentLimit, active, countries, confirmationMessage, collectBillingAddress, showShareButton, notificationEmail } = req.body;
       const updated = await storage.updatePaymentLink(id, {
         ...(name !== undefined && { name }),
+        ...(description !== undefined && { description: description || null }),
         ...(amountType !== undefined && { amountType }),
         ...(amount !== undefined && { amount: amount ? Number(amount) : null }),
         ...(redirectUrl !== undefined && { redirectUrl: redirectUrl || null }),
         ...(expiresAt !== undefined && { expiresAt: expiresAt ? new Date(expiresAt) : null }),
         ...(paymentLimit !== undefined && { paymentLimit: paymentLimit ? Number(paymentLimit) : null }),
         ...(active !== undefined && { active }),
+        ...(countries !== undefined && { countries: Array.isArray(countries) && countries.length > 0 ? countries : null }),
+        ...(confirmationMessage !== undefined && { confirmationMessage: confirmationMessage || null }),
+        ...(collectBillingAddress !== undefined && { collectBillingAddress: collectBillingAddress === true }),
+        ...(showShareButton !== undefined && { showShareButton: showShareButton !== false }),
+        ...(notificationEmail !== undefined && { notificationEmail: notificationEmail || null }),
       });
       res.json(updated);
     } catch (err: any) {

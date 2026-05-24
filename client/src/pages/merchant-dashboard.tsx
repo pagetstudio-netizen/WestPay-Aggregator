@@ -21,7 +21,7 @@ import {
   Copy, Globe, DollarSign, Hash, TrendingUp, Search, RefreshCw, BookOpen, Lock, ExternalLink,
   Webhook, Send, CheckCircle2, XCircle, Clock, ArrowUpRight, Zap, Link, QrCode, Eye, EyeOff,
   Trash2, Plus, ToggleLeft, ToggleRight, Edit3, BarChart3, MessageCircle, Phone, Receipt, User, Calendar, CreditCard, Filter,
-  Bell, Mail, HelpCircle, Power, Menu, X, ChevronLeft, ChevronRight, Bitcoin
+  Bell, Mail, HelpCircle, Power, Menu, X, ChevronLeft, ChevronRight, Bitcoin, Share2
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry, Withdrawal } from "@shared/schema";
@@ -2002,73 +2002,481 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
   );
 }
 
+const LINK_COUNTRY_FLAGS: Record<string, { flag: string; currency: string; label: string }> = {
+  "Togo": { flag: "🇹🇬", currency: "XOF", label: "Togo" },
+  "Benin": { flag: "🇧🇯", currency: "XOF", label: "Bénin" },
+  "Burkina Faso": { flag: "🇧🇫", currency: "XOF", label: "Burkina" },
+  "Cameroun": { flag: "🇨🇲", currency: "XAF", label: "Cameroun" },
+  "Congo Brazzaville": { flag: "🇨🇬", currency: "XAF", label: "Congo" },
+  "Congo RDC": { flag: "🇨🇩", currency: "CDF", label: "Congo RDC" },
+  "Gabon": { flag: "🇬🇦", currency: "XAF", label: "Gabon" },
+  "Cote d'Ivoire": { flag: "🇨🇮", currency: "XOF", label: "Côte d'Ivoire" },
+  "Mali": { flag: "🇲🇱", currency: "XOF", label: "Mali" },
+  "Senegal": { flag: "🇸🇳", currency: "XOF", label: "Sénégal" },
+  "Guinee": { flag: "🇬🇳", currency: "GNF", label: "Guinée" },
+  "Gambie": { flag: "🇬🇲", currency: "GMD", label: "Gambie" },
+  "Ghana": { flag: "🇬🇭", currency: "GHS", label: "Ghana" },
+  "Nigeria": { flag: "🇳🇬", currency: "NGN", label: "Nigeria" },
+  "Niger": { flag: "🇳🇪", currency: "XOF", label: "Niger" },
+};
+
 function PaymentLinksPanel({ token }: { token: string | null }) {
   const { t } = useLanguage();
   const { toast } = useToast();
-  const [showCreate, setShowCreate] = useState(false);
-  const [editLink, setEditLink] = useState<PaymentLink | null>(null);
-  const [form, setForm] = useState({ name: "", amountType: "fixed", amount: "", redirectUrl: "", paymentLimit: "" });
   const baseUrl = "https://westpay.cloud";
+  const [view, setView] = useState<"list" | "create" | "edit">("list");
+  const [editLink, setEditLink] = useState<PaymentLink | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const mkForm = () => ({
+    name: "", description: "", countries: [] as string[],
+    amountType: "flexible" as "fixed" | "flexible", amount: "",
+    notificationEmail: "", confirmationMessage: "", redirectUrl: "",
+    collectBillingAddress: false, showShareButton: true,
+    paymentLimit: "", expiresAt: "",
+  });
+  const [form, setForm] = useState(mkForm());
+  const setField = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
+
+  const { data: merchantCountries = [] } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
+  const activeCountries = (merchantCountries as MerchantCountry[]).filter(c => c.active).map(c => c.country);
 
   const { data: links = [], isLoading } = useQuery<PaymentLink[]>({
     queryKey: ["/api/merchant/payment-links"],
     queryFn: async () => {
       const res = await fetch("/api/merchant/payment-links", { headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) throw new Error(t("error"));
+      if (!res.ok) throw new Error("Error");
       return res.json();
     },
     enabled: !!token,
   });
 
+  const buildPayload = (f: ReturnType<typeof mkForm>) => ({
+    name: f.name, description: f.description || undefined,
+    amountType: f.amountType, amount: f.amount ? Number(f.amount) : undefined,
+    redirectUrl: f.redirectUrl || undefined,
+    paymentLimit: f.paymentLimit ? Number(f.paymentLimit) : undefined,
+    expiresAt: f.expiresAt || undefined,
+    countries: f.countries.length > 0 ? f.countries : undefined,
+    confirmationMessage: f.confirmationMessage || undefined,
+    collectBillingAddress: f.collectBillingAddress,
+    showShareButton: f.showShareButton,
+    notificationEmail: f.notificationEmail || undefined,
+  });
+
   const createMutation = useMutation({
-    mutationFn: async (data: typeof form) => {
+    mutationFn: async (f: ReturnType<typeof mkForm>) => {
       const res = await fetch("/api/merchant/payment-links", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          name: data.name, amountType: data.amountType,
-          amount: data.amount ? Number(data.amount) : undefined,
-          redirectUrl: data.redirectUrl || undefined,
-          paymentLimit: data.paymentLimit ? Number(data.paymentLimit) : undefined,
-        }),
+        body: JSON.stringify(buildPayload(f)),
       });
       if (!res.ok) throw new Error((await res.json()).message);
       return res.json();
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] }); setShowCreate(false); setForm({ name: "", amountType: "fixed", amount: "", redirectUrl: "", paymentLimit: "" }); toast({ title: t("linkCreated") }); },
-    onError: () => toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] });
+      setView("list"); setForm(mkForm()); setShowAdvanced(false);
+      toast({ title: t("linkCreated") });
+    },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
   });
 
   const updateMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: number; data: Partial<typeof form & { active: boolean }> }) => {
+    mutationFn: async ({ id, data }: { id: number; data: any }) => {
       const res = await fetch(`/api/merchant/payment-links/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(data),
       });
       if (!res.ok) throw new Error((await res.json()).message);
       return res.json();
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] }); setEditLink(null); toast({ title: t("linkUpdated") }); },
-    onError: () => toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] });
+      setView("list"); setEditLink(null); setForm(mkForm()); setShowAdvanced(false);
+      toast({ title: t("linkUpdated") });
+    },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
       const res = await fetch(`/api/merchant/payment-links/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) throw new Error(t("error"));
+      if (!res.ok) throw new Error("Error");
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] }); toast({ title: t("linkDeleted") }); },
   });
 
-  const copyLink = (uniqueId: string) => {
-    navigator.clipboard.writeText(`${baseUrl}/link/${uniqueId}`);
-    toast({ title: t("copied") });
+  const copyLink = (uniqueId: string) => { navigator.clipboard.writeText(`${baseUrl}/link/${uniqueId}`); toast({ title: t("copied") }); };
+  const shareLink = (uniqueId: string) => {
+    const url = `${baseUrl}/link/${uniqueId}`;
+    if (navigator.share) navigator.share({ title: "Lien de paiement WestPay", url });
+    else { navigator.clipboard.writeText(url); toast({ title: "Lien copié !" }); }
   };
+
+  const openCreate = () => { setForm(mkForm()); setEditLink(null); setShowAdvanced(false); setView("create"); };
+  const openEdit = (link: PaymentLink) => {
+    const l = link as any;
+    setEditLink(link);
+    setForm({
+      name: link.name, description: l.description || "",
+      countries: l.countries || [], amountType: link.amountType as "fixed" | "flexible",
+      amount: link.amount?.toString() || "", notificationEmail: l.notificationEmail || "",
+      confirmationMessage: l.confirmationMessage || "", redirectUrl: link.redirectUrl || "",
+      collectBillingAddress: l.collectBillingAddress || false,
+      showShareButton: l.showShareButton !== false,
+      paymentLimit: link.paymentLimit?.toString() || "",
+      expiresAt: link.expiresAt ? new Date(link.expiresAt as any).toISOString().slice(0, 16) : "",
+    });
+    setShowAdvanced(false); setView("edit");
+  };
+
+  const handleSubmit = () => {
+    if (!form.name.trim()) { toast({ title: "Le titre du lien est requis", variant: "destructive" }); return; }
+    if (form.amountType === "fixed" && !form.amount) { toast({ title: "Le montant est requis pour un lien à montant fixe", variant: "destructive" }); return; }
+    if (view === "edit" && editLink) updateMutation.mutate({ id: editLink.id, data: buildPayload(form) });
+    else createMutation.mutate(form);
+  };
+
+  const toggleCountry = (c: string) => setForm(f => ({
+    ...f, countries: f.countries.includes(c) ? f.countries.filter(x => x !== c) : [...f.countries, c],
+  }));
 
   const totalRevenue = links.reduce((s, l) => s + l.totalRevenue, 0);
   const totalPayments = links.reduce((s, l) => s + l.paymentCount, 0);
+  const isPending = createMutation.isPending || updateMutation.isPending;
+  const isEdit = view === "edit";
 
+  // ─── FORM VIEW (Create / Edit) ───────────────────────────────────────────────
+  if (view === "create" || view === "edit") {
+    return (
+      <div className="-m-4 md:-m-6" style={{ background: "#f2f3f5", minHeight: "100%" }}>
+        {/* Sticky header */}
+        <div className="sticky top-0 z-10 px-4 pt-5 pb-3 flex items-center gap-3" style={{ background: "#f2f3f5", borderBottom: "1px solid #e8ecf0" }}>
+          <button
+            onClick={() => { setView("list"); setEditLink(null); setForm(mkForm()); }}
+            className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
+            style={{ background: "#fff", border: "1.5px solid #e0e0e0" }}
+          >
+            <ChevronLeft className="w-4 h-4" style={{ color: "#333" }} />
+          </button>
+          <div>
+            <h2 className="text-base font-bold leading-tight" style={{ color: "#1a1a1a" }}>
+              {isEdit ? "Modifier le lien" : "Créer un lien de paiement"}
+            </h2>
+            <p className="text-xs" style={{ color: "#aaa" }}>Liens de Paiement / {isEdit ? editLink?.name : "Nouveau lien"}</p>
+          </div>
+        </div>
+
+        {/* Form sections */}
+        <div className="px-4 pt-4 pb-36 space-y-3">
+
+          {/* ── Informations du lien ── */}
+          <div className="bg-white rounded-2xl overflow-hidden" style={{ border: "1.5px solid #e8ecf0" }}>
+            <div className="px-4 py-3 flex items-center gap-2.5" style={{ borderBottom: "1px solid #f5f5f5" }}>
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#e8f5e9" }}>
+                <Link className="w-4 h-4" style={{ color: "#00b050" }} />
+              </div>
+              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Informations du lien</span>
+            </div>
+            <div className="p-4 space-y-3">
+              <div>
+                <label className="text-xs font-bold mb-1.5 block" style={{ color: "#555" }}>
+                  Titre du lien <span style={{ color: "#e53e3e" }}>*</span>
+                </label>
+                <input
+                  value={form.name} onChange={e => setField("name", e.target.value)}
+                  placeholder="ex : Billets Liverpool, Facture Mai, Inscription…"
+                  className="w-full px-3.5 py-3 text-sm rounded-xl outline-none transition-all"
+                  style={{ border: `1.5px solid ${form.name ? "#00b050" : "#e0e0e0"}`, background: "#fafafa", color: "#1a1a1a" }}
+                  data-testid="input-link-name"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold mb-1.5 block" style={{ color: "#555" }}>
+                  Description <span className="font-normal" style={{ color: "#bbb" }}>(optionnel)</span>
+                </label>
+                <textarea
+                  value={form.description} onChange={e => setField("description", e.target.value)}
+                  placeholder="ex : Meilleures places, rangée VIP, entrée générale…"
+                  rows={2}
+                  className="w-full px-3.5 py-3 text-sm rounded-xl outline-none resize-none transition-all"
+                  style={{ border: "1.5px solid #e0e0e0", background: "#fafafa", color: "#1a1a1a" }}
+                  data-testid="input-link-description"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* ── Pays de collecte ── */}
+          <div className="bg-white rounded-2xl overflow-hidden" style={{ border: "1.5px solid #e8ecf0" }}>
+            <div className="px-4 py-3 flex items-center gap-2.5" style={{ borderBottom: "1px solid #f5f5f5" }}>
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#e3f2fd" }}>
+                <Globe className="w-4 h-4" style={{ color: "#1976d2" }} />
+              </div>
+              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Pays de collecte</span>
+            </div>
+            <div className="p-4">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs" style={{ color: "#888" }}>
+                  {form.countries.length === 0
+                    ? "Le payeur choisira son opérateur lors du paiement."
+                    : `${form.countries.length} pays sélectionné${form.countries.length > 1 ? "s" : ""}`}
+                </p>
+                <button
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold"
+                  style={{
+                    background: form.countries.length === activeCountries.length && activeCountries.length > 0 ? "#e8f5e9" : "#f5f5f5",
+                    color: form.countries.length === activeCountries.length && activeCountries.length > 0 ? "#00b050" : "#555",
+                    border: "1.5px solid #e0e0e0"
+                  }}
+                  onClick={() => setForm(f => ({ ...f, countries: f.countries.length === activeCountries.length ? [] : [...activeCountries] }))}
+                  data-testid="button-select-all-countries"
+                >
+                  <CheckCircle2 className="w-3 h-3" />
+                  {form.countries.length === activeCountries.length && activeCountries.length > 0 ? "Tout désélect." : "Tout sélectionner"}
+                </button>
+              </div>
+              {activeCountries.length === 0 ? (
+                <p className="text-xs text-center py-4" style={{ color: "#aaa" }}>Aucun pays actif configuré sur votre compte</p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-3 gap-2">
+                    {activeCountries.map(c => {
+                      const info = LINK_COUNTRY_FLAGS[c] || { flag: "🌍", currency: "", label: c };
+                      const selected = form.countries.includes(c);
+                      return (
+                        <button
+                          key={c}
+                          onClick={() => toggleCountry(c)}
+                          className="flex flex-col items-center py-3 px-2 rounded-xl transition-all active:scale-95"
+                          style={{
+                            border: `1.5px solid ${selected ? "#00b050" : "#e8ecf0"}`,
+                            background: selected ? "#f0fff4" : "#fafafa",
+                          }}
+                          data-testid={`button-country-${c.replace(/[\s']/g, "-").toLowerCase()}`}
+                        >
+                          <span className="text-2xl mb-1 leading-none">{info.flag}</span>
+                          <span className="text-xs font-semibold leading-tight text-center" style={{ color: selected ? "#00b050" : "#333" }}>{info.label}</span>
+                          <span className="text-xs leading-tight" style={{ color: "#aaa" }}>{info.currency}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {form.countries.length === 0 && (
+                    <p className="text-xs mt-2 text-center py-1 rounded-lg" style={{ color: "#aaa", background: "#f9fafb" }}>
+                      Aucune sélection = tous les pays actifs acceptés
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* ── Montant ── */}
+          <div className="bg-white rounded-2xl overflow-hidden" style={{ border: "1.5px solid #e8ecf0" }}>
+            <div className="px-4 py-3 flex items-center gap-2.5" style={{ borderBottom: "1px solid #f5f5f5" }}>
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#fff8e1" }}>
+                <Zap className="w-4 h-4" style={{ color: "#f59e0b" }} />
+              </div>
+              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Montant</span>
+            </div>
+            <div className="p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: "#1a1a1a" }}>Montant fixe</p>
+                  <p className="text-xs mt-0.5" style={{ color: "#888" }}>
+                    {form.amountType === "fixed" ? "Activé — montant prédéfini par le marchand" : "Désactivé — le payeur saisit le montant librement"}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setForm(f => ({ ...f, amountType: f.amountType === "fixed" ? "flexible" : "fixed" }))}
+                  className="relative inline-flex h-7 w-12 items-center rounded-full transition-colors shrink-0"
+                  style={{ background: form.amountType === "fixed" ? "#00b050" : "#d1d5db" }}
+                  data-testid="toggle-amount-type"
+                >
+                  <span className="inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform"
+                    style={{ transform: form.amountType === "fixed" ? "translateX(1.35rem)" : "translateX(0.15rem)" }} />
+                </button>
+              </div>
+              {form.amountType === "fixed" && (
+                <div>
+                  <label className="text-xs font-bold mb-1.5 block" style={{ color: "#555" }}>Montant (F CFA)</label>
+                  <input
+                    type="number" value={form.amount} onChange={e => setField("amount", e.target.value)}
+                    placeholder="ex : 5000"
+                    className="w-full px-3.5 py-3 text-sm rounded-xl outline-none"
+                    style={{ border: `1.5px solid ${form.amount ? "#00b050" : "#e0e0e0"}`, background: "#fafafa", color: "#1a1a1a" }}
+                    data-testid="input-link-amount"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── Notification par email ── */}
+          <div className="bg-white rounded-2xl overflow-hidden" style={{ border: "1.5px solid #e8ecf0" }}>
+            <div className="px-4 py-3 flex items-center gap-2.5" style={{ borderBottom: "1px solid #f5f5f5" }}>
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#fce4ec" }}>
+                <Mail className="w-4 h-4" style={{ color: "#e91e63" }} />
+              </div>
+              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Notification par email</span>
+            </div>
+            <div className="p-4">
+              <p className="text-xs mb-3" style={{ color: "#888" }}>
+                Recevez une notification à chaque paiement reçu via ce lien.
+              </p>
+              <div className="flex items-center gap-2.5 rounded-xl px-3.5 py-2.5" style={{ border: "1.5px solid #e0e0e0", background: "#fafafa" }}>
+                <Mail className="w-4 h-4 shrink-0" style={{ color: "#ccc" }} />
+                <input
+                  type="email" value={form.notificationEmail} onChange={e => setField("notificationEmail", e.target.value)}
+                  placeholder="votre@email.com"
+                  className="flex-1 text-sm outline-none bg-transparent"
+                  style={{ color: "#1a1a1a" }}
+                  data-testid="input-link-notification-email"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* ── Paramètres avancés ── */}
+          <div className="bg-white rounded-2xl overflow-hidden" style={{ border: "1.5px solid #e8ecf0" }}>
+            <button
+              className="w-full px-4 py-3 flex items-center justify-between"
+              style={{ borderBottom: showAdvanced ? "1px solid #f5f5f5" : "none" }}
+              onClick={() => setShowAdvanced(v => !v)}
+              data-testid="button-toggle-advanced"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#f3e5f5" }}>
+                  <Settings className="w-4 h-4" style={{ color: "#9c27b0" }} />
+                </div>
+                <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Paramètres avancés</span>
+              </div>
+              <ChevronRight className="w-4 h-4 transition-transform" style={{ color: "#bbb", transform: showAdvanced ? "rotate(90deg)" : "none" }} />
+            </button>
+
+            {showAdvanced && (
+              <div className="p-4 space-y-5">
+
+                {/* Message de confirmation */}
+                <div>
+                  <label className="text-xs font-bold mb-1 block" style={{ color: "#555" }}>Message de confirmation</label>
+                  <p className="text-xs mb-2" style={{ color: "#aaa" }}>Affiché au payeur après un paiement réussi.</p>
+                  <input
+                    value={form.confirmationMessage} onChange={e => setField("confirmationMessage", e.target.value)}
+                    placeholder="ex : Merci pour votre paiement ! Votre commande est confirmée."
+                    className="w-full px-3.5 py-3 text-sm rounded-xl outline-none"
+                    style={{ border: "1.5px solid #e0e0e0", background: "#fafafa", color: "#1a1a1a" }}
+                    data-testid="input-link-confirmation-message"
+                  />
+                </div>
+
+                {/* Redirection après paiement */}
+                <div>
+                  <label className="text-xs font-bold mb-1 block" style={{ color: "#555" }}>Redirection après paiement</label>
+                  <p className="text-xs mb-2" style={{ color: "#aaa" }}>Redirigez le client vers votre site après le paiement.</p>
+                  <input
+                    value={form.redirectUrl} onChange={e => setField("redirectUrl", e.target.value)}
+                    placeholder="https://votre-site.com/merci"
+                    className="w-full px-3.5 py-3 text-sm rounded-xl outline-none"
+                    style={{ border: "1.5px solid #e0e0e0", background: "#fafafa", color: "#1a1a1a" }}
+                    data-testid="input-link-redirect"
+                  />
+                </div>
+
+                {/* Collecter l'adresse de facturation */}
+                <div className="flex items-start justify-between gap-4 py-1">
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold" style={{ color: "#1a1a1a" }}>Collecter l'adresse de facturation</p>
+                    <p className="text-xs mt-0.5" style={{ color: "#888" }}>Demande l'adresse complète du payeur lors du paiement.</p>
+                  </div>
+                  <button
+                    onClick={() => setField("collectBillingAddress", !form.collectBillingAddress)}
+                    className="relative inline-flex h-7 w-12 items-center rounded-full transition-colors shrink-0 mt-0.5"
+                    style={{ background: form.collectBillingAddress ? "#00b050" : "#d1d5db" }}
+                    data-testid="toggle-collect-billing"
+                  >
+                    <span className="inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform"
+                      style={{ transform: form.collectBillingAddress ? "translateX(1.35rem)" : "translateX(0.15rem)" }} />
+                  </button>
+                </div>
+
+                {/* Afficher le bouton de partage */}
+                <div className="flex items-start justify-between gap-4 py-1">
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold" style={{ color: "#1a1a1a" }}>Afficher le bouton de partage</p>
+                    <p className="text-xs mt-0.5" style={{ color: "#888" }}>Permet au payeur de partager le lien avec d'autres personnes.</p>
+                  </div>
+                  <button
+                    onClick={() => setField("showShareButton", !form.showShareButton)}
+                    className="relative inline-flex h-7 w-12 items-center rounded-full transition-colors shrink-0 mt-0.5"
+                    style={{ background: form.showShareButton ? "#00b050" : "#d1d5db" }}
+                    data-testid="toggle-show-share"
+                  >
+                    <span className="inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform"
+                      style={{ transform: form.showShareButton ? "translateX(1.35rem)" : "translateX(0.15rem)" }} />
+                  </button>
+                </div>
+
+                {/* Limite d'utilisations */}
+                <div>
+                  <label className="text-xs font-bold mb-1 block" style={{ color: "#555" }}>Limite d'utilisations</label>
+                  <p className="text-xs mb-2" style={{ color: "#aaa" }}>Nombre maximum de paiements autorisés via ce lien.</p>
+                  <input
+                    type="number" value={form.paymentLimit} onChange={e => setField("paymentLimit", e.target.value)}
+                    placeholder="Illimité par défaut"
+                    className="w-full px-3.5 py-3 text-sm rounded-xl outline-none"
+                    style={{ border: "1.5px solid #e0e0e0", background: "#fafafa", color: "#1a1a1a" }}
+                    data-testid="input-link-limit"
+                  />
+                </div>
+
+                {/* Date d'expiration */}
+                <div>
+                  <label className="text-xs font-bold mb-1 block" style={{ color: "#555" }}>Date d'expiration</label>
+                  <p className="text-xs mb-2" style={{ color: "#aaa" }}>Le lien sera automatiquement désactivé après cette date.</p>
+                  <input
+                    type="datetime-local" value={form.expiresAt} onChange={e => setField("expiresAt", e.target.value)}
+                    className="w-full px-3.5 py-3 text-sm rounded-xl outline-none"
+                    style={{ border: "1.5px solid #e0e0e0", background: "#fafafa", color: "#1a1a1a" }}
+                    data-testid="input-link-expires"
+                  />
+                </div>
+
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Sticky bottom action bar */}
+        <div className="fixed bottom-0 left-0 right-0 px-4 py-4 z-20"
+          style={{ background: "rgba(242,243,245,0.97)", borderTop: "1px solid #e0e0e0", backdropFilter: "blur(8px)" }}>
+          <div className="flex gap-3 max-w-lg mx-auto">
+            <button
+              onClick={() => { setView("list"); setEditLink(null); setForm(mkForm()); }}
+              className="flex-1 py-3.5 rounded-2xl text-sm font-bold"
+              style={{ background: "#fff", color: "#555", border: "1.5px solid #e0e0e0" }}
+              data-testid="button-cancel-link"
+            >
+              Annuler
+            </button>
+            <button
+              onClick={handleSubmit} disabled={isPending}
+              className="flex-1 py-3.5 rounded-2xl text-sm font-bold flex items-center justify-center gap-2"
+              style={{ background: isPending ? "#ccc" : "#00b050", color: "#fff", border: "none" }}
+              data-testid="button-submit-link-form"
+            >
+              {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />}
+              {isEdit ? "Enregistrer" : "Créer le lien"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── LIST VIEW ───────────────────────────────────────────────────────────────
   return (
     <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
       <div className="flex items-center justify-between gap-2 mb-5">
@@ -2077,7 +2485,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
           <p className="text-xs mt-0.5" style={{ color: "#888" }}>{t("paymentLinksDesc")}</p>
         </div>
         <button
-          onClick={() => setShowCreate(true)}
+          onClick={openCreate}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold"
           style={{ background: "#00b050", color: "#fff", border: "none" }}
           data-testid="button-create-payment-link"
@@ -2086,8 +2494,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
         </button>
       </div>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("summary")}</p>
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-3 gap-3 mb-5">
         <div className="rounded-xl p-4" style={{ background: "#1976d2" }}>
           <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("links")}</p>
           <p className="text-2xl font-bold text-white">{links.length}</p>
@@ -2113,11 +2520,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
           </div>
           <p className="font-bold text-sm mb-1" style={{ color: "#1a1a1a" }}>{t("noLinks")}</p>
           <p className="text-xs mb-4" style={{ color: "#aaa" }}>{t("noLinksDesc")}</p>
-          <button
-            onClick={() => setShowCreate(true)}
-            className="px-4 py-2 rounded-xl text-sm font-bold"
-            style={{ background: "#00b050", color: "#fff", border: "none" }}
-          >
+          <button onClick={openCreate} className="px-5 py-2.5 rounded-xl text-sm font-bold" style={{ background: "#00b050", color: "#fff" }}>
             {t("createLink")}
           </button>
         </div>
@@ -2126,52 +2529,57 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
           {links.map((link) => {
             const url = `${baseUrl}/link/${link.uniqueId}`;
             const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(url)}`;
-            const isExpired = link.expiresAt && new Date() > new Date(link.expiresAt);
+            const isExpired = link.expiresAt && new Date() > new Date(link.expiresAt as any);
             const isLimited = link.paymentLimit && link.paymentCount >= link.paymentLimit;
             const inactive = !link.active || isExpired || isLimited;
             let statusStyle = { bg: "#d4edda", color: "#155724", label: t("statusActive") };
             if (isExpired) statusStyle = { bg: "#f8d7da", color: "#721c24", label: t("expired") };
             else if (isLimited) statusStyle = { bg: "#f8d7da", color: "#721c24", label: t("limitReached") };
             else if (!link.active) statusStyle = { bg: "#e9ecef", color: "#495057", label: t("inactive") };
+            const l = link as any;
             return (
               <div key={link.id} className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #e8ecf0", opacity: inactive ? 0.65 : 1 }} data-testid={`card-payment-link-${link.id}`}>
-                <div className="flex flex-col sm:flex-row sm:items-start gap-4">
-                  <img src={qrUrl} alt="QR" className="w-16 h-16 rounded-xl shrink-0" style={{ border: "1px solid #e8ecf0" }} />
+                <div className="flex items-start gap-3">
+                  <img src={qrUrl} alt="QR" className="w-14 h-14 rounded-xl shrink-0" style={{ border: "1px solid #e8ecf0" }} />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <div>
-                        <p className="font-bold text-sm" style={{ color: "#1a1a1a" }} data-testid={`text-link-name-${link.id}`}>{link.name}</p>
-                        <p className="text-xs" style={{ color: "#888" }}>{link.amountType === "fixed" ? `${link.amount?.toLocaleString()} F CFA` : t("flexibleAmount")}</p>
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="min-w-0">
+                        <p className="font-bold text-sm truncate" style={{ color: "#1a1a1a" }} data-testid={`text-link-name-${link.id}`}>{link.name}</p>
+                        {l.description && <p className="text-xs truncate mt-0.5" style={{ color: "#888" }}>{l.description}</p>}
+                        <p className="text-xs mt-0.5" style={{ color: "#aaa" }}>{link.amountType === "fixed" ? `${link.amount?.toLocaleString()} F CFA` : t("flexibleAmount")}</p>
                       </div>
-                      <span className="text-xs px-2 py-0.5 rounded-full font-semibold shrink-0" style={{ background: statusStyle.bg, color: statusStyle.color }}>{statusStyle.label}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full font-semibold shrink-0 whitespace-nowrap" style={{ background: statusStyle.bg, color: statusStyle.color }}>{statusStyle.label}</span>
                     </div>
+
+                    {/* Feature badges */}
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {l.collectBillingAddress && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: "#e8f5e9", color: "#2e7d32" }}>📋 Adresse</span>}
+                      {l.showShareButton && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: "#e3f2fd", color: "#1565c0" }}>🔗 Partage</span>}
+                      {l.notificationEmail && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: "#fce4ec", color: "#ad1457" }}>✉ Email</span>}
+                      {l.confirmationMessage && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: "#fff8e1", color: "#e65100" }}>💬 Message</span>}
+                      {link.paymentLimit && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: "#f3e5f5", color: "#6a1b9a" }}>🔢 {link.paymentCount}/{link.paymentLimit}</span>}
+                      {link.expiresAt && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: "#e8eaf6", color: "#283593" }}>⏱ Expiration</span>}
+                    </div>
+
                     <div className="flex items-center gap-1 rounded-xl px-3 py-1.5 mb-2" style={{ background: "#f9fafb", border: "1px solid #e2e8f0" }}>
                       <span className="text-xs truncate flex-1 font-mono" style={{ color: "#666" }}>{url}</span>
-                      <button className="p-1 rounded hover:bg-gray-200 shrink-0" onClick={() => copyLink(link.uniqueId)} style={{ color: "#888" }} data-testid={`button-copy-link-${link.id}`}><Copy className="w-3 h-3" /></button>
-                      <button className="p-1 rounded hover:bg-gray-200 shrink-0" onClick={() => window.open(url, "_blank")} style={{ color: "#888" }} data-testid={`button-open-link-${link.id}`}><ExternalLink className="w-3 h-3" /></button>
+                      <button className="p-1 rounded" onClick={() => copyLink(link.uniqueId)} style={{ color: "#888" }} data-testid={`button-copy-link-${link.id}`}><Copy className="w-3 h-3" /></button>
+                      <button className="p-1 rounded" onClick={() => window.open(url, "_blank")} style={{ color: "#888" }} data-testid={`button-open-link-${link.id}`}><ExternalLink className="w-3 h-3" /></button>
+                      <button className="p-1 rounded" onClick={() => shareLink(link.uniqueId)} style={{ color: "#888" }} data-testid={`button-share-link-${link.id}`}><Share2 className="w-3 h-3" /></button>
                     </div>
+
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs" style={{ color: "#888" }}>
                       <span><BarChart3 className="w-3 h-3 inline mr-0.5" />{link.paymentCount} {t("payments")}</span>
                       <span style={{ color: "#00b050", fontWeight: 600 }}>{link.totalRevenue.toLocaleString()} F</span>
-                      {link.paymentLimit && <span>{t("limit")} : {link.paymentCount}/{link.paymentLimit}</span>}
                     </div>
                   </div>
-                  <div className="flex sm:flex-col items-center gap-2 shrink-0">
+
+                  <div className="flex flex-col items-center gap-2 shrink-0">
                     <Switch checked={link.active} onCheckedChange={(checked) => updateMutation.mutate({ id: link.id, data: { active: checked } })} data-testid={`switch-link-active-${link.id}`} />
-                    <button
-                      className="w-7 h-7 rounded-lg flex items-center justify-center"
-                      style={{ background: "#f0f4ff", border: "1px solid #c5cae9" }}
-                      onClick={() => { setEditLink(link); setForm({ name: link.name, amountType: link.amountType, amount: link.amount?.toString() || "", redirectUrl: link.redirectUrl || "", paymentLimit: link.paymentLimit?.toString() || "" }); }}
-                      data-testid={`button-edit-link-${link.id}`}
-                    >
+                    <button className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#f0f4ff", border: "1px solid #c5cae9" }} onClick={() => openEdit(link)} data-testid={`button-edit-link-${link.id}`}>
                       <Edit3 className="w-3 h-3" style={{ color: "#3949ab" }} />
                     </button>
-                    <button
-                      className="w-7 h-7 rounded-lg flex items-center justify-center"
-                      style={{ background: "#fff0f0", border: "1px solid #ffcdd2" }}
-                      onClick={() => deleteMutation.mutate(link.id)}
-                      data-testid={`button-delete-link-${link.id}`}
-                    >
+                    <button className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#fff0f0", border: "1px solid #ffcdd2" }} onClick={() => deleteMutation.mutate(link.id)} data-testid={`button-delete-link-${link.id}`}>
                       <Trash2 className="w-3 h-3" style={{ color: "#c62828" }} />
                     </button>
                   </div>
@@ -2181,47 +2589,6 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
           })}
         </div>
       )}
-
-      <Dialog open={showCreate || !!editLink} onOpenChange={(o) => { if (!o) { setShowCreate(false); setEditLink(null); } }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{editLink ? t("editLink") : t("createLink")}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 mt-2">
-            <div className="space-y-1">
-              <Label>{t("linkName")}</Label>
-              <Input placeholder="Ex: Paiement commande #42" value={form.name} onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))} data-testid="input-link-name" />
-            </div>
-            <div className="space-y-1">
-              <Label>{t("amountType")}</Label>
-              <Select value={form.amountType} onValueChange={(v) => setForm(f => ({ ...f, amountType: v }))}>
-                <SelectTrigger data-testid="select-link-amount-type"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="fixed">{t("fixedAmount")}</SelectItem>
-                  <SelectItem value="flexible">{t("flexibleAmount")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {form.amountType === "fixed" && (
-              <div className="space-y-1">
-                <Label>{t("amount")} (F CFA)</Label>
-                <Input type="number" placeholder="5000" value={form.amount} onChange={(e) => setForm(f => ({ ...f, amount: e.target.value }))} data-testid="input-link-amount" />
-              </div>
-            )}
-            <div className="space-y-1">
-              <Label>{t("redirectUrl")}</Label>
-              <Input placeholder="https://yoursite.com/thanks" value={form.redirectUrl} onChange={(e) => setForm(f => ({ ...f, redirectUrl: e.target.value }))} data-testid="input-link-redirect" />
-            </div>
-            <div className="space-y-1">
-              <Label>{t("paymentLimit")}</Label>
-              <Input type="number" placeholder={t("unlimited")} value={form.paymentLimit} onChange={(e) => setForm(f => ({ ...f, paymentLimit: e.target.value }))} data-testid="input-link-limit" />
-            </div>
-            <Button className="w-full" onClick={() => { if (editLink) { updateMutation.mutate({ id: editLink.id, data: { name: form.name, amountType: form.amountType, amount: form.amount ? Number(form.amount) : undefined, redirectUrl: form.redirectUrl || undefined, paymentLimit: form.paymentLimit ? Number(form.paymentLimit) : undefined } }); } else { createMutation.mutate(form); } }} disabled={createMutation.isPending || updateMutation.isPending} data-testid="button-submit-link-form">
-              {createMutation.isPending || updateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : editLink ? t("save") : t("createLink")}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
