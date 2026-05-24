@@ -181,7 +181,8 @@ export async function initiatePayment(
   if (params.description) payload.description = params.description;
   if (params.callbackUrl) payload.callbackUrl = params.callbackUrl;
 
-  console.log(`[SENDAVAPAY] Initiation paiement: ${params.amount} - Tel: ${params.phoneNumber} - Op: ${params.operator} - Pays: ${params.country}`);
+  const maskedPhone = params.phoneNumber ? params.phoneNumber.replace(/(\d{3})\d+(\d{2})/, "$1****$2") : "?";
+  console.log(`[SENDAVAPAY] Initiation paiement: ${params.amount} - Tel: ${maskedPhone} - Op: ${params.operator} - Pays: ${params.country}`);
   const result = await sendavaRequest<SendavaPayPaymentResponse>("/api/sdk/payment", "POST", apiKey, apiSecret, payload);
   console.log(`[SENDAVAPAY] Réponse initiation: success=${result.success} status=${result.status} otpRequired=${result.otpRequired} ref=${result.reference}`);
   return result;

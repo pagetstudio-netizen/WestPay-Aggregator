@@ -103,9 +103,11 @@ export async function sendAdminNotificationEmail(
   }
 
   const name = recipientName || "Marchand";
+  const escHtml = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;");
   const messageHtml = message
     .split("\n")
-    .map(line => line.trim() ? `<p style="margin:0 0 12px;color:#334155;font-size:15px;line-height:1.7;">${line}</p>` : "<br>")
+    .map(line => line.trim() ? `<p style="margin:0 0 12px;color:#334155;font-size:15px;line-height:1.7;">${escHtml(line)}</p>` : "<br>")
     .join("");
 
   const html = `<!DOCTYPE html>

@@ -357,13 +357,15 @@ export default function PaymentPage() {
   };
 
   const safeRedirect = (rawUrl: string, extra?: Record<string, string>) => {
+    if (!rawUrl || /^(javascript|data|vbscript):/i.test(rawUrl.trim())) return;
     const normalized = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
     try {
       const url = new URL(normalized);
+      if (!["https:", "http:"].includes(url.protocol)) return;
       if (extra) Object.entries(extra).forEach(([k, v]) => url.searchParams.set(k, v));
       window.location.replace(url.toString());
     } catch {
-      window.location.replace(normalized);
+      // invalid URL — abort silently
     }
   };
 

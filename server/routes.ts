@@ -56,7 +56,13 @@ import {
   type SendavaPayWebhookPayload,
 } from "./sendavapay";
 
-const JWT_SECRET = process.env.SESSION_SECRET || "westpay-secret-key-change-me";
+const JWT_SECRET = process.env.SESSION_SECRET || process.env.JWT_SECRET || "westpay-secret-key-change-me";
+if (!process.env.SESSION_SECRET && !process.env.JWT_SECRET) {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("[SECURITY] SESSION_SECRET must be set in production — refusing to start with weak default.");
+  }
+  console.warn("[SECURITY WARNING] SESSION_SECRET not set — using insecure fallback. Set it before deploying to production!");
+}
 
 async function getOmnipayApiKey(): Promise<string | undefined> {
   return process.env.OMNIPAY_API_KEY || await storage.getSetting("omnipay_api_key");
@@ -381,6 +387,33 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // ── Security headers (applied to every response) ─────────────────────────────
+  app.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    res.setHeader("X-Permitted-Cross-Domain-Policies", "none");
+    if (process.env.NODE_ENV === "production") {
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
+    }
+    res.setHeader("Content-Security-Policy", [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "img-src 'self' data: blob: https://api.dicebear.com",
+      "connect-src 'self' wss: ws: https:",
+      "font-src 'self' data: https://fonts.gstatic.com",
+      "frame-src 'none'",
+      "frame-ancestors 'none'",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join("; "));
+    next();
+  });
+
   app.get("/robots.txt", (_req, res) => {
     res.type("text/plain").send("User-agent: *\nDisallow: /\n");
   });
