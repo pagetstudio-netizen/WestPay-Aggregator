@@ -113,6 +113,10 @@ app.use((req, res, next) => {
     }
   }
 
+  // Initialize dedicated OTP bot (separate token, separate instance)
+  const { initOtpBot } = await import("./telegram-otp-bot");
+  await initOtpBot();
+
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";

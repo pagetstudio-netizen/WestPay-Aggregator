@@ -1000,20 +1000,28 @@ export async function registerRoutes(
         [merchant.email, otpHash, tempToken, expiresAt]
       );
 
-      // Envoyer l'OTP — Telegram si groupe lié, sinon email
+      // Envoyer l'OTP — bot OTP dédié → bot principal → email (fallback chain)
       let otpVia: "telegram" | "email" = "email";
       if (merchant.telegramChatId) {
         try {
-          const { sendMerchantOtpTelegram } = await import("./telegram-bot");
-          const sent = await sendMerchantOtpTelegram(merchant.telegramChatId, otpValue, merchant.name);
-          if (sent) otpVia = "telegram";
+          // 1st priority: dedicated OTP bot (separate token, single responsibility)
+          const { sendOtpViaDedicatedBot } = await import("./telegram-otp-bot");
+          const sent = await sendOtpViaDedicatedBot(merchant.telegramChatId, otpValue, merchant.name);
+          if (sent) {
+            otpVia = "telegram";
+          } else {
+            // 2nd priority: main notification bot fallback
+            const { sendMerchantOtpTelegram } = await import("./telegram-bot");
+            const sentFallback = await sendMerchantOtpTelegram(merchant.telegramChatId, otpValue, merchant.name);
+            if (sentFallback) otpVia = "telegram";
+          }
         } catch (err) {
-          console.error("[MERCHANT OTP] Erreur Telegram, fallback email:", err);
+          console.error("[MERCHANT OTP] Telegram error, falling back to email:", err);
         }
       }
       if (otpVia === "email") {
         sendMerchantOtpEmail(merchant.email, otpValue, merchant.name).catch((err) => {
-          console.error("[MERCHANT OTP] Erreur email:", err);
+          console.error("[MERCHANT OTP] Email error:", err);
         });
       }
 
@@ -1337,6 +1345,56 @@ export async function registerRoutes(
       }
       await storage.createAuditLog({ adminId: (req as any).user.id, action: "telegram_group_updated", details: `Groupe admin Telegram mis a jour : ${trimmed}`, ip: req.ip || "" });
       res.json({ success: true, groupId: trimmed });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── OTP Bot settings ──────────────────────────────────────────────────────
+
+  app.get("/api/admin/telegram/otp-bot/settings", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const { getOtpBotStatus } = await import("./telegram-otp-bot");
+      const status = getOtpBotStatus();
+      const storedToken = await storage.getSetting("telegram_otp_bot_token");
+      const hasToken = !!(process.env.TELEGRAM_OTP_BOT_TOKEN || storedToken);
+      const masked = storedToken
+        ? storedToken.slice(0, 8) + "..." + storedToken.slice(-6)
+        : process.env.TELEGRAM_OTP_BOT_TOKEN
+        ? "(env var)"
+        : null;
+      res.json({ running: status.running, username: status.username, hasToken, masked });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/telegram/otp-bot/settings", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { token } = req.body;
+      if (!token || typeof token !== "string" || !token.trim()) {
+        return res.status(400).json({ message: "token required" });
+      }
+      await storage.setSetting("telegram_otp_bot_token", token.trim());
+      const { reloadOtpBot } = await import("./telegram-otp-bot");
+      const result = await reloadOtpBot();
+      if (!result.ok) return res.status(400).json({ message: result.error || "Invalid token" });
+      await storage.createAuditLog({ adminId: (req as any).user.id, action: "otp_bot_token_updated", details: "OTP bot token updated and reloaded", ip: req.ip || "" });
+      res.json({ success: true, username: result.username });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/telegram/otp-bot/test", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { chatId, merchantName } = req.body;
+      if (!chatId) return res.status(400).json({ message: "chatId required" });
+      const { sendOtpViaDedicatedBot } = await import("./telegram-otp-bot");
+      const testOtp = String(Math.floor(100000 + Math.random() * 900000));
+      const sent = await sendOtpViaDedicatedBot(String(chatId), testOtp, merchantName || "Test Merchant");
+      if (!sent) return res.status(500).json({ message: "Failed to send — check bot token and chat ID" });
+      res.json({ success: true, otp: testOtp });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

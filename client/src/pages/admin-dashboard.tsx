@@ -5473,8 +5473,227 @@ function TelegramBroadcastPanel({ merchants }: { merchants: Merchant[] }) {
   );
 }
 
+function OtpBotPanel() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const [botToken, setBotToken] = useState("");
+  const [showToken, setShowToken] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testChatId, setTestChatId] = useState("");
+  const [testMerchantName, setTestMerchantName] = useState("");
+  const [testing, setTesting] = useState(false);
+
+  const { data: botSettings, isLoading, refetch } = useQuery<{
+    running: boolean; username: string | null; hasToken: boolean; masked: string | null;
+  }>({
+    queryKey: ["/api/admin/telegram/otp-bot/settings"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/telegram/otp-bot/settings", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Failed to load");
+      return res.json();
+    },
+  });
+
+  const handleSaveToken = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!botToken.trim()) { toast({ title: "Token required", variant: "destructive" }); return; }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/admin/telegram/otp-bot/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ token: botToken.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed");
+      toast({ title: "OTP bot started", description: `@${data.username}` });
+      setBotToken("");
+      refetch();
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!testChatId.trim()) { toast({ title: "Chat ID required", variant: "destructive" }); return; }
+    setTesting(true);
+    try {
+      const res = await fetch("/api/admin/telegram/otp-bot/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ chatId: testChatId.trim(), merchantName: testMerchantName.trim() || "Test Merchant" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed");
+      toast({ title: "Test OTP sent!", description: `Code: ${data.otp} — check Telegram` });
+    } catch (err: any) {
+      toast({ title: "Test failed", description: err.message, variant: "destructive" });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Bot status card */}
+      <div className={`flex items-center gap-4 p-4 rounded-xl border ${botSettings?.running ? "bg-emerald-950/30 border-emerald-800/40" : "bg-muted border-border"}`}>
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${botSettings?.running ? "bg-emerald-600" : "bg-muted-foreground/20"}`}>
+          <KeyRound className={`w-5 h-5 ${botSettings?.running ? "text-white" : "text-muted-foreground"}`} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-sm text-foreground">OTP Delivery Bot</span>
+            {isLoading ? (
+              <Skeleton className="h-5 w-16" />
+            ) : botSettings?.running ? (
+              <Badge className="bg-emerald-600/20 text-emerald-400 border-emerald-600/30 text-xs">● Running</Badge>
+            ) : (
+              <Badge variant="outline" className="text-muted-foreground text-xs">● Offline</Badge>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {isLoading ? "Loading..." : botSettings?.running
+              ? `@${botSettings.username} — exclusively sends OTP codes during merchant login`
+              : botSettings?.hasToken
+              ? `Token found (${botSettings.masked}) — bot failed to start`
+              : "No token configured — OTP codes will fall back to email"}
+          </p>
+        </div>
+      </div>
+
+      {/* Info box */}
+      <div className="flex gap-3 p-4 rounded-xl bg-blue-950/20 border border-blue-800/30">
+        <Shield className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
+        <div className="text-xs text-blue-300 leading-relaxed">
+          <strong className="text-blue-200 block mb-1">Dedicated single-role bot</strong>
+          This bot has one job only: deliver 6-digit OTP codes to merchant Telegram groups when they log in.
+          It does not respond to commands, does not broadcast, and does not interact with the main notification bot.
+          <br /><br />
+          <strong className="text-blue-200">Fallback chain:</strong> OTP Bot → Main Bot → Email
+        </div>
+      </div>
+
+      {/* Token configuration */}
+      <div className="p-4 rounded-xl border border-border bg-card space-y-4">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Configure Bot Token</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Create a new bot via <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">@BotFather</a> → /newbot — paste the token below
+          </p>
+        </div>
+        <form onSubmit={handleSaveToken} className="space-y-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Bot Token</Label>
+            <div className="relative">
+              <input
+                type={showToken ? "text" : "password"}
+                value={botToken}
+                onChange={e => setBotToken(e.target.value)}
+                placeholder="123456789:AAF..."
+                className="w-full px-3 py-2 pr-10 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 font-mono"
+                data-testid="input-otp-bot-token"
+              />
+              <button
+                type="button"
+                onClick={() => setShowToken(v => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+          <Button
+            type="submit"
+            disabled={saving || !botToken.trim()}
+            className="w-full"
+            data-testid="button-save-otp-bot-token"
+          >
+            {saving ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Starting bot...</> : <><CheckCircle className="w-4 h-4 mr-2" />Save & Start Bot</>}
+          </Button>
+        </form>
+        {botSettings?.hasToken && (
+          <p className="text-xs text-muted-foreground text-center">
+            Current token: <span className="font-mono text-foreground">{botSettings.masked}</span>
+          </p>
+        )}
+      </div>
+
+      {/* Test send */}
+      {botSettings?.running && (
+        <div className="p-4 rounded-xl border border-border bg-card space-y-4">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Send Test OTP</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Send a real test code to any Telegram group to verify delivery</p>
+          </div>
+          <form onSubmit={handleTest} className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Chat / Group ID</Label>
+                <input
+                  type="text"
+                  value={testChatId}
+                  onChange={e => setTestChatId(e.target.value)}
+                  placeholder="-1001234567890"
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 font-mono"
+                  data-testid="input-otp-bot-test-chat-id"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Merchant Name</Label>
+                <input
+                  type="text"
+                  value={testMerchantName}
+                  onChange={e => setTestMerchantName(e.target.value)}
+                  placeholder="EcoMat"
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  data-testid="input-otp-bot-test-merchant"
+                />
+              </div>
+            </div>
+            <Button
+              type="submit"
+              variant="outline"
+              disabled={testing || !testChatId.trim()}
+              className="w-full"
+              data-testid="button-otp-bot-test-send"
+            >
+              {testing ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Sending...</> : <><MessageSquare className="w-4 h-4 mr-2" />Send Test Code</>}
+            </Button>
+          </form>
+        </div>
+      )}
+
+      {/* Message preview */}
+      <div className="p-4 rounded-xl border border-border bg-card space-y-3">
+        <h3 className="text-sm font-semibold text-foreground">Message Preview</h3>
+        <div className="rounded-xl bg-[#17212b] p-4 font-mono text-xs leading-relaxed text-[#e8e8e8] space-y-0.5">
+          <p className="text-white font-bold">🔐 WestPay — Secure Login</p>
+          <p>&nbsp;</p>
+          <p>👤 <span className="font-bold">Merchant:</span> EcoMat</p>
+          <p className="text-[#6c7883]">━━━━━━━━━━━━━━━━━━━━━━</p>
+          <p>&nbsp;</p>
+          <p>Your one-time login code:</p>
+          <p>&nbsp;</p>
+          <p className="bg-[#0d1117] px-3 py-1.5 rounded text-[#58a6ff] tracking-[0.35em] font-bold text-sm">  4  8  3  7  2  1  </p>
+          <p>&nbsp;</p>
+          <p className="text-[#6c7883]">━━━━━━━━━━━━━━━━━━━━━━</p>
+          <p>⏱ Valid for <span className="font-bold">5 minutes</span> · Single use only</p>
+          <p>🔒 <span className="font-bold">Never share this code with anyone</span></p>
+          <p>&nbsp;</p>
+          <p className="text-[#6c7883] italic">WestPay · Secure Payment Platform</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NotificationsPanel() {
-  const [activeNotifTab, setActiveNotifTab] = useState<"email" | "telegram">("email");
+  const [activeNotifTab, setActiveNotifTab] = useState<"email" | "telegram" | "otpbot">("email");
   const { data: merchants = [] } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
   const allMerchants = merchants as Merchant[];
 
@@ -5496,7 +5715,7 @@ function NotificationsPanel() {
         <button
           type="button"
           onClick={() => setActiveNotifTab("email")}
-          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeNotifTab === "email" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${activeNotifTab === "email" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
           data-testid="button-notif-tab-email"
         >
           <Mail className="w-4 h-4" />
@@ -5505,16 +5724,26 @@ function NotificationsPanel() {
         <button
           type="button"
           onClick={() => setActiveNotifTab("telegram")}
-          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeNotifTab === "telegram" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${activeNotifTab === "telegram" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
           data-testid="button-notif-tab-telegram"
         >
           <MessageSquare className="w-4 h-4 text-blue-500" />
-          Telegram
+          Broadcast
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveNotifTab("otpbot")}
+          className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${activeNotifTab === "otpbot" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          data-testid="button-notif-tab-otpbot"
+        >
+          <KeyRound className="w-4 h-4 text-amber-500" />
+          OTP Bot
         </button>
       </div>
 
       {activeNotifTab === "email" && <EmailNotifyPanel merchants={allMerchants} />}
       {activeNotifTab === "telegram" && <TelegramBroadcastPanel merchants={allMerchants} />}
+      {activeNotifTab === "otpbot" && <OtpBotPanel />}
     </div>
   );
 }
