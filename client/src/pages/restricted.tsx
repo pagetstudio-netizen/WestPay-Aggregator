@@ -1,30 +1,46 @@
-import { Shield } from "lucide-react";
-
 export default function RestrictedPage() {
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="text-center max-w-md">
-        <div className="flex justify-center mb-6">
-          <div className="w-16 h-16 rounded-md bg-primary/10 flex items-center justify-center">
-            <Shield className="w-8 h-8 text-primary" />
-          </div>
-        </div>
+    <div
+      className="min-h-screen flex flex-col items-center justify-center p-6"
+      style={{ background: "#f0f4ff" }}
+    >
+      <div
+        className="w-full max-w-sm bg-white rounded-3xl shadow-sm flex flex-col items-center px-8 py-10"
+        style={{ border: "1px solid #e8ecf0" }}
+      >
+        <img
+          src="/404-illustration.png"
+          alt=""
+          className="w-52 h-52 object-contain mb-6"
+          draggable={false}
+        />
+
         <h1
-          className="text-2xl font-bold text-foreground mb-2"
+          className="text-xl font-extrabold text-center mb-4"
+          style={{ color: "#1a1a1a" }}
           data-testid="text-restricted-title"
         >
-          WestPay
+          Ooups, La page n'a pas été trouvée
         </h1>
+
         <p
-          className="text-muted-foreground text-sm"
+          className="text-sm text-center leading-relaxed mb-8"
+          style={{ color: "#666" }}
           data-testid="text-restricted-message"
         >
-          Plateforme privee. Acces restreint aux utilisateurs autorises uniquement.
+          Nous sommes vraiment désolés pour ce désagrément. Il semble que vous
+          essayez d'accéder à une page qui a été supprimée ou qui n'a jamais
+          existé.
         </p>
-        <div className="mt-8 flex items-center justify-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
-          <span className="text-xs text-muted-foreground">Acces non autorise</span>
-        </div>
+
+        <button
+          onClick={() => window.history.back()}
+          className="w-full py-3.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 active:opacity-80"
+          style={{ background: "#2563eb" }}
+          data-testid="button-go-back"
+        >
+          Revenir à la page précédente
+        </button>
       </div>
     </div>
   );
