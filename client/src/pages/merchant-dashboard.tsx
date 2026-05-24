@@ -42,6 +42,8 @@ import icnStatVolume from "@assets/téléchargement_(72)_1779627609372.png";
 import icnStatConfirmed from "@assets/bankCard-blue-CET1cZWP_1779627609555.png";
 import icnStatPending from "@assets/mine-mod-records-DgHXSKa1_1779627609583.png";
 import icnStatFailed from "@assets/mine-mod-bankcard-CLOhqwHj_1779627609612.png";
+import icnApiKeySettings from "@assets/1437214_1779628153139.png";
+import icnApiCloud from "@assets/6213702_1779628153256.png";
 
 type MerchantTab = "overview" | "apikeys" | "webhook" | "virements" | "reversements" | "settings" | "paymentlinks" | "transactions" | "crypto" | "sdk" | "wallet" | "analyse";
 
@@ -915,42 +917,14 @@ function ApiKeysPanel({ token }: { token: string | null }) {
 
       {/* ── Hero header ── */}
       <div className="px-5 pt-6 pb-5" style={{ background: "#fff", borderBottom: "1px solid #f0f0f0" }}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm shrink-0"
-              style={{ background: "linear-gradient(135deg, #3949ab 0%, #1a237e 100%)" }}>
-              <Key className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold leading-tight" style={{ color: "#1a1a1a" }}>
-                {t("apiKeysTitle")}
-              </h2>
-              <p className="text-xs mt-0.5" style={{ color: "#888" }}>
-                Gérez vos clés d'accès par pays
-              </p>
-            </div>
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm shrink-0"
+            style={{ background: "linear-gradient(135deg, #e8eaf6 0%, #c5cae9 100%)" }}>
+            <img src={icnApiKeySettings} alt="API Keys" className="w-8 h-8 object-contain" />
           </div>
-          <button
-            onClick={() => window.open("/api-docs", "_blank")}
-            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold shrink-0 shadow-sm transition-all active:scale-95"
-            style={{ background: "#3949ab", color: "#fff", border: "none" }}
-            data-testid="button-open-api-docs"
-          >
-            <BookOpen className="w-3.5 h-3.5" />
-            Guide d'intégration
-          </button>
-        </div>
-
-        {/* Stat pills */}
-        <div className="flex gap-2 mt-4">
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl" style={{ background: "#e8f5e9" }}>
-            <div className="w-1.5 h-1.5 rounded-full" style={{ background: "#00b050" }} />
-            <span className="text-xs font-bold" style={{ color: "#2e7d32" }}>{activeCount} pays actif{activeCount > 1 ? "s" : ""}</span>
-          </div>
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl" style={{ background: "#e8eaf6" }}>
-            <Key className="w-3 h-3" style={{ color: "#3949ab" }} />
-            <span className="text-xs font-bold" style={{ color: "#3949ab" }}>{keyList.length} clé{keyList.length > 1 ? "s" : ""} au total</span>
-          </div>
+          <h2 className="text-lg font-bold leading-tight" style={{ color: "#1a1a1a" }}>
+            {t("apiKeysTitle")}
+          </h2>
         </div>
       </div>
 
@@ -1051,9 +1025,9 @@ function ApiKeysPanel({ token }: { token: string | null }) {
         {/* ── Integration guide banner ── */}
         <div className="rounded-2xl overflow-hidden shadow-sm" style={{ background: "linear-gradient(135deg, #3949ab 0%, #1a237e 100%)" }}>
           <div className="px-5 py-5 flex items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0"
+            <div className="w-14 h-14 rounded-2xl flex items-center justify-center shrink-0"
               style={{ background: "rgba(255,255,255,0.15)" }}>
-              <BookOpen className="w-6 h-6 text-white" />
+              <img src={icnApiCloud} alt="API" className="w-10 h-10 object-contain" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-bold text-white leading-tight">{t("integrationGuide")}</p>
