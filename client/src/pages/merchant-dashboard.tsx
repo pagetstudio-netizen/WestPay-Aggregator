@@ -2159,9 +2159,13 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
 
             {/* From */}
             <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-              <div className="px-4 py-3 flex items-center gap-2" style={{ borderBottom: "1px solid #f5f5f5", background: "#fafafa" }}>
-                <div className="w-1.5 h-1.5 rounded-full" style={{ background: "#7e57c2" }} />
-                <span className="text-xs font-bold uppercase tracking-wider" style={{ color: "#7e57c2" }}>De</span>
+              <div className="px-4 py-3 flex items-center gap-2.5 relative overflow-hidden"
+                style={{ background: "linear-gradient(135deg,#512da8 0%,#7e57c2 100%)", borderBottom: "none" }}>
+                <div className="absolute -top-3 -right-3 w-12 h-12 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }} />
+                <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: "rgba(255,255,255,0.2)" }}>
+                  <span className="text-xs font-black text-white">DE</span>
+                </div>
+                <span className="text-xs font-bold uppercase tracking-wider text-white">Wallet source</span>
               </div>
               <div className="px-4 py-4">
                 {eligibleCountries.length === 0 ? (
@@ -2170,28 +2174,30 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
                   <div className="grid grid-cols-2 gap-2">
                     {eligibleCountries.map((c) => {
                       const zone = wtcMap.get(c.country)?.currencyZone || "";
-                      const zc = ZONE_COLORS[zone] || { bg: "#f5f5f5", text: "#555", pill: "#888" };
                       const selected = String(c.id) === fromCountryId;
                       return (
                         <button
                           key={c.id}
                           type="button"
                           onClick={() => { setFromCountryId(String(c.id)); setToCountryId(""); }}
-                          className="flex items-center gap-2.5 px-3 py-3 rounded-xl transition-all text-left"
+                          className="flex items-center gap-2.5 px-3 py-3 rounded-xl transition-all text-left active:scale-95"
                           style={{
-                            background: selected ? "#7e57c2" : "#f8f9fc",
+                            background: selected
+                              ? "linear-gradient(135deg,#512da8 0%,#7e57c2 100%)"
+                              : "#f8f9fc",
                             border: `1.5px solid ${selected ? "#7e57c2" : "#e8ecf0"}`,
+                            boxShadow: selected ? "0 4px 14px rgba(81,45,168,0.3)" : "none",
                           }}
                           data-testid={`select-from-${c.id}`}
                         >
                           <span className="text-xl leading-none shrink-0">{ZONE_FLAGS[c.country] || "🌍"}</span>
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <p className="text-xs font-bold truncate leading-tight" style={{ color: selected ? "#fff" : "#1a1a1a" }}>{c.country}</p>
-                            <p className="text-xs leading-tight mt-0.5" style={{ color: selected ? "rgba(255,255,255,0.7)" : "#aaa" }}>
+                            <p className="text-xs leading-tight mt-0.5 font-semibold" style={{ color: selected ? "rgba(255,255,255,0.75)" : "#7e57c2" }}>
                               {c.balance.toLocaleString("fr-FR")} {zone}
                             </p>
                           </div>
-                          {selected && <CheckCircle2 className="w-4 h-4 ml-auto shrink-0 text-white" />}
+                          {selected && <CheckCircle2 className="w-4 h-4 shrink-0 text-white" />}
                         </button>
                       );
                     })}
@@ -2201,19 +2207,25 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
             </div>
 
             {/* Arrow swap button */}
-            <div className="flex justify-center -my-3 relative z-10">
-              <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-md"
-                style={{ background: "linear-gradient(135deg, #7e57c2 0%, #512da8 100%)", border: "3px solid #f2f3f5" }}>
+            <div className="flex justify-center -my-2 relative z-10">
+              <div className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-lg"
+                style={{ background: "linear-gradient(135deg,#7e57c2 0%,#512da8 100%)", border: "3px solid #f2f3f5" }}>
                 <ArrowRightLeft className="w-5 h-5 text-white" />
               </div>
             </div>
 
             {/* To */}
             <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-              <div className="px-4 py-3 flex items-center gap-2" style={{ borderBottom: "1px solid #f5f5f5", background: "#fafafa" }}>
-                <div className="w-1.5 h-1.5 rounded-full" style={{ background: "#00b050" }} />
-                <span className="text-xs font-bold uppercase tracking-wider" style={{ color: "#00b050" }}>À</span>
-                {fromZone && <span className="text-xs ml-auto" style={{ color: "#aaa" }}>Même zone {fromZone} uniquement</span>}
+              <div className="px-4 py-3 flex items-center justify-between gap-2 relative overflow-hidden"
+                style={{ background: "linear-gradient(135deg,#00963f 0%,#00b050 100%)", borderBottom: "none" }}>
+                <div className="absolute -top-3 -right-3 w-12 h-12 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }} />
+                <div className="flex items-center gap-2.5">
+                  <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: "rgba(255,255,255,0.2)" }}>
+                    <span className="text-xs font-black text-white">À</span>
+                  </div>
+                  <span className="text-xs font-bold uppercase tracking-wider text-white">Wallet destination</span>
+                </div>
+                {fromZone && <span className="text-xs text-white/70 font-semibold">Zone {fromZone}</span>}
               </div>
               <div className="px-4 py-4">
                 {!fromCountryId ? (
@@ -2222,8 +2234,8 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
                   </div>
                 ) : toCountries.length === 0 ? (
                   <div className="py-4 text-center rounded-xl" style={{ background: "#fffbea" }}>
-                    <p className="text-sm font-medium" style={{ color: "#d97706" }}>Aucun autre wallet disponible dans la zone {fromZone}</p>
-                    <p className="text-xs mt-1" style={{ color: "#aaa" }}>Activez d'autres pays de la même zone pour effectuer un virement</p>
+                    <p className="text-sm font-medium" style={{ color: "#d97706" }}>Aucun autre wallet dans la zone {fromZone}</p>
+                    <p className="text-xs mt-1" style={{ color: "#aaa" }}>Activez d'autres pays de la même zone</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-2">
@@ -2235,21 +2247,24 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
                           key={c.id}
                           type="button"
                           onClick={() => setToCountryId(String(c.id))}
-                          className="flex items-center gap-2.5 px-3 py-3 rounded-xl transition-all text-left"
+                          className="flex items-center gap-2.5 px-3 py-3 rounded-xl transition-all text-left active:scale-95"
                           style={{
-                            background: selected ? "#00b050" : "#f8f9fc",
+                            background: selected
+                              ? "linear-gradient(135deg,#00963f 0%,#00b050 100%)"
+                              : "#f8f9fc",
                             border: `1.5px solid ${selected ? "#00b050" : "#e8ecf0"}`,
+                            boxShadow: selected ? "0 4px 14px rgba(0,176,80,0.3)" : "none",
                           }}
                           data-testid={`select-to-${c.id}`}
                         >
                           <span className="text-xl leading-none shrink-0">{ZONE_FLAGS[c.country] || "🌍"}</span>
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <p className="text-xs font-bold truncate leading-tight" style={{ color: selected ? "#fff" : "#1a1a1a" }}>{c.country}</p>
-                            <p className="text-xs leading-tight mt-0.5" style={{ color: selected ? "rgba(255,255,255,0.7)" : "#aaa" }}>
+                            <p className="text-xs leading-tight mt-0.5 font-semibold" style={{ color: selected ? "rgba(255,255,255,0.75)" : "#00b050" }}>
                               {c.balance.toLocaleString("fr-FR")} {zone}
                             </p>
                           </div>
-                          {selected && <CheckCircle2 className="w-4 h-4 ml-auto shrink-0 text-white" />}
+                          {selected && <CheckCircle2 className="w-4 h-4 shrink-0 text-white" />}
                         </button>
                       );
                     })}
@@ -3224,24 +3239,32 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
 
         {/* Sticky bottom action bar */}
         <div className="fixed bottom-0 left-0 right-0 px-4 py-4 z-20"
-          style={{ background: "rgba(242,243,245,0.97)", borderTop: "1px solid #e0e0e0", backdropFilter: "blur(8px)" }}>
+          style={{ background: "rgba(242,243,245,0.96)", borderTop: "1.5px solid #e8ecf0", backdropFilter: "blur(12px)" }}>
           <div className="flex gap-3 max-w-lg mx-auto">
             <button
               onClick={() => { setView("list"); setEditLink(null); setForm(mkForm()); }}
-              className="flex-1 py-3.5 rounded-2xl text-sm font-bold"
+              className="px-5 py-3.5 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 transition-all active:scale-95"
               style={{ background: "#fff", color: "#555", border: "1.5px solid #e0e0e0" }}
               data-testid="button-cancel-link"
             >
-              Annuler
+              <ChevronLeft className="w-4 h-4" />
+              Retour
             </button>
             <button
               onClick={handleSubmit} disabled={isPending}
-              className="flex-1 py-3.5 rounded-2xl text-sm font-bold flex items-center justify-center gap-2"
-              style={{ background: isPending ? "#ccc" : "#00b050", color: "#fff", border: "none" }}
+              className="flex-1 py-3.5 rounded-2xl text-sm font-black flex items-center justify-center gap-2 transition-all active:scale-98"
+              style={{
+                background: isPending ? "#d1d5db" : isEdit
+                  ? "linear-gradient(135deg,#1a237e 0%,#3949ab 100%)"
+                  : "linear-gradient(135deg,#00963f 0%,#00b050 60%,#43a047 100%)",
+                color: isPending ? "#9ca3af" : "#fff",
+                border: "none",
+                boxShadow: isPending ? "none" : isEdit ? "0 4px 18px rgba(26,35,126,0.35)" : "0 4px 18px rgba(0,176,80,0.38)",
+              }}
               data-testid="button-submit-link-form"
             >
-              {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />}
-              {isEdit ? "Enregistrer" : "Créer le lien"}
+              {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : isEdit ? <Edit3 className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
+              {isPending ? "En cours…" : isEdit ? "Enregistrer les modifications" : "Créer le lien de paiement"}
             </button>
           </div>
         </div>
@@ -3251,159 +3274,178 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
 
   // ─── LIST VIEW ───────────────────────────────────────────────────────────────
   return (
-    <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#f2f3f5" }}>
-      {/* Header */}
-      <div className="flex items-center justify-between gap-2 mb-5">
-        <div>
-          <h2 className="text-xl font-bold" style={{ color: "#1a1a1a" }}>{t("paymentLinksTitle")}</h2>
-          <p className="text-xs mt-0.5" style={{ color: "#888" }}>{t("paymentLinksDesc")}</p>
-        </div>
-        <button
-          onClick={openCreate}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm"
-          style={{ background: "#00b050", color: "#fff", border: "none" }}
-          data-testid="button-create-payment-link"
-        >
-          <Plus className="w-4 h-4" /> {t("newLink")}
-        </button>
-      </div>
+    <div className="-m-4 md:-m-6 min-h-full" style={{ background: "#f2f3f5" }}>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-3 mb-5">
-        <div className="bg-white rounded-2xl p-3.5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-          <div className="w-7 h-7 rounded-xl flex items-center justify-center mb-2" style={{ background: "#e3f2fd" }}>
-            <Link className="w-3.5 h-3.5" style={{ color: "#1976d2" }} />
+      {/* ── Hero header gradient ── */}
+      <div className="relative overflow-hidden px-4 pt-6 pb-5"
+        style={{ background: "linear-gradient(135deg,#1a237e 0%,#3949ab 60%,#5c6bc0 100%)" }}>
+        <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full" style={{ background: "rgba(255,255,255,0.07)" }} />
+        <div className="absolute top-10 right-4 w-16 h-16 rounded-full" style={{ background: "rgba(255,255,255,0.05)" }} />
+        <div className="flex items-center justify-between relative z-10">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0"
+              style={{ background: "rgba(255,255,255,0.18)", border: "1px solid rgba(255,255,255,0.25)", backdropFilter: "blur(8px)" }}>
+              <Link className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-white leading-tight">{t("paymentLinksTitle")}</h2>
+              <p className="text-xs text-white/60 mt-0.5">{t("paymentLinksDesc")}</p>
+            </div>
           </div>
-          <p className="text-2xl font-bold" style={{ color: "#1a1a1a" }}>{links.length}</p>
-          <p className="text-xs font-semibold mt-0.5" style={{ color: "#888" }}>{t("links")}</p>
-        </div>
-        <div className="bg-white rounded-2xl p-3.5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-          <div className="w-7 h-7 rounded-xl flex items-center justify-center mb-2" style={{ background: "#e8f5e9" }}>
-            <CheckCircle2 className="w-3.5 h-3.5" style={{ color: "#00b050" }} />
-          </div>
-          <p className="text-2xl font-bold" style={{ color: "#1a1a1a" }}>{totalPayments}</p>
-          <p className="text-xs font-semibold mt-0.5" style={{ color: "#888" }}>{t("payments")}</p>
-        </div>
-        <div className="bg-white rounded-2xl p-3.5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-          <div className="w-7 h-7 rounded-xl flex items-center justify-center mb-2" style={{ background: "#f3e5f5" }}>
-            <BarChart3 className="w-3.5 h-3.5" style={{ color: "#9c27b0" }} />
-          </div>
-          <p className="text-lg font-bold leading-tight" style={{ color: "#1a1a1a" }}>{totalRevenue.toLocaleString()}<span className="text-xs ml-0.5 font-semibold" style={{ color: "#aaa" }}>F</span></p>
-          <p className="text-xs font-semibold mt-0.5" style={{ color: "#888" }}>{t("volume")}</p>
-        </div>
-      </div>
-
-      {isLoading ? <MerchantLoadingSkeleton /> : links.length === 0 ? (
-        <div className="bg-white rounded-2xl p-10 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-          <div className="w-14 h-14 rounded-2xl mx-auto mb-3 flex items-center justify-center" style={{ background: "#f0f4ff" }}>
-            <Link className="w-7 h-7" style={{ color: "#3949ab" }} />
-          </div>
-          <p className="font-bold text-sm mb-1" style={{ color: "#1a1a1a" }}>{t("noLinks")}</p>
-          <p className="text-xs mb-4" style={{ color: "#aaa" }}>{t("noLinksDesc")}</p>
-          <button onClick={openCreate} className="px-5 py-2.5 rounded-xl text-sm font-bold" style={{ background: "#00b050", color: "#fff" }}>
-            {t("createLink")}
+          <button
+            onClick={openCreate}
+            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 shrink-0"
+            style={{ background: "#00b050", color: "#fff", border: "none", boxShadow: "0 4px 14px rgba(0,176,80,0.4)" }}
+            data-testid="button-create-payment-link"
+          >
+            <Plus className="w-4 h-4" /> {t("newLink")}
           </button>
         </div>
-      ) : (
-        <div className="space-y-3">
-          {links.map((link) => {
-            const url = `${baseUrl}/link/${link.uniqueId}`;
-            const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(url)}`;
-            const isExpired = link.expiresAt && new Date() > new Date(link.expiresAt as any);
-            const isLimited = link.paymentLimit && link.paymentCount >= link.paymentLimit;
-            const inactive = !link.active || isExpired || isLimited;
-            let statusStyle = { bg: "#e8f5e9", color: "#2e7d32", label: t("statusActive") };
-            if (isExpired) statusStyle = { bg: "#fce4ec", color: "#ad1457", label: t("expired") };
-            else if (isLimited) statusStyle = { bg: "#fce4ec", color: "#ad1457", label: t("limitReached") };
-            else if (!link.active) statusStyle = { bg: "#f5f5f5", color: "#757575", label: t("inactive") };
-            const l = link as any;
-            return (
-              <div key={link.id} className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0", opacity: inactive ? 0.65 : 1 }} data-testid={`card-payment-link-${link.id}`}>
-                {/* Top accent bar */}
-                <div className="h-1 w-full" style={{ background: inactive ? "#e0e0e0" : "linear-gradient(90deg,#00b050 0%,#3d5af1 100%)" }} />
-                <div className="p-4">
-                <div className="flex items-start gap-3">
-                  <div className="shrink-0">
-                    <img src={qrUrl} alt="QR" className="w-16 h-16 rounded-xl" style={{ border: "2px solid #e8ecf0" }} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2 mb-1">
+
+        {/* Stats row inside header */}
+        <div className="grid grid-cols-3 gap-2.5 mt-5 relative z-10">
+          <div className="rounded-2xl p-3" style={{ background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.18)", backdropFilter: "blur(6px)" }}>
+            <p className="text-xs font-bold text-white/60 uppercase tracking-widest mb-1">{t("links")}</p>
+            <p className="text-2xl font-black text-white">{links.length}</p>
+          </div>
+          <div className="rounded-2xl p-3" style={{ background: "rgba(0,176,80,0.25)", border: "1px solid rgba(0,176,80,0.35)" }}>
+            <p className="text-xs font-bold text-white/60 uppercase tracking-widest mb-1">{t("payments")}</p>
+            <p className="text-2xl font-black text-white">{totalPayments}</p>
+          </div>
+          <div className="rounded-2xl p-3" style={{ background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.18)", backdropFilter: "blur(6px)" }}>
+            <p className="text-xs font-bold text-white/60 uppercase tracking-widest mb-1">{t("volume")}</p>
+            <p className="text-base font-black text-white leading-tight">{(totalRevenue/1000).toFixed(0)}<span className="text-xs font-semibold text-white/60">K F</span></p>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-4 pb-6 space-y-3">
+
+        {isLoading ? <MerchantLoadingSkeleton /> : links.length === 0 ? (
+          <div className="bg-white rounded-2xl p-10 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+            <div className="w-14 h-14 rounded-2xl mx-auto mb-3 flex items-center justify-center" style={{ background: "linear-gradient(135deg,#1a237e,#3949ab)" }}>
+              <Link className="w-7 h-7 text-white" />
+            </div>
+            <p className="font-bold text-sm mb-1" style={{ color: "#1a1a1a" }}>{t("noLinks")}</p>
+            <p className="text-xs mb-4" style={{ color: "#aaa" }}>{t("noLinksDesc")}</p>
+            <button onClick={openCreate} className="px-5 py-2.5 rounded-xl text-sm font-bold" style={{ background: "linear-gradient(135deg,#00b050,#00963f)", color: "#fff", boxShadow: "0 4px 14px rgba(0,176,80,0.3)" }}>
+              {t("createLink")}
+            </button>
+          </div>
+        ) : (
+          <>
+            {links.map((link) => {
+              const url = `${baseUrl}/link/${link.uniqueId}`;
+              const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}`;
+              const isExpired = link.expiresAt && new Date() > new Date(link.expiresAt as any);
+              const isLimited = link.paymentLimit && link.paymentCount >= link.paymentLimit;
+              const inactive = !link.active || isExpired || isLimited;
+              const l = link as any;
+
+              const statusDot = inactive
+                ? { dot: "#9ca3af", label: isExpired ? t("expired") : isLimited ? t("limitReached") : t("inactive"), bg: "#f5f5f5", color: "#757575" }
+                : { dot: "#22c55e", label: t("statusActive"), bg: "#f0fdf4", color: "#16a34a" };
+
+              return (
+                <div key={link.id} className="bg-white rounded-2xl overflow-hidden"
+                  style={{ border: "1.5px solid #e8ecf0", opacity: inactive ? 0.7 : 1, boxShadow: "0 2px 12px rgba(26,35,126,0.07)" }}
+                  data-testid={`card-payment-link-${link.id}`}>
+
+                  {/* ── Colored gradient header ── */}
+                  <div className="relative overflow-hidden px-4 py-3.5 flex items-center justify-between gap-2"
+                    style={{ background: inactive ? "linear-gradient(135deg,#607d8b,#78909c)" : "linear-gradient(135deg,#1a237e 0%,#3949ab 100%)" }}>
+                    <div className="absolute -bottom-3 -right-3 w-16 h-16 rounded-full" style={{ background: "rgba(255,255,255,0.06)" }} />
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-9 h-9 rounded-xl overflow-hidden shrink-0" style={{ border: "2px solid rgba(255,255,255,0.25)" }}>
+                        <img src={qrUrl} alt="QR" className="w-full h-full object-cover" />
+                      </div>
                       <div className="min-w-0">
-                        <p className="font-bold text-sm truncate" style={{ color: "#1a1a1a" }} data-testid={`text-link-name-${link.id}`}>{link.name}</p>
-                        {l.description && <p className="text-xs truncate mt-0.5" style={{ color: "#888" }}>{l.description}</p>}
-                        <p className="text-xs mt-0.5 font-semibold" style={{ color: link.amountType === "fixed" ? "#3949ab" : "#00b050" }}>
-                          {link.amountType === "fixed" ? `${link.amount?.toLocaleString()} F CFA` : t("flexibleAmount")}
-                        </p>
+                        <p className="font-black text-sm text-white truncate" data-testid={`text-link-name-${link.id}`}>{link.name}</p>
+                        {l.description && <p className="text-xs text-white/60 truncate mt-0.5">{l.description}</p>}
                       </div>
-                      <span className="text-xs px-2 py-0.5 rounded-full font-semibold shrink-0 whitespace-nowrap" style={{ background: statusStyle.bg, color: statusStyle.color }}>{statusStyle.label}</span>
                     </div>
-
-                    {/* Feature badges */}
-                    <div className="flex flex-wrap gap-1 mb-2">
-                      {l.collectBillingAddress && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: "#e8f5e9", color: "#2e7d32" }}>📋 Adresse</span>}
-                      {l.showShareButton && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: "#e3f2fd", color: "#1565c0" }}>🔗 Partage</span>}
-                      {l.notificationEmail && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: "#fce4ec", color: "#ad1457" }}>✉ Email</span>}
-                      {l.confirmationMessage && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: "#fff8e1", color: "#e65100" }}>💬 Message</span>}
-                      {link.paymentLimit && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: "#f3e5f5", color: "#6a1b9a" }}>🔢 {link.paymentCount}/{link.paymentLimit}</span>}
-                      {link.expiresAt && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: "#e8eaf6", color: "#283593" }}>⏱ Expiration</span>}
-                    </div>
-
-                    {/* URL row — pro copy button */}
-                    <div className="rounded-xl overflow-hidden mb-2" style={{ border: "1.5px solid #e2e8f0" }}>
-                      <div className="flex items-center px-3 py-2" style={{ background: "#f8fafc" }}>
-                        <span className="text-xs truncate flex-1 font-mono" style={{ color: "#64748b" }}>{url}</span>
-                        <button
-                          onClick={() => window.open(url, "_blank")}
-                          className="ml-2 shrink-0 p-1.5 rounded-lg transition-all active:scale-95"
-                          style={{ background: "#e0e7ff", color: "#3949ab" }}
-                          data-testid={`button-open-link-${link.id}`}
-                          title="Ouvrir"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => shareLink(link.uniqueId)}
-                          className="ml-1.5 shrink-0 p-1.5 rounded-lg transition-all active:scale-95"
-                          style={{ background: "#e8f5e9", color: "#2e7d32" }}
-                          data-testid={`button-share-link-${link.id}`}
-                          title="Partager"
-                        >
-                          <Share2 className="w-3.5 h-3.5" />
-                        </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs font-black px-2.5 py-1 rounded-full"
+                        style={{ background: link.amountType === "fixed" ? "rgba(0,176,80,0.85)" : "rgba(245,158,11,0.85)", color: "#fff" }}>
+                        {link.amountType === "fixed" ? `${link.amount?.toLocaleString()} F` : "Libre"}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <Switch checked={link.active} onCheckedChange={(checked) => updateMutation.mutate({ id: link.id, data: { active: checked } })} data-testid={`switch-link-active-${link.id}`} />
                       </div>
-                      <button
-                        onClick={() => copyLink(link.uniqueId)}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 text-xs font-bold transition-all active:scale-98"
-                        style={{ background: "linear-gradient(135deg,#00b050 0%,#00963f 100%)", color: "#fff", border: "none" }}
-                        data-testid={`button-copy-link-${link.id}`}
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                        Copier le lien de paiement
+                    </div>
+                  </div>
+
+                  {/* ── Status + badges ── */}
+                  <div className="px-4 pt-3 pb-2 flex items-center gap-2 flex-wrap">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full"
+                      style={{ background: statusDot.bg, color: statusDot.color, border: `1px solid ${statusDot.dot}30` }}>
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: statusDot.dot }} />
+                      {statusDot.label}
+                    </span>
+                    {l.collectBillingAddress && <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: "#e8f5e9", color: "#2e7d32" }}>📋 Adresse</span>}
+                    {l.notificationEmail && <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: "#fce4ec", color: "#ad1457" }}>✉ Email</span>}
+                    {link.paymentLimit && <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: "#f3e5f5", color: "#6a1b9a" }}>🔢 {link.paymentCount}/{link.paymentLimit}</span>}
+                    {link.expiresAt && <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: "#e8eaf6", color: "#283593" }}>⏱ Expiration</span>}
+                  </div>
+
+                  {/* ── URL row ── */}
+                  <div className="px-4 pb-2">
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                      <span className="text-xs font-mono flex-1 truncate" style={{ color: "#64748b" }}>{url}</span>
+                      <button onClick={() => window.open(url, "_blank")} className="shrink-0 p-1.5 rounded-lg transition-all active:scale-95" style={{ background: "#e0e7ff", color: "#3949ab" }} data-testid={`button-open-link-${link.id}`} title="Ouvrir">
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => shareLink(link.uniqueId)} className="shrink-0 p-1.5 rounded-lg transition-all active:scale-95" style={{ background: "#e8f5e9", color: "#2e7d32" }} data-testid={`button-share-link-${link.id}`} title="Partager">
+                        <Share2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
+                  </div>
 
-                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs" style={{ color: "#888" }}>
-                      <span><BarChart3 className="w-3 h-3 inline mr-0.5" />{link.paymentCount} {t("payments")}</span>
-                      <span style={{ color: "#00b050", fontWeight: 600 }}>{link.totalRevenue.toLocaleString()} F</span>
+                  {/* ── COPY BUTTON — main CTA ── */}
+                  <div className="px-4 pb-3">
+                    <button
+                      onClick={() => copyLink(link.uniqueId)}
+                      className="w-full flex items-center justify-center gap-2.5 py-3.5 rounded-xl font-black text-sm transition-all active:scale-98"
+                      style={{
+                        background: "linear-gradient(135deg,#00b050 0%,#00963f 60%,#2e7d32 100%)",
+                        color: "#fff", border: "none",
+                        boxShadow: inactive ? "none" : "0 4px 18px rgba(0,176,80,0.38)",
+                        letterSpacing: "0.02em",
+                      }}
+                      data-testid={`button-copy-link-${link.id}`}
+                    >
+                      <Copy className="w-4 h-4" />
+                      Copier le lien de paiement
+                    </button>
+                  </div>
+
+                  {/* ── Footer stats + actions ── */}
+                  <div className="px-4 pb-3.5 flex items-center justify-between" style={{ borderTop: "1px solid #f0f4ff" }}>
+                    <div className="flex items-center gap-3 pt-2.5">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-5 h-5 rounded-lg flex items-center justify-center" style={{ background: "#e8f5e9" }}>
+                          <BarChart3 className="w-3 h-3" style={{ color: "#00b050" }} />
+                        </div>
+                        <span className="text-xs font-semibold" style={{ color: "#555" }}>{link.paymentCount} paiements</span>
+                      </div>
+                      <span className="text-xs font-black" style={{ color: "#00b050" }}>{link.totalRevenue.toLocaleString()} F</span>
+                    </div>
+                    <div className="flex items-center gap-2 pt-2.5">
+                      <button className="w-8 h-8 rounded-xl flex items-center justify-center transition-all active:scale-95" style={{ background: "linear-gradient(135deg,#e8eaf6,#c5cae9)", border: "1.5px solid #9fa8da" }} onClick={() => openEdit(link)} data-testid={`button-edit-link-${link.id}`}>
+                        <Edit3 className="w-3.5 h-3.5" style={{ color: "#283593" }} />
+                      </button>
+                      <button className="w-8 h-8 rounded-xl flex items-center justify-center transition-all active:scale-95" style={{ background: "linear-gradient(135deg,#fce4ec,#f8bbd0)", border: "1.5px solid #f48fb1" }} onClick={() => deleteMutation.mutate(link.id)} data-testid={`button-delete-link-${link.id}`}>
+                        <Trash2 className="w-3.5 h-3.5" style={{ color: "#ad1457" }} />
+                      </button>
                     </div>
                   </div>
 
-                  <div className="flex flex-col items-center gap-2 shrink-0">
-                    <Switch checked={link.active} onCheckedChange={(checked) => updateMutation.mutate({ id: link.id, data: { active: checked } })} data-testid={`switch-link-active-${link.id}`} />
-                    <button className="w-8 h-8 rounded-xl flex items-center justify-center transition-all active:scale-95" style={{ background: "#e8eaf6", border: "1.5px solid #c5cae9" }} onClick={() => openEdit(link)} data-testid={`button-edit-link-${link.id}`}>
-                      <Edit3 className="w-3.5 h-3.5" style={{ color: "#3949ab" }} />
-                    </button>
-                    <button className="w-8 h-8 rounded-xl flex items-center justify-center transition-all active:scale-95" style={{ background: "#fce4ec", border: "1.5px solid #f48fb1" }} onClick={() => deleteMutation.mutate(link.id)} data-testid={`button-delete-link-${link.id}`}>
-                      <Trash2 className="w-3.5 h-3.5" style={{ color: "#c62828" }} />
-                    </button>
-                  </div>
                 </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </>
+        )}
+      </div>
     </div>
   );
 }
