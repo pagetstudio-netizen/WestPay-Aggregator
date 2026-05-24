@@ -69,12 +69,14 @@ const COUNTRY_COLORS = [
 ];
 
 function OverviewPanel({ token, onTabChange }: { token: string | null; onTabChange: (tab: MerchantTab) => void }) {
+  const { t, lang } = useLanguage();
   const { data: transactions = [], isLoading: txLoading } = useMerchantFetch("/api/merchant/transactions", ["/api/merchant/transactions"], token);
 
   const allTx = transactions as (Transaction & { payerName?: string | null })[];
   const totalCount = allTx.length;
-  const confirmedCount = allTx.filter(t => t.status === "confirmed").length;
+  const confirmedCount = allTx.filter(tx => tx.status === "confirmed").length;
   const recentTx = allTx.slice(0, 30);
+  const locale = lang === "pt" ? "pt-BR" : lang === "en" ? "en-US" : "fr-FR";
 
   return (
     <div className="flex flex-col h-full overflow-hidden -m-4 md:-m-6" style={{ background: "#e8eaed" }}>
@@ -85,7 +87,7 @@ function OverviewPanel({ token, onTabChange }: { token: string | null; onTabChan
         <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: "#1a237e" }} data-testid="card-overview-total">
           <div className="flex items-center gap-2 mb-3">
             <div className="w-2.5 h-2.5 rounded-full" style={{ background: "rgba(255,255,255,0.45)" }} />
-            <span className="text-sm font-semibold" style={{ color: "rgba(255,255,255,0.75)" }}>Total</span>
+            <span className="text-sm font-semibold" style={{ color: "rgba(255,255,255,0.75)" }}>{t("total")}</span>
           </div>
           <p className="text-5xl font-bold text-white leading-none" data-testid="text-total-count">
             {String(totalCount).padStart(2, "0")}
@@ -101,7 +103,7 @@ function OverviewPanel({ token, onTabChange }: { token: string | null; onTabChan
         <div className="rounded-2xl p-5 relative overflow-hidden bg-white" style={{ border: "1.5px solid #e8ecf0" }} data-testid="card-overview-success">
           <div className="flex items-center gap-2 mb-3">
             <CheckCircle2 className="w-4 h-4" style={{ color: "#00b050" }} />
-            <span className="text-sm font-semibold" style={{ color: "#555" }}>Succès</span>
+            <span className="text-sm font-semibold" style={{ color: "#555" }}>{t("successCount")}</span>
           </div>
           <p className="text-5xl font-bold leading-none" style={{ color: "#1a1a1a" }} data-testid="text-confirmed-count">
             {String(confirmedCount).padStart(2, "0")}
@@ -113,14 +115,14 @@ function OverviewPanel({ token, onTabChange }: { token: string | null; onTabChan
 
         {/* Card 3 – Green action card */}
         <div className="rounded-2xl p-4" style={{ background: "#2e7d32" }} data-testid="card-overview-actions">
-          <div className="flex gap-3 mb-3">
+          <div className="flex gap-3">
             <button
               onClick={() => onTabChange("wallet")}
               className="flex-1 py-2.5 rounded-full text-sm font-bold bg-white transition-all hover:bg-gray-100 active:scale-95"
               style={{ color: "#1a1a1a" }}
               data-testid="button-wallet-balance"
             >
-              Solde wallet
+              {t("walletBalance")}
             </button>
             <button
               onClick={() => onTabChange("analyse")}
@@ -128,26 +130,23 @@ function OverviewPanel({ token, onTabChange }: { token: string | null; onTabChan
               style={{ color: "#1a1a1a" }}
               data-testid="button-analyse"
             >
-              Analyse
+              {t("analyseTitle")}
             </button>
           </div>
-          <p className="text-center text-sm font-bold text-white tracking-wide">
-            Westpay <span className="font-black">非洲的支付聚合平台</span>
-          </p>
         </div>
       </div>
 
       {/* ── Scrollable transactions section ── */}
       <div className="flex-1 overflow-y-auto px-4 pb-4 mt-5 min-h-0">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-base font-bold" style={{ color: "#1a1a1a" }}>Dernier Transactions</h3>
+          <h3 className="text-base font-bold" style={{ color: "#1a1a1a" }}>{t("recentTransactionsTitle")}</h3>
           <button
             onClick={() => onTabChange("transactions")}
             className="px-4 py-1.5 rounded-full text-xs font-bold text-white transition-all hover:opacity-90 active:scale-95"
             style={{ background: "#3d5af1" }}
             data-testid="button-voir-tout"
           >
-            voir tout
+            {t("viewAll")}
           </button>
         </div>
 
@@ -158,7 +157,7 @@ function OverviewPanel({ token, onTabChange }: { token: string | null; onTabChan
         ) : recentTx.length === 0 ? (
           <div className="bg-white rounded-2xl p-8 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
             <CreditCard className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
-            <p className="text-sm" style={{ color: "#aaa" }}>Aucune transaction</p>
+            <p className="text-sm" style={{ color: "#aaa" }}>{t("noTransactions")}</p>
           </div>
         ) : (
           <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
@@ -173,7 +172,7 @@ function OverviewPanel({ token, onTabChange }: { token: string | null; onTabChan
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-semibold truncate" style={{ color: "#1a1a1a" }}>
-                      {isTransfer ? "TRANSFERT " : ""}{tx.txId}
+                      {isTransfer ? "TRANSFER " : ""}{tx.txId}
                     </p>
                     {(tx as any).payerName && (
                       <p className="text-xs truncate" style={{ color: "#888" }}>{(tx as any).payerName}</p>
@@ -181,7 +180,7 @@ function OverviewPanel({ token, onTabChange }: { token: string | null; onTabChan
                   </div>
                   <div className="text-center shrink-0 px-2">
                     <p className="text-xs font-bold" style={{ color: isTransfer ? "#e53935" : "#00b050" }}>
-                      {tx.amount.toLocaleString("fr-FR")} {countryToCurrency(tx.country)}
+                      {tx.amount.toLocaleString(locale)} {countryToCurrency(tx.country)}
                     </p>
                   </div>
                   <div className="text-right shrink-0">
@@ -475,16 +474,16 @@ function AnalysePanel({ token }: { token: string | null }) {
 }
 
 function TransactionDetailDrawer({ tx, onClose }: { tx: any; onClose: () => void }) {
-  const { toast } = useToast();
+  const { toast, t: _t } = { toast: useToast().toast, t: useLanguage().t };
   const isTransfer = tx.amount < 0 || tx.txId?.startsWith("TR-");
   const fee = tx.providerFee != null ? tx.providerFee : Math.round(Math.abs(tx.amount) * 0.03);
   const net = Math.abs(tx.amount) - fee;
 
   const statusCfg = tx.status === "confirmed"
-    ? { label: "Confirmé", bg: "#f0fdf4", color: "#16a34a", border: "#bbf7d0", dot: "#22c55e" }
+    ? { label: _t("confirmedLabel2"), bg: "#f0fdf4", color: "#16a34a", border: "#bbf7d0", dot: "#22c55e" }
     : tx.status === "pending"
-    ? { label: "En attente", bg: "#fffbeb", color: "#d97706", border: "#fde68a", dot: "#f59e0b" }
-    : { label: "Échoué", bg: "#fef2f2", color: "#dc2626", border: "#fecaca", dot: "#ef4444" };
+    ? { label: _t("pendingLabel"), bg: "#fffbeb", color: "#d97706", border: "#fde68a", dot: "#f59e0b" }
+    : { label: _t("failedLabel"), bg: "#fef2f2", color: "#dc2626", border: "#fecaca", dot: "#ef4444" };
 
   const providerLabel = (p: string) => {
     if (p === "omnipay" || p === "mbiyo") return "Mobile Money";
@@ -1492,19 +1491,20 @@ type WithdrawalOperatorFE = {
 };
 
 function StatusPill({ status }: { status: string }) {
+  const { t } = useLanguage();
   if (status === "pending") return (
     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold" style={{ background: "#fff3cd", color: "#856404" }}>
-      <Clock className="w-3 h-3" /> En attente
+      <Clock className="w-3 h-3" /> {t("pendingLabel")}
     </span>
   );
   if (status === "approved") return (
     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold" style={{ background: "#d4edda", color: "#155724" }}>
-      <CheckCircle2 className="w-3 h-3" /> Approuvé
+      <CheckCircle2 className="w-3 h-3" /> {t("approved")}
     </span>
   );
   return (
     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold" style={{ background: "#f8d7da", color: "#721c24" }}>
-      <XCircle className="w-3 h-3" /> Rejeté
+      <XCircle className="w-3 h-3" /> {t("rejected")}
     </span>
   );
 }
@@ -2212,7 +2212,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
             {createMutation.isPending
               ? <Loader2 className="w-5 h-5 animate-spin" />
               : <Send className="w-5 h-5" />}
-            {createMutation.isPending ? "Traitement…" : insufficientBalance ? "Solde insuffisant" : "Envoyer l'argent"}
+            {createMutation.isPending ? t("processingLabel") : insufficientBalance ? t("insufficientFunds") : t("sendMoney")}
           </button>
         </form>
 
@@ -2246,10 +2246,10 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
             <div className="divide-y" style={{ borderColor: "#f5f5f5" }}>
               {(walletTransfers as WalletTransfer[]).map((wt) => {
                 const statusConf = wt.status === "approved"
-                  ? { bg: "#e8f5e9", color: "#2e7d32", label: "Approuvé" }
+                  ? { bg: "#e8f5e9", color: "#2e7d32", label: t("approved") }
                   : wt.status === "rejected"
-                  ? { bg: "#fce4ec", color: "#ad1457", label: "Refusé" }
-                  : { bg: "#fff8e1", color: "#e65100", label: "En attente" };
+                  ? { bg: "#fce4ec", color: "#ad1457", label: t("rejected") }
+                  : { bg: "#fff8e1", color: "#e65100", label: t("pendingLabel") };
                 return (
                   <div key={wt.id} className="px-5 py-4" data-testid={`virement-row-${wt.id}`}>
                     <div className="flex items-center gap-3">
@@ -2271,7 +2271,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
                         <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs" style={{ color: "#888" }}>
                           <span className="font-semibold" style={{ color: "#555" }}>{wt.amount.toLocaleString("fr-FR")} {wt.currency}</span>
                           <span style={{ color: wt.fee === 0 ? "#00b050" : "#888" }}>
-                            {wt.fee === 0 ? "Sans frais" : `Frais : ${wt.fee.toLocaleString("fr-FR")} ${wt.currency}`}
+                            {wt.fee === 0 ? t("noFeesLabel") : `${t("fees")} : ${wt.fee.toLocaleString("fr-FR")} ${wt.currency}`}
                           </span>
                           <span>{new Date(wt.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</span>
                         </div>
