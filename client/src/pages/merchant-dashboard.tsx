@@ -1320,15 +1320,79 @@ function TransfersPanel({ token }: { token: string | null }) {
   };
 
   const transferTxs = (transactions as Transaction[]).filter(t => t.amount < 0 || t.txId.startsWith("TR-"));
+  const transferTotal = transferTxs.reduce((s, t) => s + Math.abs(t.amount), 0);
+  const transferCount = transferTxs.length;
+  const activeCountriesCount = omnipayCountries.length;
+  const now = new Date();
+  const thisMonthCount = transferTxs.filter(t => {
+    const d = new Date(t.createdAt);
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  }).length;
 
   if (balLoading) return <MerchantLoadingSkeleton />;
 
   return (
-    <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-foreground">Transferts Mobile Money</h2>
-      <p className="text-sm text-muted-foreground">
-        Envoyez de l'argent directement vers un portefeuille Mobile Money.
-      </p>
+    <div className="-m-4 md:-m-6 min-h-full" style={{ background: "#f2f3f5" }}>
+      {/* Header */}
+      <div className="px-5 pt-5 pb-4 bg-white border-b border-gray-100 flex items-center justify-between gap-3 mb-0">
+        <div>
+          <h2 className="text-lg font-bold" style={{ color: "#1a1a1a" }}>Transferts Mobile Money</h2>
+          <p className="text-xs mt-0.5" style={{ color: "#888" }}>Envoyez de l'argent vers un portefeuille Mobile Money</p>
+        </div>
+        <div className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0" style={{ background: "#3b82f6" }}>
+          <Send className="w-5 h-5 text-white" />
+        </div>
+      </div>
+
+      {/* Stat cards */}
+      <div className="px-4 pt-4 pb-0 grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(59,130,246,0.08)" }}>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#dbeafe" }}>
+              <img src={icnStatVolume} alt="volume" className="w-6 h-6 object-contain"
+                style={{ filter: "brightness(0) saturate(100%) invert(39%) sepia(94%) saturate(729%) hue-rotate(199deg) brightness(105%) contrast(93%)" }} />
+            </div>
+            <span className="text-xs font-semibold text-blue-500 uppercase tracking-wide">Volume</span>
+          </div>
+          <p className="text-lg font-black text-gray-900 leading-tight">{transferTotal.toLocaleString("fr-FR")}</p>
+          <p className="text-xs text-gray-400 mt-0.5">FCFA envoyés</p>
+        </div>
+        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(22,163,74,0.08)" }}>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#dcfce7" }}>
+              <img src={icnStatConfirmed} alt="transferts" className="w-6 h-6 object-contain"
+                style={{ filter: "brightness(0) saturate(100%) invert(44%) sepia(72%) saturate(543%) hue-rotate(89deg) brightness(93%) contrast(88%)" }} />
+            </div>
+            <span className="text-xs font-semibold text-green-600 uppercase tracking-wide">Total</span>
+          </div>
+          <p className="text-lg font-black text-gray-900">{transferCount}</p>
+          <p className="text-xs text-gray-400 mt-0.5">transferts</p>
+        </div>
+        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(217,119,6,0.08)" }}>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#fef3c7" }}>
+              <img src={icnStatPending} alt="ce mois" className="w-6 h-6 object-contain"
+                style={{ filter: "brightness(0) saturate(100%) invert(54%) sepia(100%) saturate(432%) hue-rotate(12deg) brightness(96%) contrast(97%)" }} />
+            </div>
+            <span className="text-xs font-semibold text-amber-600 uppercase tracking-wide">Ce mois</span>
+          </div>
+          <p className="text-lg font-black text-gray-900">{thisMonthCount}</p>
+          <p className="text-xs text-gray-400 mt-0.5">transferts</p>
+        </div>
+        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(59,130,246,0.08)" }}>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#fee2e2" }}>
+              <img src={icnStatFailed} alt="pays" className="w-6 h-6 object-contain"
+                style={{ filter: "brightness(0) saturate(100%) invert(22%) sepia(93%) saturate(1354%) hue-rotate(344deg) brightness(96%) contrast(98%)" }} />
+            </div>
+            <span className="text-xs font-semibold text-red-500 uppercase tracking-wide">Pays actifs</span>
+          </div>
+          <p className="text-lg font-black text-gray-900">{activeCountriesCount}</p>
+          <p className="text-xs text-gray-400 mt-0.5">disponibles</p>
+        </div>
+      </div>
+
+      <div className="px-4 pb-4 space-y-4">
 
       <Card>
         <CardHeader><CardTitle className="text-base">Nouveau transfert</CardTitle></CardHeader>
@@ -1473,6 +1537,7 @@ function TransfersPanel({ token }: { token: string | null }) {
         </CardContent>
       </Card>
     </div>
+  </div>
   );
 }
 
@@ -1574,6 +1639,8 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
 
   const totalWithdrawn = (withdrawalList as Withdrawal[]).filter(w => w.status === "approved").reduce((s, w) => s + w.amount, 0);
   const pendingCount = (withdrawalList as Withdrawal[]).filter(w => w.status === "pending").length;
+  const approvedCount = (withdrawalList as Withdrawal[]).filter(w => w.status === "approved").length;
+  const rejectedCount = (withdrawalList as Withdrawal[]).filter(w => w.status === "rejected").length;
 
   return (
     <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#f2f3f5" }}>
@@ -1589,24 +1656,50 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 gap-3 mb-5">
-        <div className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "#e8f5e9" }}>
-              <Download className="w-3.5 h-3.5" style={{ color: "#00b050" }} />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(59,130,246,0.08)" }}>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#dbeafe" }}>
+              <img src={icnStatVolume} alt="volume" className="w-6 h-6 object-contain"
+                style={{ filter: "brightness(0) saturate(100%) invert(39%) sepia(94%) saturate(729%) hue-rotate(199deg) brightness(105%) contrast(93%)" }} />
             </div>
-            <p className="text-xs font-semibold" style={{ color: "#888" }}>{t("totalWithdrawn")}</p>
+            <span className="text-xs font-semibold text-blue-500 uppercase tracking-wide">Volume</span>
           </div>
-          <p className="text-xl font-bold" style={{ color: "#1a1a1a" }}>{totalWithdrawn.toLocaleString("fr-FR")}<span className="text-sm ml-1 font-semibold" style={{ color: "#aaa" }}>F</span></p>
+          <p className="text-lg font-black text-gray-900 leading-tight">{totalWithdrawn.toLocaleString("fr-FR")}</p>
+          <p className="text-xs text-gray-400 mt-0.5">FCFA reversés</p>
         </div>
-        <div className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: pendingCount > 0 ? "#fff8e1" : "#f3e5f5" }}>
-              <Clock className="w-3.5 h-3.5" style={{ color: pendingCount > 0 ? "#f59e0b" : "#9c27b0" }} />
+        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(22,163,74,0.08)" }}>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#dcfce7" }}>
+              <img src={icnStatConfirmed} alt="approuvés" className="w-6 h-6 object-contain"
+                style={{ filter: "brightness(0) saturate(100%) invert(44%) sepia(72%) saturate(543%) hue-rotate(89deg) brightness(93%) contrast(88%)" }} />
             </div>
-            <p className="text-xs font-semibold" style={{ color: "#888" }}>{t("pending")}</p>
+            <span className="text-xs font-semibold text-green-600 uppercase tracking-wide">Approuvés</span>
           </div>
-          <p className="text-xl font-bold" style={{ color: "#1a1a1a" }}>{pendingCount}</p>
+          <p className="text-lg font-black text-gray-900">{approvedCount}</p>
+          <p className="text-xs text-gray-400 mt-0.5">reversements</p>
+        </div>
+        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(217,119,6,0.08)" }}>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#fef3c7" }}>
+              <img src={icnStatPending} alt="en attente" className="w-6 h-6 object-contain"
+                style={{ filter: "brightness(0) saturate(100%) invert(54%) sepia(100%) saturate(432%) hue-rotate(12deg) brightness(96%) contrast(97%)" }} />
+            </div>
+            <span className="text-xs font-semibold text-amber-600 uppercase tracking-wide">En attente</span>
+          </div>
+          <p className="text-lg font-black text-gray-900">{pendingCount}</p>
+          <p className="text-xs text-gray-400 mt-0.5">reversements</p>
+        </div>
+        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(220,38,38,0.08)" }}>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#fee2e2" }}>
+              <img src={icnStatFailed} alt="rejetés" className="w-6 h-6 object-contain"
+                style={{ filter: "brightness(0) saturate(100%) invert(22%) sepia(93%) saturate(1354%) hue-rotate(344deg) brightness(96%) contrast(98%)" }} />
+            </div>
+            <span className="text-xs font-semibold text-red-600 uppercase tracking-wide">Rejetés</span>
+          </div>
+          <p className="text-lg font-black text-gray-900">{rejectedCount}</p>
+          <p className="text-xs text-gray-400 mt-0.5">reversements</p>
         </div>
       </div>
 
