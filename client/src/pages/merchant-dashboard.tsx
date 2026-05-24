@@ -27,7 +27,7 @@ import { Switch } from "@/components/ui/switch";
 import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry, Withdrawal } from "@shared/schema";
 import { useLanguage, LANGUAGES } from "@/lib/language";
 
-type MerchantTab = "overview" | "apikeys" | "webhook" | "virements" | "reversements" | "settings" | "paymentlinks" | "transactions" | "crypto" | "sdk";
+type MerchantTab = "overview" | "apikeys" | "webhook" | "virements" | "reversements" | "settings" | "paymentlinks" | "transactions" | "crypto" | "sdk" | "wallet" | "analyse";
 
 function useMerchantFetch(url: string, key: string[], token: string | null) {
   return useQuery({
@@ -56,129 +56,403 @@ const COUNTRY_COLORS = [
   "#039be5", "#6d4c41",
 ];
 
-function BigStatCard({
-  color, label, value, currency, sub, testId
-}: {
-  color: string; label: string; value: string; currency?: string; sub?: string; testId?: string;
-}) {
+function OverviewPanel({ token, onTabChange }: { token: string | null; onTabChange: (tab: MerchantTab) => void }) {
+  const { data: transactions = [], isLoading: txLoading } = useMerchantFetch("/api/merchant/transactions", ["/api/merchant/transactions"], token);
+
+  const allTx = transactions as (Transaction & { payerName?: string | null })[];
+  const totalCount = allTx.length;
+  const confirmedCount = allTx.filter(t => t.status === "confirmed").length;
+  const recentTx = allTx.slice(0, 30);
+
   return (
-    <div
-      className="rounded-xl p-5 w-full"
-      style={{ background: color }}
-      data-testid={testId}
-    >
-      <p className="text-xs font-bold text-white/80 uppercase tracking-widest mb-2">{label}</p>
-      <p className="text-3xl font-bold text-white leading-none">
-        {value}{currency && <span className="text-xl font-semibold ml-2 text-white/90">{currency}</span>}
-      </p>
-      {sub && <p className="text-xs text-white/70 mt-2 font-medium">{sub}</p>}
+    <div className="flex flex-col h-full overflow-hidden -m-4 md:-m-6" style={{ background: "#e8eaed" }}>
+      {/* ── Fixed cards section ── */}
+      <div className="flex-shrink-0 px-4 pt-4 space-y-3">
+
+        {/* Card 1 – Total (dark navy) */}
+        <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: "#1a237e" }} data-testid="card-overview-total">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2.5 h-2.5 rounded-full" style={{ background: "rgba(255,255,255,0.45)" }} />
+            <span className="text-sm font-semibold" style={{ color: "rgba(255,255,255,0.75)" }}>Total</span>
+          </div>
+          <p className="text-5xl font-bold text-white leading-none" data-testid="text-total-count">
+            {String(totalCount).padStart(2, "0")}
+          </p>
+          <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-15 pointer-events-none">
+            <div className="w-16 h-16 rounded-xl border-4 border-white flex items-center justify-center">
+              <div className="w-7 h-7 rounded-full border-4 border-white" />
+            </div>
+          </div>
+        </div>
+
+        {/* Card 2 – Succès (white) */}
+        <div className="rounded-2xl p-5 relative overflow-hidden bg-white" style={{ border: "1.5px solid #e8ecf0" }} data-testid="card-overview-success">
+          <div className="flex items-center gap-2 mb-3">
+            <CheckCircle2 className="w-4 h-4" style={{ color: "#00b050" }} />
+            <span className="text-sm font-semibold" style={{ color: "#555" }}>Succès</span>
+          </div>
+          <p className="text-5xl font-bold leading-none" style={{ color: "#1a1a1a" }} data-testid="text-confirmed-count">
+            {String(confirmedCount).padStart(2, "0")}
+          </p>
+          <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-8 pointer-events-none">
+            <ArrowRightLeft className="w-16 h-16" style={{ color: "#bbb" }} />
+          </div>
+        </div>
+
+        {/* Card 3 – Green action card */}
+        <div className="rounded-2xl p-4" style={{ background: "#2e7d32" }} data-testid="card-overview-actions">
+          <div className="flex gap-3 mb-3">
+            <button
+              onClick={() => onTabChange("wallet")}
+              className="flex-1 py-2.5 rounded-full text-sm font-bold bg-white transition-all hover:bg-gray-100 active:scale-95"
+              style={{ color: "#1a1a1a" }}
+              data-testid="button-wallet-balance"
+            >
+              Solde wallet
+            </button>
+            <button
+              onClick={() => onTabChange("analyse")}
+              className="flex-1 py-2.5 rounded-full text-sm font-bold bg-white transition-all hover:bg-gray-100 active:scale-95"
+              style={{ color: "#1a1a1a" }}
+              data-testid="button-analyse"
+            >
+              Analyse
+            </button>
+          </div>
+          <p className="text-center text-sm font-bold text-white tracking-wide">
+            Westpay <span className="font-black">非洲的支付聚合平台</span>
+          </p>
+        </div>
+      </div>
+
+      {/* ── Scrollable transactions section ── */}
+      <div className="flex-1 overflow-y-auto px-4 pb-4 mt-5 min-h-0">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-base font-bold" style={{ color: "#1a1a1a" }}>Dernier Transactions</h3>
+          <button
+            onClick={() => onTabChange("transactions")}
+            className="px-4 py-1.5 rounded-full text-xs font-bold text-white transition-all hover:opacity-90 active:scale-95"
+            style={{ background: "#3d5af1" }}
+            data-testid="button-voir-tout"
+          >
+            voir tout
+          </button>
+        </div>
+
+        {txLoading ? (
+          <div className="space-y-3">
+            {[1, 2, 3].map(i => <Skeleton key={i} className="h-14 w-full rounded-xl" />)}
+          </div>
+        ) : recentTx.length === 0 ? (
+          <div className="bg-white rounded-2xl p-8 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+            <CreditCard className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
+            <p className="text-sm" style={{ color: "#aaa" }}>Aucune transaction</p>
+          </div>
+        ) : (
+          <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+            {recentTx.map((tx, idx) => {
+              const isTransfer = tx.amount < 0 || tx.txId.startsWith("TR-");
+              return (
+                <div
+                  key={tx.id}
+                  className="flex items-center gap-2 px-4 py-3"
+                  style={{ borderBottom: idx < recentTx.length - 1 ? "1px solid #f0f4ff" : "none" }}
+                  data-testid={`row-tx-overview-${tx.id}`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold truncate" style={{ color: "#1a1a1a" }}>
+                      {isTransfer ? "TRANSFERT " : ""}{tx.txId}
+                    </p>
+                    {(tx as any).payerName && (
+                      <p className="text-xs truncate" style={{ color: "#888" }}>{(tx as any).payerName}</p>
+                    )}
+                  </div>
+                  <div className="text-center shrink-0 px-2">
+                    <p className="text-xs font-bold" style={{ color: isTransfer ? "#e53935" : "#00b050" }}>
+                      {tx.amount.toLocaleString("fr-FR")} {countryToCurrency(tx.country)}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-xs" style={{ color: "#888" }}>{tx.payerNumber || "—"}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-function OverviewPanel({ token }: { token: string | null }) {
-  const { t } = useLanguage();
+function WalletPanel({ token }: { token: string | null }) {
   const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
-  const { data: stats } = useMerchantFetch("/api/merchant/stats", ["/api/merchant/stats"], token);
-  const { data: me } = useMerchantFetch("/api/merchant/me", ["/api/merchant/me"], token);
-
-  if (balLoading) return <MerchantLoadingSkeleton />;
+  const { data: cryptoBalances = [], isLoading: cryptoLoading } = useMerchantFetch("/api/merchant/crypto/balances", ["/api/merchant/crypto/balances"], token);
 
   const countries = balance as MerchantCountry[];
   const totalBalance = countries.reduce((sum, c) => sum + (c.balance || 0), 0);
-  const activeCount = countries.filter(c => c.active).length;
+  const cryptoList = cryptoBalances as { currency: string; balance: string }[];
+  const hasCryptoBalance = cryptoList.some(c => parseFloat(c.balance) > 0);
 
   return (
-    <div
-      className="-m-4 md:-m-6 p-4 md:p-6 min-h-full"
-      style={{ background: "#e8eaed" }}
-    >
-      <div className="flex items-center gap-3 mb-5 flex-wrap">
-        <h2 className="text-xl font-bold" style={{ color: "#333" }}>{t("dashboard")}</h2>
-        {(me as any)?.feeExempt && (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-600 text-white">
-            ✦ Zéro frais activé
-          </span>
+    <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full overflow-y-auto" style={{ background: "#e8eaed" }}>
+      <div className="mb-5">
+        <h2 className="text-xl font-bold" style={{ color: "#1a1a1a" }}>Solde Wallet</h2>
+        <p className="text-xs mt-0.5" style={{ color: "#888" }}>Vue d'ensemble de vos soldes par pays</p>
+      </div>
+
+      {/* Total balance summary */}
+      <div className="rounded-2xl p-5 mb-5 relative overflow-hidden" style={{ background: "linear-gradient(135deg,#1a237e,#3949ab)" }}>
+        <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: "rgba(255,255,255,0.65)" }}>Solde total consolidé</p>
+        <p className="text-4xl font-black text-white leading-none mb-1" data-testid="text-wallet-total">
+          {balLoading ? "—" : totalBalance.toLocaleString("fr-FR")}
+        </p>
+        <p className="text-sm font-semibold" style={{ color: "rgba(255,255,255,0.7)" }}>FCFA</p>
+        <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-10 pointer-events-none">
+          <Wallet className="w-20 h-20 text-white" />
+        </div>
+      </div>
+
+      {/* Country balances */}
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
+        Solde par pays — {countries.length}
+      </p>
+
+      {balLoading ? (
+        <div className="space-y-3">
+          {[1,2,3].map(i => <Skeleton key={i} className="h-20 w-full rounded-2xl" />)}
+        </div>
+      ) : countries.length === 0 ? (
+        <div className="bg-white rounded-2xl p-8 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+          <Wallet className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
+          <p className="text-sm" style={{ color: "#aaa" }}>Aucun pays configuré</p>
+        </div>
+      ) : (
+        <div className="space-y-3 mb-5">
+          {countries.map((c, idx) => (
+            <div
+              key={c.id}
+              className="rounded-2xl p-4 relative overflow-hidden"
+              style={{ background: COUNTRY_COLORS[idx % COUNTRY_COLORS.length], opacity: c.active ? 1 : 0.65 }}
+              data-testid={`card-wallet-${c.country}`}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Globe className="w-3.5 h-3.5 text-white/70" />
+                  <p className="text-xs font-bold text-white/80 uppercase tracking-widest">{c.country}</p>
+                </div>
+                <span
+                  className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
+                  style={{ background: c.active ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.25)", color: "white" }}
+                >
+                  {c.active ? "Actif" : "Désactivé"}
+                </span>
+              </div>
+              <div className="flex items-end justify-between">
+                <div>
+                  <p className="text-3xl font-black text-white leading-none">
+                    {(c.balance ?? 0).toLocaleString("fr-FR")}
+                  </p>
+                  <p className="text-xs font-semibold text-white/70 mt-0.5">{countryToCurrency(c.country)}</p>
+                </div>
+                {!c.active && (
+                  <p className="text-xs text-white/50 max-w-28 text-right">Pays désactivé</p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Crypto balances */}
+      {(hasCryptoBalance || cryptoLoading) && (
+        <>
+          <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
+            Soldes Crypto
+          </p>
+          {cryptoLoading ? (
+            <div className="space-y-3">
+              {[1,2].map(i => <Skeleton key={i} className="h-16 w-full rounded-2xl" />)}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {cryptoList.filter(c => parseFloat(c.balance) > 0).map(c => (
+                <div key={c.currency} className="bg-white rounded-2xl p-4 flex items-center justify-between shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "#f59e0b20" }}>
+                      <Bitcoin className="w-5 h-5" style={{ color: "#f59e0b" }} />
+                    </div>
+                    <p className="text-sm font-bold" style={{ color: "#1a1a1a" }}>{c.currency}</p>
+                  </div>
+                  <p className="text-base font-black" style={{ color: "#1a1a1a" }}>{parseFloat(c.balance).toFixed(6)}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function AnalysePanel({ token }: { token: string | null }) {
+  const { data: stats } = useMerchantFetch("/api/merchant/stats", ["/api/merchant/stats"], token);
+  const { data: transactions = [], isLoading: txLoading } = useMerchantFetch("/api/merchant/transactions", ["/api/merchant/transactions"], token);
+  const { data: balance = [] } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
+
+  const allTx = transactions as (Transaction & { payerName?: string | null })[];
+  const countries = balance as MerchantCountry[];
+
+  const confirmedTx = allTx.filter(t => t.status === "confirmed");
+  const pendingTx = allTx.filter(t => t.status === "pending");
+  const failedTx = allTx.filter(t => t.status === "failed");
+  const confirmedTotal = confirmedTx.reduce((s, t) => s + t.amount, 0);
+  const successRate = allTx.length > 0 ? Math.round((confirmedTx.length / allTx.length) * 100) : 0;
+
+  const last7Days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    const label = d.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
+    const dayTx = confirmedTx.filter(t => {
+      const txDate = new Date(t.createdAt);
+      return txDate.toDateString() === d.toDateString();
+    });
+    return { label, count: dayTx.length, volume: dayTx.reduce((s, t) => s + t.amount, 0) };
+  });
+
+  const maxVolume = Math.max(...last7Days.map(d => d.volume), 1);
+
+  const countryStats = countries.map(c => ({
+    country: c.country,
+    count: confirmedTx.filter(t => t.country === c.country).length,
+    volume: confirmedTx.filter(t => t.country === c.country).reduce((s, t) => s + t.amount, 0),
+  })).filter(c => c.count > 0).sort((a, b) => b.volume - a.volume);
+
+  return (
+    <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full overflow-y-auto" style={{ background: "#e8eaed" }}>
+      <div className="mb-5">
+        <h2 className="text-xl font-bold" style={{ color: "#1a1a1a" }}>Analyse</h2>
+        <p className="text-xs mt-0.5" style={{ color: "#888" }}>Performance et statistiques de vos paiements</p>
+      </div>
+
+      {/* KPI cards row */}
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Statistiques globales</p>
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        <div className="rounded-2xl p-4" style={{ background: "#1a237e" }} data-testid="card-analyse-total">
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Total</p>
+          <p className="text-3xl font-black text-white">{allTx.length}</p>
+          <p className="text-xs text-white/60 mt-0.5">transactions</p>
+        </div>
+        <div className="rounded-2xl p-4" style={{ background: "#2e7d32" }} data-testid="card-analyse-success">
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Taux succès</p>
+          <p className="text-3xl font-black text-white">{successRate}%</p>
+          <p className="text-xs text-white/60 mt-0.5">{confirmedTx.length} confirmées</p>
+        </div>
+        <div className="rounded-2xl p-4 bg-white" style={{ border: "1.5px solid #e8ecf0" }} data-testid="card-analyse-volume">
+          <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: "#888" }}>Volume confirmé</p>
+          <p className="text-xl font-black" style={{ color: "#1a1a1a" }}>{confirmedTotal.toLocaleString("fr-FR")}</p>
+          <p className="text-xs mt-0.5" style={{ color: "#aaa" }}>FCFA</p>
+        </div>
+        <div className="rounded-2xl p-4 bg-white" style={{ border: "1.5px solid #e8ecf0" }} data-testid="card-analyse-pending">
+          <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: "#888" }}>En attente</p>
+          <p className="text-3xl font-black" style={{ color: pendingTx.length > 0 ? "#fb8c00" : "#1a1a1a" }}>{pendingTx.length}</p>
+          <p className="text-xs mt-0.5" style={{ color: "#aaa" }}>transactions</p>
+        </div>
+      </div>
+
+      {/* Status breakdown */}
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Répartition des statuts</p>
+      <div className="bg-white rounded-2xl p-4 mb-5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+        {allTx.length === 0 ? (
+          <p className="text-sm text-center py-2" style={{ color: "#aaa" }}>Aucune donnée</p>
+        ) : (
+          <div className="space-y-3">
+            {[
+              { label: "Confirmées", count: confirmedTx.length, color: "#00b050" },
+              { label: "En attente", count: pendingTx.length, color: "#fb8c00" },
+              { label: "Échouées", count: failedTx.length, color: "#e53935" },
+            ].map(s => (
+              <div key={s.label}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-semibold" style={{ color: "#555" }}>{s.label}</span>
+                  <span className="text-xs font-bold" style={{ color: s.color }}>{s.count}</span>
+                </div>
+                <div className="h-2 rounded-full overflow-hidden" style={{ background: "#f0f4ff" }}>
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: allTx.length > 0 ? `${(s.count / allTx.length) * 100}%` : "0%",
+                      background: s.color
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-        {t("balance")} / {t("reversements")}
-      </p>
-      <div className="flex flex-col gap-4 mb-6">
-        <BigStatCard
-          color="#1e88e5"
-          label={t("balance")}
-          value={totalBalance.toLocaleString("fr-FR")}
-          currency="FCFA"
-          sub={`${activeCount} pays actif${activeCount > 1 ? "s" : ""} — ${stats?.transactionCount || 0} transaction${(stats?.transactionCount || 0) > 1 ? "s" : ""}`}
-          testId="text-total-balance"
-        />
-        <BigStatCard
-          color="#26a69a"
-          label={t("reversements")}
-          value={(stats?.totalWithdrawn || 0).toLocaleString("fr-FR")}
-          currency="FCFA"
-          testId="text-total-withdrawn"
-        />
+      {/* 7-day chart */}
+      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Volume 7 derniers jours</p>
+      <div className="bg-white rounded-2xl p-4 mb-5 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+        {txLoading ? (
+          <Skeleton className="h-24 w-full" />
+        ) : (
+          <div className="flex items-end gap-1.5 h-24">
+            {last7Days.map((d, i) => (
+              <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                <div className="w-full rounded-t-lg transition-all" style={{
+                  height: `${Math.max((d.volume / maxVolume) * 80, d.volume > 0 ? 8 : 0)}px`,
+                  background: d.volume > 0 ? "#3d5af1" : "#e8ecf0",
+                  minHeight: 4,
+                }} />
+                <span className="text-[9px] font-medium text-center leading-tight" style={{ color: "#aaa" }}>{d.label}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-        {t("todayStats")}
-      </p>
-      <div className="flex flex-col gap-4 mb-6">
-        <BigStatCard
-          color="#ef5350"
-          label={t("today")}
-          value={(stats?.todayVolume || 0).toLocaleString("fr-FR")}
-          currency="FCFA"
-          testId="text-today-volume"
-        />
-        <BigStatCard
-          color="#7e57c2"
-          label={t("yesterday")}
-          value={(stats?.yesterdayVolume || 0).toLocaleString("fr-FR")}
-          currency="FCFA"
-          testId="text-yesterday-volume"
-        />
-      </div>
-
-      {countries.length > 0 && (
+      {/* Performance by country */}
+      {countryStats.length > 0 && (
         <>
-          <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-            {t("balanceByCountry")}
-          </p>
-          <div className="flex flex-col gap-4">
-            {countries.map((c, idx) => (
-              <div
-                key={c.id}
-                className={`rounded-xl p-5 transition-opacity ${!c.active ? "opacity-60" : ""}`}
-                style={{ background: COUNTRY_COLORS[idx % COUNTRY_COLORS.length] }}
-                data-testid={`text-balance-${c.country}`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-bold text-white/80 uppercase tracking-widest">{c.country}</p>
-                  {c.active ? (
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500 text-white shadow-sm">
-                      Actif
-                    </span>
-                  ) : (
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-500 text-white shadow-sm">
-                      Désactivé
-                    </span>
-                  )}
+          <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>Performance par pays</p>
+          <div className="space-y-2">
+            {countryStats.map((c, idx) => (
+              <div key={c.country} className="bg-white rounded-2xl p-4 flex items-center justify-between shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0" style={{ background: COUNTRY_COLORS[idx % COUNTRY_COLORS.length] }}>
+                    <Globe className="w-4 h-4 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold" style={{ color: "#1a1a1a" }}>{c.country}</p>
+                    <p className="text-xs" style={{ color: "#888" }}>{c.count} transaction{c.count > 1 ? "s" : ""}</p>
+                  </div>
                 </div>
-                <p className="text-3xl font-bold text-white leading-none">
-                  {(c.balance ?? 0).toLocaleString("fr-FR")}<span className="text-xl font-semibold ml-2 text-white/90">{countryToCurrency(c.country)}</span>
-                </p>
-                {!c.active && (
-                  <p className="text-xs text-white/60 mt-2">Ce pays est désactivé — non visible sur la page de paiement</p>
-                )}
+                <div className="text-right">
+                  <p className="text-sm font-black" style={{ color: "#00b050" }}>{c.volume.toLocaleString("fr-FR")}</p>
+                  <p className="text-xs" style={{ color: "#aaa" }}>FCFA</p>
+                </div>
               </div>
             ))}
           </div>
         </>
       )}
+
+      {/* Today / yesterday */}
+      <p className="text-xs font-bold uppercase tracking-widest mt-5 mb-3" style={{ color: "#888" }}>Aujourd'hui & hier</p>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-2xl p-4" style={{ background: "#ef5350" }}>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Aujourd'hui</p>
+          <p className="text-2xl font-black text-white">{(stats?.todayVolume || 0).toLocaleString("fr-FR")}</p>
+          <p className="text-xs text-white/60">FCFA</p>
+        </div>
+        <div className="rounded-2xl p-4" style={{ background: "#7e57c2" }}>
+          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">Hier</p>
+          <p className="text-2xl font-black text-white">{(stats?.yesterdayVolume || 0).toLocaleString("fr-FR")}</p>
+          <p className="text-xs text-white/60">FCFA</p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3646,74 +3920,90 @@ export default function MerchantDashboard() {
 
         {/* Header */}
         <header
-          className="flex items-center justify-between gap-2 px-4 shrink-0 shadow-md"
-          style={{ background: "#1e2231", height: 52, zIndex: 30 }}
+          className="flex items-center justify-between gap-2 px-4 shrink-0"
+          style={{ background: "#3d5af1", height: 56, zIndex: 30, boxShadow: "0 2px 12px rgba(61,90,241,0.25)" }}
         >
           <div className="flex items-center gap-3">
+            {/* Desktop sidebar toggle */}
             <button
-              className="hidden md:flex w-8 h-8 rounded-lg items-center justify-center transition-colors hover:bg-white/10"
-              style={{ color: "rgba(255,255,255,0.7)" }}
+              className="hidden md:flex w-9 h-9 rounded-xl items-center justify-center transition-colors hover:bg-white/15"
+              style={{ color: "white" }}
               onClick={() => setSidebarCollapsed(c => !c)}
               data-testid="button-merchant-sidebar-toggle"
             >
-              {sidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+              <Menu className="w-5 h-5" />
             </button>
+            {/* Mobile hamburger */}
             <button
-              className="flex md:hidden w-8 h-8 rounded-lg items-center justify-center transition-colors hover:bg-white/10"
-              style={{ color: "rgba(255,255,255,0.7)" }}
+              className="flex md:hidden w-9 h-9 rounded-xl items-center justify-center transition-colors hover:bg-white/15"
+              style={{ color: "white" }}
               onClick={() => setMobileOpen(o => !o)}
               data-testid="button-mobile-sidebar-toggle"
             >
-              <Menu className="w-4 h-4" />
+              <Menu className="w-5 h-5" />
             </button>
-
-            {currentItem && (
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: "rgba(255,255,255,0.1)" }}>
-                  <currentItem.icon className="w-3.5 h-3.5" style={{ color: currentItem.color }} />
-                </div>
-                <span className="text-sm font-semibold text-white/80 hidden sm:block">
-                  {activeTab === "virements" ? t("transfers") : activeTab === "reversements" ? t("withdrawals") : activeTab === "paymentlinks" ? t("paymentlinks") : activeTab === "apikeys" ? t("apikeys") : activeTab === "crypto" ? "Paiements Crypto" : activeTab === "sdk" ? "SDK API" : t(activeTab)}
-                </span>
-              </div>
-            )}
+            <span className="text-base font-bold text-white tracking-wide">
+              {activeTab === "overview" ? "Overview"
+                : activeTab === "wallet" ? "Solde wallet"
+                : activeTab === "analyse" ? "Analyse"
+                : activeTab === "transactions" ? "Transactions"
+                : activeTab === "virements" ? t("transfers")
+                : activeTab === "reversements" ? t("withdrawals")
+                : activeTab === "paymentlinks" ? t("paymentlinks")
+                : activeTab === "apikeys" ? t("apikeys")
+                : activeTab === "crypto" ? "Crypto"
+                : activeTab === "sdk" ? "SDK"
+                : activeTab === "webhook" ? "Webhook"
+                : activeTab === "settings" ? t("settings")
+                : "WestPay"}
+            </span>
           </div>
 
-          <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-1">
+            {/* Help / Info */}
             <button
-              className="relative p-2 rounded-lg hover:bg-white/10 transition-colors"
-              style={{ color: "rgba(255,255,255,0.7)" }}
-              onClick={() => toast({ title: t("notifications"), description: "Aucune nouvelle notification." })}
-              data-testid="button-notifications"
-            >
-              <Bell className="w-4 h-4" />
-            </button>
-            <button
-              className="p-2 rounded-lg hover:bg-white/10 transition-colors"
-              style={{ color: "rgba(255,255,255,0.7)" }}
+              className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors hover:bg-white/15"
+              style={{ color: "white" }}
               onClick={() => window.open("/api-docs", "_blank")}
               data-testid="button-help"
               title="Documentation API"
             >
-              <HelpCircle className="w-4 h-4" />
+              <HelpCircle className="w-5 h-5" />
             </button>
-            <LanguageDropdown />
+            {/* Profile / Settings */}
+            <button
+              className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors hover:bg-white/15"
+              style={{ background: "rgba(255,255,255,0.18)", color: "white" }}
+              onClick={() => handleTabChange("settings")}
+              data-testid="button-profile"
+              title="Paramètres"
+            >
+              <User className="w-5 h-5" />
+            </button>
           </div>
         </header>
 
-        <main className="flex-1 overflow-auto p-4 md:p-6">
-          <SupportBanner />
-          {activeTab === "overview"      && <OverviewPanel token={token} />}
-          {activeTab === "transactions"  && <MerchantTransactionsPanel token={token} />}
-          {activeTab === "virements"     && <WalletTransfersPanel token={token} />}
-          {activeTab === "reversements"  && <WithdrawalsPanel token={token} />}
-          {activeTab === "paymentlinks"  && <PaymentLinksPanel token={token} />}
-          {activeTab === "apikeys"       && <ApiKeysPanel token={token} />}
-          {activeTab === "webhook"       && <WebhookPanel token={token} />}
-          {activeTab === "settings"      && <MerchantSettingsPanel token={token} />}
-          {activeTab === "crypto"        && <CryptoPanel token={token} user={user} />}
-          {activeTab === "sdk"           && <SdkDocPanel sdkApiKey={sdkApiKey} />}
-        </main>
+        {/* ── Main content ── */}
+        {activeTab === "overview" ? (
+          <main className="flex-1 overflow-hidden p-4 md:p-6">
+            <OverviewPanel token={token} onTabChange={handleTabChange} />
+          </main>
+        ) : (
+          <main className="flex-1 overflow-auto p-4 md:p-6">
+            <SupportBanner />
+            {activeTab === "wallet"        && <WalletPanel token={token} />}
+            {activeTab === "analyse"       && <AnalysePanel token={token} />}
+            {activeTab === "transactions"  && <MerchantTransactionsPanel token={token} />}
+            {activeTab === "virements"     && <WalletTransfersPanel token={token} />}
+            {activeTab === "reversements"  && <WithdrawalsPanel token={token} />}
+            {activeTab === "paymentlinks"  && <PaymentLinksPanel token={token} />}
+            {activeTab === "apikeys"       && <ApiKeysPanel token={token} />}
+            {activeTab === "webhook"       && <WebhookPanel token={token} />}
+            {activeTab === "settings"      && <MerchantSettingsPanel token={token} />}
+            {activeTab === "crypto"        && <CryptoPanel token={token} user={user} />}
+            {activeTab === "sdk"           && <SdkDocPanel sdkApiKey={sdkApiKey} />}
+          </main>
+        )}
       </div>
     </div>
   );
