@@ -671,7 +671,7 @@ export default function PaymentPage() {
         </div>
 
         {/* ── footer (outside card) ─────────────────────────────────── */}
-        <div style={{ marginTop:22, display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+        <div style={{ marginTop:36, marginBottom:24, display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
           <img src={robotpayLogo} alt="RobotPay" style={{ height:36, objectFit:"contain", display:"block" }} />
         </div>
 
