@@ -1924,236 +1924,360 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
 
   if (balLoading) return <MerchantLoadingSkeleton />;
 
-  const xofCountries = wtcList.filter((c: WalletTransferCountry) => c.currencyZone === "XOF").map((c: WalletTransferCountry) => c.country).join(", ");
-  const xafCountries = wtcList.filter((c: WalletTransferCountry) => c.currencyZone === "XAF").map((c: WalletTransferCountry) => c.country).join(", ");
-  const cdfCountries = wtcList.filter((c: WalletTransferCountry) => c.currencyZone === "CDF").map((c: WalletTransferCountry) => c.country).join(", ");
+  const ZONE_FLAGS: Record<string, string> = {
+    "Togo": "🇹🇬", "Benin": "🇧🇯", "Ivory Coast": "🇨🇮", "Senegal": "🇸🇳",
+    "Mali": "🇲🇱", "Burkina Faso": "🇧🇫", "Niger": "🇳🇪", "Guinea-Bissau": "🇬🇼",
+    "Cameroon": "🇨🇲", "Chad": "🇹🇩", "Congo": "🇨🇬", "Gabon": "🇬🇦",
+    "CAR": "🇨🇫", "Equatorial Guinea": "🇬🇶", "DRC": "🇨🇩", "Guinea": "🇬🇳",
+  };
+  const ZONE_COLORS: Record<string, { bg: string; text: string; pill: string }> = {
+    "XOF": { bg: "#e8f5e9", text: "#2e7d32", pill: "#00b050" },
+    "XAF": { bg: "#e3f2fd", text: "#1565c0", pill: "#1976d2" },
+    "CDF": { bg: "#fff8e1", text: "#e65100", pill: "#f59e0b" },
+  };
+
   const totalTransferred = (walletTransfers as WalletTransfer[]).filter(w => w.status === "approved").reduce((s, w) => s + w.amount, 0);
   const pendingCount = (walletTransfers as WalletTransfer[]).filter(w => w.status === "pending").length;
 
+  const fromMCObj = eligibleCountries.find(c => String(c.id) === fromCountryId);
+  const toMCObj = toCountries.find(c => String(c.id) === toCountryId);
+  const fromWtc = fromMCObj ? wtcMap.get(fromMCObj.country) : undefined;
+  const parsedAmt = parseInt(amount) || 0;
+  let estimatedFee = 0;
+  if (!feeExempt && wtFeeSettings && parsedAmt > 0) {
+    estimatedFee = wtFeeSettings.feeType === "percentage"
+      ? Math.round((parsedAmt * wtFeeSettings.feeValue) / 100)
+      : Math.round(wtFeeSettings.feeValue);
+  }
+  const totalNeeded = parsedAmt + estimatedFee;
+  const insufficientBalance = !!(fromMCObj && parsedAmt > 0 && fromMCObj.balance < totalNeeded);
+  const isDisabled = createMutation.isPending || !fromCountryId || !toCountryId || !amount || insufficientBalance;
+
+  // Group eligible countries by zone for display
+  const zoneGroups = new Map<string, MerchantCountry[]>();
+  eligibleCountries.forEach(c => {
+    const zone = wtcMap.get(c.country)?.currencyZone || "?";
+    if (!zoneGroups.has(zone)) zoneGroups.set(zone, []);
+    zoneGroups.get(zone)!.push(c);
+  });
+
   return (
-    <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
-      <h2 className="text-xl font-bold mb-1" style={{ color: "#333" }}>{t("walletTransfersTitle")}</h2>
-      <p className="text-xs mb-5" style={{ color: "#888" }}>{t("walletTransfersDesc")}</p>
+    <div className="-m-4 md:-m-6 min-h-full" style={{ background: "#f2f3f5" }}>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("summary")}</p>
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        <div className="rounded-xl p-4" style={{ background: "#7e57c2" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("totalTransfers")}</p>
-          <p className="text-2xl font-bold text-white">{totalTransferred.toLocaleString("fr-FR")}<span className="text-sm ml-1 text-white/80">FCFA</span></p>
-        </div>
-        <div className="rounded-xl p-4" style={{ background: pendingCount > 0 ? "#fb8c00" : "#1976d2" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("pending")}</p>
-          <p className="text-2xl font-bold text-white">{pendingCount}</p>
-        </div>
-      </div>
-
-      {wtcList.length > 0 && (
-        <div className="grid grid-cols-2 gap-2 mb-5">
-          {xofCountries && (
-            <div className="rounded-xl px-3 py-2 text-xs" style={{ background: "#e8f5e9", border: "1px solid #c8e6c9" }}>
-              <span className="font-bold" style={{ color: "#2e7d32" }}>Zone XOF : </span>
-              <span style={{ color: "#388e3c" }}>{xofCountries}</span>
-            </div>
-          )}
-          {xafCountries && (
-            <div className="rounded-xl px-3 py-2 text-xs" style={{ background: "#e3f2fd", border: "1px solid #bbdefb" }}>
-              <span className="font-bold" style={{ color: "#1565c0" }}>Zone XAF : </span>
-              <span style={{ color: "#1976d2" }}>{xafCountries}</span>
-            </div>
-          )}
-          {cdfCountries && (
-            <div className="rounded-xl px-3 py-2 text-xs" style={{ background: "#fff8e1", border: "1px solid #ffe082" }}>
-              <span className="font-bold" style={{ color: "#e65100" }}>Zone CDF : </span>
-              <span style={{ color: "#ef6c00" }}>{cdfCountries}</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {eligibleCountries.length < 2 && (
-        <div className="rounded-xl p-4 mb-5 text-sm" style={{ background: "#fff3cd", border: "1px solid #ffc107", color: "#856404" }}>
-          {t("transferWarning")}
-        </div>
-      )}
-
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("newTransfer")}</p>
-      <div className="bg-white rounded-2xl p-5 mb-6 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>
-                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs mr-1.5" style={{ background: "#7e57c2" }}>1</span>
-                {t("fromCountry")}
-              </label>
-              <select
-                value={fromCountryId}
-                onChange={(e) => { setFromCountryId(e.target.value); setToCountryId(""); }}
-                className="w-full rounded-xl px-4 py-2.5 text-sm outline-none"
-                style={{ border: "1.5px solid #e2e8f0", background: "#fff", color: fromCountryId ? "#1a1a1a" : "#aaa" }}
-                data-testid="select-virement-from"
-              >
-                <option value="">{eligibleCountries.length === 0 ? t("noData") : t("selectFromCountry")}</option>
-                {eligibleCountries.map(c => (
-                  <option key={c.id} value={String(c.id)}>{c.country} — {c.balance.toLocaleString("fr-FR")} {countryToCurrency(c.country)}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>
-                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs mr-1.5" style={{ background: "#7e57c2" }}>2</span>
-                {t("toCountry")}
-              </label>
-              <select
-                value={toCountryId}
-                onChange={(e) => setToCountryId(e.target.value)}
-                disabled={!fromCountryId || toCountries.length === 0}
-                className="w-full rounded-xl px-4 py-2.5 text-sm outline-none"
-                style={{ border: "1.5px solid #e2e8f0", background: !fromCountryId ? "#f5f5f5" : "#fff", color: toCountryId ? "#1a1a1a" : "#aaa" }}
-                data-testid="select-virement-to"
-              >
-                <option value="">{fromCountryId && toCountries.length === 0 ? t("noData") : t("selectToCountry")}</option>
-                {toCountries.map(c => (
-                  <option key={c.id} value={String(c.id)}>{c.country} — {c.balance.toLocaleString("fr-FR")} {countryToCurrency(c.country)}</option>
-                ))}
-              </select>
-            </div>
+      {/* ── Hero header ── */}
+      <div className="px-5 pt-6 pb-5" style={{ background: "#fff", borderBottom: "1px solid #f0f0f0" }}>
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm shrink-0"
+            style={{ background: "linear-gradient(135deg, #7e57c2 0%, #512da8 100%)" }}>
+            <ArrowRightLeft className="w-6 h-6 text-white" />
           </div>
-
           <div>
-            <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>
-              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs mr-1.5" style={{ background: "#7e57c2" }}>3</span>
-              {t("amount")} ({fromZone || "FCFA"})
-            </label>
-            <input
-              type="number"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="Ex: 50000"
-              min="1"
-              required
-              className="w-full rounded-xl px-4 py-2.5 text-sm outline-none"
-              style={{ border: "1.5px solid #e2e8f0", background: "#fff", color: "#1a1a1a" }}
-              data-testid="input-virement-amount"
-            />
-            {fromMC && amount && !isNaN(parseInt(amount)) && (
-              <p className="text-xs mt-1" style={{ color: "#aaa" }}>
-                {t("availableBalance")} : <strong style={{ color: "#555" }}>{fromMC.balance.toLocaleString("fr-FR")} {fromZone}</strong>
-              </p>
-            )}
+            <h2 className="text-lg font-bold leading-tight" style={{ color: "#1a1a1a" }}>{t("walletTransfersTitle")}</h2>
+            <p className="text-xs mt-0.5" style={{ color: "#888" }}>Transférez entre wallets de la même zone monétaire</p>
           </div>
-
-          {fromCountryId && toCountryId && (
-            <div className="rounded-xl p-3 flex items-center gap-3 text-sm" style={{ background: "#f0f4ff", border: "1px solid #c5cae9" }}>
-              <ArrowRightLeft className="w-4 h-4 shrink-0" style={{ color: "#7e57c2" }} />
-              <span style={{ color: "#333" }}>
-                {eligibleCountries.find(c => String(c.id) === fromCountryId)?.country} → {toCountries.find(c => String(c.id) === toCountryId)?.country}
-              </span>
-            </div>
-          )}
-
-          {fromCountryId && toCountryId && amount && !isNaN(parseInt(amount)) && parseInt(amount) > 0 && (() => {
-            const parsedAmt = parseInt(amount);
-            let estimatedFee = 0;
-            if (!feeExempt && wtFeeSettings) {
-              if (wtFeeSettings.feeType === "percentage") {
-                estimatedFee = Math.round((parsedAmt * wtFeeSettings.feeValue) / 100);
-              } else {
-                estimatedFee = Math.round(wtFeeSettings.feeValue);
-              }
-            }
-            const totalNeeded = parsedAmt + estimatedFee;
-            const hasEnough = !fromMC || fromMC.balance >= totalNeeded;
-            return (
-              <div className="rounded-lg p-2.5 text-xs space-y-1.5" style={{ background: hasEnough ? "#f0faf5" : "#fff5f5", border: `1px solid ${hasEnough ? "#c3e6cb" : "#feb2b2"}` }}>
-                <div className="flex justify-between">
-                  <span style={{ color: "#555" }}>Montant</span>
-                  <span style={{ color: "#333", fontWeight: 600 }}>{parsedAmt.toLocaleString("fr-FR")} {fromZone || "FCFA"}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span style={{ color: "#555" }}>Frais de virement</span>
-                  {feeExempt ? (
-                    <span style={{ color: "#2e7d32", fontWeight: 600 }}>✦ Sans frais</span>
-                  ) : (
-                    <span style={{ color: estimatedFee > 0 ? "#e53e3e" : "#555", fontWeight: 600 }}>
-                      {estimatedFee > 0 ? `−${estimatedFee.toLocaleString("fr-FR")} ${fromZone || "FCFA"}` : "0"}
-                    </span>
-                  )}
-                </div>
-                <div className="flex justify-between border-t pt-1.5" style={{ borderColor: hasEnough ? "#c3e6cb" : "#feb2b2" }}>
-                  <span style={{ color: hasEnough ? "#155724" : "#c53030", fontWeight: 700 }}>Total débité</span>
-                  <span style={{ color: hasEnough ? "#155724" : "#c53030", fontWeight: 700 }}>{totalNeeded.toLocaleString("fr-FR")} {fromZone || "FCFA"}</span>
-                </div>
-                {!hasEnough && fromMC && (
-                  <p className="text-xs pt-0.5" style={{ color: "#c53030" }}>
-                    Solde insuffisant — vous avez {fromMC.balance.toLocaleString("fr-FR")} {fromZone}, il vous manque {(totalNeeded - fromMC.balance).toLocaleString("fr-FR")} {fromZone}.
-                  </p>
-                )}
-              </div>
-            );
-          })()}
-
-          {(() => {
-            const parsedAmt = parseInt(amount) || 0;
-            let estimatedFee = 0;
-            if (!feeExempt && wtFeeSettings && parsedAmt > 0) {
-              estimatedFee = wtFeeSettings.feeType === "percentage"
-                ? Math.round((parsedAmt * wtFeeSettings.feeValue) / 100)
-                : Math.round(wtFeeSettings.feeValue);
-            }
-            const totalNeeded = parsedAmt + estimatedFee;
-            const insufficientBalance = !!(fromMC && parsedAmt > 0 && fromMC.balance < totalNeeded);
-            const isDisabled = createMutation.isPending || !fromCountryId || !toCountryId || !amount || insufficientBalance;
-            return (
-              <button
-                type="submit"
-                disabled={isDisabled}
-                className="w-full rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 transition-all"
-                style={{ background: isDisabled ? "#ccc" : "#7e57c2", color: "#fff", border: "none", cursor: isDisabled ? "not-allowed" : "pointer" }}
-                data-testid="button-submit-virement"
-              >
-                {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightLeft className="w-4 h-4" />}
-                {createMutation.isPending ? t("loading") : insufficientBalance ? "Solde insuffisant" : t("confirmTransfer")}
-              </button>
-            );
-          })()}
-        </form>
+        </div>
+        {/* Stat pills */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-2xl p-3.5" style={{ background: "#f3e5f5", border: "1.5px solid #e1bee7" }}>
+            <p className="text-xs font-semibold mb-1" style={{ color: "#7b1fa2" }}>Total transféré</p>
+            <p className="text-xl font-bold" style={{ color: "#4a148c" }}>{totalTransferred.toLocaleString("fr-FR")}<span className="text-xs ml-1 font-semibold" style={{ color: "#9c27b0" }}>F</span></p>
+          </div>
+          <div className="rounded-2xl p-3.5" style={{ background: pendingCount > 0 ? "#fff8e1" : "#f3e5f5", border: `1.5px solid ${pendingCount > 0 ? "#ffe082" : "#e1bee7"}` }}>
+            <p className="text-xs font-semibold mb-1" style={{ color: pendingCount > 0 ? "#e65100" : "#7b1fa2" }}>En attente</p>
+            <p className="text-xl font-bold" style={{ color: pendingCount > 0 ? "#bf360c" : "#4a148c" }}>{pendingCount}</p>
+          </div>
+        </div>
       </div>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-        {t("transferHistory")} — {(walletTransfers as WalletTransfer[]).length}
-      </p>
-      <div className="space-y-3">
-        {wtLoading ? (
-          [1,2,3].map(i => <Skeleton key={i} className="h-20 w-full rounded-2xl" />)
-        ) : (walletTransfers as WalletTransfer[]).length === 0 ? (
-          <div className="bg-white rounded-2xl p-6 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-            <ArrowRightLeft className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
-            <p className="text-sm" style={{ color: "#aaa" }}>{t("noTransfers")}</p>
-          </div>
-        ) : (
-          (walletTransfers as WalletTransfer[]).map((wt) => (
-            <div key={wt.id} className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }} data-testid={`virement-row-${wt.id}`}>
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-base font-bold" style={{ color: "#1a1a1a" }}>{wt.fromCountry}</span>
-                  <ArrowRightLeft className="w-3.5 h-3.5" style={{ color: "#7e57c2" }} />
-                  <span className="text-base font-bold" style={{ color: "#1a1a1a" }}>{wt.toCountry}</span>
+      <div className="p-4 space-y-4">
+
+        {/* ── Zone info pills ── */}
+        {wtcList.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {Array.from(zoneGroups.entries()).map(([zone, countries]) => {
+              const zc = ZONE_COLORS[zone] || { bg: "#f5f5f5", text: "#555", pill: "#888" };
+              return (
+                <div key={zone} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold"
+                  style={{ background: zc.bg, color: zc.text }}>
+                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: zc.pill }} />
+                  Zone {zone} · {countries.map(c => ZONE_FLAGS[c.country] || "🌍").join(" ")} {countries.map(c => c.country).join(", ")}
                 </div>
-                <StatusPill status={wt.status} />
+              );
+            })}
+          </div>
+        )}
+
+        {/* ── Warning if not enough countries ── */}
+        {eligibleCountries.length < 2 && (
+          <div className="rounded-2xl p-4 flex items-start gap-3" style={{ background: "#fffbea", border: "1.5px solid #fef3c7" }}>
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "#d97706" }} />
+            <p className="text-xs leading-relaxed" style={{ color: "#92400e" }}>{t("transferWarning")}</p>
+          </div>
+        )}
+
+        {/* ── Transfer form ── */}
+        <form onSubmit={handleSubmit}>
+
+          {/* Montant */}
+          <div className="bg-white rounded-2xl overflow-hidden shadow-sm mb-4" style={{ border: "1.5px solid #e8ecf0" }}>
+            <div className="px-5 py-4 flex items-center gap-2.5" style={{ borderBottom: "1px solid #f5f5f5" }}>
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#f3e5f5" }}>
+                <DollarSign className="w-4 h-4" style={{ color: "#7e57c2" }} />
               </div>
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: "#888" }}>
-                <span>{t("amount")} : <strong style={{ color: "#333" }}>{wt.amount.toLocaleString("fr-FR")} {wt.currency}</strong></span>
-                <span>{t("fees")} : <strong style={{ color: wt.fee === 0 ? "#00b050" : "#333" }}>{wt.fee === 0 ? "Sans frais" : `${wt.fee.toLocaleString("fr-FR")} ${wt.currency}`}</strong></span>
-                <span>{new Date(wt.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" })}</span>
+              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Montant</span>
+            </div>
+            <div className="px-5 py-4">
+              <div className="flex items-center rounded-xl overflow-hidden" style={{ border: "1.5px solid #e2e8f0", background: "#fafafa" }}>
+                <span className="px-4 py-3.5 text-sm font-bold shrink-0" style={{ color: "#7e57c2", borderRight: "1px solid #e2e8f0" }}>
+                  {fromZone || "FCFA"}
+                </span>
+                <input
+                  type="number"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0"
+                  min="1"
+                  className="flex-1 px-4 py-3.5 text-xl font-bold outline-none bg-transparent"
+                  style={{ color: "#1a1a1a" }}
+                  data-testid="input-virement-amount"
+                />
               </div>
-              {wt.adminNote && (
-                <p className="text-xs mt-2 px-2 py-1 rounded-lg italic" style={{ background: "#f8f9fa", color: "#666" }}>
-                  {t("adminNote")} : {wt.adminNote}
+              {fromMCObj && amount && parsedAmt > 0 && (
+                <p className="text-xs mt-2 flex items-center gap-1.5" style={{ color: "#888" }}>
+                  <Wallet className="w-3 h-3" />
+                  Solde disponible : <strong style={{ color: "#555" }}>{fromMCObj.balance.toLocaleString("fr-FR")} {fromZone}</strong>
                 </p>
               )}
             </div>
-          ))
-        )}
+          </div>
+
+          {/* From / Arrow / To */}
+          <div className="relative mb-4">
+
+            {/* From */}
+            <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+              <div className="px-4 py-3 flex items-center gap-2" style={{ borderBottom: "1px solid #f5f5f5", background: "#fafafa" }}>
+                <div className="w-1.5 h-1.5 rounded-full" style={{ background: "#7e57c2" }} />
+                <span className="text-xs font-bold uppercase tracking-wider" style={{ color: "#7e57c2" }}>De</span>
+              </div>
+              <div className="px-4 py-4">
+                {eligibleCountries.length === 0 ? (
+                  <p className="text-sm text-center py-2" style={{ color: "#bbb" }}>Aucun pays éligible</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    {eligibleCountries.map((c) => {
+                      const zone = wtcMap.get(c.country)?.currencyZone || "";
+                      const zc = ZONE_COLORS[zone] || { bg: "#f5f5f5", text: "#555", pill: "#888" };
+                      const selected = String(c.id) === fromCountryId;
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => { setFromCountryId(String(c.id)); setToCountryId(""); }}
+                          className="flex items-center gap-2.5 px-3 py-3 rounded-xl transition-all text-left"
+                          style={{
+                            background: selected ? "#7e57c2" : "#f8f9fc",
+                            border: `1.5px solid ${selected ? "#7e57c2" : "#e8ecf0"}`,
+                          }}
+                          data-testid={`select-from-${c.id}`}
+                        >
+                          <span className="text-xl leading-none shrink-0">{ZONE_FLAGS[c.country] || "🌍"}</span>
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold truncate leading-tight" style={{ color: selected ? "#fff" : "#1a1a1a" }}>{c.country}</p>
+                            <p className="text-xs leading-tight mt-0.5" style={{ color: selected ? "rgba(255,255,255,0.7)" : "#aaa" }}>
+                              {c.balance.toLocaleString("fr-FR")} {zone}
+                            </p>
+                          </div>
+                          {selected && <CheckCircle2 className="w-4 h-4 ml-auto shrink-0 text-white" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Arrow swap button */}
+            <div className="flex justify-center -my-3 relative z-10">
+              <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-md"
+                style={{ background: "linear-gradient(135deg, #7e57c2 0%, #512da8 100%)", border: "3px solid #f2f3f5" }}>
+                <ArrowRightLeft className="w-5 h-5 text-white" />
+              </div>
+            </div>
+
+            {/* To */}
+            <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+              <div className="px-4 py-3 flex items-center gap-2" style={{ borderBottom: "1px solid #f5f5f5", background: "#fafafa" }}>
+                <div className="w-1.5 h-1.5 rounded-full" style={{ background: "#00b050" }} />
+                <span className="text-xs font-bold uppercase tracking-wider" style={{ color: "#00b050" }}>À</span>
+                {fromZone && <span className="text-xs ml-auto" style={{ color: "#aaa" }}>Même zone {fromZone} uniquement</span>}
+              </div>
+              <div className="px-4 py-4">
+                {!fromCountryId ? (
+                  <div className="py-4 text-center">
+                    <p className="text-sm" style={{ color: "#ccc" }}>Sélectionnez d'abord un pays source</p>
+                  </div>
+                ) : toCountries.length === 0 ? (
+                  <div className="py-4 text-center rounded-xl" style={{ background: "#fffbea" }}>
+                    <p className="text-sm font-medium" style={{ color: "#d97706" }}>Aucun autre wallet disponible dans la zone {fromZone}</p>
+                    <p className="text-xs mt-1" style={{ color: "#aaa" }}>Activez d'autres pays de la même zone pour effectuer un virement</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    {toCountries.map((c) => {
+                      const zone = wtcMap.get(c.country)?.currencyZone || "";
+                      const selected = String(c.id) === toCountryId;
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => setToCountryId(String(c.id))}
+                          className="flex items-center gap-2.5 px-3 py-3 rounded-xl transition-all text-left"
+                          style={{
+                            background: selected ? "#00b050" : "#f8f9fc",
+                            border: `1.5px solid ${selected ? "#00b050" : "#e8ecf0"}`,
+                          }}
+                          data-testid={`select-to-${c.id}`}
+                        >
+                          <span className="text-xl leading-none shrink-0">{ZONE_FLAGS[c.country] || "🌍"}</span>
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold truncate leading-tight" style={{ color: selected ? "#fff" : "#1a1a1a" }}>{c.country}</p>
+                            <p className="text-xs leading-tight mt-0.5" style={{ color: selected ? "rgba(255,255,255,0.7)" : "#aaa" }}>
+                              {c.balance.toLocaleString("fr-FR")} {zone}
+                            </p>
+                          </div>
+                          {selected && <CheckCircle2 className="w-4 h-4 ml-auto shrink-0 text-white" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Fee recap */}
+          {fromCountryId && toCountryId && parsedAmt > 0 && (
+            <div className="rounded-2xl p-4 mb-4 space-y-2"
+              style={{ background: insufficientBalance ? "#fff5f5" : "#f0faf5", border: `1.5px solid ${insufficientBalance ? "#feb2b2" : "#c3e6cb"}` }}>
+              <div className="flex justify-between text-sm">
+                <span style={{ color: "#555" }}>Montant</span>
+                <span style={{ color: "#1a1a1a", fontWeight: 600 }}>{parsedAmt.toLocaleString("fr-FR")} {fromZone || "FCFA"}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span style={{ color: "#555" }}>Frais de virement</span>
+                {feeExempt ? (
+                  <span style={{ color: "#2e7d32", fontWeight: 600 }}>✦ Sans frais</span>
+                ) : (
+                  <span style={{ color: estimatedFee > 0 ? "#e53e3e" : "#555", fontWeight: 600 }}>
+                    {estimatedFee > 0 ? `−${estimatedFee.toLocaleString("fr-FR")} ${fromZone || "FCFA"}` : "0"}
+                  </span>
+                )}
+              </div>
+              <div className="flex justify-between text-sm pt-2" style={{ borderTop: `1px solid ${insufficientBalance ? "#feb2b2" : "#c3e6cb"}` }}>
+                <span style={{ fontWeight: 700, color: insufficientBalance ? "#c53030" : "#155724" }}>Total débité</span>
+                <span style={{ fontWeight: 700, color: insufficientBalance ? "#c53030" : "#155724" }}>{totalNeeded.toLocaleString("fr-FR")} {fromZone || "FCFA"}</span>
+              </div>
+              {insufficientBalance && fromMCObj && (
+                <p className="text-xs pt-1" style={{ color: "#c53030" }}>
+                  Solde insuffisant — disponible : {fromMCObj.balance.toLocaleString("fr-FR")} {fromZone}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Submit */}
+          <button
+            type="submit"
+            disabled={isDisabled}
+            className="w-full rounded-2xl py-4 text-sm font-bold flex items-center justify-center gap-2 transition-all shadow-sm"
+            style={{
+              background: isDisabled ? "#d1d5db" : "linear-gradient(135deg, #7e57c2 0%, #512da8 100%)",
+              color: isDisabled ? "#9ca3af" : "#fff",
+              border: "none",
+            }}
+            data-testid="button-submit-virement"
+          >
+            {createMutation.isPending
+              ? <Loader2 className="w-5 h-5 animate-spin" />
+              : <Send className="w-5 h-5" />}
+            {createMutation.isPending ? "Traitement…" : insufficientBalance ? "Solde insuffisant" : "Envoyer l'argent"}
+          </button>
+        </form>
+
+        {/* ── History ── */}
+        <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+          <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: "1px solid #f5f5f5" }}>
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#f3e5f5" }}>
+                <BarChart3 className="w-4 h-4" style={{ color: "#7e57c2" }} />
+              </div>
+              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>{t("transferHistory")}</span>
+            </div>
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "#f3e5f5", color: "#7e57c2" }}>
+              {(walletTransfers as WalletTransfer[]).length}
+            </span>
+          </div>
+
+          {wtLoading ? (
+            <div className="p-4 space-y-3">
+              {[1,2,3].map(i => <Skeleton key={i} className="h-16 w-full rounded-xl" />)}
+            </div>
+          ) : (walletTransfers as WalletTransfer[]).length === 0 ? (
+            <div className="p-10 text-center">
+              <div className="w-12 h-12 rounded-2xl mx-auto mb-3 flex items-center justify-center" style={{ background: "#f5f5f5" }}>
+                <ArrowRightLeft className="w-6 h-6" style={{ color: "#ccc" }} />
+              </div>
+              <p className="text-sm font-medium mb-1" style={{ color: "#888" }}>{t("noTransfers")}</p>
+              <p className="text-xs" style={{ color: "#bbb" }}>Vos virements inter-wallets apparaîtront ici</p>
+            </div>
+          ) : (
+            <div className="divide-y" style={{ borderColor: "#f5f5f5" }}>
+              {(walletTransfers as WalletTransfer[]).map((wt) => {
+                const statusConf = wt.status === "approved"
+                  ? { bg: "#e8f5e9", color: "#2e7d32", label: "Approuvé" }
+                  : wt.status === "rejected"
+                  ? { bg: "#fce4ec", color: "#ad1457", label: "Refusé" }
+                  : { bg: "#fff8e1", color: "#e65100", label: "En attente" };
+                return (
+                  <div key={wt.id} className="px-5 py-4" data-testid={`virement-row-${wt.id}`}>
+                    <div className="flex items-center gap-3">
+                      <div className="shrink-0 flex items-center gap-1 text-lg">
+                        <span>{ZONE_FLAGS[wt.fromCountry] || "🌍"}</span>
+                        <ArrowRightLeft className="w-3.5 h-3.5 mx-0.5" style={{ color: "#7e57c2" }} />
+                        <span>{ZONE_FLAGS[wt.toCountry] || "🌍"}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2 mb-0.5">
+                          <p className="text-sm font-bold" style={{ color: "#1a1a1a" }}>
+                            {wt.fromCountry} → {wt.toCountry}
+                          </p>
+                          <span className="text-xs px-2 py-0.5 rounded-full font-semibold shrink-0"
+                            style={{ background: statusConf.bg, color: statusConf.color }}>
+                            {statusConf.label}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs" style={{ color: "#888" }}>
+                          <span className="font-semibold" style={{ color: "#555" }}>{wt.amount.toLocaleString("fr-FR")} {wt.currency}</span>
+                          <span style={{ color: wt.fee === 0 ? "#00b050" : "#888" }}>
+                            {wt.fee === 0 ? "Sans frais" : `Frais : ${wt.fee.toLocaleString("fr-FR")} ${wt.currency}`}
+                          </span>
+                          <span>{new Date(wt.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</span>
+                        </div>
+                        {wt.adminNote && (
+                          <p className="text-xs mt-1.5 px-2.5 py-1.5 rounded-lg italic"
+                            style={{ background: "#fffbea", color: "#78350f", border: "1px solid #fef3c7" }}>
+                            💬 {wt.adminNote}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
