@@ -133,6 +133,9 @@ function OverviewPanel({ token, onTabChange }: { token: string | null; onTabChan
               {t("analyseTitle")}
             </button>
           </div>
+          <p className="text-center text-sm font-bold text-white tracking-wide mt-3">
+            RobotPay <span className="font-black">非洲的支付聚合平台</span>
+          </p>
         </div>
       </div>
 
