@@ -3,6 +3,12 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, Check, Phone, ExternalLink, Bitcoin, X, RefreshCw, Clock, CreditCard, ShieldCheck } from "lucide-react";
 import HelpButton from "@/components/HelpButton";
 
+import waveIcon from "@assets/zOMoVcU_1779635321598.png";
+import moovIcon from "@assets/ZJCa7PK_1779635321640.jpg";
+import mtnIcon from "@assets/XzQ5b64_1779635321616.png";
+import tmoneyIcon from "@assets/ruU3bQe_1779635321485.png";
+import robotpayLogo from "@assets/20260524_144646_1779635303879.png";
+
 type MerchantInfo = {
   name: string;
   slug: string;
@@ -54,12 +60,19 @@ const COUNTRY_FLAGS: Record<string, string> = {
   "Gambie": "🇬🇲",
 };
 
+const OPERATOR_ICONS: Record<string, string> = {
+  "Wave": waveIcon,
+  "Moov Money": moovIcon,
+  "MTN Mobile Money": mtnIcon,
+  "TMoney": tmoneyIcon,
+};
+
 const OPERATOR_META: Record<string, { color: string; abbr: string }> = {
   "Wave": { color: "#1E90FF", abbr: "WV" },
   "Orange Money": { color: "#FF6600", abbr: "OM" },
   "MTN Mobile Money": { color: "#FFCC00", abbr: "MTN" },
-  "Moov Money": { color: "#00AEEF", abbr: "MV" },
-  "TMoney": { color: "#0099CC", abbr: "TM" },
+  "Moov Money": { color: "#e8530a", abbr: "MV" },
+  "TMoney": { color: "#f5c100", abbr: "TM" },
   "Airtel Money": { color: "#E8001D", abbr: "AT" },
   "M-Pesa": { color: "#60BB44", abbr: "MP" },
   "Coris Money": { color: "#7C2020", abbr: "CM" },
@@ -407,7 +420,7 @@ export default function PaymentPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "#0d0d1a" }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "#ffffff" }}>
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="w-9 h-9 animate-spin" style={{ color: "#3b82f6" }} />
           <span className="text-sm" style={{ color: "#6b7280" }}>Chargement...</span>
@@ -418,8 +431,8 @@ export default function PaymentPage() {
 
   if ((loadError || !merchantInfo) && step !== 3) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "#0d0d1a" }}>
-        <div className="rounded-2xl p-6 max-w-sm w-full text-center space-y-3" style={{ background: "#ffffff" }}>
+      <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "#ffffff" }}>
+        <div className="rounded-2xl p-6 max-w-sm w-full text-center space-y-3" style={{ background: "#ffffff", boxShadow: "0 8px 32px rgba(0,0,0,0.12)" }}>
           <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto" style={{ backgroundColor: "#fee2e2" }}>
             <X className="w-6 h-6" style={{ color: "#dc2626" }} />
           </div>
@@ -431,7 +444,7 @@ export default function PaymentPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center py-6 px-4" style={{ background: "#0d0d1a" }}>
+    <div className="min-h-screen flex flex-col items-center justify-center py-6 px-4" style={{ background: "#ffffff" }}>
       <style>{`
         .pay-root *, .pay-root *::before, .pay-root *::after { box-sizing: border-box; }
         .pay-input {
@@ -451,10 +464,10 @@ export default function PaymentPage() {
           width: 100%;
           padding: 10px 14px;
           font-size: 14px;
-          border: 1.5px solid #e5e7eb;
+          border: 1.5px solid #d1d5db;
           border-radius: 10px;
           outline: none;
-          background: #f9fafb;
+          background: #ffffff;
           color: #111827;
           cursor: pointer;
           appearance: none;
@@ -466,26 +479,31 @@ export default function PaymentPage() {
           transition: border-color 0.15s;
         }
         .pay-select:focus { border-color: #3b82f6; }
-        .op-tile {
+        .op-row {
           display: flex;
-          flex-direction: column;
           align-items: center;
-          gap: 5px;
-          padding: 10px 6px;
+          gap: 10px;
+          padding: 8px 12px;
           border-radius: 12px;
           border: 2px solid #e5e7eb;
           cursor: pointer;
-          transition: border-color 0.15s, background 0.15s, transform 0.1s;
+          transition: border-color 0.15s, background 0.15s;
           user-select: none;
           -webkit-tap-highlight-color: transparent;
-          flex: 1;
-          min-width: 0;
+          background: #fff;
         }
-        .op-tile:active { transform: scale(0.95); }
-        .op-tile.selected { border-color: #3b82f6; background: #eff6ff; }
-        .op-tile-icon {
-          width: 40px;
-          height: 40px;
+        .op-row:active { transform: scale(0.98); }
+        .op-row.selected { border-color: #3b82f6; background: #eff6ff; }
+        .op-img {
+          width: 46px;
+          height: 46px;
+          border-radius: 10px;
+          object-fit: cover;
+          flex-shrink: 0;
+        }
+        .op-fallback {
+          width: 46px;
+          height: 46px;
           border-radius: 10px;
           display: flex;
           align-items: center;
@@ -494,26 +512,40 @@ export default function PaymentPage() {
           font-weight: 800;
           color: #fff;
           letter-spacing: 0.02em;
+          flex-shrink: 0;
         }
-        .op-tile-label {
-          font-size: 10px;
+        .op-name {
+          font-size: 13px;
           font-weight: 600;
-          color: #374151;
-          text-align: center;
-          line-height: 1.2;
-          word-break: break-word;
+          color: #1f2937;
+          flex: 1;
         }
-        .op-tile.selected .op-tile-label { color: #1d4ed8; }
+        .op-row.selected .op-name { color: #1d4ed8; }
+        .op-check {
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          border: 2px solid #d1d5db;
+          flex-shrink: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: background 0.15s, border-color 0.15s;
+        }
+        .op-row.selected .op-check {
+          background: #3b82f6;
+          border-color: #3b82f6;
+        }
         .pay-btn-yellow {
           width: 100%;
-          padding: 13px;
-          font-size: 15px;
-          font-weight: 700;
-          border-radius: 12px;
+          padding: 14px;
+          font-size: 16px;
+          font-weight: 800;
+          border-radius: 14px;
           border: none;
           cursor: pointer;
-          background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-          color: #fff;
+          background: linear-gradient(135deg, #f5c100 0%, #e6a800 100%);
+          color: #1a1a1a;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -521,6 +553,7 @@ export default function PaymentPage() {
           transition: opacity 0.15s, transform 0.1s;
           -webkit-tap-highlight-color: transparent;
           letter-spacing: 0.01em;
+          box-shadow: 0 4px 15px rgba(245,193,0,0.4);
         }
         .pay-btn-yellow:hover:not(:disabled) { opacity: 0.92; }
         .pay-btn-yellow:active:not(:disabled) { transform: scale(0.98); }
@@ -590,7 +623,7 @@ export default function PaymentPage() {
         .modal-overlay {
           position: fixed;
           inset: 0;
-          background: rgba(0,0,0,0.65);
+          background: rgba(0,0,0,0.55);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -599,19 +632,56 @@ export default function PaymentPage() {
         }
         .modal-box {
           background: #fff;
-          border-radius: 18px;
+          border-radius: 20px;
           padding: 24px;
           width: 100%;
           max-width: 360px;
-          box-shadow: 0 25px 60px rgba(0,0,0,0.35);
+          box-shadow: 0 25px 60px rgba(0,0,0,0.25);
         }
+        .phone-input-wrapper {
+          display: flex;
+          align-items: stretch;
+          border: 1.5px solid #d1d5db;
+          border-radius: 12px;
+          overflow: hidden;
+          background: #ffffff;
+          transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        .phone-input-wrapper:focus-within {
+          border-color: #3b82f6;
+          box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
+        }
+        .phone-dial {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0 14px;
+          background: #f3f4f6;
+          font-size: 14px;
+          font-weight: 600;
+          color: #374151;
+          border-right: 1.5px solid #d1d5db;
+          min-width: 68px;
+          flex-shrink: 0;
+        }
+        .phone-field {
+          flex: 1;
+          padding: 12px 14px;
+          font-size: 14px;
+          color: #111827;
+          border: none;
+          outline: none;
+          background: transparent;
+        }
+        .phone-field::placeholder { color: #9ca3af; }
       `}</style>
 
-      <div className="pay-root w-full" style={{ maxWidth: 420 }}>
+      <div className="pay-root w-full" style={{ maxWidth: 400 }}>
         <div
-          className="rounded-2xl overflow-hidden"
-          style={{ background: "#ffffff", boxShadow: "0 24px 60px rgba(0,0,0,0.45)" }}
+          className="rounded-3xl overflow-hidden"
+          style={{ background: "#ffffff", boxShadow: "0 8px 40px rgba(0,0,0,0.13), 0 1px 3px rgba(0,0,0,0.06)" }}
         >
+          {/* ── Header ────────────────────────────────────────────────────────── */}
           <div
             className="flex items-center justify-between px-5 py-4"
             style={{ background: "linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%)" }}
@@ -619,7 +689,7 @@ export default function PaymentPage() {
             <div className="flex items-center gap-3">
               <div
                 className="w-9 h-9 rounded-xl flex items-center justify-center"
-                style={{ background: "rgba(255,255,255,0.18)" }}
+                style={{ background: "rgba(255,255,255,0.2)" }}
               >
                 <CreditCard className="w-5 h-5 text-white" />
               </div>
@@ -628,13 +698,13 @@ export default function PaymentPage() {
                   Effectuer un paiement
                 </p>
                 {merchantInfo && (
-                  <p className="text-white/70 text-xs">{merchantInfo.name}</p>
+                  <p className="text-white/70 text-xs mt-0.5">{merchantInfo.name}</p>
                 )}
               </div>
             </div>
             <div
               className="w-8 h-8 rounded-full flex items-center justify-center cursor-pointer"
-              style={{ background: "rgba(255,255,255,0.15)" }}
+              style={{ background: "rgba(255,255,255,0.18)" }}
               onClick={() => window.history.back()}
               data-testid="button-close"
             >
@@ -642,13 +712,15 @@ export default function PaymentPage() {
             </div>
           </div>
 
+          {/* ── Body ──────────────────────────────────────────────────────────── */}
           <div className="px-5 py-5 space-y-5">
 
             {step === 1 && (
               <>
+                {/* Country selector */}
                 {merchantInfo && merchantInfo.countries.length > 1 && (
                   <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "#6b7280" }}>
+                    <label className="block text-sm font-semibold mb-2" style={{ color: "#374151" }}>
                       Sélectionner un pays
                     </label>
                     <div className="relative">
@@ -670,50 +742,90 @@ export default function PaymentPage() {
                   </div>
                 )}
 
+                {/* Amount */}
                 {amount > 0 && (
                   <div
-                    className="rounded-xl px-4 py-3 flex items-center justify-between"
-                    style={{ background: "#eff6ff", border: "1.5px solid #bfdbfe" }}
+                    className="rounded-2xl px-5 py-4 text-center"
+                    style={{ background: "#f0f6ff", border: "1.5px solid #bfdbfe" }}
                   >
-                    <span className="text-xs font-semibold" style={{ color: "#3b82f6" }}>
+                    <p className="text-xs font-semibold mb-1" style={{ color: "#64748b" }}>
                       Montant à payer
-                    </span>
-                    <span className="font-bold text-xl" style={{ color: "#1d4ed8" }} data-testid="text-pay-amount">
+                    </p>
+                    <p className="font-extrabold text-2xl" style={{ color: "#1d4ed8" }} data-testid="text-pay-amount">
                       {currency} {formatAmount(amount)}
-                    </span>
+                    </p>
                   </div>
                 )}
 
+                {/* Operator selection */}
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "#6b7280" }}>
-                    Choisissez votre opérateur
+                  <label className="block text-sm font-semibold mb-3" style={{ color: "#374151" }}>
+                    Choisissez une méthode de payement
                   </label>
+
                   {availableMethods.length === 0 && !cryptoEnabled ? (
                     <p className="text-sm py-3 text-center rounded-xl" style={{ color: "#9ca3af", border: "1.5px dashed #e5e7eb" }}>
                       Aucune méthode disponible pour ce pays.
                     </p>
                   ) : (
-                    <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Opérateur de paiement">
-                      {availableMethods.map((method) => {
+                    <div
+                      className="rounded-2xl overflow-hidden"
+                      style={{ border: "1.5px solid #e5e7eb" }}
+                      role="radiogroup"
+                      aria-label="Opérateur de paiement"
+                    >
+                      {availableMethods.map((method, idx) => {
+                        const icon = OPERATOR_ICONS[method];
                         const meta = OPERATOR_META[method] || { color: "#6b7280", abbr: method.substring(0, 2).toUpperCase() };
                         const isSelected = selectedMethod === method;
+                        const isLast = idx === availableMethods.length - 1 && !cryptoEnabled;
                         return (
                           <div
                             key={method}
                             onClick={() => handleSelectMethod(method)}
                             onTouchEnd={(e) => { e.preventDefault(); handleSelectMethod(method); }}
-                            className={`op-tile${isSelected ? " selected" : ""}`}
-                            style={{ minWidth: "calc(25% - 8px)", maxWidth: "calc(25% - 8px)" }}
+                            className="flex items-center gap-3 px-4 py-3 cursor-pointer"
+                            style={{
+                              background: isSelected ? "#eff6ff" : "#ffffff",
+                              borderBottom: isLast ? "none" : "1px solid #f3f4f6",
+                              transition: "background 0.15s",
+                            }}
                             role="radio"
                             aria-checked={isSelected}
                             tabIndex={0}
                             onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); handleSelectMethod(method); } }}
                             data-testid={`radio-method-${method.replace(/\s+/g, "-").toLowerCase()}`}
                           >
-                            <div className="op-tile-icon" style={{ background: meta.color }}>
-                              {meta.abbr}
+                            {icon ? (
+                              <img src={icon} alt={method} className="op-img" />
+                            ) : (
+                              <div className="op-fallback" style={{ background: meta.color }}>
+                                {meta.abbr}
+                              </div>
+                            )}
+                            <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: isSelected ? "#1d4ed8" : "#1f2937" }}>
+                              {method}
+                            </span>
+                            <div
+                              style={{
+                                width: 22,
+                                height: 22,
+                                borderRadius: "50%",
+                                border: isSelected ? "none" : "2px solid #d1d5db",
+                                background: isSelected ? "#3b82f6" : "transparent",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                flexShrink: 0,
+                                transition: "background 0.15s, border-color 0.15s",
+                              }}
+                            >
+                              {isSelected && (
+                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                                  <path d="M2 6 L5 9 L10 3" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              )}
                             </div>
-                            <span className="op-tile-label">{method}</span>
                           </div>
                         );
                       })}
@@ -722,18 +834,43 @@ export default function PaymentPage() {
                         <div
                           onClick={() => handleSelectMethod("crypto")}
                           onTouchEnd={(e) => { e.preventDefault(); handleSelectMethod("crypto"); }}
-                          className={`op-tile${isCryptoMethod ? " selected" : ""}`}
-                          style={{ minWidth: "calc(25% - 8px)", maxWidth: "calc(25% - 8px)", ...(isCryptoMethod ? { borderColor: "#f59e0b", background: "#fffbeb" } : {}) }}
+                          className="flex items-center gap-3 px-4 py-3 cursor-pointer"
+                          style={{
+                            background: isCryptoMethod ? "#fffbeb" : "#ffffff",
+                            transition: "background 0.15s",
+                          }}
                           role="radio"
                           aria-checked={isCryptoMethod}
                           tabIndex={0}
                           onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); handleSelectMethod("crypto"); } }}
                           data-testid="radio-method-crypto"
                         >
-                          <div className="op-tile-icon" style={{ background: "#f59e0b" }}>
+                          <div className="op-fallback" style={{ background: "#f59e0b" }}>
                             <Bitcoin className="w-5 h-5 text-white" />
                           </div>
-                          <span className="op-tile-label" style={isCryptoMethod ? { color: "#d97706" } : {}}>Crypto</span>
+                          <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: isCryptoMethod ? "#d97706" : "#1f2937" }}>
+                            Crypto (via OxaPay)
+                          </span>
+                          <div
+                            style={{
+                              width: 22,
+                              height: 22,
+                              borderRadius: "50%",
+                              border: isCryptoMethod ? "none" : "2px solid #d1d5db",
+                              background: isCryptoMethod ? "#f59e0b" : "transparent",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                              transition: "background 0.15s",
+                            }}
+                          >
+                            {isCryptoMethod && (
+                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                                <path d="M2 6 L5 9 L10 3" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -751,25 +888,22 @@ export default function PaymentPage() {
                   </div>
                 )}
 
+                {/* Phone input */}
                 {!isCryptoMethod && (
                   <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "#6b7280" }}>
+                    <label className="block text-sm font-semibold mb-2" style={{ color: "#374151" }}>
                       Numéro de téléphone
                     </label>
-                    <div className="flex items-stretch rounded-xl overflow-hidden" style={{ border: "1.5px solid #e5e7eb" }}>
-                      <div
-                        className="flex items-center justify-center px-3 shrink-0 text-sm font-bold"
-                        style={{ background: "#f3f4f6", color: "#374151", borderRight: "1.5px solid #e5e7eb", minWidth: 60 }}
-                      >
+                    <div className="phone-input-wrapper">
+                      <div className="phone-dial">
                         {dialCode}
                       </div>
                       <input
                         type="tel"
                         value={payerPhone}
                         onChange={(e) => setPayerPhone(e.target.value)}
-                        placeholder="Ex: 90 123 456"
-                        className="flex-1 py-2.5 px-3 text-sm outline-none"
-                        style={{ background: "#f9fafb", color: "#111827", border: "none" }}
+                        placeholder="XX XXX XX XX"
+                        className="phone-field"
                         data-testid="input-payer-phone"
                       />
                     </div>
@@ -789,27 +923,26 @@ export default function PaymentPage() {
                   </div>
                 )}
 
-                <button
-                  type="button"
-                  onClick={handlePayClick}
-                  disabled={
-                    isSubmitting ||
-                    isCryptoLoading ||
-                    !selectedMethod ||
-                    (!isCryptoMethod && !payerPhone.trim())
-                  }
-                  className="pay-btn-yellow"
-                  data-testid="button-step1-next"
-                >
-                  {(isSubmitting || isCryptoLoading) ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  {isCryptoMethod ? "Payer en crypto" : "Payez avec RobotPay"}
-                </button>
-
-                <div className="flex items-center justify-center gap-1.5 pt-1">
-                  <ShieldCheck className="w-3.5 h-3.5" style={{ color: "#9ca3af" }} />
-                  <span className="text-xs" style={{ color: "#9ca3af" }}>
-                    Paiement sécurisé · Données chiffrées
-                  </span>
+                {/* Pay button */}
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={handlePayClick}
+                    disabled={
+                      isSubmitting ||
+                      isCryptoLoading ||
+                      !selectedMethod ||
+                      (!isCryptoMethod && !payerPhone.trim())
+                    }
+                    className="pay-btn-yellow"
+                    data-testid="button-step1-next"
+                  >
+                    {(isSubmitting || isCryptoLoading) ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                    {isCryptoMethod ? "Payer en crypto" : "Payez avec RobotPay"}
+                  </button>
+                  <p className="text-center text-xs" style={{ color: "#9ca3af", letterSpacing: "0.02em" }}>
+                    使用 RobotPay 安全等待
+                  </p>
                 </div>
               </>
             )}
@@ -1045,62 +1178,87 @@ export default function PaymentPage() {
 
           </div>
 
+          {/* ── Footer ────────────────────────────────────────────────────────── */}
           <div
-            className="flex items-center justify-center gap-2 px-5 py-3"
-            style={{ borderTop: "1px solid #f3f4f6", background: "#f9fafb" }}
+            className="flex flex-col items-center justify-center gap-1 px-5 py-4"
+            style={{ borderTop: "1px solid #f1f5f9", background: "#fafafa" }}
           >
-            <ShieldCheck className="w-3.5 h-3.5" style={{ color: "#9ca3af" }} />
-            <span className="text-xs" style={{ color: "#9ca3af" }}>
-              Hosted &amp; secured by <strong style={{ color: "#6b7280" }}>RobotPay</strong>
-            </span>
+            <div className="flex items-center gap-2">
+              <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                <path d="M14 2L4 7v7c0 6.1 4.3 11.8 10 13.2C19.7 25.8 24 20.1 24 14V7L14 2z" fill="#1d4ed8" opacity="0.12"/>
+                <path d="M14 2L4 7v7c0 6.1 4.3 11.8 10 13.2C19.7 25.8 24 20.1 24 14V7L14 2z" stroke="#1d4ed8" strokeWidth="1.5" fill="none"/>
+                <path d="M10 14l3 3 5-6" stroke="#1d4ed8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              <span className="text-xs font-medium" style={{ color: "#94a3b8" }}>Hosted &amp; secured by</span>
+            </div>
+            <img
+              src={robotpayLogo}
+              alt="RobotPay"
+              style={{ height: 22, objectFit: "contain", opacity: 0.65, filter: "grayscale(20%)" }}
+            />
           </div>
         </div>
       </div>
 
+      {/* ── OTP Modal ─────────────────────────────────────────────────────────── */}
       {showOtpPopup && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowOtpPopup(false); }}>
           <div className="modal-box">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-base" style={{ color: "#111827" }}>Code OTP requis</h3>
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h3 className="font-bold text-base" style={{ color: "#111827" }}>Code OTP requis</h3>
+                <p className="text-xs mt-0.5" style={{ color: "#6b7280" }}>Orange Money</p>
+              </div>
               <button
                 type="button"
                 onClick={() => setShowOtpPopup(false)}
-                className="w-8 h-8 rounded-full flex items-center justify-center"
-                style={{ background: "#f3f4f6", border: "none", cursor: "pointer" }}
+                style={{ width: 32, height: 32, borderRadius: "50%", background: "#f3f4f6", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
               >
                 <X className="w-4 h-4" style={{ color: "#6b7280" }} />
               </button>
             </div>
 
             <div
-              className="rounded-xl p-3 mb-4"
+              className="rounded-2xl p-4 mb-5"
               style={{ background: "#fff7ed", border: "1.5px solid #fed7aa" }}
             >
-              <p className="text-xs font-semibold mb-1" style={{ color: "#c2410c" }}>Orange Money</p>
-              <p className="text-sm" style={{ color: "#92400e" }}>
-                Composez{" "}
-                <span
-                  className="font-bold font-mono px-1.5 py-0.5 rounded"
-                  style={{ background: "#fff", color: "#c2410c", border: "1px solid #fed7aa" }}
+              <div className="flex items-start gap-3">
+                <div
+                  style={{ width: 36, height: 36, borderRadius: 10, background: "#ff6600", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
                 >
-                  {otpUssdDisplay}
-                </span>{" "}
-                sur votre téléphone pour générer le code OTP et mettez-le ici.
-              </p>
+                  <Phone className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold mb-1" style={{ color: "#c2410c" }}>Composez sur votre téléphone</p>
+                  <p className="text-sm" style={{ color: "#92400e" }}>
+                    <span
+                      className="font-bold font-mono px-2 py-0.5 rounded"
+                      style={{ background: "#fff", color: "#c2410c", border: "1px solid #fed7aa", fontSize: 15 }}
+                    >
+                      {otpUssdDisplay}
+                    </span>
+                    {" "}pour générer le code OTP et mettez-le ici.
+                  </p>
+                </div>
+              </div>
             </div>
 
             <div className="space-y-3">
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={8}
-                value={otpCode}
-                onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
-                placeholder="Entrez votre code OTP"
-                className="pay-input"
-                autoFocus
-                data-testid="input-otp-orange"
-              />
+              <div>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: "#374151" }}>Votre code OTP</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={8}
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
+                  placeholder="Entrez le code reçu"
+                  className="pay-input"
+                  autoFocus
+                  data-testid="input-otp-orange"
+                  style={{ fontSize: 18, letterSpacing: "0.15em", textAlign: "center", fontWeight: 700 }}
+                />
+              </div>
               <button
                 type="button"
                 onClick={() => {
