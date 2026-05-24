@@ -9,7 +9,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { sendMerchantOtpEmail } from "./email";
-import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, notifyAdminMerchantCreated, notifyAdminAdminCreated, getGeoInfo, notifyAdminMerchantLogin, notifyAdminIpBlocked, notifyAdminBruteForce, notifyAdminDeviceBlocked, notifyAdminNewDevice, notifyAdminOtp, notifyAdminVpn, notifyAdminCountryBlocked, notifyAdminLocationJump, notifyAdminNewMerchantIp } from "./telegram-bot";
+import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, notifyAdminMerchantCreated, notifyAdminAdminCreated, getGeoInfo, notifyAdminMerchantLogin, notifyAdminIpBlocked, notifyAdminBruteForce, notifyAdminDeviceBlocked, notifyAdminNewDevice, notifyAdminOtp, notifyAdminVpn, notifyAdminCountryBlocked, notifyAdminLocationJump, notifyAdminNewMerchantIp, broadcastToMerchants, sendTelegramMessage } from "./telegram-bot";
 import {
   initiatePayment as omnipayInitiatePayment,
   initiateTransfer as omnipayInitiateTransfer,
@@ -1337,6 +1337,64 @@ export async function registerRoutes(
       }
       await storage.createAuditLog({ adminId: (req as any).user.id, action: "telegram_group_updated", details: `Groupe admin Telegram mis a jour : ${trimmed}`, ip: req.ip || "" });
       res.json({ success: true, groupId: trimmed });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/telegram/broadcast", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { message, imageUrl, buttons, target, merchantIds } = req.body;
+      if (!message || !message.trim()) return res.status(400).json({ message: "Message requis" });
+
+      const validatedButtons: Array<Array<{ text: string; url: string }>> = [];
+      if (buttons && Array.isArray(buttons)) {
+        for (const row of buttons) {
+          if (Array.isArray(row)) {
+            const validRow = row.filter((b: any) => b.text?.trim() && b.url?.trim());
+            if (validRow.length > 0) validatedButtons.push(validRow);
+          }
+        }
+      }
+
+      let targetChatIds: string[] | undefined;
+      if (target === "specific" && Array.isArray(merchantIds) && merchantIds.length > 0) {
+        const merchants = await storage.getMerchants();
+        targetChatIds = merchants
+          .filter((m: any) => merchantIds.includes(m.id) && m.telegramChatId)
+          .map((m: any) => m.telegramChatId as string);
+      }
+
+      const result = await broadcastToMerchants({
+        message: message.trim(),
+        imageUrl: imageUrl?.trim() || undefined,
+        buttons: validatedButtons.length > 0 ? validatedButtons : undefined,
+        targetChatIds,
+      });
+
+      res.json({
+        message: `Telegram : ${result.sent} envoyé(s), ${result.failed} échec(s)`,
+        ...result,
+      });
+    } catch (err: any) {
+      console.error("[TELEGRAM BROADCAST]", err);
+      res.status(500).json({ message: err.message || "Erreur serveur" });
+    }
+  });
+
+  app.get("/api/admin/telegram/merchants-with-telegram", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const merchants = await storage.getMerchants();
+      const withTelegram = merchants
+        .filter((m: any) => m.telegramChatId)
+        .map((m: any) => ({
+          id: m.id,
+          name: m.name,
+          email: m.email,
+          telegramChatId: m.telegramChatId,
+          suspended: m.suspended,
+        }));
+      res.json(withTelegram);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

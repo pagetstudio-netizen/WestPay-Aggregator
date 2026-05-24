@@ -5037,7 +5037,7 @@ function LoadingSkeleton() {
   );
 }
 
-function NotificationsPanel() {
+function EmailNotifyPanel({ merchants }: { merchants: Merchant[] }) {
   const { token } = useAuth();
   const { toast } = useToast();
   const [mode, setMode] = useState<"all" | "specific">("all");
@@ -5047,185 +5047,93 @@ function NotificationsPanel() {
   const [isSending, setIsSending] = useState(false);
   const [lastResult, setLastResult] = useState<{ count: number; message: string; failed?: string[] } | null>(null);
 
-  const { data: merchants = [] } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
-  const activeMerchants = (merchants as Merchant[]).filter(m => m.status !== "suspended");
+  const activeMerchants = merchants.filter(m => m.status !== "suspended");
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!subject.trim() || !message.trim()) {
-      toast({ title: "Sujet et message requis", variant: "destructive" }); return;
-    }
-    if (mode === "specific" && !specificEmail.trim()) {
-      toast({ title: "Adresse email requise", variant: "destructive" }); return;
-    }
+    if (!subject.trim() || !message.trim()) { toast({ title: "Sujet et message requis", variant: "destructive" }); return; }
+    if (mode === "specific" && !specificEmail.trim()) { toast({ title: "Adresse email requise", variant: "destructive" }); return; }
     setIsSending(true);
     setLastResult(null);
     try {
       const res = await fetch("/api/admin/notify", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          subject: subject.trim(),
-          message: message.trim(),
-          to: mode === "specific" ? specificEmail.trim() : undefined,
-        }),
+        body: JSON.stringify({ subject: subject.trim(), message: message.trim(), to: mode === "specific" ? specificEmail.trim() : undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Erreur");
       setLastResult(data);
       toast({ title: "✅ " + data.message });
-      setSubject("");
-      setMessage("");
-      setSpecificEmail("");
+      setSubject(""); setMessage(""); setSpecificEmail("");
     } catch (err: any) {
       toast({ title: "Erreur", description: err.message, variant: "destructive" });
-    } finally {
-      setIsSending(false);
-    }
+    } finally { setIsSending(false); }
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shadow-sm">
-          <MessageSquare className="w-5 h-5 text-primary-foreground" />
-        </div>
-        <div>
-          <h2 className="text-lg font-bold text-foreground">Notifications Email</h2>
-          <p className="text-sm text-muted-foreground">Envoyez un message à tous vos marchands ou à une adresse spécifique</p>
-        </div>
-      </div>
-
-      {/* Stats pill */}
+    <div className="space-y-5">
       <div className="flex items-center gap-3 p-4 rounded-xl border bg-muted/30">
         <Users className="w-4 h-4 text-muted-foreground shrink-0" />
         <span className="text-sm text-muted-foreground">
           <strong className="text-foreground">{activeMerchants.length}</strong> marchands actifs disponibles pour une diffusion globale
         </span>
       </div>
-
-      {/* Form card */}
       <Card>
-        <CardHeader className="pb-4">
-          <CardTitle className="text-base">Composer la notification</CardTitle>
-        </CardHeader>
+        <CardHeader className="pb-4"><CardTitle className="text-base">Composer la notification</CardTitle></CardHeader>
         <CardContent>
           <form onSubmit={handleSend} className="space-y-5">
-
-            {/* Recipient mode */}
             <div>
               <Label className="text-sm font-semibold mb-2 block">Destinataires</Label>
               <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setMode("all")}
-                  className={`flex items-center gap-2 px-4 py-3 rounded-xl border-2 transition-all text-sm font-medium text-left ${
-                    mode === "all" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-muted-foreground"
-                  }`}
-                  data-testid="button-notify-mode-all"
-                >
+                <button type="button" onClick={() => setMode("all")}
+                  className={`flex items-center gap-2 px-4 py-3 rounded-xl border-2 transition-all text-sm font-medium text-left ${mode === "all" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-muted-foreground"}`}
+                  data-testid="button-notify-mode-all">
                   <Users className="w-4 h-4 shrink-0" />
-                  <div>
-                    <p className="font-semibold leading-tight">Tous les marchands</p>
-                    <p className="text-xs opacity-70 leading-tight">{activeMerchants.length} destinataires</p>
-                  </div>
+                  <div><p className="font-semibold leading-tight">Tous les marchands</p><p className="text-xs opacity-70 leading-tight">{activeMerchants.length} destinataires</p></div>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setMode("specific")}
-                  className={`flex items-center gap-2 px-4 py-3 rounded-xl border-2 transition-all text-sm font-medium text-left ${
-                    mode === "specific" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-muted-foreground"
-                  }`}
-                  data-testid="button-notify-mode-specific"
-                >
+                <button type="button" onClick={() => setMode("specific")}
+                  className={`flex items-center gap-2 px-4 py-3 rounded-xl border-2 transition-all text-sm font-medium text-left ${mode === "specific" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-muted-foreground"}`}
+                  data-testid="button-notify-mode-specific">
                   <Mail className="w-4 h-4 shrink-0" />
-                  <div>
-                    <p className="font-semibold leading-tight">Email spécifique</p>
-                    <p className="text-xs opacity-70 leading-tight">Un seul destinataire</p>
-                  </div>
+                  <div><p className="font-semibold leading-tight">Email spécifique</p><p className="text-xs opacity-70 leading-tight">Un seul destinataire</p></div>
                 </button>
               </div>
             </div>
-
-            {/* Specific email input */}
             {mode === "specific" && (
               <div>
                 <Label htmlFor="notif-email" className="text-sm font-semibold">Adresse email</Label>
-                <Input
-                  id="notif-email"
-                  type="email"
-                  value={specificEmail}
-                  onChange={e => setSpecificEmail(e.target.value)}
-                  placeholder="exemple@email.com"
-                  className="mt-1.5"
-                  data-testid="input-notify-email"
-                />
+                <Input id="notif-email" type="email" value={specificEmail} onChange={e => setSpecificEmail(e.target.value)} placeholder="exemple@email.com" className="mt-1.5" data-testid="input-notify-email" />
               </div>
             )}
-
-            {/* Subject */}
             <div>
               <Label htmlFor="notif-subject" className="text-sm font-semibold">Objet de l'email</Label>
-              <Input
-                id="notif-subject"
-                value={subject}
-                onChange={e => setSubject(e.target.value)}
-                placeholder="Ex: Maintenance prévue — lundi 27 mai"
-                className="mt-1.5"
-                data-testid="input-notify-subject"
-              />
+              <Input id="notif-subject" value={subject} onChange={e => setSubject(e.target.value)} placeholder="Ex: Maintenance prévue — lundi 27 mai" className="mt-1.5" data-testid="input-notify-subject" />
             </div>
-
-            {/* Message */}
             <div>
               <Label htmlFor="notif-message" className="text-sm font-semibold">Message</Label>
-              <textarea
-                id="notif-message"
-                value={message}
-                onChange={e => setMessage(e.target.value)}
-                placeholder={"Bonjour,\n\nNous souhaitons vous informer que...\n\nCordialement,\nL'équipe RobotPay"}
-                rows={8}
-                className="mt-1.5 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
-                data-testid="textarea-notify-message"
-              />
+              <textarea id="notif-message" value={message} onChange={e => setMessage(e.target.value)}
+                placeholder={"Bonjour,\n\nNous souhaitons vous informer que...\n\nCordialement,\nL'équipe WestPay"}
+                rows={8} className="mt-1.5 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
+                data-testid="textarea-notify-message" />
               <p className="text-xs text-muted-foreground mt-1">Les retours à la ligne sont préservés dans l'email.</p>
             </div>
-
-            {/* Preview of recipients */}
             {mode === "all" && activeMerchants.length > 0 && (
               <div className="rounded-xl border bg-muted/20 p-3">
                 <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-widest">Destinataires ({activeMerchants.length})</p>
                 <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
-                  {(activeMerchants as Merchant[]).map(m => (
-                    <span key={m.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-background border border-border text-foreground">
-                      {m.email}
-                    </span>
+                  {activeMerchants.map(m => (
+                    <span key={m.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-background border border-border text-foreground">{m.email}</span>
                   ))}
                 </div>
               </div>
             )}
-
-            {/* Send button */}
-            <Button
-              type="submit"
-              disabled={isSending || !subject.trim() || !message.trim()}
-              className="w-full"
-              data-testid="button-send-notification"
-            >
-              {isSending ? (
-                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Envoi en cours…</>
-              ) : (
-                <><MessageSquare className="w-4 h-4 mr-2" />
-                  {mode === "all" ? `Envoyer à ${activeMerchants.length} marchands` : "Envoyer l'email"}
-                </>
-              )}
+            <Button type="submit" disabled={isSending || !subject.trim() || !message.trim()} className="w-full" data-testid="button-send-notification">
+              {isSending ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Envoi en cours…</> : <><MessageSquare className="w-4 h-4 mr-2" />{mode === "all" ? `Envoyer à ${activeMerchants.length} marchands` : "Envoyer l'email"}</>}
             </Button>
           </form>
         </CardContent>
       </Card>
-
-      {/* Result card */}
       {lastResult && (
         <Card className={lastResult.failed && lastResult.failed.length > 0 ? "border-yellow-200" : "border-green-200"}>
           <CardContent className="pt-5">
@@ -5240,9 +5148,7 @@ function NotificationsPanel() {
                   <div className="mt-2">
                     <p className="text-xs font-medium text-yellow-700 mb-1">Échecs ({lastResult.failed.length}) :</p>
                     <div className="flex flex-wrap gap-1">
-                      {lastResult.failed.map(e => (
-                        <span key={e} className="text-xs px-2 py-0.5 rounded bg-yellow-100 text-yellow-800">{e}</span>
-                      ))}
+                      {lastResult.failed.map(e => <span key={e} className="text-xs px-2 py-0.5 rounded bg-yellow-100 text-yellow-800">{e}</span>)}
                     </div>
                   </div>
                 )}
@@ -5251,6 +5157,364 @@ function NotificationsPanel() {
           </CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+type TgButton = { text: string; url: string };
+
+function TelegramBroadcastPanel({ merchants }: { merchants: Merchant[] }) {
+  const { token } = useAuth();
+  const { toast } = useToast();
+
+  const [mode, setMode] = useState<"all" | "specific">("all");
+  const [message, setMessage] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
+  const [buttons, setButtons] = useState<TgButton[]>([]);
+  const [selectedMerchantIds, setSelectedMerchantIds] = useState<number[]>([]);
+  const [isSending, setIsSending] = useState(false);
+  const [lastResult, setLastResult] = useState<{ sent: number; failed: number; message: string } | null>(null);
+
+  const { data: tgMerchants = [] } = useAdminFetch("/api/admin/telegram/merchants-with-telegram", ["/api/admin/telegram/merchants-with-telegram"]);
+  const telegramMerchants = tgMerchants as { id: number; name: string; email: string; suspended: boolean }[];
+  const activeTgMerchants = telegramMerchants.filter(m => !m.suspended);
+
+  const addButton = () => {
+    if (buttons.length >= 6) return;
+    setButtons(prev => [...prev, { text: "", url: "" }]);
+  };
+
+  const removeButton = (idx: number) => setButtons(prev => prev.filter((_, i) => i !== idx));
+
+  const updateButton = (idx: number, field: keyof TgButton, value: string) => {
+    setButtons(prev => prev.map((b, i) => i === idx ? { ...b, [field]: value } : b));
+  };
+
+  const toggleMerchant = (id: number) => {
+    setSelectedMerchantIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const handleSend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!message.trim()) { toast({ title: "Message requis", variant: "destructive" }); return; }
+    if (mode === "specific" && selectedMerchantIds.length === 0) { toast({ title: "Sélectionnez au moins un marchand", variant: "destructive" }); return; }
+
+    const validButtons = buttons.filter(b => b.text.trim() && b.url.trim());
+    const buttonsPayload = validButtons.length > 0 ? [validButtons] : [];
+
+    setIsSending(true);
+    setLastResult(null);
+    try {
+      const res = await fetch("/api/admin/telegram/broadcast", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          message: message.trim(),
+          imageUrl: imageUrl.trim() || undefined,
+          buttons: buttonsPayload,
+          target: mode,
+          merchantIds: mode === "specific" ? selectedMerchantIds : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Erreur");
+      setLastResult(data);
+      toast({ title: "✅ " + data.message });
+      setMessage("");
+      setImageUrl("");
+      setButtons([]);
+      setSelectedMerchantIds([]);
+    } catch (err: any) {
+      toast({ title: "Erreur envoi Telegram", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Stats */}
+      <div className="flex items-center gap-3 p-4 rounded-xl border bg-blue-50 dark:bg-blue-950/20">
+        <MessageSquare className="w-4 h-4 text-blue-500 shrink-0" />
+        <span className="text-sm text-muted-foreground">
+          <strong className="text-foreground">{activeTgMerchants.length}</strong> marchands avec Telegram actif /{" "}
+          <strong className="text-foreground">{merchants.filter(m => m.status !== "suspended").length}</strong> au total
+        </span>
+      </div>
+
+      {activeTgMerchants.length === 0 && (
+        <div className="rounded-xl border border-yellow-200 bg-yellow-50 dark:bg-yellow-950/20 p-4 text-sm text-yellow-800 dark:text-yellow-300">
+          ⚠️ Aucun marchand n'a encore configuré son Telegram. Les marchands doivent lier leur groupe via le bot pour recevoir des messages.
+        </div>
+      )}
+
+      <Card>
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base flex items-center gap-2">
+            <MessageSquare className="w-4 h-4 text-blue-500" />
+            Composer le message Telegram
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSend} className="space-y-5">
+
+            {/* Recipient mode */}
+            <div>
+              <Label className="text-sm font-semibold mb-2 block">Destinataires</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => setMode("all")}
+                  className={`flex items-center gap-2 px-4 py-3 rounded-xl border-2 transition-all text-sm font-medium text-left ${mode === "all" ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400" : "border-border text-muted-foreground hover:border-muted-foreground"}`}
+                  data-testid="button-tg-mode-all">
+                  <Users className="w-4 h-4 shrink-0" />
+                  <div>
+                    <p className="font-semibold leading-tight">Tous les marchands</p>
+                    <p className="text-xs opacity-70 leading-tight">{activeTgMerchants.length} avec Telegram</p>
+                  </div>
+                </button>
+                <button type="button" onClick={() => setMode("specific")}
+                  className={`flex items-center gap-2 px-4 py-3 rounded-xl border-2 transition-all text-sm font-medium text-left ${mode === "specific" ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400" : "border-border text-muted-foreground hover:border-muted-foreground"}`}
+                  data-testid="button-tg-mode-specific">
+                  <MessageSquare className="w-4 h-4 shrink-0" />
+                  <div>
+                    <p className="font-semibold leading-tight">Marchands spécifiques</p>
+                    <p className="text-xs opacity-70 leading-tight">Sélection manuelle</p>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Merchant selection for specific mode */}
+            {mode === "specific" && (
+              <div>
+                <Label className="text-sm font-semibold mb-2 block">Sélectionner les marchands ({selectedMerchantIds.length} sélectionné(s))</Label>
+                <div className="border rounded-xl overflow-hidden">
+                  {activeTgMerchants.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-6">Aucun marchand avec Telegram configuré</p>
+                  ) : (
+                    <div className="max-h-48 overflow-y-auto divide-y divide-border">
+                      {activeTgMerchants.map(m => (
+                        <label key={m.id} className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-muted/40 transition-colors" data-testid={`checkbox-tg-merchant-${m.id}`}>
+                          <input
+                            type="checkbox"
+                            checked={selectedMerchantIds.includes(m.id)}
+                            onChange={() => toggleMerchant(m.id)}
+                            className="rounded border-border"
+                          />
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-foreground leading-tight truncate">{m.name}</p>
+                            <p className="text-xs text-muted-foreground truncate">{m.email}</p>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Message */}
+            <div>
+              <Label htmlFor="tg-message" className="text-sm font-semibold">Message</Label>
+              <textarea
+                id="tg-message"
+                value={message}
+                onChange={e => setMessage(e.target.value)}
+                placeholder={"🔔 Bonjour,\n\nNous vous informons que...\n\n— L'équipe WestPay"}
+                rows={7}
+                className="mt-1.5 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none font-mono"
+                data-testid="textarea-tg-message"
+              />
+              <p className="text-xs text-muted-foreground mt-1">Vous pouvez utiliser *gras*, _italique_, `code` (format Markdown Telegram).</p>
+            </div>
+
+            {/* Image URL */}
+            <div>
+              <Label htmlFor="tg-image" className="text-sm font-semibold flex items-center gap-2">
+                Image
+                <span className="text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded-full">optionnel</span>
+              </Label>
+              <Input
+                id="tg-image"
+                type="url"
+                value={imageUrl}
+                onChange={e => setImageUrl(e.target.value)}
+                placeholder="https://exemple.com/image.jpg"
+                className="mt-1.5"
+                data-testid="input-tg-image"
+              />
+              {imageUrl && imageUrl.startsWith("http") && (
+                <div className="mt-2 rounded-xl overflow-hidden border border-border w-full max-h-40">
+                  <img src={imageUrl} alt="Aperçu" className="w-full h-40 object-cover" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground mt-1">L'image sera envoyée avec le texte en légende. URL publique obligatoire (https).</p>
+            </div>
+
+            {/* Inline Buttons */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-sm font-semibold flex items-center gap-2">
+                  Boutons
+                  <span className="text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded-full">optionnel</span>
+                </Label>
+                <Button type="button" variant="outline" size="sm" onClick={addButton} disabled={buttons.length >= 6} className="h-7 text-xs gap-1" data-testid="button-tg-add-btn">
+                  <Plus className="w-3 h-3" />
+                  Ajouter un bouton
+                </Button>
+              </div>
+
+              {buttons.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border p-4 text-center">
+                  <p className="text-xs text-muted-foreground">Aucun bouton — cliquez sur « Ajouter un bouton » pour en créer un</p>
+                  <p className="text-xs text-muted-foreground mt-1">Chaque bouton apparaîtra sous le message avec un lien cliquable</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {buttons.map((btn, idx) => (
+                    <div key={idx} className="flex items-start gap-2 p-3 rounded-xl border bg-muted/20" data-testid={`tg-button-row-${idx}`}>
+                      <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                          <Label className="text-xs text-muted-foreground mb-1 block">Texte du bouton</Label>
+                          <Input
+                            value={btn.text}
+                            onChange={e => updateButton(idx, "text", e.target.value)}
+                            placeholder="Ex: Accéder à mon compte"
+                            className="h-8 text-sm"
+                            data-testid={`input-tg-btn-text-${idx}`}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs text-muted-foreground mb-1 block">Lien URL</Label>
+                          <Input
+                            value={btn.url}
+                            onChange={e => updateButton(idx, "url", e.target.value)}
+                            placeholder="https://westpay.cloud/merchant-login"
+                            className="h-8 text-sm"
+                            data-testid={`input-tg-btn-url-${idx}`}
+                          />
+                        </div>
+                      </div>
+                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10 mt-5" onClick={() => removeButton(idx)} data-testid={`button-tg-remove-btn-${idx}`}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                  <p className="text-xs text-muted-foreground">Maximum 6 boutons · Les boutons avec texte et URL vides sont ignorés</p>
+                </div>
+              )}
+            </div>
+
+            {/* Preview */}
+            {(message.trim() || imageUrl.trim() || buttons.filter(b => b.text && b.url).length > 0) && (
+              <div className="rounded-xl border border-blue-200 bg-blue-50/50 dark:bg-blue-950/10 p-4">
+                <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-widest mb-3">Aperçu du message</p>
+                <div className="bg-white dark:bg-zinc-900 rounded-xl border p-3 space-y-2 shadow-sm">
+                  {imageUrl && imageUrl.startsWith("http") && (
+                    <div className="rounded-lg overflow-hidden">
+                      <img src={imageUrl} alt="" className="w-full max-h-32 object-cover" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                    </div>
+                  )}
+                  <p className="text-sm text-foreground whitespace-pre-wrap">{message || "—"}</p>
+                  {buttons.filter(b => b.text && b.url).length > 0 && (
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {buttons.filter(b => b.text && b.url).map((b, i) => (
+                        <span key={i} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-500 text-white text-xs font-medium">
+                          <ExternalLink className="w-3 h-3" />
+                          {b.text}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Send button */}
+            <Button
+              type="submit"
+              disabled={isSending || !message.trim() || (mode === "specific" && selectedMerchantIds.length === 0)}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+              data-testid="button-send-telegram"
+            >
+              {isSending ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Envoi en cours…</>
+              ) : (
+                <><MessageSquare className="w-4 h-4 mr-2" />
+                  {mode === "all"
+                    ? `Envoyer à ${activeTgMerchants.length} marchands Telegram`
+                    : `Envoyer à ${selectedMerchantIds.length} marchand(s) sélectionné(s)`}
+                </>
+              )}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      {/* Result */}
+      {lastResult && (
+        <Card className={lastResult.failed > 0 ? "border-yellow-200" : "border-green-200"}>
+          <CardContent className="pt-5">
+            <div className="flex items-start gap-3">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${lastResult.failed > 0 ? "bg-yellow-100" : "bg-green-100"}`}>
+                <CheckCircle className={`w-4 h-4 ${lastResult.failed > 0 ? "text-yellow-600" : "text-green-600"}`} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground">{lastResult.message}</p>
+                <div className="flex gap-3 mt-1">
+                  <span className="text-xs text-green-600">✓ {lastResult.sent} envoyé(s)</span>
+                  {lastResult.failed > 0 && <span className="text-xs text-yellow-600">✗ {lastResult.failed} échec(s)</span>}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function NotificationsPanel() {
+  const [activeNotifTab, setActiveNotifTab] = useState<"email" | "telegram">("email");
+  const { data: merchants = [] } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
+  const allMerchants = merchants as Merchant[];
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shadow-sm">
+          <MessageSquare className="w-5 h-5 text-primary-foreground" />
+        </div>
+        <div>
+          <h2 className="text-lg font-bold text-foreground">Notifications & Diffusion</h2>
+          <p className="text-sm text-muted-foreground">Envoyez des messages à vos marchands par email ou Telegram</p>
+        </div>
+      </div>
+
+      {/* Channel tabs */}
+      <div className="flex gap-1 p-1 rounded-xl bg-muted border">
+        <button
+          type="button"
+          onClick={() => setActiveNotifTab("email")}
+          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeNotifTab === "email" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          data-testid="button-notif-tab-email"
+        >
+          <Mail className="w-4 h-4" />
+          Email
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveNotifTab("telegram")}
+          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeNotifTab === "telegram" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          data-testid="button-notif-tab-telegram"
+        >
+          <MessageSquare className="w-4 h-4 text-blue-500" />
+          Telegram
+        </button>
+      </div>
+
+      {activeNotifTab === "email" && <EmailNotifyPanel merchants={allMerchants} />}
+      {activeNotifTab === "telegram" && <TelegramBroadcastPanel merchants={allMerchants} />}
     </div>
   );
 }

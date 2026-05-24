@@ -1452,6 +1452,108 @@ async function safeSend(chatId: string, message: string): Promise<void> {
   }
 }
 
+type InlineButton = { text: string; url: string };
+
+function buildInlineKeyboard(buttons: InlineButton[][]): { inline_keyboard: { text: string; url: string }[][] } {
+  return {
+    inline_keyboard: buttons.map(row => row.map(btn => ({ text: btn.text, url: btn.url }))),
+  };
+}
+
+async function safeSendWithMedia(
+  chatId: string,
+  message: string,
+  imageUrl?: string,
+  buttons?: InlineButton[][]
+): Promise<void> {
+  if (!bot) return;
+  const replyMarkup = buttons && buttons.length > 0 ? buildInlineKeyboard(buttons) : undefined;
+
+  if (imageUrl && imageUrl.startsWith("http")) {
+    try {
+      await bot.telegram.sendPhoto(chatId, imageUrl, {
+        caption: message,
+        parse_mode: "Markdown",
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+      });
+      return;
+    } catch (err: any) {
+      console.error("[TELEGRAM] Echec sendPhoto, tentative sans image:", err.message);
+    }
+  }
+
+  try {
+    await bot.telegram.sendMessage(chatId, message, {
+      parse_mode: "Markdown",
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+    });
+  } catch (err: any) {
+    console.error("[TELEGRAM] Echec envoi Markdown, tentative texte brut:", err.message);
+    try {
+      const plain = message.replace(/[*_`[\]()~>#+=|{}.!\\-]/g, "");
+      await bot.telegram.sendMessage(chatId, plain, {
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+      });
+    } catch (err2: any) {
+      console.error("[TELEGRAM] Echec envoi texte brut:", err2.message);
+    }
+  }
+}
+
+export async function broadcastToMerchants(options: {
+  message: string;
+  imageUrl?: string;
+  buttons?: InlineButton[][];
+  targetChatIds?: string[];
+}): Promise<{ sent: number; failed: number; skipped: number }> {
+  if (!bot) return { sent: 0, failed: 0, skipped: 0 };
+
+  let chatIds: string[] = [];
+
+  if (options.targetChatIds && options.targetChatIds.length > 0) {
+    chatIds = options.targetChatIds;
+  } else {
+    const merchants = await storage.getMerchants();
+    chatIds = merchants
+      .filter((m: any) => m.telegramChatId && !m.suspended)
+      .map((m: any) => m.telegramChatId as string);
+  }
+
+  let sent = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  for (const chatId of chatIds) {
+    if (!chatId) { skipped++; continue; }
+    try {
+      await safeSendWithMedia(chatId, options.message, options.imageUrl, options.buttons);
+      sent++;
+      await new Promise(r => setTimeout(r, 100));
+    } catch (err: any) {
+      console.error(`[TELEGRAM] Echec broadcast vers ${chatId}:`, err.message);
+      failed++;
+    }
+  }
+
+  console.log(`[TELEGRAM] Broadcast terminé: ${sent} envoyés, ${failed} échecs, ${skipped} ignorés`);
+  return { sent, failed, skipped };
+}
+
+export async function sendTelegramMessage(options: {
+  chatId: string;
+  message: string;
+  imageUrl?: string;
+  buttons?: InlineButton[][];
+}): Promise<boolean> {
+  if (!bot) return false;
+  try {
+    await safeSendWithMedia(options.chatId, options.message, options.imageUrl, options.buttons);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function notifyAdminGroup(message: string): Promise<void> {
   if (!bot) return;
   try {
