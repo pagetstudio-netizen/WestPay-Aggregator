@@ -44,6 +44,9 @@ import icnStatPending from "@assets/mine-mod-records-DgHXSKa1_1779627609583.png"
 import icnStatFailed from "@assets/mine-mod-bankcard-CLOhqwHj_1779627609612.png";
 import icnApiKeySettings from "@assets/1437214_1779628153139.png";
 import icnApiCloud from "@assets/6213702_1779628153256.png";
+import icnSettingsProfile from "@assets/téléchargement_(71)_1779628273093.png";
+import icnSettingsPassword from "@assets/mine-mod-change-pwd-D4tL_Aft_1779628273126.png";
+import icnSettingsContact from "@assets/téléchargement_(59)_1779628273158.png";
 
 type MerchantTab = "overview" | "apikeys" | "webhook" | "virements" | "reversements" | "settings" | "paymentlinks" | "transactions" | "crypto" | "sdk" | "wallet" | "analyse";
 
@@ -2325,9 +2328,15 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
   };
 
   const tabs = [
-    { key: "info" as const, label: "Informations personnelles", icon: User },
-    { key: "password" as const, label: "Mot de passe", icon: Shield },
-    { key: "support" as const, label: "Contacts SAV", icon: MessageCircle },
+    { key: "info" as const, label: "Informations personnelles", img: icnSettingsProfile,
+      filterActive: "brightness(0) saturate(100%) invert(44%) sepia(72%) saturate(543%) hue-rotate(89deg) brightness(93%) contrast(88%)",
+      filterInactive: "saturate(0%) opacity(45%)" },
+    { key: "password" as const, label: "Mot de passe", img: icnSettingsPassword,
+      filterActive: "brightness(0) saturate(100%) invert(30%) sepia(60%) saturate(900%) hue-rotate(265deg) brightness(90%) contrast(105%)",
+      filterInactive: "brightness(0) opacity(30%)" },
+    { key: "support" as const, label: "Contacts SAV", img: icnSettingsContact,
+      filterActive: "none",
+      filterInactive: "saturate(0%) opacity(50%)" },
   ];
 
   return (
@@ -2354,20 +2363,21 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
       <div className="px-4 pt-4 pb-0">
         <div className="flex gap-1 p-1 rounded-2xl" style={{ background: "#e8ecf0" }}>
           {tabs.map(tab => {
-            const Icon = tab.icon;
+            const isActive = activeTab === tab.key;
             return (
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
                 className="flex-1 flex flex-col items-center gap-1 py-2.5 px-1 rounded-xl text-xs font-semibold transition-all"
                 style={{
-                  background: activeTab === tab.key ? "#fff" : "transparent",
-                  color: activeTab === tab.key ? "#00b050" : "#888",
-                  boxShadow: activeTab === tab.key ? "0 1px 4px rgba(0,0,0,0.08)" : "none",
+                  background: isActive ? "#fff" : "transparent",
+                  color: isActive ? "#00b050" : "#888",
+                  boxShadow: isActive ? "0 1px 4px rgba(0,0,0,0.08)" : "none",
                 }}
                 data-testid={`tab-settings-${tab.key}`}
               >
-                <Icon className="w-4 h-4" />
+                <img src={tab.img} alt={tab.label} className="w-5 h-5 object-contain transition-all"
+                  style={{ filter: isActive ? tab.filterActive : tab.filterInactive }} />
                 <span className="leading-none text-center" style={{ fontSize: "10px" }}>{tab.label.split(" ")[0]}</span>
               </button>
             );
@@ -2384,7 +2394,8 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
             <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
               <div className="px-5 py-4 flex items-center gap-2.5" style={{ borderBottom: "1px solid #f5f5f5" }}>
                 <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#e8f5e9" }}>
-                  <User className="w-4 h-4" style={{ color: "#00b050" }} />
+                  <img src={icnSettingsProfile} alt="info" className="w-5 h-5 object-contain"
+                    style={{ filter: "brightness(0) saturate(100%) invert(44%) sepia(72%) saturate(543%) hue-rotate(89deg) brightness(93%) contrast(88%)" }} />
                 </div>
                 <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Informations du compte</span>
               </div>
@@ -2435,7 +2446,8 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
           <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
             <div className="px-5 py-4 flex items-center gap-2.5" style={{ borderBottom: "1px solid #f5f5f5" }}>
               <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#f3e5f5" }}>
-                <Shield className="w-4 h-4" style={{ color: "#9c27b0" }} />
+                <img src={icnSettingsPassword} alt="password" className="w-5 h-5 object-contain"
+                  style={{ filter: "brightness(0) saturate(100%) invert(30%) sepia(60%) saturate(900%) hue-rotate(265deg) brightness(90%) contrast(105%)" }} />
               </div>
               <div>
                 <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>{t("changePassword")}</span>
@@ -2512,7 +2524,9 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
                 }}
                 data-testid="button-merchant-change-password"
               >
-                {isChanging ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
+                {isChanging
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <img src={icnSettingsPassword} alt="" className="w-4 h-4 object-contain" style={{ filter: "brightness(0) invert(1)" }} />}
                 {isChanging ? "Modification..." : t("changePassword")}
               </button>
             </form>
@@ -2523,8 +2537,8 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
         {activeTab === "support" && (
           <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
             <div className="px-5 py-4 flex items-center gap-2.5" style={{ borderBottom: "1px solid #f5f5f5" }}>
-              <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#e3f2fd" }}>
-                <MessageCircle className="w-4 h-4" style={{ color: "#1976d2" }} />
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#ede7f6" }}>
+                <img src={icnSettingsContact} alt="support" className="w-5 h-5 object-contain" />
               </div>
               <div>
                 <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Contacts du support</span>
