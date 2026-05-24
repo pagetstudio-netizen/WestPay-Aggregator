@@ -160,14 +160,16 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
           style={{ backgroundImage: "radial-gradient(circle at 25% 75%,#ffffff 0%,transparent 55%),radial-gradient(circle at 75% 25%,#ffffff 0%,transparent 45%)" }} />
 
         <div className="relative z-10">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-white/20 backdrop-blur flex items-center justify-center">
-              <img src="/robotpay-logo.jpg" alt="RobotPay" className="w-9 h-9 rounded-lg object-cover"
-                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 rounded-2xl bg-white shadow-lg flex items-center justify-center overflow-hidden flex-shrink-0"
+              style={{ boxShadow: "0 4px 20px rgba(0,0,0,0.25)" }}>
+              <img src="/robotpay-logo.jpg" alt="WestPay" className="w-full h-full object-cover" />
             </div>
-            <span className="text-2xl font-black text-white tracking-tight">RobotPay</span>
+            <div>
+              <span className="text-3xl font-black text-white tracking-tight leading-none block">WestPay</span>
+              <p className="text-white/60 text-sm mt-1">Documentation API</p>
+            </div>
           </div>
-          <p className="text-white/60 text-sm mt-2">Documentation API</p>
         </div>
 
         <div className="relative z-10 space-y-6">
@@ -207,12 +209,14 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
       <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-10 bg-white">
         <div className="w-full max-w-[420px]">
           {/* Mobile logo */}
-          <div className="flex lg:hidden items-center justify-center gap-3 mb-8">
-            <div className="w-10 h-10 rounded-xl overflow-hidden shadow">
-              <img src="/robotpay-logo.jpg" alt="RobotPay" className="w-full h-full object-cover"
-                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+          <div className="flex lg:hidden flex-col items-center gap-3 mb-8">
+            <div className="w-20 h-20 rounded-2xl overflow-hidden shadow-lg border border-slate-100">
+              <img src="/robotpay-logo.jpg" alt="WestPay" className="w-full h-full object-cover" />
             </div>
-            <span className="text-xl font-black text-slate-900">RobotPay</span>
+            <div className="text-center">
+              <span className="text-2xl font-black text-slate-900 block">WestPay</span>
+              <span className="text-sm text-slate-400">Documentation API</span>
+            </div>
           </div>
 
           <div className="mb-8">
