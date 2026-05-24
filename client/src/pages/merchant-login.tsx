@@ -47,6 +47,7 @@ export default function MerchantLogin() {
   const [otpCode, setOtpCode] = useState("");
   const [otpToken, setOtpToken] = useState("");
   const [otpEmail, setOtpEmail] = useState("");
+  const [otpVia, setOtpVia] = useState<"email" | "telegram">("email");
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpResendLoading, setOtpResendLoading] = useState(false);
   const [otpCountdown, setOtpCountdown] = useState(0);
@@ -105,7 +106,13 @@ export default function MerchantLogin() {
         setOtpEmail(email);
         setOtpStep(true);
         setOtpCountdown(60);
-        toast({ title: "Code envoyé", description: `Un code de vérification a été envoyé à ${email}` });
+        setOtpVia(data.otpVia || "email");
+        toast({
+          title: "Code envoyé",
+          description: data.otpVia === "telegram"
+            ? "Votre code de vérification a été envoyé dans votre groupe Telegram."
+            : `Un code de vérification a été envoyé à ${email}`,
+        });
         return;
       }
 
@@ -171,7 +178,13 @@ export default function MerchantLogin() {
         setOtpToken(data.tempToken);
         setOtpCode("");
         setOtpCountdown(60);
-        toast({ title: "Code renvoyé", description: `Nouveau code envoyé à ${otpEmail}` });
+        if (data.otpVia) setOtpVia(data.otpVia);
+        toast({
+          title: "Code renvoyé",
+          description: data.otpVia === "telegram"
+            ? "Nouveau code envoyé dans votre groupe Telegram."
+            : `Nouveau code envoyé à ${otpEmail}`,
+        });
       }
     } catch (err: any) {
       toast({ title: "Erreur", description: err.message, variant: "destructive" });
@@ -403,13 +416,21 @@ export default function MerchantLogin() {
             <>
               <div className="mb-8">
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-5 mx-auto"
-                  style={{ background: "linear-gradient(135deg,#00b050,#005c2e)" }}>
-                  <Mail className="w-8 h-8 text-white" />
+                  style={{ background: otpVia === "telegram" ? "linear-gradient(135deg,#229ED9,#0d6fa8)" : "linear-gradient(135deg,#00b050,#005c2e)" }}>
+                  {otpVia === "telegram"
+                    ? <svg className="w-8 h-8 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.088 13.47l-2.95-.924c-.64-.203-.658-.64.135-.954l11.566-4.458c.537-.194 1.006.131.835.952l.26-.865z"/></svg>
+                    : <Mail className="w-8 h-8 text-white" />
+                  }
                 </div>
-                <h1 className="text-2xl font-black text-slate-900 text-center mb-2">Vérification email</h1>
+                <h1 className="text-2xl font-black text-slate-900 text-center mb-2">
+                  {otpVia === "telegram" ? "Vérification Telegram" : "Vérification email"}
+                </h1>
                 <p className="text-slate-500 text-sm text-center leading-relaxed">
-                  Un code à 6 chiffres a été envoyé à<br />
-                  <span className="font-semibold text-slate-700">{otpEmail}</span>
+                  {otpVia === "telegram" ? (
+                    <>Un code à 6 chiffres a été envoyé dans<br /><span className="font-semibold text-slate-700">votre groupe Telegram</span></>
+                  ) : (
+                    <>Un code à 6 chiffres a été envoyé à<br /><span className="font-semibold text-slate-700">{otpEmail}</span></>
+                  )}
                 </p>
               </div>
 

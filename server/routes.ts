@@ -1000,12 +1000,24 @@ export async function registerRoutes(
         [merchant.email, otpHash, tempToken, expiresAt]
       );
 
-      // Envoyer l'OTP par email (non-bloquant si Resend non configuré)
-      sendMerchantOtpEmail(merchant.email, otpValue, merchant.name).catch((err) => {
-        console.error("[MERCHANT OTP] Erreur email:", err);
-      });
+      // Envoyer l'OTP — Telegram si groupe lié, sinon email
+      let otpVia: "telegram" | "email" = "email";
+      if (merchant.telegramChatId) {
+        try {
+          const { sendMerchantOtpTelegram } = await import("./telegram-bot");
+          const sent = await sendMerchantOtpTelegram(merchant.telegramChatId, otpValue, merchant.name);
+          if (sent) otpVia = "telegram";
+        } catch (err) {
+          console.error("[MERCHANT OTP] Erreur Telegram, fallback email:", err);
+        }
+      }
+      if (otpVia === "email") {
+        sendMerchantOtpEmail(merchant.email, otpValue, merchant.name).catch((err) => {
+          console.error("[MERCHANT OTP] Erreur email:", err);
+        });
+      }
 
-      return res.json({ requiresOtp: true, tempToken });
+      return res.json({ requiresOtp: true, tempToken, otpVia });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

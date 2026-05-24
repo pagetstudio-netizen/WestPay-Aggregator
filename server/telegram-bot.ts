@@ -2400,3 +2400,31 @@ function scheduleDailyReport(): void {
 export function getBot(): Telegraf | null {
   return bot;
 }
+
+export async function sendMerchantOtpTelegram(chatId: string, otp: string, merchantName: string): Promise<boolean> {
+  if (!bot) {
+    console.log(`[TELEGRAM OTP] Bot non initialisé — OTP pour ${chatId}: ${otp}`);
+    return false;
+  }
+  const msg = [
+    `🤖 *RobotPay — Code de connexion*`,
+    ``,
+    `👤 *Marchand :* ${merchantName}`,
+    ``,
+    `🔑 *Votre code OTP :*`,
+    ``,
+    `\`\`\``,
+    `  ${otp}`,
+    `\`\`\``,
+    ``,
+    `⏱️ _Valide 5 minutes — usage unique._`,
+    `🔒 _Ne communiquez jamais ce code._`,
+  ].join("\n");
+  try {
+    await safeSend(chatId, msg);
+    return true;
+  } catch (err: any) {
+    console.error("[TELEGRAM OTP] Échec envoi:", err.message);
+    return false;
+  }
+}
