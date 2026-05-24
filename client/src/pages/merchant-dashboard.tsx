@@ -47,7 +47,7 @@ import icnApiCloud from "@assets/6213702_1779628153256.png";
 import icnSettingsProfile from "@assets/téléchargement_(71)_1779628273093.png";
 import icnSettingsPassword from "@assets/mine-mod-change-pwd-D4tL_Aft_1779628273126.png";
 import icnSettingsContact from "@assets/téléchargement_(59)_1779628273158.png";
-import icnAvatar from "@assets/icon-avator-33519d44_1779628636247.png";
+import { getAvatarUrl, getInitials, getAvatarColor } from "@/lib/avatar";
 
 type MerchantTab = "overview" | "apikeys" | "webhook" | "virements" | "reversements" | "settings" | "paymentlinks" | "transactions" | "crypto" | "sdk" | "wallet" | "analyse";
 
@@ -2439,8 +2439,27 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
       {/* Profile hero */}
       <div className="px-5 pt-6 pb-5" style={{ background: "#fff", borderBottom: "1px solid #f0f0f0" }}>
         <div className="flex items-center gap-4">
-          <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold text-white shrink-0 shadow-sm" style={{ background: "linear-gradient(135deg, #00b050 0%, #00852e 100%)" }}>
-            {user?.name?.charAt(0)?.toUpperCase() || "M"}
+          <div className="w-16 h-16 rounded-2xl overflow-hidden shrink-0 shadow-md" style={{ border: "2px solid #e8f5e9" }}>
+            <img
+              src={getAvatarUrl(user?.name || "merchant", 128)}
+              alt={user?.name || "Profil"}
+              className="w-full h-full object-cover"
+              onError={e => {
+                const t = e.currentTarget;
+                t.style.display = "none";
+                const parent = t.parentElement;
+                if (parent && !parent.querySelector(".av-fallback")) {
+                  parent.style.display = "flex";
+                  parent.style.alignItems = "center";
+                  parent.style.justifyContent = "center";
+                  parent.style.background = getAvatarColor(user?.name || "M");
+                  const fb = document.createElement("span");
+                  fb.className = "av-fallback text-white font-bold text-2xl";
+                  fb.textContent = getInitials(user?.name || "M");
+                  parent.appendChild(fb);
+                }
+              }}
+            />
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-lg font-bold leading-tight truncate" style={{ color: "#1a1a1a" }}>{user?.name}</p>
@@ -4447,14 +4466,31 @@ function MerchantSidebarContent({
           style={{ filter: "brightness(0.45)" }}
         />
         <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.55) 100%)" }} />
-        <div className={`relative z-10 flex flex-col ${collapsed ? "items-center justify-center h-full" : "justify-end px-4 pb-4 h-full"}`}>
+        <div className={`relative z-10 flex flex-col ${collapsed ? "items-center justify-center h-full" : "justify-end px-4 pb-3 h-full"}`}>
           {collapsed ? (
-            <span className="text-white font-black text-lg tracking-tight">R</span>
+            <div className="w-9 h-9 rounded-xl overflow-hidden shadow-md" style={{ border: "2px solid rgba(255,255,255,0.3)" }}>
+              <img
+                src={getAvatarUrl(user?.name || "merchant", 64)}
+                alt={user?.name || ""}
+                className="w-full h-full object-cover"
+                onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+              />
+            </div>
           ) : (
-            <>
-              <p className="text-white font-black text-xl tracking-tight leading-tight drop-shadow-md">RobotPay</p>
-              <p className="text-xs mt-0.5 truncate font-medium" style={{ color: "rgba(255,255,255,0.65)", maxWidth: 160 }}>{user?.name}</p>
-            </>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl overflow-hidden shrink-0 shadow-md" style={{ border: "2px solid rgba(255,255,255,0.35)" }}>
+                <img
+                  src={getAvatarUrl(user?.name || "merchant", 80)}
+                  alt={user?.name || ""}
+                  className="w-full h-full object-cover"
+                  onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                />
+              </div>
+              <div className="min-w-0">
+                <p className="text-white font-black text-sm tracking-tight leading-tight drop-shadow-md truncate" style={{ maxWidth: 120 }}>{user?.name}</p>
+                <p className="text-xs font-medium truncate" style={{ color: "rgba(255,255,255,0.6)", maxWidth: 120 }}>Espace Marchand</p>
+              </div>
+            </div>
           )}
         </div>
       </div>
@@ -5206,13 +5242,29 @@ export default function MerchantDashboard() {
             </button>
             {/* Profile / Settings */}
             <button
-              className="w-9 h-9 rounded-xl overflow-hidden transition-all hover:ring-2 hover:ring-white/50 active:scale-95"
+              className="w-9 h-9 rounded-xl overflow-hidden transition-all hover:ring-2 hover:ring-white/50 active:scale-95 shrink-0"
               style={{ background: "rgba(255,255,255,0.18)" }}
               onClick={() => handleTabChange("settings")}
               data-testid="button-profile"
               title="Paramètres"
             >
-              <img src={icnAvatar} alt="Profil" className="w-full h-full object-cover" />
+              <img
+                src={getAvatarUrl(user?.name || "merchant", 64)}
+                alt={user?.name || "Profil"}
+                className="w-full h-full object-cover"
+                onError={e => {
+                  const t = e.currentTarget;
+                  t.style.display = "none";
+                  const parent = t.parentElement;
+                  if (parent && !parent.querySelector(".av-fallback")) {
+                    const fb = document.createElement("div");
+                    fb.className = "av-fallback w-full h-full flex items-center justify-center text-white text-sm font-bold";
+                    fb.style.background = getAvatarColor(user?.name || "M");
+                    fb.textContent = getInitials(user?.name || "M");
+                    parent.appendChild(fb);
+                  }
+                }}
+              />
             </button>
           </div>
         </header>

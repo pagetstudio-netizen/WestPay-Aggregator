@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { getAvatarUrl, getInitials, getAvatarColor } from "@/lib/avatar";
 import { useAuth } from "@/lib/auth";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -1163,14 +1164,40 @@ function MerchantsPanel() {
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-2 flex-wrap">
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-semibold text-foreground" data-testid={`text-merchant-name-${merchant.id}`}>{merchant.name}</h3>
-                      <Badge variant={merchant.suspended ? "destructive" : "secondary"}>
-                        {merchant.suspended ? "Suspendu" : "Actif"}
-                      </Badge>
-                      {merchant.feeExempt && <Badge className="text-xs bg-emerald-600 text-white">Zéro frais</Badge>}
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="w-10 h-10 rounded-xl overflow-hidden shrink-0 shadow-sm" style={{ border: "1.5px solid var(--border)" }}>
+                        <img
+                          src={getAvatarUrl(merchant.name, 80)}
+                          alt={merchant.name}
+                          className="w-full h-full object-cover"
+                          onError={e => {
+                            const t = e.currentTarget as HTMLImageElement;
+                            t.style.display = "none";
+                            const parent = t.parentElement;
+                            if (parent && !parent.querySelector(".av-fallback")) {
+                              parent.style.display = "flex";
+                              parent.style.alignItems = "center";
+                              parent.style.justifyContent = "center";
+                              parent.style.background = getAvatarColor(merchant.name);
+                              const fb = document.createElement("span");
+                              fb.className = "av-fallback text-white font-bold text-sm";
+                              fb.textContent = getInitials(merchant.name);
+                              parent.appendChild(fb);
+                            }
+                          }}
+                        />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-semibold text-foreground" data-testid={`text-merchant-name-${merchant.id}`}>{merchant.name}</h3>
+                          <Badge variant={merchant.suspended ? "destructive" : "secondary"}>
+                            {merchant.suspended ? "Suspendu" : "Actif"}
+                          </Badge>
+                          {merchant.feeExempt && <Badge className="text-xs bg-emerald-600 text-white">Zéro frais</Badge>}
+                        </div>
+                        <p className="text-sm text-muted-foreground">{merchant.email}</p>
+                      </div>
                     </div>
-                    <p className="text-sm text-muted-foreground mt-1">{merchant.email}</p>
                     <p className="text-xs text-muted-foreground">Slug: /{merchant.slug}</p>
                     <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
                       <span><Link className="w-3 h-3 inline mr-1" />{merchant.linkCount || 0} liens</span>
@@ -6916,8 +6943,15 @@ export default function AdminDashboard() {
               <h1 className="text-sm font-semibold text-foreground hidden sm:block">Administration</h1>
             </div>
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 bg-primary/8 border border-primary/15 rounded-full px-3 py-1">
-                <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+              <div className="flex items-center gap-2 bg-primary/8 border border-primary/15 rounded-full pl-1 pr-3 py-1">
+                <div className="w-6 h-6 rounded-full overflow-hidden shrink-0">
+                  <img
+                    src={getAvatarUrl(user.email, 48)}
+                    alt={user.email}
+                    className="w-full h-full object-cover"
+                    onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                  />
+                </div>
                 <span className="text-xs font-medium text-primary truncate max-w-40">{user.email}</span>
               </div>
             </div>
