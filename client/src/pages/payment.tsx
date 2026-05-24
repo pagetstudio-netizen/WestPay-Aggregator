@@ -344,7 +344,7 @@ export default function PaymentPage() {
         }
         .csel:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12)}
         .paybtn{
-          width:100%;padding:16px;font-size:18px;font-weight:900;
+          width:100%;padding:13px 16px;font-size:16px;font-weight:900;
           border:none;border-radius:14px;cursor:pointer;
           display:flex;align-items:center;justify-content:center;gap:8px;
           letter-spacing:.01em;transition:opacity .15s,transform .1s;
@@ -371,7 +371,7 @@ export default function PaymentPage() {
         }
       `}</style>
 
-      <div style={{ minHeight:"100vh", background:"#fff", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"20px 0" }}>
+      <div style={{ minHeight:"100vh", background:"#fff", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"12px 0" }}>
 
         {/* ── top header (outside card) ─────────────────────────────── */}
         <div style={{ width:"100%", maxWidth:400, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 20px 14px" }}>
@@ -388,8 +388,8 @@ export default function PaymentPage() {
         </div>
 
         {/* ── white card ───────────────────────────────────────────── */}
-        <div style={{ width:"100%", maxWidth:400, background:"#fff", borderRadius:24, boxShadow:"0 2px 24px rgba(0,0,0,.09), 0 1px 4px rgba(0,0,0,.05)", overflow:"hidden" }}>
-          <div style={{ padding:"22px 20px 24px", display:"flex", flexDirection:"column", gap:18 }}>
+        <div style={{ width:"100%", maxWidth:400, background:"#fff", borderRadius:24, boxShadow:"0 2px 24px rgba(0,0,0,.14), 0 1px 4px rgba(0,0,0,.07)", overflow:"hidden" }}>
+          <div style={{ padding:"18px 20px 20px", display:"flex", flexDirection:"column", gap:14 }}>
 
             {/* ══ STEP 1 ══════════════════════════════════════════════ */}
             {step === 1 && (<>
@@ -413,9 +413,9 @@ export default function PaymentPage() {
               {/* Amount */}
               {amount > 0 && (
                 <div style={{ background:"#f1f5f9", borderRadius:14, padding:"14px 16px", textAlign:"center" }}>
-                  <p style={{ fontSize:14, fontWeight:700, color:"#374151", marginBottom:4 }}>Montant à payer</p>
-                  <p style={{ fontSize:30, fontWeight:900, color:"#2563eb", letterSpacing:"-0.5px" }} data-testid="text-amount">
-                    {currency} {fmt(amount)}
+                  <p style={{ fontSize:13, fontWeight:600, color:"#6b7280", marginBottom:4, textTransform:"uppercase", letterSpacing:".05em" }}>Montant à payer</p>
+                  <p style={{ fontSize:38, fontWeight:900, color:"#2563eb", letterSpacing:"-1px", lineHeight:1.1 }} data-testid="text-amount">
+                    {fmt(amount)}<span style={{ fontSize:18, fontWeight:700, color:"#2563eb", marginLeft:6, opacity:.85 }}>{currency}</span>
                   </p>
                 </div>
               )}
@@ -505,7 +505,7 @@ export default function PaymentPage() {
                   {(isSubmitting || cryptoLoading) && <Loader2 style={{ width:18, height:18, animation:"spin 1s linear infinite" }} />}
                   {isCrypto ? "Payer en crypto" : "Payez avec RobotPay"}
                 </button>
-                <p style={{ textAlign:"center", fontSize:12, color:"#9ca3af" }}>使用 RobotPay 安全等待</p>
+                <p style={{ textAlign:"center", fontSize:12, color:"#374151", fontWeight:500 }}>使用 RobotPay 安全等待</p>
               </div>
 
             </>)}
@@ -671,8 +671,9 @@ export default function PaymentPage() {
         </div>
 
         {/* ── footer (outside card) ─────────────────────────────────── */}
-        <div style={{ marginTop:36, marginBottom:24, display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-          <img src={robotpayLogo} alt="RobotPay" style={{ height:36, objectFit:"contain", display:"block" }} />
+        <div style={{ marginTop:20, marginBottom:20, display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
+          <p style={{ fontSize:11, color:"#9ca3af", letterSpacing:".04em", fontWeight:500 }}>Hosted &amp; secured by</p>
+          <img src={robotpayLogo} alt="RobotPay" style={{ height:52, objectFit:"contain", display:"block" }} />
         </div>
 
       </div>
