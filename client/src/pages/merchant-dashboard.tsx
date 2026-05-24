@@ -27,6 +27,17 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry, Withdrawal } from "@shared/schema";
 import { useLanguage, LANGUAGES } from "@/lib/language";
+import imgSidebarBg from "@assets/IMG-20260524-WA0032_1779626216477.jpg";
+import icnOverview from "@assets/homeBarActive_1779626310103.png";
+import icnTransactions from "@assets/a90f54732fab3ff150753cf117ce6a24_1779626310067.png";
+import icnVirements from "@assets/a96d355bc25b348d27c903a0be9d6798_1779626310086.png";
+import icnReversements from "@assets/téléchargement_(57)_1779626310270.png";
+import icnPaymentLinks from "@assets/téléchargement_(58)_1779626310247.png";
+import icnCrypto from "@assets/fa6620bc07e2128cfd6a47b85bb73129_1779626310124.png";
+import icnSdk from "@assets/6146731_1779626310202.png";
+import icnApikeys from "@assets/2164832_1779626310294.png";
+import icnWebhook from "@assets/da590302ca9d8b4097acd7253ed8fbf0_1779626310173.png";
+import icnSettings from "@assets/1437214_1779626310223.png";
 
 type MerchantTab = "overview" | "apikeys" | "webhook" | "virements" | "reversements" | "settings" | "paymentlinks" | "transactions" | "crypto" | "sdk" | "wallet" | "analyse";
 
@@ -4244,52 +4255,53 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
   );
 }
 
-const NAV_ITEMS: { key: MerchantTab; icon: any; color: string }[] = [
-  { key: "overview",      icon: BarChart3,    color: "#1976d2" },
-  { key: "transactions",  icon: Receipt,      color: "#26a69a" },
-  { key: "virements",     icon: ArrowRightLeft, color: "#7e57c2" },
-  { key: "reversements",  icon: Download,     color: "#fb8c00" },
-  { key: "paymentlinks",  icon: Link,         color: "#e57373" },
-  { key: "crypto",        icon: Bitcoin,      color: "#f59e0b" },
-  { key: "sdk",           icon: BookOpen,     color: "#8b5cf6" },
-  { key: "apikeys",       icon: Key,          color: "#039be5" },
-  { key: "webhook",       icon: Webhook,      color: "#43a047" },
-  { key: "settings",      icon: Settings,     color: "#6d4c41" },
+const NAV_ITEMS: { key: MerchantTab; img: string; label: string }[] = [
+  { key: "overview",      img: icnOverview,      label: "overview" },
+  { key: "transactions",  img: icnTransactions,  label: "transactions" },
+  { key: "virements",     img: icnVirements,     label: "virements" },
+  { key: "reversements",  img: icnReversements,  label: "reversements" },
+  { key: "paymentlinks",  img: icnPaymentLinks,  label: "paymentlinks" },
+  { key: "crypto",        img: icnCrypto,        label: "crypto" },
+  { key: "sdk",           img: icnSdk,           label: "sdk" },
+  { key: "apikeys",       img: icnApikeys,       label: "apikeys" },
+  { key: "webhook",       img: icnWebhook,       label: "webhook" },
+  { key: "settings",      img: icnSettings,      label: "settings" },
 ];
 
 function NavItem({
-  icon: Icon, label, color, active, collapsed, onClick, testId
+  img, label, active, collapsed, onClick, testId
 }: {
-  icon: any; label: string; color: string; active: boolean;
+  img: string; label: string; active: boolean;
   collapsed: boolean; onClick: () => void; testId: string;
 }) {
   return (
     <button
       onClick={onClick}
       data-testid={testId}
-      className="w-full flex items-center gap-3 rounded-xl transition-all duration-150 text-left group"
+      className="w-full flex items-center gap-3 rounded-xl transition-all duration-150 text-left"
       style={{
-        padding: collapsed ? "10px" : "9px 12px",
+        padding: collapsed ? "9px" : "8px 10px",
         justifyContent: collapsed ? "center" : undefined,
         background: active ? "#00b050" : "transparent",
-        color: active ? "#fff" : "rgba(255,255,255,0.55)",
       }}
       title={collapsed ? label : undefined}
     >
       <div
-        className="flex items-center justify-center rounded-lg shrink-0 transition-all"
+        className="flex items-center justify-center rounded-xl shrink-0"
         style={{
-          width: 32, height: 32,
-          background: active ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.06)",
+          width: 36, height: 36,
+          background: active ? "rgba(255,255,255,0.2)" : "#f2f3f5",
         }}
       >
-        <Icon className="w-4 h-4" style={{ color: active ? "#fff" : color }} />
+        <img src={img} alt={label} className="w-5 h-5 object-contain" style={{ filter: active ? "brightness(10)" : "none" }} />
       </div>
       {!collapsed && (
-        <span className="text-sm font-medium truncate">{label}</span>
+        <span className="text-sm font-semibold truncate" style={{ color: active ? "#fff" : "#1a1a1a" }}>
+          {label}
+        </span>
       )}
       {!collapsed && active && (
-        <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white/70 shrink-0" />
+        <div className="ml-auto w-1.5 h-5 rounded-full shrink-0" style={{ background: "rgba(255,255,255,0.6)" }} />
       )}
     </button>
   );
@@ -4310,39 +4322,49 @@ function MerchantSidebarContent({
     return true;
   });
 
+  const navLabel = (key: MerchantTab) => {
+    if (key === "virements") return t("transfers");
+    if (key === "reversements") return t("withdrawals");
+    if (key === "paymentlinks") return t("paymentlinks");
+    if (key === "apikeys") return t("apikeys");
+    if (key === "crypto") return "Crypto";
+    return t(key);
+  };
+
   return (
-    <div className="flex flex-col h-full select-none">
-      <div className="px-3 py-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-        <div className={`flex items-center gap-3 ${collapsed ? "justify-center" : ""}`}>
-          <div
-            className="flex items-center justify-center rounded-xl shrink-0 shadow-md"
-            style={{ width: 38, height: 38, background: "linear-gradient(135deg,#00b050,#00832a)" }}
-          >
-            <span className="text-white font-black text-base">W</span>
-          </div>
-          {!collapsed && (
-            <div className="min-w-0">
-              <p className="text-sm font-bold text-white leading-tight tracking-wide">WestPay</p>
-              <p className="text-xs truncate leading-tight" style={{ color: "rgba(255,255,255,0.45)", maxWidth: 150 }}>{user?.name}</p>
-            </div>
+    <div className="flex flex-col h-full select-none" style={{ background: "#fff" }}>
+
+      {/* ── Brand hero with background image ── */}
+      <div
+        className="relative overflow-hidden shrink-0"
+        style={{ height: collapsed ? 72 : 120 }}
+      >
+        <img
+          src={imgSidebarBg}
+          alt="brand"
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ filter: "brightness(0.45)" }}
+        />
+        <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.55) 100%)" }} />
+        <div className={`relative z-10 flex flex-col ${collapsed ? "items-center justify-center h-full" : "justify-end px-4 pb-4 h-full"}`}>
+          {collapsed ? (
+            <span className="text-white font-black text-lg tracking-tight">R</span>
+          ) : (
+            <>
+              <p className="text-white font-black text-xl tracking-tight leading-tight drop-shadow-md">RobotPay</p>
+              <p className="text-xs mt-0.5 truncate font-medium" style={{ color: "rgba(255,255,255,0.65)", maxWidth: 160 }}>{user?.name}</p>
+            </>
           )}
         </div>
       </div>
 
+      {/* ── Nav items ── */}
       <div className="flex-1 overflow-y-auto py-2 px-2 space-y-0.5">
         {visibleNavItems.map(item => (
           <NavItem
             key={item.key}
-            icon={item.icon}
-            label={
-              item.key === "virements" ? t("transfers") :
-              item.key === "reversements" ? t("withdrawals") :
-              item.key === "paymentlinks" ? t("paymentlinks") :
-              item.key === "apikeys" ? t("apikeys") :
-              item.key === "crypto" ? "Crypto" :
-              t(item.key)
-            }
-            color={item.color}
+            img={item.img}
+            label={navLabel(item.key)}
             active={activeTab === item.key}
             collapsed={collapsed}
             onClick={() => onTabChange(item.key)}
@@ -4351,22 +4373,22 @@ function MerchantSidebarContent({
         ))}
       </div>
 
-      <div className="p-2" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+      {/* ── Logout ── */}
+      <div className="p-2 shrink-0" style={{ borderTop: "1px solid #f0f0f0" }}>
         <button
           onClick={onLogout}
           data-testid="button-merchant-logout"
           className="w-full flex items-center gap-3 rounded-xl transition-all duration-150"
           style={{
-            padding: collapsed ? "10px" : "9px 12px",
+            padding: collapsed ? "9px" : "8px 10px",
             justifyContent: collapsed ? "center" : undefined,
-            color: "rgba(255,255,255,0.45)",
           }}
           title={collapsed ? t("logout") : undefined}
         >
-          <div className="flex items-center justify-center rounded-lg shrink-0" style={{ width: 32, height: 32, background: "rgba(255,255,255,0.06)" }}>
-            <LogOut className="w-4 h-4 text-red-400" />
+          <div className="flex items-center justify-center rounded-xl shrink-0" style={{ width: 36, height: 36, background: "#fff0f0" }}>
+            <LogOut className="w-4 h-4" style={{ color: "#e53e3e" }} />
           </div>
-          {!collapsed && <span className="text-sm font-medium text-red-400">{t("logout")}</span>}
+          {!collapsed && <span className="text-sm font-semibold" style={{ color: "#e53e3e" }}>{t("logout")}</span>}
         </button>
       </div>
     </div>
@@ -4976,8 +4998,9 @@ export default function MerchantDashboard() {
         className="hidden md:flex flex-col shrink-0 transition-all duration-300 overflow-hidden"
         style={{
           width: sidebarCollapsed ? 64 : 240,
-          background: "#1e2231",
-          boxShadow: "2px 0 16px rgba(0,0,0,0.18)",
+          background: "#fff",
+          boxShadow: "2px 0 12px rgba(0,0,0,0.08)",
+          borderRight: "1px solid #eef0f3",
         }}
       >
         <MerchantSidebarContent
@@ -5004,10 +5027,10 @@ export default function MerchantDashboard() {
       {/* ── Mobile drawer ── */}
       <aside
         className={`fixed inset-y-0 left-0 z-50 w-64 flex flex-col md:hidden transition-transform duration-300 ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
-        style={{ background: "#1e2231", boxShadow: "4px 0 24px rgba(0,0,0,0.3)" }}
+        style={{ background: "#fff", boxShadow: "4px 0 24px rgba(0,0,0,0.15)", borderRight: "1px solid #eef0f3" }}
       >
         <div className="flex items-center justify-end px-3 pt-3 pb-1">
-          <button onClick={() => setMobileOpen(false)} className="p-1.5 rounded-lg" style={{ color: "rgba(255,255,255,0.5)" }}>
+          <button onClick={() => setMobileOpen(false)} className="p-1.5 rounded-lg" style={{ color: "#888", background: "#f5f5f5" }}>
             <X className="w-4 h-4" />
           </button>
         </div>
