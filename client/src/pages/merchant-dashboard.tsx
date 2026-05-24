@@ -38,6 +38,10 @@ import icnSdk from "@assets/6146731_1779626310202.png";
 import icnApikeys from "@assets/2164832_1779626310294.png";
 import icnWebhook from "@assets/da590302ca9d8b4097acd7253ed8fbf0_1779626310173.png";
 import icnSettings from "@assets/1437214_1779626310223.png";
+import icnStatVolume from "@assets/téléchargement_(72)_1779627609372.png";
+import icnStatConfirmed from "@assets/bankCard-blue-CET1cZWP_1779627609555.png";
+import icnStatPending from "@assets/mine-mod-records-DgHXSKa1_1779627609583.png";
+import icnStatFailed from "@assets/mine-mod-bankcard-CLOhqwHj_1779627609612.png";
 
 type MerchantTab = "overview" | "apikeys" | "webhook" | "virements" | "reversements" | "settings" | "paymentlinks" | "transactions" | "crypto" | "sdk" | "wallet" | "analyse";
 
@@ -694,45 +698,53 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
 
       {/* Summary stats */}
       <div className="px-4 py-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#eff6ff" }}>
-              <TrendingUp className="w-3.5 h-3.5" style={{ color: "#3b82f6" }} />
+        {/* Volume */}
+        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(59,130,246,0.08)" }}>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#dbeafe" }}>
+              <img src={icnStatVolume} alt="volume" className="w-6 h-6 object-contain"
+                style={{ filter: "brightness(0) saturate(100%) invert(39%) sepia(94%) saturate(729%) hue-rotate(199deg) brightness(105%) contrast(93%)" }} />
             </div>
-            <span className="text-xs font-medium text-gray-400">Volume</span>
+            <span className="text-xs font-semibold text-blue-500 uppercase tracking-wide">Volume</span>
           </div>
-          <p className="text-base font-black text-gray-900 leading-tight">{confirmedTotal.toLocaleString("fr-FR")}</p>
-          <p className="text-xs text-gray-400">FCFA</p>
+          <p className="text-lg font-black text-gray-900 leading-tight">{confirmedTotal.toLocaleString("fr-FR")}</p>
+          <p className="text-xs text-gray-400 mt-0.5">FCFA confirmés</p>
         </div>
-        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#f0fdf4" }}>
-              <CheckCircle2 className="w-3.5 h-3.5" style={{ color: "#16a34a" }} />
+        {/* Confirmées */}
+        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(22,163,74,0.08)" }}>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#dcfce7" }}>
+              <img src={icnStatConfirmed} alt="confirmées" className="w-6 h-6 object-contain"
+                style={{ filter: "brightness(0) saturate(100%) invert(44%) sepia(72%) saturate(543%) hue-rotate(89deg) brightness(93%) contrast(88%)" }} />
             </div>
-            <span className="text-xs font-medium text-gray-400">Confirmées</span>
+            <span className="text-xs font-semibold text-green-600 uppercase tracking-wide">Confirmées</span>
           </div>
-          <p className="text-base font-black text-gray-900">{confirmedCount}</p>
-          <p className="text-xs text-gray-400">transactions</p>
+          <p className="text-lg font-black text-gray-900">{confirmedCount}</p>
+          <p className="text-xs text-gray-400 mt-0.5">transactions</p>
         </div>
-        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#fffbeb" }}>
-              <Clock className="w-3.5 h-3.5" style={{ color: "#d97706" }} />
+        {/* En attente */}
+        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(217,119,6,0.08)" }}>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#fef3c7" }}>
+              <img src={icnStatPending} alt="en attente" className="w-6 h-6 object-contain"
+                style={{ filter: "brightness(0) saturate(100%) invert(54%) sepia(100%) saturate(432%) hue-rotate(12deg) brightness(96%) contrast(97%)" }} />
             </div>
-            <span className="text-xs font-medium text-gray-400">En attente</span>
+            <span className="text-xs font-semibold text-amber-600 uppercase tracking-wide">En attente</span>
           </div>
-          <p className="text-base font-black text-gray-900">{pendingCount}</p>
-          <p className="text-xs text-gray-400">transactions</p>
+          <p className="text-lg font-black text-gray-900">{pendingCount}</p>
+          <p className="text-xs text-gray-400 mt-0.5">transactions</p>
         </div>
-        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#fef2f2" }}>
-              <XCircle className="w-3.5 h-3.5" style={{ color: "#dc2626" }} />
+        {/* Échouées */}
+        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(220,38,38,0.08)" }}>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "#fee2e2" }}>
+              <img src={icnStatFailed} alt="échouées" className="w-6 h-6 object-contain"
+                style={{ filter: "brightness(0) saturate(100%) invert(22%) sepia(93%) saturate(1354%) hue-rotate(344deg) brightness(96%) contrast(98%)" }} />
             </div>
-            <span className="text-xs font-medium text-gray-400">Échouées</span>
+            <span className="text-xs font-semibold text-red-600 uppercase tracking-wide">Échouées</span>
           </div>
-          <p className="text-base font-black text-gray-900">{failedCount}</p>
-          <p className="text-xs text-gray-400">transactions</p>
+          <p className="text-lg font-black text-gray-900">{failedCount}</p>
+          <p className="text-xs text-gray-400 mt-0.5">transactions</p>
         </div>
       </div>
 
