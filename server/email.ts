@@ -1,7 +1,7 @@
 import { Resend } from "resend";
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
-const FROM_EMAIL = "WestPay <noreply@westpay.cloud>";
+const FROM_EMAIL = "RobotPay <noreply@westpay.cloud>";
 
 export async function sendMerchantOtpEmail(to: string, otp: string, merchantName?: string): Promise<boolean> {
   if (!resend) {
@@ -77,7 +77,7 @@ export async function sendMerchantOtpEmail(to: string, otp: string, merchantName
     const result = await resend.emails.send({
       from: FROM_EMAIL,
       to,
-      subject: `${otp} — Votre code de vérification WestPay`,
+      subject: `${otp} — Votre code de vérification RobotPay`,
       html,
     });
     if (result.error) {
@@ -87,6 +87,86 @@ export async function sendMerchantOtpEmail(to: string, otp: string, merchantName
     return true;
   } catch (err) {
     console.error("[EMAIL OTP] Exception:", err);
+    return false;
+  }
+}
+
+export async function sendAdminNotificationEmail(
+  to: string,
+  subject: string,
+  message: string,
+  recipientName?: string
+): Promise<boolean> {
+  if (!resend) {
+    console.log(`[EMAIL NOTIFY] RESEND_API_KEY non configuré — notification pour ${to}: ${subject}`);
+    return true; // pretend success in dev
+  }
+
+  const name = recipientName || "Marchand";
+  const messageHtml = message
+    .split("\n")
+    .map(line => line.trim() ? `<p style="margin:0 0 12px;color:#334155;font-size:15px;line-height:1.7;">${line}</p>` : "<br>")
+    .join("");
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${subject}</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f6f9;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:40px 0;">
+    <tr>
+      <td align="center">
+        <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+          <tr>
+            <td style="background:linear-gradient(135deg,#00b050 0%,#005c2e 100%);padding:36px 40px 32px;text-align:center;">
+              <div style="display:inline-flex;align-items:center;gap:10px;">
+                <div style="width:40px;height:40px;background:rgba(255,255,255,0.2);border-radius:10px;display:inline-block;vertical-align:middle;line-height:40px;text-align:center;font-size:22px;">🤖</div>
+                <span style="font-size:26px;font-weight:800;color:#ffffff;vertical-align:middle;letter-spacing:-0.5px;">RobotPay</span>
+              </div>
+              <p style="margin:12px 0 0;color:rgba(255,255,255,0.85);font-size:14px;letter-spacing:0.3px;">Plateforme de paiement Mobile Money</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:40px 40px 32px;">
+              <h1 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#0a1628;letter-spacing:-0.3px;">${subject}</h1>
+              <p style="margin:0 0 24px;color:#94a3b8;font-size:14px;">Bonjour <strong style="color:#0a1628;">${name}</strong>,</p>
+              <div style="border-left:4px solid #00b050;padding-left:16px;margin:0 0 24px;">
+                ${messageHtml}
+              </div>
+              <div style="background:#f0fdf4;border-radius:10px;padding:16px 20px;margin:0 0 16px;">
+                <p style="margin:0;color:#16a34a;font-size:13px;line-height:1.5;">
+                  📧 Cet email vous a été envoyé par l'équipe <strong>RobotPay</strong>. Pour toute question, contactez votre gestionnaire de compte.
+                </p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 40px 36px;border-top:1px solid #f1f5f9;">
+              <p style="margin:0;color:#cbd5e1;font-size:12px;text-align:center;">
+                © ${new Date().getFullYear()} RobotPay · Plateforme privée ·
+                <a href="https://westpay.cloud" style="color:#00b050;text-decoration:none;">westpay.cloud</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  try {
+    const result = await resend.emails.send({ from: FROM_EMAIL, to, subject, html });
+    if (result.error) {
+      console.error("[EMAIL NOTIFY] Erreur Resend:", result.error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("[EMAIL NOTIFY] Exception:", err);
     return false;
   }
 }

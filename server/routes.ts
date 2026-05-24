@@ -6431,6 +6431,41 @@ export async function registerRoutes(
     }
   });
 
+  // ─── ADMIN: Send notification emails ──────────────────────────────────────
+
+  app.post("/api/admin/notify", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { subject, message, to } = req.body;
+      if (!subject || !subject.trim()) return res.status(400).json({ message: "Sujet requis" });
+      if (!message || !message.trim()) return res.status(400).json({ message: "Message requis" });
+
+      const { sendAdminNotificationEmail } = await import("./email");
+
+      if (to && to.trim()) {
+        // Send to a single specific email
+        const ok = await sendAdminNotificationEmail(to.trim(), subject.trim(), message.trim());
+        if (!ok) return res.status(500).json({ message: "Échec envoi email — vérifiez RESEND_API_KEY" });
+        return res.json({ message: "Email envoyé", count: 1, recipients: [to.trim()] });
+      }
+
+      // Send to ALL active merchants
+      const merchants = await storage.getMerchants();
+      const targets = merchants.filter((m: any) => m.email && m.status !== "suspended");
+      if (targets.length === 0) return res.status(400).json({ message: "Aucun marchand actif trouvé" });
+
+      let sent = 0;
+      const failed: string[] = [];
+      for (const m of targets) {
+        const ok = await sendAdminNotificationEmail(m.email, subject.trim(), message.trim(), m.name);
+        if (ok) sent++; else failed.push(m.email);
+      }
+      return res.json({ message: `Envoyé à ${sent}/${targets.length} marchands`, count: sent, failed });
+    } catch (err: any) {
+      console.error("[ADMIN NOTIFY]", err);
+      res.status(500).json({ message: err.message || "Erreur serveur" });
+    }
+  });
+
   // ─── SDK API v1 : Ping ────────────────────────────────────────
 
   app.get("/api/sdk/v1/ping", sdkAuthMiddleware, async (req, res) => {

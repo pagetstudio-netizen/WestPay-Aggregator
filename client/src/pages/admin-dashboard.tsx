@@ -27,12 +27,12 @@ import {
   RefreshCw, Lock, BookOpen, FileText, Webhook, Zap, ToggleLeft, ToggleRight, Link2,
   Link, BarChart3, TrendingUp, Eye, ToggleLeft as Toggle, ExternalLink, Filter,
   Check, ChevronsUpDown, ArrowUpRight, Edit3, Wallet, AlertTriangle, RotateCcw, Bitcoin,
-  Monitor, EyeOff, KeyRound
+  Monitor, EyeOff, KeyRound, Mail
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
 
-type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "sendavapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security";
+type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "sendavapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications";
 
 function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: { staleTime?: number; refetchOnWindowFocus?: boolean }) {
   const { token, logout } = useAuth();
@@ -5037,6 +5037,224 @@ function LoadingSkeleton() {
   );
 }
 
+function NotificationsPanel() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const [mode, setMode] = useState<"all" | "specific">("all");
+  const [subject, setSubject] = useState("");
+  const [message, setMessage] = useState("");
+  const [specificEmail, setSpecificEmail] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [lastResult, setLastResult] = useState<{ count: number; message: string; failed?: string[] } | null>(null);
+
+  const { data: merchants = [] } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
+  const activeMerchants = (merchants as Merchant[]).filter(m => m.status !== "suspended");
+
+  const handleSend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!subject.trim() || !message.trim()) {
+      toast({ title: "Sujet et message requis", variant: "destructive" }); return;
+    }
+    if (mode === "specific" && !specificEmail.trim()) {
+      toast({ title: "Adresse email requise", variant: "destructive" }); return;
+    }
+    setIsSending(true);
+    setLastResult(null);
+    try {
+      const res = await fetch("/api/admin/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          subject: subject.trim(),
+          message: message.trim(),
+          to: mode === "specific" ? specificEmail.trim() : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Erreur");
+      setLastResult(data);
+      toast({ title: "✅ " + data.message });
+      setSubject("");
+      setMessage("");
+      setSpecificEmail("");
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shadow-sm">
+          <MessageSquare className="w-5 h-5 text-primary-foreground" />
+        </div>
+        <div>
+          <h2 className="text-lg font-bold text-foreground">Notifications Email</h2>
+          <p className="text-sm text-muted-foreground">Envoyez un message à tous vos marchands ou à une adresse spécifique</p>
+        </div>
+      </div>
+
+      {/* Stats pill */}
+      <div className="flex items-center gap-3 p-4 rounded-xl border bg-muted/30">
+        <Users className="w-4 h-4 text-muted-foreground shrink-0" />
+        <span className="text-sm text-muted-foreground">
+          <strong className="text-foreground">{activeMerchants.length}</strong> marchands actifs disponibles pour une diffusion globale
+        </span>
+      </div>
+
+      {/* Form card */}
+      <Card>
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base">Composer la notification</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSend} className="space-y-5">
+
+            {/* Recipient mode */}
+            <div>
+              <Label className="text-sm font-semibold mb-2 block">Destinataires</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMode("all")}
+                  className={`flex items-center gap-2 px-4 py-3 rounded-xl border-2 transition-all text-sm font-medium text-left ${
+                    mode === "all" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-muted-foreground"
+                  }`}
+                  data-testid="button-notify-mode-all"
+                >
+                  <Users className="w-4 h-4 shrink-0" />
+                  <div>
+                    <p className="font-semibold leading-tight">Tous les marchands</p>
+                    <p className="text-xs opacity-70 leading-tight">{activeMerchants.length} destinataires</p>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMode("specific")}
+                  className={`flex items-center gap-2 px-4 py-3 rounded-xl border-2 transition-all text-sm font-medium text-left ${
+                    mode === "specific" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-muted-foreground"
+                  }`}
+                  data-testid="button-notify-mode-specific"
+                >
+                  <Mail className="w-4 h-4 shrink-0" />
+                  <div>
+                    <p className="font-semibold leading-tight">Email spécifique</p>
+                    <p className="text-xs opacity-70 leading-tight">Un seul destinataire</p>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Specific email input */}
+            {mode === "specific" && (
+              <div>
+                <Label htmlFor="notif-email" className="text-sm font-semibold">Adresse email</Label>
+                <Input
+                  id="notif-email"
+                  type="email"
+                  value={specificEmail}
+                  onChange={e => setSpecificEmail(e.target.value)}
+                  placeholder="exemple@email.com"
+                  className="mt-1.5"
+                  data-testid="input-notify-email"
+                />
+              </div>
+            )}
+
+            {/* Subject */}
+            <div>
+              <Label htmlFor="notif-subject" className="text-sm font-semibold">Objet de l'email</Label>
+              <Input
+                id="notif-subject"
+                value={subject}
+                onChange={e => setSubject(e.target.value)}
+                placeholder="Ex: Maintenance prévue — lundi 27 mai"
+                className="mt-1.5"
+                data-testid="input-notify-subject"
+              />
+            </div>
+
+            {/* Message */}
+            <div>
+              <Label htmlFor="notif-message" className="text-sm font-semibold">Message</Label>
+              <textarea
+                id="notif-message"
+                value={message}
+                onChange={e => setMessage(e.target.value)}
+                placeholder={"Bonjour,\n\nNous souhaitons vous informer que...\n\nCordialement,\nL'équipe RobotPay"}
+                rows={8}
+                className="mt-1.5 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
+                data-testid="textarea-notify-message"
+              />
+              <p className="text-xs text-muted-foreground mt-1">Les retours à la ligne sont préservés dans l'email.</p>
+            </div>
+
+            {/* Preview of recipients */}
+            {mode === "all" && activeMerchants.length > 0 && (
+              <div className="rounded-xl border bg-muted/20 p-3">
+                <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-widest">Destinataires ({activeMerchants.length})</p>
+                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                  {(activeMerchants as Merchant[]).map(m => (
+                    <span key={m.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-background border border-border text-foreground">
+                      {m.email}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Send button */}
+            <Button
+              type="submit"
+              disabled={isSending || !subject.trim() || !message.trim()}
+              className="w-full"
+              data-testid="button-send-notification"
+            >
+              {isSending ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Envoi en cours…</>
+              ) : (
+                <><MessageSquare className="w-4 h-4 mr-2" />
+                  {mode === "all" ? `Envoyer à ${activeMerchants.length} marchands` : "Envoyer l'email"}
+                </>
+              )}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      {/* Result card */}
+      {lastResult && (
+        <Card className={lastResult.failed && lastResult.failed.length > 0 ? "border-yellow-200" : "border-green-200"}>
+          <CardContent className="pt-5">
+            <div className="flex items-start gap-3">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${lastResult.failed && lastResult.failed.length > 0 ? "bg-yellow-100" : "bg-green-100"}`}>
+                <CheckCircle className={`w-4 h-4 ${lastResult.failed && lastResult.failed.length > 0 ? "text-yellow-600" : "text-green-600"}`} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-foreground">{lastResult.message}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{lastResult.count} email(s) envoyé(s) avec succès</p>
+                {lastResult.failed && lastResult.failed.length > 0 && (
+                  <div className="mt-2">
+                    <p className="text-xs font-medium text-yellow-700 mb-1">Échecs ({lastResult.failed.length}) :</p>
+                    <div className="flex flex-wrap gap-1">
+                      {lastResult.failed.map(e => (
+                        <span key={e} className="text-xs px-2 py-0.5 rounded bg-yellow-100 text-yellow-800">{e}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 function SdkPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
@@ -6148,6 +6366,7 @@ export default function AdminDashboard() {
     { title: "Sécurité IP", icon: Lock, tab: "security" },
     { title: "Parametres", icon: Settings, tab: "settings" },
     { title: "SDK API", icon: BookOpen, tab: "sdk" },
+    { title: "Notifications", icon: Mail, tab: "notifications" },
   ];
 
   const style = {
@@ -6232,6 +6451,7 @@ export default function AdminDashboard() {
             {activeTab === "security" && <SecurityIpsPanel />}
             {activeTab === "settings" && <SettingsPanel />}
             {activeTab === "sdk" && <SdkPanel />}
+            {activeTab === "notifications" && <NotificationsPanel />}
           </main>
         </div>
       </div>
