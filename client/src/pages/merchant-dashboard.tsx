@@ -47,6 +47,7 @@ import icnApiCloud from "@assets/6213702_1779628153256.png";
 import icnSettingsProfile from "@assets/téléchargement_(71)_1779628273093.png";
 import icnSettingsPassword from "@assets/mine-mod-change-pwd-D4tL_Aft_1779628273126.png";
 import icnSettingsContact from "@assets/téléchargement_(59)_1779628273158.png";
+import icnAvatar from "@assets/icon-avator-33519d44_1779628636247.png";
 
 type MerchantTab = "overview" | "apikeys" | "webhook" | "virements" | "reversements" | "settings" | "paymentlinks" | "transactions" | "crypto" | "sdk" | "wallet" | "analyse";
 
@@ -5210,13 +5211,13 @@ export default function MerchantDashboard() {
             </button>
             {/* Profile / Settings */}
             <button
-              className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors hover:bg-white/15"
-              style={{ background: "rgba(255,255,255,0.18)", color: "white" }}
+              className="w-9 h-9 rounded-xl overflow-hidden transition-all hover:ring-2 hover:ring-white/50 active:scale-95"
+              style={{ background: "rgba(255,255,255,0.18)" }}
               onClick={() => handleTabChange("settings")}
               data-testid="button-profile"
               title="Paramètres"
             >
-              <User className="w-5 h-5" />
+              <img src={icnAvatar} alt="Profil" className="w-full h-full object-cover" />
             </button>
           </div>
         </header>
