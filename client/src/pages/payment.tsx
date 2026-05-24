@@ -7,7 +7,7 @@ import moovIcon      from "@assets/ZJCa7PK_1779635321640.jpg";
 import mtnIcon       from "@assets/XzQ5b64_1779635321616.png";
 import tmoneyIcon    from "@assets/ruU3bQe_1779635321485.png";
 import orangeIcon    from "@assets/ctVnv9i_1779636596458.png";
-import robotpayLogo  from "@assets/20260524_144646_1779635303879.png";
+import robotpayLogo  from "@assets/20260524_144646_1779637077787.png";
 import bankCardIcon  from "@assets/mine-mod-bankcard-CLOhqwHj_1779636875827.png";
 
 /* ── types ─────────────────────────────────────────────────────────────── */
@@ -672,17 +672,7 @@ export default function PaymentPage() {
 
         {/* ── footer (outside card) ─────────────────────────────────── */}
         <div style={{ marginTop:22, display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-            {/* shield SVG matching mockup */}
-            <svg width="38" height="44" viewBox="0 0 38 44" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M19 2L3 9.5v11c0 10.2 6.9 19.7 16 22 9.1-2.3 16-11.8 16-22v-11L19 2z" fill="#fff" stroke="#111" strokeWidth="2"/>
-              <path d="M11 22l5.5 5.5 10-10" stroke="#111" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            <div>
-              <p style={{ fontSize:11, color:"#94a3b8", margin:0, lineHeight:1.3 }}>Hosted &amp; secured by</p>
-              <img src={robotpayLogo} alt="RobotPay" style={{ height:22, objectFit:"contain", display:"block", marginTop:2, filter:"brightness(0.3) saturate(0)" }} />
-            </div>
-          </div>
+          <img src={robotpayLogo} alt="RobotPay" style={{ height:36, objectFit:"contain", display:"block" }} />
         </div>
 
       </div>
