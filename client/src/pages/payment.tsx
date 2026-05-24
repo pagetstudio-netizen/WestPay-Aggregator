@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Check, Phone, ExternalLink, Bitcoin, X, RefreshCw, Clock, CreditCard, ShieldCheck } from "lucide-react";
+import { Loader2, Phone, ExternalLink, Bitcoin, X, RefreshCw, Clock, CreditCard } from "lucide-react";
 import HelpButton from "@/components/HelpButton";
 
 import waveIcon from "@assets/zOMoVcU_1779635321598.png";
@@ -9,11 +9,7 @@ import mtnIcon from "@assets/XzQ5b64_1779635321616.png";
 import tmoneyIcon from "@assets/ruU3bQe_1779635321485.png";
 import robotpayLogo from "@assets/20260524_144646_1779635303879.png";
 
-type MerchantInfo = {
-  name: string;
-  slug: string;
-  countries: string[];
-};
+type MerchantInfo = { name: string; slug: string; countries: string[] };
 
 const PAYMENT_METHODS: Record<string, string[]> = {
   "Togo": ["Moov Money", "TMoney"],
@@ -23,56 +19,38 @@ const PAYMENT_METHODS: Record<string, string[]> = {
   "Congo Brazzaville": ["MTN Mobile Money"],
   "Congo RDC": ["Africell", "Airtel Money", "M-Pesa", "Orange Money"],
   "Gabon": ["Airtel Money", "Moov Money"],
-  "Cote d'Ivoire": ["Moov Money", "MTN Mobile Money", "Orange Money", "Wave"],
+  "Cote d'Ivoire": ["Wave", "Orange Money", "Moov Money", "MTN Mobile Money"],
   "Mali": ["Orange Money"],
-  "Senegal": ["Mixx by Yas", "Orange Money", "Wave"],
+  "Senegal": ["Wave", "Mixx by Yas", "Orange Money"],
   "Guinee": ["MTN Mobile Money", "Orange Money"],
   "Gambie": ["Africell Money"],
 };
 
 const DIAL_CODES: Record<string, string> = {
-  "Togo": "+228",
-  "Benin": "+229",
-  "Burkina Faso": "+226",
-  "Cameroun": "+237",
-  "Congo Brazzaville": "+242",
-  "Congo RDC": "+243",
-  "Gabon": "+241",
-  "Cote d'Ivoire": "+225",
-  "Mali": "+223",
-  "Senegal": "+221",
-  "Guinee": "+224",
-  "Gambie": "+220",
+  "Togo": "+228", "Benin": "+229", "Burkina Faso": "+226", "Cameroun": "+237",
+  "Congo Brazzaville": "+242", "Congo RDC": "+243", "Gabon": "+241",
+  "Cote d'Ivoire": "+225", "Mali": "+223", "Senegal": "+221",
+  "Guinee": "+224", "Gambie": "+220",
 };
 
 const COUNTRY_FLAGS: Record<string, string> = {
-  "Togo": "🇹🇬",
-  "Benin": "🇧🇯",
-  "Burkina Faso": "🇧🇫",
-  "Cameroun": "🇨🇲",
-  "Congo Brazzaville": "🇨🇬",
-  "Congo RDC": "🇨🇩",
-  "Gabon": "🇬🇦",
-  "Cote d'Ivoire": "🇨🇮",
-  "Mali": "🇲🇱",
-  "Senegal": "🇸🇳",
-  "Guinee": "🇬🇳",
-  "Gambie": "🇬🇲",
+  "Togo": "🇹🇬", "Benin": "🇧🇯", "Burkina Faso": "🇧🇫", "Cameroun": "🇨🇲",
+  "Congo Brazzaville": "🇨🇬", "Congo RDC": "🇨🇩", "Gabon": "🇬🇦",
+  "Cote d'Ivoire": "🇨🇮", "Mali": "🇲🇱", "Senegal": "🇸🇳",
+  "Guinee": "🇬🇳", "Gambie": "🇬🇲",
 };
 
-const OPERATOR_ICONS: Record<string, string> = {
+/* Map operator name → real image */
+const OPERATOR_IMAGES: Record<string, string> = {
   "Wave": waveIcon,
   "Moov Money": moovIcon,
   "MTN Mobile Money": mtnIcon,
   "TMoney": tmoneyIcon,
 };
 
+/* Fallback color + abbreviation for operators without an image */
 const OPERATOR_META: Record<string, { color: string; abbr: string }> = {
-  "Wave": { color: "#1E90FF", abbr: "WV" },
   "Orange Money": { color: "#FF6600", abbr: "OM" },
-  "MTN Mobile Money": { color: "#FFCC00", abbr: "MTN" },
-  "Moov Money": { color: "#e8530a", abbr: "MV" },
-  "TMoney": { color: "#f5c100", abbr: "TM" },
   "Airtel Money": { color: "#E8001D", abbr: "AT" },
   "M-Pesa": { color: "#60BB44", abbr: "MP" },
   "Coris Money": { color: "#7C2020", abbr: "CM" },
@@ -92,9 +70,9 @@ function currencyForCountry(country: string): string {
 
 export default function PaymentPage() {
   const { toast } = useToast();
+
   const pathParts = window.location.pathname.split("/");
   const slugFromPath = pathParts.length === 3 && pathParts[1] === "pay" ? pathParts[2] : "";
-
   const urlParams = new URLSearchParams(window.location.search);
   const merchantSlug = urlParams.get("merchant") || slugFromPath || "";
   const amountParam = urlParams.get("amount");
@@ -115,7 +93,7 @@ export default function PaymentPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [payerPhone, setPayerPhone] = useState(phoneParam);
-  const [payerName, setPayerName] = useState(nameParam);
+  const [payerName] = useState(nameParam);
   const [selectedCountry, setSelectedCountry] = useState(countryParam);
   const currency = currencyForCountry(selectedCountry);
   const [selectedMethod, setSelectedMethod] = useState("");
@@ -142,9 +120,9 @@ export default function PaymentPage() {
   const [paymentFailed, setPaymentFailed] = useState(false);
   const [failureReason, setFailureReason] = useState("");
   const [confirmedAt, setConfirmedAt] = useState<Date | null>(null);
-
   const [showOtpPopup, setShowOtpPopup] = useState(false);
 
+  /* ── Fetch merchant on mount ─────────────────────────────────────────────── */
   useEffect(() => {
     if (omnipayStatusParam === "complete" && refParam) {
       setIsLoading(false);
@@ -155,22 +133,13 @@ export default function PaymentPage() {
           if (d.redirectUrl) { setRedirectUrl(d.redirectUrl); redirectUrlRef.current = d.redirectUrl; }
           if (d.omnipayReference) setOmnipayReference(d.omnipayReference);
           if (d.merchantSlug || d.merchantName) {
-            setMerchantInfo({
-              name: d.merchantName || d.merchantSlug || "",
-              slug: d.merchantSlug || "",
-              countries: d.country ? [d.country] : [],
-            });
+            setMerchantInfo({ name: d.merchantName || d.merchantSlug || "", slug: d.merchantSlug || "", countries: d.country ? [d.country] : [] });
           }
           setConfirmedAt(new Date());
-        })
-        .catch(() => {});
+        }).catch(() => {});
       return;
     }
-    if (!merchantSlug) {
-      setLoadError("Lien de paiement invalide. Parametre 'merchant' manquant.");
-      setIsLoading(false);
-      return;
-    }
+    if (!merchantSlug) { setLoadError("Lien de paiement invalide."); setIsLoading(false); return; }
     fetchMerchantInfo();
   }, [merchantSlug]);
 
@@ -178,10 +147,9 @@ export default function PaymentPage() {
     if (!selectedCountry) return;
     fetch(`/api/public/payment-methods/${encodeURIComponent(selectedCountry)}?type=api`)
       .then(r => r.json())
-      .then(d => { setDynamicMethods(Array.isArray(d.methods) ? d.methods : null); })
+      .then(d => setDynamicMethods(Array.isArray(d.methods) ? d.methods : null))
       .catch(() => setDynamicMethods(null));
-    setSelectedMethod("");
-    setOtpCode("");
+    setSelectedMethod(""); setOtpCode("");
   }, [selectedCountry]);
 
   useEffect(() => {
@@ -196,26 +164,17 @@ export default function PaymentPage() {
     setIsLoading(true);
     try {
       const res = await fetch(`/api/payment/${merchantSlug}/info`);
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.message || "Marchand introuvable");
-      }
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Marchand introuvable"); }
       const data = await res.json();
       setMerchantInfo(data.merchant);
       if (countryParam) {
-        const match = data.merchant.countries.find(
-          (c: string) => c.toLowerCase() === countryParam.toLowerCase()
-        );
-        if (match) setSelectedCountry(match);
-        else if (data.merchant.countries.length > 0) setSelectedCountry(data.merchant.countries[0]);
+        const match = data.merchant.countries.find((c: string) => c.toLowerCase() === countryParam.toLowerCase());
+        setSelectedCountry(match || (data.merchant.countries[0] ?? ""));
       } else if (data.merchant.countries.length > 0) {
         setSelectedCountry(data.merchant.countries[0]);
       }
-    } catch (err: any) {
-      setLoadError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
+    } catch (err: any) { setLoadError(err.message); }
+    finally { setIsLoading(false); }
   };
 
   const availableMethods = dynamicMethods ?? (PAYMENT_METHODS[selectedCountry] || []);
@@ -224,12 +183,12 @@ export default function PaymentPage() {
   const orangeUssdCode = selectedCountry === "Mali" ? "#144#" : null;
   const orangeMenuHint = selectedCountry === "Mali" ? "menu Paiement marchand (option 2)" : null;
   const needsOrangeInstruction = selectedMethod === "Orange Money" && selectedCountry === "Mali";
+  const isCryptoMethod = selectedMethod === "crypto";
+  const dialCode = DIAL_CODES[selectedCountry] || "+";
 
-  const handleSelectMethod = useCallback((method: string) => {
-    setSelectedMethod(method);
-    setOtpCode("");
-  }, []);
+  const handleSelectMethod = useCallback((m: string) => { setSelectedMethod(m); setOtpCode(""); }, []);
 
+  /* ── OmniPay polling ─────────────────────────────────────────────────────── */
   const startOmnipayPolling = (pId: number) => {
     setOmnipayPolling(true);
     if (pollingRef.current) clearInterval(pollingRef.current);
@@ -237,138 +196,15 @@ export default function PaymentPage() {
       try {
         const res = await fetch(`/api/omnipay/payment/${pId}/status`);
         const data = await res.json();
-        if (data.status === "confirmed") {
-          if (pollingRef.current) clearInterval(pollingRef.current);
-          setOmnipayPolling(false);
-          setConfirmedAt(new Date());
-          setStep(3);
-        } else if (data.status === "failed") {
-          if (pollingRef.current) clearInterval(pollingRef.current);
-          setOmnipayPolling(false);
-          setPaymentFailed(true);
-          setFailureReason("Le paiement n'a pas pu etre traite. Verifiez votre solde ou votre code secret et reessayez.");
-        }
+        if (data.status === "confirmed") { clearInterval(pollingRef.current!); setOmnipayPolling(false); setConfirmedAt(new Date()); setStep(3); }
+        else if (data.status === "failed") { clearInterval(pollingRef.current!); setOmnipayPolling(false); setPaymentFailed(true); setFailureReason("Le paiement n'a pas pu être traité. Vérifiez votre solde ou votre code secret."); }
       } catch {}
     }, 5000);
   };
 
-  useEffect(() => {
-    return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
-  }, []);
+  useEffect(() => () => { if (pollingRef.current) clearInterval(pollingRef.current); }, []);
 
-  const isCryptoMethod = selectedMethod === "crypto";
-
-  const handlePayClick = () => {
-    if (!selectedMethod) {
-      toast({ title: "Methode de paiement requise", description: "Veuillez selectionner une methode de paiement.", variant: "destructive" });
-      return;
-    }
-    if (isCryptoMethod) { handleStep1Next(); return; }
-    if (!payerPhone.trim()) {
-      toast({ title: "Numero requis", description: "Veuillez saisir votre numero de telephone.", variant: "destructive" });
-      return;
-    }
-    if (needsManualOtp && !otpCode.trim()) {
-      setShowOtpPopup(true);
-      return;
-    }
-    handleStep1Next();
-  };
-
-  const handleStep1Next = async () => {
-    if (!selectedMethod) return;
-    if (isCryptoMethod) {
-      setIsCryptoLoading(true);
-      try {
-        const res = await fetch("/api/payment/crypto/initiate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ merchantSlug, amount, currency, returnUrl: redirectUrl || undefined }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message);
-        window.location.replace(`/pay/crypto/${data.trackId}`);
-      } catch {
-        toast({ title: "Paiement non disponible", description: "Une erreur est survenue. Veuillez reessayer.", variant: "destructive" });
-      } finally {
-        setIsCryptoLoading(false);
-      }
-      return;
-    }
-    setIsSubmitting(true);
-    setPaymentFailed(false);
-    setFailureReason("");
-    try {
-      const res = await fetch("/api/payment/initiate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          merchantSlug,
-          country: selectedCountry,
-          amount,
-          payerPhone: payerPhone.trim(),
-          payerName: payerName.trim(),
-          paymentMethod: selectedMethod,
-          redirectUrl: redirectUrl || null,
-          firstName: "Client",
-          lastName: "RobotPay",
-          operator: selectedMethod.toLowerCase().includes("wave") ? "wave" : undefined,
-          otp: needsManualOtp ? otpCode.trim() : undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
-      setPaymentId(data.paymentId);
-      setOmnipayReference(data.omnipayReference);
-      setOmnipayFees(data.fees || 0);
-      setShowOtpPopup(false);
-      if (data.sendavapay && data.otpRequired) {
-        setSendavaOtpRequired(true);
-        setSendavaUssdCode(data.ussdCode || null);
-        setSendavaOtpConfirmed(false);
-        setSendavaOtp("");
-        setStep(2);
-      } else if (data.paymentUrl) {
-        setOmnipayPaymentUrl(data.paymentUrl);
-        setStep(2);
-      } else {
-        setStep(2);
-        startOmnipayPolling(data.paymentId);
-      }
-    } catch {
-      toast({ title: "Paiement non abouti", description: "Une erreur est survenue. Verifiez vos informations et reessayez.", variant: "destructive" });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleSendavaConfirmOtp = async () => {
-    if (!paymentId || !sendavaOtp.trim()) return;
-    setSendavaOtpConfirming(true);
-    try {
-      const res = await fetch("/api/payment/sendavapay/confirm-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentId, otp: sendavaOtp.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
-      setSendavaOtpConfirmed(true);
-      startOmnipayPolling(paymentId);
-    } catch (err: any) {
-      toast({ title: "Code OTP invalide", description: err.message || "Le code est invalide ou a expire. Veuillez reessayer.", variant: "destructive" });
-    } finally {
-      setSendavaOtpConfirming(false);
-    }
-  };
-
-  const handleWaveRedirect = () => {
-    if (omnipayPaymentUrl) {
-      window.open(omnipayPaymentUrl, "_blank");
-      if (paymentId) startOmnipayPolling(paymentId);
-    }
-  };
-
+  /* ── Redirect countdown on success ──────────────────────────────────────── */
   const safeRedirect = (rawUrl: string, extra?: Record<string, string>) => {
     if (!rawUrl || /^(javascript|data|vbscript):/i.test(rawUrl.trim())) return;
     const normalized = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
@@ -377,864 +213,495 @@ export default function PaymentPage() {
       if (!["https:", "http:"].includes(url.protocol)) return;
       if (extra) Object.entries(extra).forEach(([k, v]) => url.searchParams.set(k, v));
       window.location.replace(url.toString());
-    } catch {
-      // invalid URL — abort silently
-    }
+    } catch {}
   };
 
   useEffect(() => {
     if (step !== 3) return;
     const timer = setInterval(() => {
-      setRedirectCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          const currentRedirectUrl = redirectUrlRef.current;
-          if (currentRedirectUrl) {
-            safeRedirect(currentRedirectUrl, { status: "success", amount: String(amount), ref: omnipayReference || "" });
-          }
-          return 0;
-        }
+      setRedirectCountdown(prev => {
+        if (prev <= 1) { clearInterval(timer); if (redirectUrlRef.current) safeRedirect(redirectUrlRef.current, { status: "success", amount: String(amount), ref: omnipayReference || "" }); return 0; }
         return prev - 1;
       });
     }, 1000);
     return () => clearInterval(timer);
   }, [step]);
 
-  const formatAmount = (val: number) => val.toLocaleString("fr-FR");
-  const dialCode = DIAL_CODES[selectedCountry] || "+";
+  /* ── Payment handlers ────────────────────────────────────────────────────── */
+  const handlePayClick = () => {
+    if (!selectedMethod) { toast({ title: "Méthode requise", description: "Veuillez sélectionner une méthode de paiement.", variant: "destructive" }); return; }
+    if (isCryptoMethod) { handleStep1Next(); return; }
+    if (!payerPhone.trim()) { toast({ title: "Numéro requis", description: "Veuillez saisir votre numéro de téléphone.", variant: "destructive" }); return; }
+    if (needsManualOtp && !otpCode.trim()) { setShowOtpPopup(true); return; }
+    handleStep1Next();
+  };
+
+  const handleStep1Next = async () => {
+    if (!selectedMethod) return;
+    if (isCryptoMethod) {
+      setIsCryptoLoading(true);
+      try {
+        const res = await fetch("/api/payment/crypto/initiate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ merchantSlug, amount, currency, returnUrl: redirectUrl || undefined }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message);
+        window.location.replace(`/pay/crypto/${data.trackId}`);
+      } catch { toast({ title: "Paiement non disponible", variant: "destructive" }); }
+      finally { setIsCryptoLoading(false); }
+      return;
+    }
+    setIsSubmitting(true); setPaymentFailed(false); setFailureReason("");
+    try {
+      const res = await fetch("/api/payment/initiate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ merchantSlug, country: selectedCountry, amount, payerPhone: payerPhone.trim(), payerName: payerName.trim(), paymentMethod: selectedMethod, redirectUrl: redirectUrl || null, firstName: "Client", lastName: "RobotPay", operator: selectedMethod.toLowerCase().includes("wave") ? "wave" : undefined, otp: needsManualOtp ? otpCode.trim() : undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setPaymentId(data.paymentId); setOmnipayReference(data.omnipayReference); setOmnipayFees(data.fees || 0); setShowOtpPopup(false);
+      if (data.sendavapay && data.otpRequired) { setSendavaOtpRequired(true); setSendavaUssdCode(data.ussdCode || null); setSendavaOtpConfirmed(false); setSendavaOtp(""); setStep(2); }
+      else if (data.paymentUrl) { setOmnipayPaymentUrl(data.paymentUrl); setStep(2); }
+      else { setStep(2); startOmnipayPolling(data.paymentId); }
+    } catch { toast({ title: "Paiement non abouti", description: "Vérifiez vos informations et réessayez.", variant: "destructive" }); }
+    finally { setIsSubmitting(false); }
+  };
+
+  const handleSendavaConfirmOtp = async () => {
+    if (!paymentId || !sendavaOtp.trim()) return;
+    setSendavaOtpConfirming(true);
+    try {
+      const res = await fetch("/api/payment/sendavapay/confirm-otp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paymentId, otp: sendavaOtp.trim() }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setSendavaOtpConfirmed(true); startOmnipayPolling(paymentId);
+    } catch (err: any) { toast({ title: "Code OTP invalide", description: err.message, variant: "destructive" }); }
+    finally { setSendavaOtpConfirming(false); }
+  };
+
+  const handleWaveRedirect = () => { if (omnipayPaymentUrl) { window.open(omnipayPaymentUrl, "_blank"); if (paymentId) startOmnipayPolling(paymentId); } };
 
   const handleRetry = () => {
     if (pollingRef.current) clearInterval(pollingRef.current);
-    setOmnipayPolling(false);
-    setPaymentFailed(false);
-    setFailureReason("");
-    setOmnipayPaymentUrl(null);
-    setSendavaOtpRequired(false);
-    setSendavaOtp("");
-    setSendavaOtpConfirmed(false);
-    setStep(1);
+    setOmnipayPolling(false); setPaymentFailed(false); setFailureReason(""); setOmnipayPaymentUrl(null);
+    setSendavaOtpRequired(false); setSendavaOtp(""); setSendavaOtpConfirmed(false); setStep(1);
   };
 
-  const formatTime = (date: Date) => date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-  const formatDate = (date: Date) => date.toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
+  const formatAmount = (v: number) => v.toLocaleString("fr-FR");
+  const formatTime = (d: Date) => d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  const formatDate = (d: Date) => d.toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "#ffffff" }}>
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="w-9 h-9 animate-spin" style={{ color: "#3b82f6" }} />
-          <span className="text-sm" style={{ color: "#6b7280" }}>Chargement...</span>
+  /* ── Loading / Error states ─────────────────────────────────────────────── */
+  if (isLoading) return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fff" }}>
+      <Loader2 style={{ width: 32, height: 32, color: "#2563eb", animation: "spin 1s linear infinite" }} />
+    </div>
+  );
+
+  if ((loadError || !merchantInfo) && step !== 3) return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#fff", padding: 16 }}>
+      <div style={{ background: "#fff", borderRadius: 20, padding: 32, maxWidth: 340, width: "100%", textAlign: "center", boxShadow: "0 8px 32px rgba(0,0,0,0.10)" }}>
+        <div style={{ width: 52, height: 52, borderRadius: "50%", background: "#fee2e2", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+          <X style={{ width: 24, height: 24, color: "#dc2626" }} />
         </div>
+        <p style={{ fontWeight: 700, color: "#111", marginBottom: 8 }}>Lien invalide</p>
+        <p style={{ color: "#6b7280", fontSize: 14 }}>{loadError || "Ce lien de paiement n'est pas valide."}</p>
       </div>
-    );
-  }
+    </div>
+  );
 
-  if ((loadError || !merchantInfo) && step !== 3) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "#ffffff" }}>
-        <div className="rounded-2xl p-6 max-w-sm w-full text-center space-y-3" style={{ background: "#ffffff", boxShadow: "0 8px 32px rgba(0,0,0,0.12)" }}>
-          <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto" style={{ backgroundColor: "#fee2e2" }}>
-            <X className="w-6 h-6" style={{ color: "#dc2626" }} />
-          </div>
-          <h2 className="text-base font-semibold" style={{ color: "#111827" }}>Lien invalide</h2>
-          <p className="text-sm" style={{ color: "#6b7280" }}>{loadError || "Ce lien de paiement n'est pas valide."}</p>
-        </div>
-      </div>
-    );
-  }
-
+  /* ── Main render ─────────────────────────────────────────────────────────── */
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center py-6 px-4" style={{ background: "#ffffff" }}>
+    <div style={{ minHeight: "100vh", background: "#ffffff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 16px" }}>
       <style>{`
-        .pay-root *, .pay-root *::before, .pay-root *::after { box-sizing: border-box; }
-        .pay-input {
-          width: 100%;
-          padding: 10px 14px;
-          font-size: 14px;
-          border: 1.5px solid #e5e7eb;
-          border-radius: 10px;
-          outline: none;
-          background: #f9fafb;
-          color: #111827;
-          transition: border-color 0.15s, box-shadow 0.15s;
-        }
-        .pay-input::placeholder { color: #9ca3af; }
-        .pay-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.12); background: #fff; }
-        .pay-select {
-          width: 100%;
-          padding: 10px 14px;
-          font-size: 14px;
-          border: 1.5px solid #d1d5db;
-          border-radius: 10px;
-          outline: none;
-          background: #ffffff;
-          color: #111827;
-          cursor: pointer;
-          appearance: none;
-          -webkit-appearance: none;
-          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-          background-repeat: no-repeat;
-          background-position: right 12px center;
-          padding-right: 36px;
-          transition: border-color 0.15s;
-        }
-        .pay-select:focus { border-color: #3b82f6; }
-        .op-row {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 8px 12px;
-          border-radius: 12px;
-          border: 2px solid #e5e7eb;
-          cursor: pointer;
-          transition: border-color 0.15s, background 0.15s;
-          user-select: none;
-          -webkit-tap-highlight-color: transparent;
-          background: #fff;
-        }
-        .op-row:active { transform: scale(0.98); }
-        .op-row.selected { border-color: #3b82f6; background: #eff6ff; }
-        .op-img {
-          width: 46px;
-          height: 46px;
-          border-radius: 10px;
-          object-fit: cover;
-          flex-shrink: 0;
-        }
-        .op-fallback {
-          width: 46px;
-          height: 46px;
-          border-radius: 10px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 11px;
-          font-weight: 800;
-          color: #fff;
-          letter-spacing: 0.02em;
-          flex-shrink: 0;
-        }
-        .op-name {
-          font-size: 13px;
-          font-weight: 600;
-          color: #1f2937;
-          flex: 1;
-        }
-        .op-row.selected .op-name { color: #1d4ed8; }
-        .op-check {
-          width: 20px;
-          height: 20px;
-          border-radius: 50%;
-          border: 2px solid #d1d5db;
-          flex-shrink: 0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: background 0.15s, border-color 0.15s;
-        }
-        .op-row.selected .op-check {
-          background: #3b82f6;
-          border-color: #3b82f6;
-        }
-        .pay-btn-yellow {
-          width: 100%;
-          padding: 14px;
-          font-size: 16px;
-          font-weight: 800;
-          border-radius: 14px;
-          border: none;
-          cursor: pointer;
-          background: linear-gradient(135deg, #f5c100 0%, #e6a800 100%);
-          color: #1a1a1a;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          transition: opacity 0.15s, transform 0.1s;
-          -webkit-tap-highlight-color: transparent;
-          letter-spacing: 0.01em;
-          box-shadow: 0 4px 15px rgba(245,193,0,0.4);
-        }
-        .pay-btn-yellow:hover:not(:disabled) { opacity: 0.92; }
-        .pay-btn-yellow:active:not(:disabled) { transform: scale(0.98); }
-        .pay-btn-yellow:disabled { opacity: 0.4; cursor: not-allowed; }
-        .pay-btn-blue {
-          padding: 10px 20px;
-          font-size: 14px;
-          font-weight: 600;
-          border-radius: 10px;
-          border: none;
-          cursor: pointer;
-          background: #3b82f6;
-          color: #fff;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          transition: opacity 0.15s, transform 0.1s;
-        }
-        .pay-btn-blue:hover:not(:disabled) { opacity: 0.88; }
-        .pay-btn-blue:active:not(:disabled) { transform: scale(0.97); }
-        .pay-btn-blue:disabled { opacity: 0.4; cursor: not-allowed; }
-        .pay-btn-ghost {
-          padding: 10px 16px;
-          font-size: 13px;
-          font-weight: 500;
-          border-radius: 10px;
-          border: 1.5px solid #e5e7eb;
-          cursor: pointer;
-          background: transparent;
-          color: #6b7280;
-          display: inline-flex;
-          align-items: center;
-          gap: 5px;
-          transition: background 0.15s;
-        }
-        .pay-btn-ghost:hover { background: #f3f4f6; }
-        @keyframes success-pop {
-          0% { transform: scale(0.5); opacity: 0; }
-          60% { transform: scale(1.1); opacity: 1; }
-          80% { transform: scale(0.95); }
-          100% { transform: scale(1); opacity: 1; }
-        }
-        .success-icon-anim { animation: success-pop 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
-        @keyframes check-draw {
-          0% { stroke-dashoffset: 100; }
-          100% { stroke-dashoffset: 0; }
-        }
-        .check-path { stroke-dasharray: 100; stroke-dashoffset: 100; animation: check-draw 0.4s ease-out 0.35s forwards; }
-        @keyframes omnipay-pulse {
-          0% { transform: scale(0.95); opacity: 1; }
-          50% { transform: scale(1.05); opacity: 0.7; }
-          100% { transform: scale(0.95); opacity: 1; }
-        }
-        .omnipay-pulse { animation: omnipay-pulse 2s ease-in-out infinite; }
-        @keyframes fail-shake {
-          0% { transform: translateX(0); }
-          15% { transform: translateX(-8px); }
-          30% { transform: translateX(8px); }
-          45% { transform: translateX(-6px); }
-          60% { transform: translateX(6px); }
-          75% { transform: translateX(-3px); }
-          90% { transform: translateX(3px); }
-          100% { transform: translateX(0); }
-        }
-        .fail-icon-anim { animation: fail-shake 0.5s ease-in-out 0.1s both; }
-        .modal-overlay {
-          position: fixed;
-          inset: 0;
-          background: rgba(0,0,0,0.55);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 1000;
-          padding: 16px;
-        }
-        .modal-box {
-          background: #fff;
-          border-radius: 20px;
-          padding: 24px;
-          width: 100%;
-          max-width: 360px;
-          box-shadow: 0 25px 60px rgba(0,0,0,0.25);
-        }
-        .phone-input-wrapper {
-          display: flex;
-          align-items: stretch;
-          border: 1.5px solid #d1d5db;
-          border-radius: 12px;
-          overflow: hidden;
-          background: #ffffff;
-          transition: border-color 0.15s, box-shadow 0.15s;
-        }
-        .phone-input-wrapper:focus-within {
-          border-color: #3b82f6;
-          box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
-        }
-        .phone-dial {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 0 14px;
-          background: #f3f4f6;
-          font-size: 14px;
-          font-weight: 600;
-          color: #374151;
-          border-right: 1.5px solid #d1d5db;
-          min-width: 68px;
-          flex-shrink: 0;
-        }
-        .phone-field {
-          flex: 1;
-          padding: 12px 14px;
-          font-size: 14px;
-          color: #111827;
-          border: none;
-          outline: none;
-          background: transparent;
-        }
-        .phone-field::placeholder { color: #9ca3af; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes success-pop { 0%{transform:scale(0.5);opacity:0} 60%{transform:scale(1.1);opacity:1} 80%{transform:scale(0.95)} 100%{transform:scale(1);opacity:1} }
+        @keyframes check-draw { 0%{stroke-dashoffset:100} 100%{stroke-dashoffset:0} }
+        @keyframes omni-pulse { 0%,100%{transform:scale(0.95);opacity:1} 50%{transform:scale(1.05);opacity:0.7} }
+        @keyframes fail-shake { 0%,100%{transform:translateX(0)} 15%{transform:translateX(-8px)} 30%{transform:translateX(8px)} 45%{transform:translateX(-6px)} 60%{transform:translateX(6px)} 75%{transform:translateX(-3px)} 90%{transform:translateX(3px)} }
+        .anim-success { animation: success-pop 0.5s cubic-bezier(0.175,0.885,0.32,1.275) forwards; }
+        .anim-check { stroke-dasharray:100;stroke-dashoffset:100;animation:check-draw 0.4s ease-out 0.35s forwards; }
+        .anim-pulse { animation: omni-pulse 2s ease-in-out infinite; }
+        .anim-fail { animation: fail-shake 0.5s ease-in-out 0.1s both; }
+        .op-circle { border-radius:50%;cursor:pointer;transition:transform 0.12s,box-shadow 0.12s;-webkit-tap-highlight-color:transparent;user-select:none; }
+        .op-circle:active { transform:scale(0.93); }
+        .pay-btn { width:100%;padding:15px;font-size:17px;font-weight:800;border:none;border-radius:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;letter-spacing:0.01em;-webkit-tap-highlight-color:transparent;transition:opacity 0.15s,transform 0.1s; }
+        .pay-btn:active:not(:disabled){transform:scale(0.98);}
+        .pay-btn:disabled{opacity:0.45;cursor:not-allowed;}
+        .ghost-btn{padding:10px 18px;font-size:13px;font-weight:500;border:1.5px solid #e5e7eb;border-radius:10px;background:transparent;color:#6b7280;cursor:pointer;display:inline-flex;align-items:center;gap:5px;transition:background 0.15s;}
+        .ghost-btn:hover{background:#f3f4f6;}
+        .pay-input{width:100%;padding:11px 14px;font-size:15px;border:1.5px solid #d1d5db;border-radius:11px;outline:none;background:#fff;color:#111;transition:border-color 0.15s,box-shadow 0.15s;}
+        .pay-input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,0.12);}
+        .pay-input::placeholder{color:#9ca3af;}
+        .pay-select{width:100%;padding:11px 40px 11px 14px;font-size:15px;border:1.5px solid #d1d5db;border-radius:11px;outline:none;background:#fff;color:#111;cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;transition:border-color 0.15s;}
+        .pay-select:focus{border-color:#2563eb;}
+        .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;}
+        .modal-box{background:#fff;border-radius:22px;padding:26px;width:100%;max-width:360px;box-shadow:0 24px 60px rgba(0,0,0,0.22);}
       `}</style>
 
-      <div className="pay-root w-full" style={{ maxWidth: 400 }}>
-        <div
-          className="rounded-3xl overflow-hidden"
-          style={{ background: "#ffffff", boxShadow: "0 8px 40px rgba(0,0,0,0.13), 0 1px 3px rgba(0,0,0,0.06)" }}
-        >
-          {/* ── Header ────────────────────────────────────────────────────────── */}
-          <div
-            className="flex items-center justify-between px-5 py-4"
-            style={{ background: "linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%)" }}
-          >
-            <div className="flex items-center gap-3">
-              <div
-                className="w-9 h-9 rounded-xl flex items-center justify-center"
-                style={{ background: "rgba(255,255,255,0.2)" }}
-              >
-                <CreditCard className="w-5 h-5 text-white" />
-              </div>
+      {/* ════════════════════════════════ CARD ════════════════════════════════ */}
+      <div style={{ width: "100%", maxWidth: 390, background: "#fff", borderRadius: 28, boxShadow: "0 4px 32px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06)", overflow: "hidden" }}>
+
+        {/* ── Header ── */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: "1px solid #f1f5f9", background: "#fff" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 38, height: 38, borderRadius: 10, background: "#eff6ff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <CreditCard style={{ width: 20, height: 20, color: "#2563eb" }} />
+            </div>
+            <div>
+              <p style={{ fontWeight: 700, fontSize: 15, color: "#111827", lineHeight: 1.2 }} data-testid="text-brand">Effectuer un paiement</p>
+              {merchantInfo && <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{merchantInfo.name}</p>}
+            </div>
+          </div>
+          <button onClick={() => window.history.back()} data-testid="button-close"
+            style={{ width: 32, height: 32, borderRadius: "50%", border: "1.5px solid #e5e7eb", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <X style={{ width: 15, height: 15, color: "#6b7280" }} />
+          </button>
+        </div>
+
+        {/* ── Body ── */}
+        <div style={{ padding: "22px 20px", display: "flex", flexDirection: "column", gap: 20 }}>
+
+          {/* ══ STEP 1 ══════════════════════════════════════════════════════ */}
+          {step === 1 && (<>
+
+            {/* Country selector */}
+            {merchantInfo && merchantInfo.countries.length > 1 && (
               <div>
-                <p className="text-white font-bold text-sm leading-tight" data-testid="text-brand">
-                  Effectuer un paiement
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>Sélectionner un pays</label>
+                <div style={{ position: "relative" }}>
+                  <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 18, pointerEvents: "none" }}>
+                    {COUNTRY_FLAGS[selectedCountry] || "🌍"}
+                  </span>
+                  <select value={selectedCountry} onChange={e => { setSelectedCountry(e.target.value); setSelectedMethod(""); }}
+                    className="pay-select" style={{ paddingLeft: 40 }} data-testid="select-country">
+                    {merchantInfo.countries.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {/* Amount */}
+            {amount > 0 && (
+              <div style={{ textAlign: "center" }}>
+                <p style={{ fontSize: 13, color: "#9ca3af", marginBottom: 4, fontWeight: 500 }}>Montant à payer</p>
+                <p style={{ fontSize: 28, fontWeight: 800, color: "#2563eb", letterSpacing: "-0.5px" }} data-testid="text-pay-amount">
+                  {currency} {formatAmount(amount)}
                 </p>
-                {merchantInfo && (
-                  <p className="text-white/70 text-xs mt-0.5">{merchantInfo.name}</p>
-                )}
               </div>
-            </div>
-            <div
-              className="w-8 h-8 rounded-full flex items-center justify-center cursor-pointer"
-              style={{ background: "rgba(255,255,255,0.18)" }}
-              onClick={() => window.history.back()}
-              data-testid="button-close"
-            >
-              <X className="w-4 h-4 text-white" />
-            </div>
-          </div>
+            )}
 
-          {/* ── Body ──────────────────────────────────────────────────────────── */}
-          <div className="px-5 py-5 space-y-5">
+            {/* Operator circles */}
+            <div>
+              <p style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 10 }}>Choisissez une méthode de payement</p>
 
-            {step === 1 && (
-              <>
-                {/* Country selector */}
-                {merchantInfo && merchantInfo.countries.length > 1 && (
-                  <div>
-                    <label className="block text-sm font-semibold mb-2" style={{ color: "#374151" }}>
-                      Sélectionner un pays
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-base pointer-events-none">
-                        {COUNTRY_FLAGS[selectedCountry] || "🌍"}
-                      </span>
-                      <select
-                        value={selectedCountry}
-                        onChange={(e) => { setSelectedCountry(e.target.value); setSelectedMethod(""); }}
-                        className="pay-select"
-                        style={{ paddingLeft: "36px" }}
-                        data-testid="select-country"
+              {availableMethods.length === 0 && !cryptoEnabled ? (
+                <p style={{ textAlign: "center", color: "#9ca3af", fontSize: 13, padding: "12px 0", border: "1.5px dashed #e5e7eb", borderRadius: 12 }}>Aucune méthode disponible pour ce pays.</p>
+              ) : (
+                <div style={{ border: "2px solid #111", borderRadius: 16, padding: "12px 10px", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap" }}
+                  role="radiogroup" aria-label="Opérateur de paiement">
+
+                  {availableMethods.map(method => {
+                    const img = OPERATOR_IMAGES[method];
+                    const meta = OPERATOR_META[method] || { color: "#6b7280", abbr: method.substring(0, 2).toUpperCase() };
+                    const isSelected = selectedMethod === method;
+                    return (
+                      <div key={method} className="op-circle"
+                        onClick={() => handleSelectMethod(method)}
+                        onTouchEnd={e => { e.preventDefault(); handleSelectMethod(method); }}
+                        role="radio" aria-checked={isSelected} tabIndex={0}
+                        onKeyDown={e => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); handleSelectMethod(method); } }}
+                        data-testid={`radio-method-${method.replace(/\s+/g, "-").toLowerCase()}`}
+                        style={{
+                          width: 64, height: 64, overflow: "hidden", flexShrink: 0,
+                          boxShadow: isSelected ? "0 0 0 3px #2563eb" : "0 0 0 2px transparent",
+                          transition: "box-shadow 0.15s, transform 0.12s",
+                        }}
+                        title={method}
                       >
-                        {merchantInfo.countries.map((c) => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                )}
+                        {img ? (
+                          <img src={img} alt={method} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%", display: "block" }} />
+                        ) : (
+                          <div style={{ width: "100%", height: "100%", borderRadius: "50%", background: meta.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: "#fff", letterSpacing: "0.03em" }}>
+                            {meta.abbr}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
 
-                {/* Amount */}
-                {amount > 0 && (
-                  <div
-                    className="rounded-2xl px-5 py-4 text-center"
-                    style={{ background: "#f0f6ff", border: "1.5px solid #bfdbfe" }}
-                  >
-                    <p className="text-xs font-semibold mb-1" style={{ color: "#64748b" }}>
-                      Montant à payer
-                    </p>
-                    <p className="font-extrabold text-2xl" style={{ color: "#1d4ed8" }} data-testid="text-pay-amount">
-                      {currency} {formatAmount(amount)}
-                    </p>
-                  </div>
-                )}
-
-                {/* Operator selection */}
-                <div>
-                  <label className="block text-sm font-semibold mb-3" style={{ color: "#374151" }}>
-                    Choisissez une méthode de payement
-                  </label>
-
-                  {availableMethods.length === 0 && !cryptoEnabled ? (
-                    <p className="text-sm py-3 text-center rounded-xl" style={{ color: "#9ca3af", border: "1.5px dashed #e5e7eb" }}>
-                      Aucune méthode disponible pour ce pays.
-                    </p>
-                  ) : (
-                    <div
-                      className="rounded-2xl overflow-hidden"
-                      style={{ border: "1.5px solid #e5e7eb" }}
-                      role="radiogroup"
-                      aria-label="Opérateur de paiement"
+                  {cryptoEnabled && (
+                    <div className="op-circle"
+                      onClick={() => handleSelectMethod("crypto")}
+                      onTouchEnd={e => { e.preventDefault(); handleSelectMethod("crypto"); }}
+                      role="radio" aria-checked={isCryptoMethod} tabIndex={0}
+                      onKeyDown={e => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); handleSelectMethod("crypto"); } }}
+                      data-testid="radio-method-crypto"
+                      style={{ width: 64, height: 64, overflow: "hidden", flexShrink: 0, boxShadow: isCryptoMethod ? "0 0 0 3px #f59e0b" : "0 0 0 2px transparent", transition: "box-shadow 0.15s" }}
+                      title="Crypto"
                     >
-                      {availableMethods.map((method, idx) => {
-                        const icon = OPERATOR_ICONS[method];
-                        const meta = OPERATOR_META[method] || { color: "#6b7280", abbr: method.substring(0, 2).toUpperCase() };
-                        const isSelected = selectedMethod === method;
-                        const isLast = idx === availableMethods.length - 1 && !cryptoEnabled;
-                        return (
-                          <div
-                            key={method}
-                            onClick={() => handleSelectMethod(method)}
-                            onTouchEnd={(e) => { e.preventDefault(); handleSelectMethod(method); }}
-                            className="flex items-center gap-3 px-4 py-3 cursor-pointer"
-                            style={{
-                              background: isSelected ? "#eff6ff" : "#ffffff",
-                              borderBottom: isLast ? "none" : "1px solid #f3f4f6",
-                              transition: "background 0.15s",
-                            }}
-                            role="radio"
-                            aria-checked={isSelected}
-                            tabIndex={0}
-                            onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); handleSelectMethod(method); } }}
-                            data-testid={`radio-method-${method.replace(/\s+/g, "-").toLowerCase()}`}
-                          >
-                            {icon ? (
-                              <img src={icon} alt={method} className="op-img" />
-                            ) : (
-                              <div className="op-fallback" style={{ background: meta.color }}>
-                                {meta.abbr}
-                              </div>
-                            )}
-                            <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: isSelected ? "#1d4ed8" : "#1f2937" }}>
-                              {method}
-                            </span>
-                            <div
-                              style={{
-                                width: 22,
-                                height: 22,
-                                borderRadius: "50%",
-                                border: isSelected ? "none" : "2px solid #d1d5db",
-                                background: isSelected ? "#3b82f6" : "transparent",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                flexShrink: 0,
-                                transition: "background 0.15s, border-color 0.15s",
-                              }}
-                            >
-                              {isSelected && (
-                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                                  <path d="M2 6 L5 9 L10 3" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-
-                      {cryptoEnabled && (
-                        <div
-                          onClick={() => handleSelectMethod("crypto")}
-                          onTouchEnd={(e) => { e.preventDefault(); handleSelectMethod("crypto"); }}
-                          className="flex items-center gap-3 px-4 py-3 cursor-pointer"
-                          style={{
-                            background: isCryptoMethod ? "#fffbeb" : "#ffffff",
-                            transition: "background 0.15s",
-                          }}
-                          role="radio"
-                          aria-checked={isCryptoMethod}
-                          tabIndex={0}
-                          onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); handleSelectMethod("crypto"); } }}
-                          data-testid="radio-method-crypto"
-                        >
-                          <div className="op-fallback" style={{ background: "#f59e0b" }}>
-                            <Bitcoin className="w-5 h-5 text-white" />
-                          </div>
-                          <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: isCryptoMethod ? "#d97706" : "#1f2937" }}>
-                            Crypto (via OxaPay)
-                          </span>
-                          <div
-                            style={{
-                              width: 22,
-                              height: 22,
-                              borderRadius: "50%",
-                              border: isCryptoMethod ? "none" : "2px solid #d1d5db",
-                              background: isCryptoMethod ? "#f59e0b" : "transparent",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              flexShrink: 0,
-                              transition: "background 0.15s",
-                            }}
-                          >
-                            {isCryptoMethod && (
-                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                                <path d="M2 6 L5 9 L10 3" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                            )}
-                          </div>
-                        </div>
-                      )}
+                      <div style={{ width: "100%", height: "100%", borderRadius: "50%", background: "#f59e0b", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <Bitcoin style={{ width: 28, height: 28, color: "#fff" }} />
+                      </div>
                     </div>
                   )}
                 </div>
+              )}
 
-                {isCryptoMethod && (
-                  <div
-                    className="p-3 rounded-xl text-xs space-y-1"
-                    style={{ background: "#fffbeb", border: "1.5px solid #fde68a", color: "#92400e" }}
-                    data-testid="crypto-info-block"
-                  >
-                    <p className="font-semibold" style={{ color: "#78350f" }}>Paiement en crypto-monnaie</p>
-                    <p>Vous serez redirigé vers une page sécurisée avec QR code. Équivalence FCFA → crypto calculée en temps réel.</p>
+              {/* Selected method label */}
+              {selectedMethod && !isCryptoMethod && (
+                <p style={{ textAlign: "center", fontSize: 13, color: "#2563eb", fontWeight: 600, marginTop: 8 }}>{selectedMethod}</p>
+              )}
+              {isCryptoMethod && (
+                <p style={{ textAlign: "center", fontSize: 13, color: "#d97706", fontWeight: 600, marginTop: 8 }}>Paiement en crypto-monnaie</p>
+              )}
+            </div>
+
+            {/* Crypto info */}
+            {isCryptoMethod && (
+              <div style={{ background: "#fffbeb", border: "1.5px solid #fde68a", borderRadius: 12, padding: "10px 14px" }} data-testid="crypto-info-block">
+                <p style={{ fontSize: 12, color: "#92400e" }}>Vous serez redirigé vers une page sécurisée avec QR code. Équivalence FCFA → crypto calculée en temps réel.</p>
+              </div>
+            )}
+
+            {/* Phone input */}
+            {!isCryptoMethod && (
+              <div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>Numéro de téléphone</label>
+                <div style={{ display: "flex", alignItems: "stretch", border: "1.5px solid #d1d5db", borderRadius: 11, overflow: "hidden", background: "#fff", transition: "border-color 0.15s" }}
+                  onFocus={() => {}} onBlur={() => {}}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", background: "#f8fafc", borderRight: "1.5px solid #e5e7eb", flexShrink: 0 }}>
+                    <Phone style={{ width: 14, height: 14, color: "#9ca3af" }} />
+                    <span style={{ fontSize: 14, fontWeight: 700, color: "#374151" }}>{dialCode}</span>
                   </div>
-                )}
+                  <input type="tel" value={payerPhone} onChange={e => setPayerPhone(e.target.value)}
+                    placeholder="XX XXX XX XXX" data-testid="input-payer-phone"
+                    style={{ flex: 1, padding: "12px 14px", fontSize: 15, border: "none", outline: "none", background: "transparent", color: "#111" }} />
+                </div>
+              </div>
+            )}
 
-                {/* Phone input */}
-                {!isCryptoMethod && (
-                  <div>
-                    <label className="block text-sm font-semibold mb-2" style={{ color: "#374151" }}>
-                      Numéro de téléphone
-                    </label>
-                    <div className="phone-input-wrapper">
-                      <div className="phone-dial">
-                        {dialCode}
-                      </div>
-                      <input
-                        type="tel"
-                        value={payerPhone}
-                        onChange={(e) => setPayerPhone(e.target.value)}
-                        placeholder="XX XXX XX XX"
-                        className="phone-field"
-                        data-testid="input-payer-phone"
-                      />
+            {/* Orange Money Mali instruction */}
+            {needsOrangeInstruction && !isCryptoMethod && (
+              <div style={{ background: "#fff7ed", border: "1.5px solid #fed7aa", borderRadius: 12, padding: "10px 14px" }} data-testid="orange-instruction-block">
+                <p style={{ fontSize: 12, fontWeight: 600, color: "#c2410c", marginBottom: 4 }}>Orange Money — Validation requise</p>
+                <p style={{ fontSize: 12, color: "#92400e" }}>Composez <strong>{orangeUssdCode}</strong> puis accédez au <strong>{orangeMenuHint}</strong> pour valider.</p>
+              </div>
+            )}
+
+            {/* Pay button */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <button type="button" onClick={handlePayClick}
+                disabled={isSubmitting || isCryptoLoading || !selectedMethod || (!isCryptoMethod && !payerPhone.trim())}
+                className="pay-btn" data-testid="button-step1-next"
+                style={{ background: "linear-gradient(135deg,#f5c100 0%,#e8a800 100%)", color: "#1a1100", boxShadow: "0 4px 18px rgba(245,193,0,0.38)" }}>
+                {(isSubmitting || isCryptoLoading) && <Loader2 style={{ width: 18, height: 18, animation: "spin 1s linear infinite" }} />}
+                {isCryptoMethod ? "Payer en crypto" : "Payez avec RobotPay"}
+              </button>
+              <p style={{ textAlign: "center", fontSize: 12, color: "#9ca3af", letterSpacing: "0.03em" }}>使用 RobotPay 安全等待</p>
+            </div>
+
+          </>)}
+
+          {/* ══ STEP 2 ══════════════════════════════════════════════════════ */}
+          {step === 2 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }} data-testid="step-2-omnipay-content">
+
+              {paymentFailed ? (
+                <div style={{ textAlign: "center", paddingTop: 8, display: "flex", flexDirection: "column", gap: 16 }} data-testid="step-2-failed">
+                  <div className="anim-fail" style={{ display: "inline-block" }}>
+                    <div style={{ width: 80, height: 80, borderRadius: "50%", background: "#fee2e2", border: "4px solid #fca5a5", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }}>
+                      <X style={{ width: 36, height: 36, color: "#dc2626" }} />
                     </div>
                   </div>
-                )}
-
-                {needsOrangeInstruction && !isCryptoMethod && (
-                  <div
-                    className="p-3 rounded-xl space-y-1.5"
-                    style={{ background: "#fff7ed", border: "1.5px solid #fed7aa" }}
-                    data-testid="orange-instruction-block"
-                  >
-                    <p className="text-xs font-semibold" style={{ color: "#c2410c" }}>Orange Money — Validation requise</p>
-                    <p className="text-xs" style={{ color: "#92400e" }}>
-                      Composez <span className="font-bold font-mono">{orangeUssdCode}</span> puis accédez au <strong>{orangeMenuHint}</strong> pour valider.
-                    </p>
+                  <div>
+                    <p style={{ fontWeight: 700, color: "#991b1b", fontSize: 16 }}>Paiement échoué</p>
+                    <p style={{ color: "#6b7280", fontSize: 13, marginTop: 4 }}>{failureReason}</p>
                   </div>
-                )}
-
-                {/* Pay button */}
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={handlePayClick}
-                    disabled={
-                      isSubmitting ||
-                      isCryptoLoading ||
-                      !selectedMethod ||
-                      (!isCryptoMethod && !payerPhone.trim())
-                    }
-                    className="pay-btn-yellow"
-                    data-testid="button-step1-next"
-                  >
-                    {(isSubmitting || isCryptoLoading) ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                    {isCryptoMethod ? "Payer en crypto" : "Payez avec RobotPay"}
+                  <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 12, padding: "12px 14px", textAlign: "left" }}>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: "#991b1b", marginBottom: 4 }}>Que faire ?</p>
+                    {["Vérifiez que votre solde est suffisant","Assurez-vous que votre code secret est correct","Vérifiez que le numéro est correct"].map(t => (
+                      <p key={t} style={{ fontSize: 12, color: "#7f1d1d" }}>• {t}</p>
+                    ))}
+                  </div>
+                  <button type="button" onClick={handleRetry} className="pay-btn" data-testid="button-retry"
+                    style={{ background: "linear-gradient(135deg,#f5c100 0%,#e8a800 100%)", color: "#1a1100" }}>
+                    <RefreshCw style={{ width: 16, height: 16 }} /> Réessayer
                   </button>
-                  <p className="text-center text-xs" style={{ color: "#9ca3af", letterSpacing: "0.02em" }}>
-                    使用 RobotPay 安全等待
-                  </p>
                 </div>
-              </>
-            )}
 
-            {step === 2 && (
-              <div className="space-y-4" data-testid="step-2-omnipay-content">
-                {paymentFailed ? (
-                  <div className="text-center py-2 space-y-4" data-testid="step-2-failed">
-                    <div className="fail-icon-anim inline-block">
-                      <div
-                        className="w-20 h-20 rounded-full flex items-center justify-center mx-auto"
-                        style={{ background: "#fee2e2", border: "4px solid #fca5a5" }}
-                      >
-                        <X className="w-9 h-9" style={{ color: "#dc2626" }} />
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-base font-bold" style={{ color: "#991b1b" }}>Paiement échoué</p>
-                      <p className="text-sm mt-1" style={{ color: "#6b7280" }}>{failureReason}</p>
-                    </div>
-                    <div className="rounded-xl p-3 text-left space-y-1" style={{ background: "#fef2f2", border: "1px solid #fecaca" }}>
-                      <p className="text-xs font-semibold" style={{ color: "#991b1b" }}>Que faire ?</p>
-                      <p className="text-xs" style={{ color: "#7f1d1d" }}>• Vérifiez que votre solde est suffisant</p>
-                      <p className="text-xs" style={{ color: "#7f1d1d" }}>• Assurez-vous que votre code secret est correct</p>
-                      <p className="text-xs" style={{ color: "#7f1d1d" }}>• Vérifiez que le numéro est correct</p>
-                    </div>
-                    <button type="button" onClick={handleRetry} className="pay-btn-yellow" data-testid="button-retry">
-                      <RefreshCw className="w-4 h-4" /> Réessayer
-                    </button>
+              ) : sendavaOtpRequired && !sendavaOtpConfirmed ? (<>
+                <div style={{ background: "#fff7ed", borderRadius: 12, padding: 12, textAlign: "center", fontSize: 14, fontWeight: 500, color: "#92400e" }}>Validation Orange Money — Code OTP requis</div>
+                {sendavaUssdCode && (
+                  <div style={{ background: "#fff7ed", border: "1.5px solid #fed7aa", borderRadius: 12, padding: "10px 14px" }} data-testid="sendava-ussd-block">
+                    <p style={{ fontSize: 12, fontWeight: 600, color: "#c2410c", marginBottom: 4 }}>Étape 1 — Obtenez votre code OTP</p>
+                    <p style={{ fontSize: 12, color: "#92400e" }}>Composez <strong style={{ fontFamily: "monospace" }}>{sendavaUssdCode}</strong> sur votre téléphone.</p>
                   </div>
-
-                ) : sendavaOtpRequired && !sendavaOtpConfirmed ? (
-                  <>
-                    <div className="rounded-xl p-3 text-center text-sm font-medium" style={{ background: "#fff7ed", color: "#92400e" }}>
-                      Validation Orange Money — Code OTP requis
-                    </div>
-                    {sendavaUssdCode && (
-                      <div className="rounded-xl p-3 space-y-2" style={{ background: "#fff7ed", border: "1.5px solid #fed7aa" }} data-testid="sendava-ussd-block">
-                        <p className="text-xs font-semibold" style={{ color: "#c2410c" }}>Étape 1 — Obtenez votre code OTP</p>
-                        <p className="text-xs" style={{ color: "#92400e" }}>
-                          Composez <span className="font-bold font-mono">{sendavaUssdCode}</span> sur votre téléphone pour recevoir votre code OTP par SMS.
-                        </p>
-                      </div>
-                    )}
-                    <div className="rounded-xl p-3 space-y-3" style={{ background: "#f0fdf4", border: "1.5px solid #bbf7d0" }} data-testid="sendava-otp-input-block">
-                      <p className="text-xs font-semibold" style={{ color: "#166534" }}>Étape 2 — Entrez votre code OTP</p>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        maxLength={8}
-                        value={sendavaOtp}
-                        onChange={(e) => setSendavaOtp(e.target.value.replace(/\D/g, ""))}
-                        placeholder="Code OTP reçu par SMS"
-                        className="pay-input"
-                        data-testid="input-sendava-otp"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleSendavaConfirmOtp}
-                        disabled={sendavaOtpConfirming || !sendavaOtp.trim()}
-                        className="pay-btn-yellow"
-                        data-testid="button-sendava-confirm-otp"
-                      >
-                        {sendavaOtpConfirming ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                        Confirmer le paiement
-                      </button>
-                    </div>
-                    <button type="button" onClick={handleRetry} className="pay-btn-ghost" data-testid="button-step2-sendava-prev">
-                      ← Retour
-                    </button>
-                  </>
-
-                ) : sendavaOtpRequired && sendavaOtpConfirmed ? (
-                  <>
-                    <div className="rounded-xl p-3 text-center text-sm font-medium" style={{ background: "#dcfce7", color: "#166534" }}>
-                      Code OTP confirmé — Paiement en cours
-                    </div>
-                    <div className="text-center py-6">
-                      <Loader2 className="w-9 h-9 animate-spin mx-auto" style={{ color: "#3b82f6" }} />
-                      <p className="text-sm mt-3" style={{ color: "#6b7280" }}>Vérification en cours...</p>
-                    </div>
-                  </>
-
-                ) : omnipayPaymentUrl ? (
-                  <>
-                    <div className="rounded-xl p-3 text-center text-sm font-medium" style={{ background: "#dbeafe", color: "#1e40af" }}>
-                      Cliquez ci-dessous pour valider votre paiement de {formatAmount(amount)} {currency}
-                    </div>
-                    {omnipayFees > 0 && (
-                      <p className="text-xs text-center" style={{ color: "#6b7280" }}>
-                        Frais de transaction : {formatAmount(omnipayFees)} {currency}
-                      </p>
-                    )}
-                    <button type="button" onClick={handleWaveRedirect} className="pay-btn-yellow" data-testid="button-wave-pay">
-                      <ExternalLink className="w-4 h-4" /> Valider le paiement
-                    </button>
-                    {omnipayPolling && (
-                      <div className="flex items-center justify-center gap-2 py-2" style={{ color: "#6b7280" }}>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span className="text-sm">En attente de confirmation...</span>
-                      </div>
-                    )}
-                    <button type="button" onClick={handleRetry} className="pay-btn-ghost" data-testid="button-step2-prev">
-                      ← Retour
-                    </button>
-                  </>
-
-                ) : (
-                  <>
-                    <div className="text-center py-4">
-                      <div className="omnipay-pulse inline-block">
-                        <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto" style={{ background: "#eff6ff" }}>
-                          <Phone className="w-10 h-10" style={{ color: "#3b82f6" }} />
-                        </div>
-                      </div>
-                      <p className="text-sm mt-4 font-semibold" style={{ color: "#111827" }}>
-                        Validez sur votre téléphone
-                      </p>
-                      <p className="text-xs mt-1.5" style={{ color: "#6b7280" }}>
-                        Une demande de paiement de <strong style={{ color: "#1d4ed8" }}>{formatAmount(amount)} {currency}</strong> a été envoyée sur votre appareil.
-                      </p>
-                      {omnipayFees > 0 && (
-                        <p className="text-xs mt-1" style={{ color: "#9ca3af" }}>Frais : {formatAmount(omnipayFees)} {currency}</p>
-                      )}
-                    </div>
-
-                    {needsOrangeInstruction && (
-                      <div className="rounded-xl p-3 space-y-1.5" style={{ background: "#fff7ed", border: "1.5px solid #fed7aa" }} data-testid="orange-instruction-step2">
-                        <p className="text-xs font-semibold" style={{ color: "#c2410c" }}>Orange Money — Comment valider ?</p>
-                        <p className="text-xs" style={{ color: "#92400e" }}>
-                          Composez <span className="font-bold font-mono">{orangeUssdCode}</span> puis accédez au <strong>{orangeMenuHint}</strong> et validez avec votre code secret.
-                        </p>
-                      </div>
-                    )}
-
-                    {omnipayPolling && (
-                      <div className="flex items-center justify-center gap-2 py-1" style={{ color: "#6b7280" }}>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span className="text-xs">Vérification en cours...</span>
-                      </div>
-                    )}
-
-                    <button type="button" onClick={handleRetry} className="pay-btn-ghost" data-testid="button-step2-prev">
-                      ← Retour
-                    </button>
-                  </>
                 )}
-              </div>
-            )}
-
-            {step === 3 && (
-              <div className="py-2 space-y-4" data-testid="step-3-content">
-                <div className="flex flex-col items-center">
-                  <div className="success-icon-anim">
-                    <div
-                      className="w-24 h-24 rounded-full flex items-center justify-center"
-                      style={{ background: "radial-gradient(circle, #dcfce7 60%, #bbf7d0 100%)", border: "5px solid #86efac", boxShadow: "0 0 0 8px #dcfce7" }}
-                    >
-                      <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-                        <path className="check-path" d="M10 25 L20 35 L38 14" stroke="#00b050" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                      </svg>
-                    </div>
-                  </div>
-                  <p className="text-xs font-bold mt-3 uppercase tracking-widest" style={{ color: "#00b050" }}>
-                    Paiement approuvé
-                  </p>
+                <div style={{ background: "#f0fdf4", border: "1.5px solid #bbf7d0", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 12 }} data-testid="sendava-otp-input-block">
+                  <p style={{ fontSize: 12, fontWeight: 600, color: "#166534" }}>Étape 2 — Entrez votre code OTP</p>
+                  <input type="text" inputMode="numeric" maxLength={8} value={sendavaOtp}
+                    onChange={e => setSendavaOtp(e.target.value.replace(/\D/g, ""))}
+                    placeholder="Code OTP reçu par SMS" className="pay-input" data-testid="input-sendava-otp" />
+                  <button type="button" onClick={handleSendavaConfirmOtp} disabled={sendavaOtpConfirming || !sendavaOtp.trim()}
+                    className="pay-btn" data-testid="button-sendava-confirm-otp"
+                    style={{ background: "linear-gradient(135deg,#f5c100 0%,#e8a800 100%)", color: "#1a1100" }}>
+                    {sendavaOtpConfirming && <Loader2 style={{ width: 16, height: 16, animation: "spin 1s linear infinite" }} />}
+                    Confirmer le paiement
+                  </button>
                 </div>
-
-                <div className="rounded-xl px-4 py-5 text-center" style={{ background: "linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%)" }}>
-                  <p className="text-white/70 text-xs uppercase tracking-wider mb-1">Montant débité</p>
-                  <p className="text-white font-bold text-4xl tracking-tight">
-                    {formatAmount(amount)}
-                    <span className="text-xl ml-2 font-medium opacity-80">{currency}</span>
-                  </p>
-                  {merchantInfo && <p className="text-white/60 text-xs mt-2">{merchantInfo.name}</p>}
+                <button type="button" onClick={handleRetry} className="ghost-btn" data-testid="button-step2-sendava-prev">← Retour</button>
+              </>) : sendavaOtpRequired && sendavaOtpConfirmed ? (<>
+                <div style={{ background: "#dcfce7", borderRadius: 12, padding: 12, textAlign: "center", fontSize: 14, fontWeight: 500, color: "#166534" }}>Code OTP confirmé — Paiement en cours</div>
+                <div style={{ textAlign: "center", padding: "24px 0" }}>
+                  <Loader2 style={{ width: 36, height: 36, color: "#2563eb", animation: "spin 1s linear infinite", margin: "0 auto" }} />
+                  <p style={{ fontSize: 13, color: "#6b7280", marginTop: 12 }}>Vérification en cours...</p>
                 </div>
-
-                <div className="rounded-xl overflow-hidden" style={{ border: "1.5px solid #e5e7eb" }}>
-                  {omnipayReference && (
-                    <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid #f3f4f6" }}>
-                      <span className="text-xs font-medium" style={{ color: "#6b7280" }}>Référence</span>
-                      <span className="text-xs font-mono font-semibold" style={{ color: "#111827" }}>{omnipayReference}</span>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid #f3f4f6" }}>
-                    <span className="text-xs font-medium" style={{ color: "#6b7280" }}>Statut</span>
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "#dcfce7", color: "#166534" }}>Confirmé</span>
-                  </div>
-                  {confirmedAt && (
-                    <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid #f3f4f6" }}>
-                      <span className="text-xs font-medium" style={{ color: "#6b7280" }}>Date</span>
-                      <span className="text-xs" style={{ color: "#374151" }}>{formatDate(confirmedAt)}</span>
-                    </div>
-                  )}
-                  {confirmedAt && (
-                    <div className="flex items-center justify-between px-4 py-3">
-                      <span className="text-xs font-medium flex items-center gap-1" style={{ color: "#6b7280" }}>
-                        <Clock className="w-3 h-3" /> Heure
-                      </span>
-                      <span className="text-xs font-semibold" style={{ color: "#374151" }}>{formatTime(confirmedAt)}</span>
-                    </div>
-                  )}
+              </>) : omnipayPaymentUrl ? (<>
+                <div style={{ background: "#dbeafe", borderRadius: 12, padding: 12, textAlign: "center", fontSize: 14, fontWeight: 500, color: "#1e40af" }}>
+                  Cliquez ci-dessous pour valider votre paiement de {formatAmount(amount)} {currency}
                 </div>
-
-                {redirectUrl ? (
-                  <div className="space-y-2">
-                    <p className="text-xs text-center" style={{ color: "#9ca3af" }}>
-                      Redirection dans <strong style={{ color: "#374151" }}>{redirectCountdown}s</strong>...
-                    </p>
-                    <a
-                      href={(() => {
-                        const normalized = /^https?:\/\//i.test(redirectUrl) ? redirectUrl : `https://${redirectUrl}`;
-                        try {
-                          const url = new URL(normalized);
-                          url.searchParams.set("status", "success");
-                          url.searchParams.set("amount", String(amount));
-                          url.searchParams.set("ref", omnipayReference || "");
-                          return url.toString();
-                        } catch { return normalized; }
-                      })()}
-                      className="pay-btn-yellow"
-                      style={{ textDecoration: "none" }}
-                      data-testid="link-redirect"
-                    >
-                      Retourner sur le site
-                    </a>
+                {omnipayFees > 0 && <p style={{ textAlign: "center", fontSize: 12, color: "#6b7280" }}>Frais : {formatAmount(omnipayFees)} {currency}</p>}
+                <button type="button" onClick={handleWaveRedirect} className="pay-btn" data-testid="button-wave-pay"
+                  style={{ background: "linear-gradient(135deg,#f5c100 0%,#e8a800 100%)", color: "#1a1100" }}>
+                  <ExternalLink style={{ width: 16, height: 16 }} /> Valider le paiement
+                </button>
+                {omnipayPolling && (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: "#6b7280" }}>
+                    <Loader2 style={{ width: 16, height: 16, animation: "spin 1s linear infinite" }} />
+                    <span style={{ fontSize: 13 }}>En attente de confirmation...</span>
                   </div>
-                ) : (
-                  <p className="text-sm text-center" style={{ color: "#9ca3af" }}>Vous pouvez fermer cette page.</p>
                 )}
-              </div>
-            )}
-
-          </div>
-
-          {/* ── Footer ────────────────────────────────────────────────────────── */}
-          <div
-            className="flex flex-col items-center justify-center gap-1 px-5 py-4"
-            style={{ borderTop: "1px solid #f1f5f9", background: "#fafafa" }}
-          >
-            <div className="flex items-center gap-2">
-              <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-                <path d="M14 2L4 7v7c0 6.1 4.3 11.8 10 13.2C19.7 25.8 24 20.1 24 14V7L14 2z" fill="#1d4ed8" opacity="0.12"/>
-                <path d="M14 2L4 7v7c0 6.1 4.3 11.8 10 13.2C19.7 25.8 24 20.1 24 14V7L14 2z" stroke="#1d4ed8" strokeWidth="1.5" fill="none"/>
-                <path d="M10 14l3 3 5-6" stroke="#1d4ed8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-              <span className="text-xs font-medium" style={{ color: "#94a3b8" }}>Hosted &amp; secured by</span>
+                <button type="button" onClick={handleRetry} className="ghost-btn" data-testid="button-step2-prev">← Retour</button>
+              </>) : (<>
+                <div style={{ textAlign: "center", padding: "16px 0" }}>
+                  <div className="anim-pulse" style={{ display: "inline-block" }}>
+                    <div style={{ width: 80, height: 80, borderRadius: "50%", background: "#eff6ff", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }}>
+                      <Phone style={{ width: 38, height: 38, color: "#2563eb" }} />
+                    </div>
+                  </div>
+                  <p style={{ fontWeight: 700, fontSize: 15, color: "#111", marginTop: 14 }}>Validez sur votre téléphone</p>
+                  <p style={{ fontSize: 13, color: "#6b7280", marginTop: 6 }}>
+                    Une demande de paiement de <strong style={{ color: "#1d4ed8" }}>{formatAmount(amount)} {currency}</strong> a été envoyée sur votre appareil.
+                  </p>
+                  {omnipayFees > 0 && <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>Frais : {formatAmount(omnipayFees)} {currency}</p>}
+                </div>
+                {needsOrangeInstruction && (
+                  <div style={{ background: "#fff7ed", border: "1.5px solid #fed7aa", borderRadius: 12, padding: "10px 14px" }} data-testid="orange-instruction-step2">
+                    <p style={{ fontSize: 12, fontWeight: 600, color: "#c2410c", marginBottom: 4 }}>Orange Money — Comment valider ?</p>
+                    <p style={{ fontSize: 12, color: "#92400e" }}>Composez <strong>{orangeUssdCode}</strong> puis accédez au <strong>{orangeMenuHint}</strong> et validez.</p>
+                  </div>
+                )}
+                {omnipayPolling && (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, color: "#6b7280" }}>
+                    <Loader2 style={{ width: 14, height: 14, animation: "spin 1s linear infinite" }} />
+                    <span style={{ fontSize: 12 }}>Vérification en cours...</span>
+                  </div>
+                )}
+                <button type="button" onClick={handleRetry} className="ghost-btn" data-testid="button-step2-prev">← Retour</button>
+              </>)}
             </div>
-            <img
-              src={robotpayLogo}
-              alt="RobotPay"
-              style={{ height: 22, objectFit: "contain", opacity: 0.65, filter: "grayscale(20%)" }}
-            />
+          )}
+
+          {/* ══ STEP 3 ══════════════════════════════════════════════════════ */}
+          {step === 3 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16, paddingTop: 8 }} data-testid="step-3-content">
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <div className="anim-success">
+                  <div style={{ width: 96, height: 96, borderRadius: "50%", background: "radial-gradient(circle,#dcfce7 60%,#bbf7d0 100%)", border: "5px solid #86efac", boxShadow: "0 0 0 8px #dcfce7", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+                      <path className="anim-check" d="M10 25 L20 35 L38 14" stroke="#00b050" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                    </svg>
+                  </div>
+                </div>
+                <p style={{ fontSize: 11, fontWeight: 700, color: "#00b050", textTransform: "uppercase", letterSpacing: "0.12em", marginTop: 12 }}>Paiement approuvé</p>
+              </div>
+
+              <div style={{ borderRadius: 14, padding: "18px 20px", textAlign: "center", background: "linear-gradient(135deg,#1d4ed8 0%,#3b82f6 100%)" }}>
+                <p style={{ color: "rgba(255,255,255,0.65)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Montant débité</p>
+                <p style={{ color: "#fff", fontWeight: 800, fontSize: 38, letterSpacing: "-1px" }}>
+                  {formatAmount(amount)}<span style={{ fontSize: 20, fontWeight: 500, opacity: 0.75, marginLeft: 8 }}>{currency}</span>
+                </p>
+                {merchantInfo && <p style={{ color: "rgba(255,255,255,0.55)", fontSize: 12, marginTop: 6 }}>{merchantInfo.name}</p>}
+              </div>
+
+              <div style={{ border: "1.5px solid #e5e7eb", borderRadius: 14, overflow: "hidden" }}>
+                {omnipayReference && (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 16px", borderBottom: "1px solid #f3f4f6" }}>
+                    <span style={{ fontSize: 12, color: "#6b7280" }}>Référence</span>
+                    <span style={{ fontSize: 12, fontFamily: "monospace", fontWeight: 600, color: "#111" }}>{omnipayReference}</span>
+                  </div>
+                )}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 16px", borderBottom: "1px solid #f3f4f6" }}>
+                  <span style={{ fontSize: 12, color: "#6b7280" }}>Statut</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, background: "#dcfce7", color: "#166534", padding: "2px 10px", borderRadius: 99 }}>Confirmé</span>
+                </div>
+                {confirmedAt && (<>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 16px", borderBottom: "1px solid #f3f4f6" }}>
+                    <span style={{ fontSize: 12, color: "#6b7280" }}>Date</span>
+                    <span style={{ fontSize: 12, color: "#374151" }}>{formatDate(confirmedAt)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 16px" }}>
+                    <span style={{ fontSize: 12, color: "#6b7280", display: "flex", alignItems: "center", gap: 4 }}><Clock style={{ width: 12, height: 12 }} /> Heure</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>{formatTime(confirmedAt)}</span>
+                  </div>
+                </>)}
+              </div>
+
+              {redirectUrl ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <p style={{ textAlign: "center", fontSize: 12, color: "#9ca3af" }}>Redirection dans <strong style={{ color: "#374151" }}>{redirectCountdown}s</strong>...</p>
+                  <a href={(() => { try { const u = new URL(/^https?:\/\//i.test(redirectUrl) ? redirectUrl : `https://${redirectUrl}`); u.searchParams.set("status","success"); u.searchParams.set("amount",String(amount)); u.searchParams.set("ref",omnipayReference||""); return u.toString(); } catch { return "#"; } })()}
+                    className="pay-btn" style={{ textDecoration: "none", background: "linear-gradient(135deg,#f5c100 0%,#e8a800 100%)", color: "#1a1100" }} data-testid="link-redirect">
+                    Retourner sur le site
+                  </a>
+                </div>
+              ) : (
+                <p style={{ textAlign: "center", fontSize: 13, color: "#9ca3af" }}>Vous pouvez fermer cette page.</p>
+              )}
+            </div>
+          )}
+
+        </div>
+
+        {/* ── Footer ── */}
+        <div style={{ borderTop: "1px solid #f1f5f9", padding: "14px 20px", display: "flex", flexDirection: "column", alignItems: "center", gap: 6, background: "#fafafa" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {/* Shield + check SVG */}
+            <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+              <path d="M16 3L5 8.5v8c0 7 4.9 13.5 11 15 6.1-1.5 11-8 11-15v-8L16 3z" fill="#e8f0fe" stroke="#2563eb" strokeWidth="1.5" />
+              <path d="M11 16l4 4 6-7" stroke="#2563eb" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <div style={{ textAlign: "left" }}>
+              <p style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500 }}>Hosted &amp; secured by</p>
+              <img src={robotpayLogo} alt="RobotPay" style={{ height: 20, objectFit: "contain", filter: "grayscale(30%) brightness(0.4)", marginTop: 2 }} />
+            </div>
           </div>
         </div>
       </div>
 
-      {/* ── OTP Modal ─────────────────────────────────────────────────────────── */}
+      {/* ════════════ OTP MODAL ════════════ */}
       {showOtpPopup && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowOtpPopup(false); }}>
+        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setShowOtpPopup(false); }}>
           <div className="modal-box">
-            <div className="flex items-center justify-between mb-5">
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20 }}>
               <div>
-                <h3 className="font-bold text-base" style={{ color: "#111827" }}>Code OTP requis</h3>
-                <p className="text-xs mt-0.5" style={{ color: "#6b7280" }}>Orange Money</p>
+                <p style={{ fontWeight: 700, fontSize: 17, color: "#111" }}>Code OTP requis</p>
+                <p style={{ fontSize: 13, color: "#6b7280", marginTop: 2 }}>Orange Money</p>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowOtpPopup(false)}
-                style={{ width: 32, height: 32, borderRadius: "50%", background: "#f3f4f6", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
-              >
-                <X className="w-4 h-4" style={{ color: "#6b7280" }} />
+              <button onClick={() => setShowOtpPopup(false)}
+                style={{ width: 32, height: 32, borderRadius: "50%", border: "1.5px solid #e5e7eb", background: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <X style={{ width: 15, height: 15, color: "#6b7280" }} />
               </button>
             </div>
 
-            <div
-              className="rounded-2xl p-4 mb-5"
-              style={{ background: "#fff7ed", border: "1.5px solid #fed7aa" }}
-            >
-              <div className="flex items-start gap-3">
-                <div
-                  style={{ width: 36, height: 36, borderRadius: 10, background: "#ff6600", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
-                >
-                  <Phone className="w-4 h-4 text-white" />
+            <div style={{ background: "#fff7ed", border: "1.5px solid #fed7aa", borderRadius: 14, padding: "14px 16px", marginBottom: 18 }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: "#ff6600", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <Phone style={{ width: 18, height: 18, color: "#fff" }} />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold mb-1" style={{ color: "#c2410c" }}>Composez sur votre téléphone</p>
-                  <p className="text-sm" style={{ color: "#92400e" }}>
-                    <span
-                      className="font-bold font-mono px-2 py-0.5 rounded"
-                      style={{ background: "#fff", color: "#c2410c", border: "1px solid #fed7aa", fontSize: 15 }}
-                    >
+                  <p style={{ fontWeight: 600, fontSize: 13, color: "#c2410c", marginBottom: 4 }}>Composez sur votre téléphone</p>
+                  <p style={{ fontSize: 14, color: "#92400e" }}>
+                    <span style={{ fontFamily: "monospace", fontWeight: 800, fontSize: 16, background: "#fff", color: "#c2410c", padding: "2px 8px", borderRadius: 6, border: "1px solid #fed7aa" }}>
                       {otpUssdDisplay}
                     </span>
                     {" "}pour générer le code OTP et mettez-le ici.
@@ -1243,44 +710,23 @@ export default function PaymentPage() {
               </div>
             </div>
 
-            <div className="space-y-3">
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div>
-                <label className="block text-xs font-semibold mb-1.5" style={{ color: "#374151" }}>Votre code OTP</label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={8}
-                  value={otpCode}
-                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
-                  placeholder="Entrez le code reçu"
-                  className="pay-input"
-                  autoFocus
-                  data-testid="input-otp-orange"
-                  style={{ fontSize: 18, letterSpacing: "0.15em", textAlign: "center", fontWeight: 700 }}
-                />
+                <label style={{ fontSize: 12, fontWeight: 600, color: "#374151", display: "block", marginBottom: 6 }}>Votre code OTP</label>
+                <input type="text" inputMode="numeric" maxLength={8} value={otpCode}
+                  onChange={e => setOtpCode(e.target.value.replace(/\D/g, ""))}
+                  placeholder="Code reçu par téléphone" className="pay-input" autoFocus data-testid="input-otp-orange"
+                  style={{ textAlign: "center", fontSize: 22, fontWeight: 700, letterSpacing: "0.2em" }} />
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  if (!otpCode.trim()) {
-                    toast({ title: "Code OTP requis", description: "Veuillez entrer le code OTP reçu.", variant: "destructive" });
-                    return;
-                  }
-                  handleStep1Next();
-                }}
+              <button type="button" className="pay-btn" data-testid="button-otp-confirm"
                 disabled={isSubmitting || !otpCode.trim()}
-                className="pay-btn-yellow"
-                data-testid="button-otp-confirm"
-              >
-                {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                style={{ background: "linear-gradient(135deg,#f5c100 0%,#e8a800 100%)", color: "#1a1100" }}
+                onClick={() => { if (!otpCode.trim()) { toast({ title: "Code OTP requis", variant: "destructive" }); return; } handleStep1Next(); }}>
+                {isSubmitting && <Loader2 style={{ width: 16, height: 16, animation: "spin 1s linear infinite" }} />}
                 Confirmer et payer
               </button>
-              <button
-                type="button"
-                onClick={() => setShowOtpPopup(false)}
-                className="pay-btn-ghost w-full"
-                style={{ justifyContent: "center" }}
-              >
+              <button type="button" className="ghost-btn" onClick={() => setShowOtpPopup(false)}
+                style={{ justifyContent: "center", width: "100%" }}>
                 Annuler
               </button>
             </div>
