@@ -1588,6 +1588,170 @@ export async function notifyAdminWalletTransfer(data: {
   await notifyAdminGroup(msg);
 }
 
+const WITHDRAWAL_TRANSLATIONS: Record<string, {
+  title: string;
+  reference: string;
+  amountRequested: string;
+  fees: string;
+  amountSent: string;
+  phone: string;
+  country: string;
+  operator: string;
+  status: string;
+  date: string;
+  statusApproved: string;
+  statusRejected: string;
+  statusFailed: string;
+  statusPending: string;
+  dateLocale: string;
+}> = {
+  fr: {
+    title: "Demande de retrait",
+    reference: "Référence",
+    amountRequested: "Montant demandé",
+    fees: "Frais",
+    amountSent: "Montant envoyé",
+    phone: "Numéro de réception",
+    country: "Pays",
+    operator: "Opérateur",
+    status: "Statut",
+    date: "Date",
+    statusApproved: "Approuvé ✅",
+    statusRejected: "Rejeté ❌",
+    statusFailed: "Échoué ❌",
+    statusPending: "En attente ⏳",
+    dateLocale: "fr-FR",
+  },
+  en: {
+    title: "Withdrawal request",
+    reference: "Reference",
+    amountRequested: "Amount requested",
+    fees: "Fees",
+    amountSent: "Amount sent",
+    phone: "Receiving number",
+    country: "Country",
+    operator: "Operator",
+    status: "Status",
+    date: "Date",
+    statusApproved: "Approved ✅",
+    statusRejected: "Rejected ❌",
+    statusFailed: "Failed ❌",
+    statusPending: "Pending ⏳",
+    dateLocale: "en-GB",
+  },
+  zh: {
+    title: "提款请求",
+    reference: "参考编号",
+    amountRequested: "请求金额",
+    fees: "手续费",
+    amountSent: "发送金额",
+    phone: "收款号码",
+    country: "国家",
+    operator: "运营商",
+    status: "状态",
+    date: "日期",
+    statusApproved: "已批准 ✅",
+    statusRejected: "已拒绝 ❌",
+    statusFailed: "失败 ❌",
+    statusPending: "待处理 ⏳",
+    dateLocale: "zh-CN",
+  },
+  de: {
+    title: "Auszahlungsanfrage",
+    reference: "Referenz",
+    amountRequested: "Angeforderter Betrag",
+    fees: "Gebühren",
+    amountSent: "Gesendeter Betrag",
+    phone: "Empfangsnummer",
+    country: "Land",
+    operator: "Betreiber",
+    status: "Status",
+    date: "Datum",
+    statusApproved: "Genehmigt ✅",
+    statusRejected: "Abgelehnt ❌",
+    statusFailed: "Fehlgeschlagen ❌",
+    statusPending: "Ausstehend ⏳",
+    dateLocale: "de-DE",
+  },
+};
+
+const TRANSFER_TRANSLATIONS: Record<string, {
+  title: string;
+  reference: string;
+  from: string;
+  to: string;
+  amount: string;
+  fees: string;
+  received: string;
+  status: string;
+  date: string;
+  statusApproved: string;
+  statusRejected: string;
+  statusPending: string;
+  dateLocale: string;
+}> = {
+  fr: {
+    title: "Virement entre wallets",
+    reference: "Référence",
+    from: "De",
+    to: "Vers",
+    amount: "Montant",
+    fees: "Frais",
+    received: "Montant reçu",
+    status: "Statut",
+    date: "Date",
+    statusApproved: "Approuvé ✅",
+    statusRejected: "Rejeté ❌",
+    statusPending: "En attente ⏳",
+    dateLocale: "fr-FR",
+  },
+  en: {
+    title: "Wallet transfer",
+    reference: "Reference",
+    from: "From",
+    to: "To",
+    amount: "Amount",
+    fees: "Fees",
+    received: "Amount received",
+    status: "Status",
+    date: "Date",
+    statusApproved: "Approved ✅",
+    statusRejected: "Rejected ❌",
+    statusPending: "Pending ⏳",
+    dateLocale: "en-GB",
+  },
+  zh: {
+    title: "钱包转账",
+    reference: "参考编号",
+    from: "来自",
+    to: "到",
+    amount: "金额",
+    fees: "手续费",
+    received: "收到金额",
+    status: "状态",
+    date: "日期",
+    statusApproved: "已批准 ✅",
+    statusRejected: "已拒绝 ❌",
+    statusPending: "待处理 ⏳",
+    dateLocale: "zh-CN",
+  },
+  de: {
+    title: "Wallet-Überweisung",
+    reference: "Referenz",
+    from: "Von",
+    to: "Nach",
+    amount: "Betrag",
+    fees: "Gebühren",
+    received: "Erhaltener Betrag",
+    status: "Status",
+    date: "Datum",
+    statusApproved: "Genehmigt ✅",
+    statusRejected: "Abgelehnt ❌",
+    statusPending: "Ausstehend ⏳",
+    dateLocale: "de-DE",
+  },
+};
+
 export async function notifyMerchantWithdrawal(merchantId: number, data: {
   id: number;
   country: string;
@@ -1602,27 +1766,30 @@ export async function notifyMerchantWithdrawal(merchantId: number, data: {
     const merchant = await storage.getMerchantById(merchantId);
     if (!merchant?.telegramChatId) return;
 
-    const dateStr = new Date().toLocaleString("fr-FR", {
+    const lang = (merchant as any).telegramBotLanguage || "fr";
+    const tw = WITHDRAWAL_TRANSLATIONS[lang] || WITHDRAWAL_TRANSLATIONS["fr"];
+
+    const dateStr = new Date().toLocaleString(tw.dateLocale, {
       day: "2-digit", month: "long", year: "numeric",
       hour: "2-digit", minute: "2-digit", timeZone: "UTC",
     });
 
     const icon = data.status === "approved" ? "✅" : (data.status === "failed" || data.status === "rejected") ? "❌" : "⏳";
-    const statusLabel = data.status === "approved" ? "Approuvé ✅" : data.status === "rejected" ? "Rejeté ❌" : data.status === "failed" ? "Échoué ❌" : "En attente ⏳";
+    const statusLabel = data.status === "approved" ? tw.statusApproved : data.status === "rejected" ? tw.statusRejected : data.status === "failed" ? tw.statusFailed : tw.statusPending;
     const net = data.amount - data.fees;
 
     const lines = [
-      `${icon} *Demande de retrait*`,
+      `${icon} *${tw.title}*`,
       ``,
-      `🔖 *Référence :* \`WD-${data.id}\``,
-      `💰 *Montant demandé :* ${formatAmount(data.amount)}`,
-      data.fees > 0 ? `💵 *Frais :* ${formatAmount(data.fees)}` : null,
-      data.fees > 0 ? `✅ *Montant envoyé :* ${formatAmount(net)}` : null,
-      `📞 *Numéro de réception :* ${data.phone}`,
-      `🌍 *Pays :* ${countryLabel(data.country)}`,
-      data.operator ? `📱 *Opérateur :* ${data.operator}` : null,
-      `📊 *Statut :* ${statusLabel}`,
-      `📅 *Date :* ${dateStr}`,
+      `🔖 *${tw.reference} :* \`WD-${data.id}\``,
+      `💰 *${tw.amountRequested} :* ${formatAmount(data.amount)}`,
+      data.fees > 0 ? `💵 *${tw.fees} :* ${formatAmount(data.fees)}` : null,
+      data.fees > 0 ? `✅ *${tw.amountSent} :* ${formatAmount(net)}` : null,
+      `📞 *${tw.phone} :* ${data.phone}`,
+      `🌍 *${tw.country} :* ${countryLabel(data.country)}`,
+      data.operator ? `📱 *${tw.operator} :* ${data.operator}` : null,
+      `📊 *${tw.status} :* ${statusLabel}`,
+      `📅 *${tw.date} :* ${dateStr}`,
     ].filter(Boolean) as string[];
 
     await safeSend(merchant.telegramChatId, lines.join("\n"));
@@ -1645,25 +1812,28 @@ export async function notifyMerchantWalletTransfer(merchantId: number, data: {
     const merchant = await storage.getMerchantById(merchantId);
     if (!merchant?.telegramChatId) return;
 
-    const dateStr = new Date().toLocaleString("fr-FR", {
+    const lang = (merchant as any).telegramBotLanguage || "fr";
+    const tt = TRANSFER_TRANSLATIONS[lang] || TRANSFER_TRANSLATIONS["fr"];
+
+    const dateStr = new Date().toLocaleString(tt.dateLocale, {
       day: "2-digit", month: "long", year: "numeric",
       hour: "2-digit", minute: "2-digit", timeZone: "UTC",
     });
 
     const icon = data.status === "approved" ? "✅" : data.status === "rejected" ? "❌" : "⏳";
-    const statusLabel = data.status === "approved" ? "Approuvé ✅" : data.status === "rejected" ? "Rejeté ❌" : "En attente ⏳";
+    const statusLabel = data.status === "approved" ? tt.statusApproved : data.status === "rejected" ? tt.statusRejected : tt.statusPending;
     const net = data.amount - data.fee;
 
     const msg = [
-      `${icon} *Virement entre wallets*`,
+      `${icon} *${tt.title}*`,
       ``,
-      `🔖 *Référence :* \`TR-${data.id}\``,
-      `🌍 *De :* ${countryLabel(data.fromCountry)} ➡️ *Vers :* ${countryLabel(data.toCountry)}`,
-      `💰 *Montant :* ${formatAmount(data.amount)} ${data.currency}`,
-      `💵 *Frais :* ${formatAmount(data.fee)} ${data.currency}`,
-      `✅ *Montant reçu :* ${formatAmount(net)} ${data.currency}`,
-      `📊 *Statut :* ${statusLabel}`,
-      `📅 *Date :* ${dateStr}`,
+      `🔖 *${tt.reference} :* \`TR-${data.id}\``,
+      `🌍 *${tt.from} :* ${countryLabel(data.fromCountry)} ➡️ *${tt.to} :* ${countryLabel(data.toCountry)}`,
+      `💰 *${tt.amount} :* ${formatAmount(data.amount)} ${data.currency}`,
+      `💵 *${tt.fees} :* ${formatAmount(data.fee)} ${data.currency}`,
+      `✅ *${tt.received} :* ${formatAmount(net)} ${data.currency}`,
+      `📊 *${tt.status} :* ${statusLabel}`,
+      `📅 *${tt.date} :* ${dateStr}`,
     ].join("\n");
 
     await safeSend(merchant.telegramChatId, msg);
