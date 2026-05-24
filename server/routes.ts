@@ -1004,7 +1004,7 @@ export async function registerRoutes(
       }
 
       // ── Bypass OTP pour les comptes de test ──────────────────────────────────
-      const OTP_BYPASS_EMAILS = ["test@westpay.dev", "test@testmerchant.com"];
+      const OTP_BYPASS_EMAILS = ["test@westpay.dev", "test@testmerchant.com", "demo@westpay.dev"];
       if (OTP_BYPASS_EMAILS.includes(merchant.email.toLowerCase())) {
         const JWT_SECRET_KEY = process.env.JWT_SECRET || JWT_SECRET;
         const token = jwt.sign(
