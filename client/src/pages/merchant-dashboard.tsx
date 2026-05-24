@@ -499,10 +499,9 @@ function TransactionDetailDrawer({ tx, onClose }: { tx: any; onClose: () => void
     : { label: _t("failedLabel"), bg: "#fef2f2", color: "#dc2626", border: "#fecaca", dot: "#ef4444" };
 
   const providerLabel = (p: string) => {
-    if (p === "omnipay" || p === "mbiyo") return "Mobile Money";
     if (p === "crypto") return "Crypto";
     if (p === "sms") return "SMS";
-    return p || "—";
+    return "Mobile Money";
   };
 
   const copyToClipboard = (text: string, label: string) => {
@@ -607,7 +606,6 @@ function TransactionDetailDrawer({ tx, onClose }: { tx: any; onClose: () => void
           {(tx.payerNumber || tx.payer_number) && <DetailRow label="Téléphone" value={tx.payerNumber || tx.payer_number} copyable />}
           <DetailRow label="Pays" value={tx.country || "—"} />
           <DetailRow label="Mode" value={providerLabel(tx.provider)} />
-          {tx.omnipayTxId && <DetailRow label="ID Opérateur" value={tx.omnipayTxId} mono copyable />}
           <DetailRow label="Date" value={new Date(tx.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })} />
         </div>
 
@@ -678,9 +676,9 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
       : { label: "Échoué", bg: "#fef2f2", color: "#dc2626", border: "#fecaca", dot: "#ef4444" };
 
   const providerLabel = (p: string) => {
-    if (p === "omnipay" || p === "mbiyo") return "Mobile Money";
     if (p === "crypto") return "Crypto";
-    return "SMS";
+    if (p === "sms") return "SMS";
+    return "Mobile Money";
   };
 
   return (
