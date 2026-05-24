@@ -2,11 +2,13 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { db } from "./db";
+import { pool } from "./db";
 import { admins, merchantCountries } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
+import { sendMerchantOtpEmail } from "./email";
 import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, notifyAdminMerchantCreated, notifyAdminAdminCreated, getGeoInfo, notifyAdminMerchantLogin, notifyAdminIpBlocked, notifyAdminBruteForce, notifyAdminDeviceBlocked, notifyAdminNewDevice, notifyAdminOtp, notifyAdminVpn, notifyAdminCountryBlocked, notifyAdminLocationJump, notifyAdminNewMerchantIp } from "./telegram-bot";
 import {
   initiatePayment as omnipayInitiatePayment,
@@ -957,15 +959,96 @@ export async function registerRoutes(
       await storage.createLoginLog({ userId: merchant.id, role: "merchant", ip: clientIp, device: ua, success: true });
 
       if (!seenBefore) {
-        // Nouvelle IP jamais vue — log sécurité + alerte Telegram dédiée
         storage.createSecurityLog({ eventType: "new_ip_login", ip: clientIp, userEmail: merchant.email, action: "new_merchant_ip", details: merchant.name }).catch(() => {});
         notifyAdminNewMerchantIp({ email: merchant.email, merchantName: merchant.name, merchantId: merchant.id, ip: clientIp, device: ua }).catch(() => {});
       } else {
         notifyAdminMerchantLogin({ email: merchant.email, merchantName: merchant.name, ip: clientIp, device: ua, success: true }).catch(() => {});
       }
 
-      const token = signToken({ id: merchant.id, role: "merchant", email: merchant.email });
-      res.json({ token, user: { id: merchant.id, email: merchant.email, name: merchant.name, slug: merchant.slug } });
+      // ── Email OTP 2FA ─────────────────────────────────────────────────────────
+      const otpValue = String(Math.floor(100000 + Math.random() * 900000));
+      const otpHash = await bcrypt.hash(otpValue, 8);
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+      const tempToken = jwt.sign(
+        { merchantId: merchant.id, email: merchant.email, purpose: "merchant_otp", slug: merchant.slug, name: merchant.name },
+        process.env.JWT_SECRET || JWT_SECRET,
+        { expiresIn: "6m" }
+      );
+
+      // Invalider les anciens OTPs non utilisés pour cet email
+      await pool.query(`DELETE FROM merchant_login_otps WHERE email = $1`, [merchant.email]);
+
+      await pool.query(
+        `INSERT INTO merchant_login_otps (email, otp_hash, temp_token, expires_at, used, attempts)
+         VALUES ($1, $2, $3, $4, false, 0)`,
+        [merchant.email, otpHash, tempToken, expiresAt]
+      );
+
+      // Envoyer l'OTP par email (non-bloquant si Resend non configuré)
+      sendMerchantOtpEmail(merchant.email, otpValue, merchant.name).catch((err) => {
+        console.error("[MERCHANT OTP] Erreur email:", err);
+      });
+
+      return res.json({ requiresOtp: true, tempToken });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Merchant email OTP verification ───────────────────────────────────────────
+  app.post("/api/auth/merchant/verify-otp", async (req, res) => {
+    try {
+      const { tempToken, code } = req.body;
+      if (!tempToken || !code) return res.status(400).json({ message: "Données manquantes" });
+
+      let payload: any;
+      try {
+        payload = jwt.verify(tempToken, process.env.JWT_SECRET || JWT_SECRET);
+      } catch {
+        return res.status(401).json({ message: "Session expirée, veuillez vous reconnecter." });
+      }
+
+      if (payload.purpose !== "merchant_otp") {
+        return res.status(401).json({ message: "Token invalide" });
+      }
+
+      const { merchantId, email, slug, name } = payload;
+
+      // Récupérer l'OTP en DB
+      const otpRow = await pool.query(
+        `SELECT id, otp_hash, expires_at, used, attempts
+         FROM merchant_login_otps
+         WHERE email = $1 AND temp_token = $2
+         ORDER BY created_at DESC LIMIT 1`,
+        [email, tempToken]
+      );
+
+      if (!otpRow.rowCount || otpRow.rowCount === 0) {
+        return res.status(401).json({ message: "Code introuvable ou expiré." });
+      }
+
+      const otp = otpRow.rows[0];
+
+      if (otp.used) return res.status(401).json({ message: "Ce code a déjà été utilisé." });
+      if (new Date(otp.expires_at) < new Date()) return res.status(401).json({ message: "Code expiré." });
+      if (otp.attempts >= 5) {
+        return res.status(429).json({ message: "Trop de tentatives. Veuillez vous reconnecter." });
+      }
+
+      // Incrémenter les tentatives
+      await pool.query(`UPDATE merchant_login_otps SET attempts = attempts + 1 WHERE id = $1`, [otp.id]);
+
+      const valid = await bcrypt.compare(String(code).trim(), otp.otp_hash);
+      if (!valid) {
+        const remaining = 4 - otp.attempts;
+        return res.status(401).json({ message: `Code incorrect. ${remaining > 0 ? `${remaining} tentative(s) restante(s).` : "Veuillez vous reconnecter."}` });
+      }
+
+      // Marquer comme utilisé
+      await pool.query(`UPDATE merchant_login_otps SET used = true WHERE id = $1`, [otp.id]);
+
+      const token = signToken({ id: merchantId, role: "merchant", email });
+      return res.json({ token, user: { id: merchantId, email, name, slug } });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -4880,7 +4963,7 @@ export async function registerRoutes(
   app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
-      const { merchantCountryId, amount, phone, operator } = req.body;
+      const { merchantCountryId, amount, phone, operator, recipientName } = req.body;
       if (!merchantCountryId || !amount || !phone) return res.status(400).json({ message: "Champs requis manquants" });
 
       const withdrawalsDisabledFlag = await storage.getSetting("withdrawals_disabled");
@@ -4930,6 +5013,7 @@ export async function registerRoutes(
         country: mc.country,
         amount,
         phone,
+        recipientName: recipientName || null,
         operator: operator || null,
         status: "pending",
         withdrawalMode: "auto",

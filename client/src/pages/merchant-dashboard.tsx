@@ -462,12 +462,97 @@ function AnalysePanel({ token }: { token: string | null }) {
   );
 }
 
+function TransactionReceiptModal({ tx, onClose }: { tx: any; onClose: () => void }) {
+  const isTransfer = tx.amount < 0 || tx.txId?.startsWith("TR-");
+  const statusColor = tx.status === "confirmed" ? "#00b050" : tx.status === "pending" ? "#f59e0b" : "#ef4444";
+  const statusLabel = tx.status === "confirmed" ? "Confirmé" : tx.status === "pending" ? "En attente" : "Échoué";
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm bg-white rounded-3xl overflow-hidden shadow-2xl"
+        style={{ maxHeight: "90vh", overflowY: "auto" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Receipt Header */}
+        <div className="p-6 text-center" style={{ background: "linear-gradient(135deg,#00b050,#005c2e)" }}>
+          <div className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center mx-auto mb-3">
+            {tx.status === "confirmed" ? (
+              <CheckCircle2 className="w-8 h-8 text-white" />
+            ) : tx.status === "pending" ? (
+              <Loader2 className="w-8 h-8 text-white animate-spin" />
+            ) : (
+              <X className="w-8 h-8 text-white" />
+            )}
+          </div>
+          <p className="text-white/80 text-sm font-medium mb-1">{isTransfer ? "Transfert" : "Paiement reçu"}</p>
+          <p className="text-3xl font-black text-white">
+            {isTransfer ? "" : "+"}{Math.abs(tx.amount).toLocaleString("fr-FR")} <span className="text-xl text-white/80">FCFA</span>
+          </p>
+        </div>
+
+        {/* Status badge */}
+        <div className="flex justify-center -mt-3 mb-0">
+          <span className="px-4 py-1 rounded-full text-sm font-bold shadow-sm"
+            style={{ background: statusColor, color: "#fff" }}>
+            {statusLabel}
+          </span>
+        </div>
+
+        {/* Receipt body */}
+        <div className="p-6 space-y-0">
+          <div className="border-t border-dashed border-slate-200 my-4" />
+
+          {[
+            { label: "Référence", value: tx.txId, mono: true },
+            { label: "Payeur", value: (tx.payerName || tx.payer_name) || "—" },
+            { label: "Numéro", value: (tx.payerNumber || tx.payer_number) || "—" },
+            { label: "Pays", value: tx.country },
+            { label: "Mode", value: tx.provider === "omnipay" || tx.provider === "mbiyo" ? "Mobile Money" : tx.provider === "crypto" ? "Crypto" : tx.provider || "—" },
+            { label: "Date", value: new Date(tx.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }) },
+          ].map(({ label, value, mono }) => (
+            <div key={label} className="flex items-start justify-between gap-3 py-2.5 border-b border-slate-100 last:border-0">
+              <span className="text-sm text-slate-500 flex-shrink-0">{label}</span>
+              <span className={`text-sm font-semibold text-slate-800 text-right ${mono ? "font-mono" : ""}`} style={{ wordBreak: "break-all" }}>{value}</span>
+            </div>
+          ))}
+
+          <div className="border-t border-dashed border-slate-200 my-4" />
+
+          <div className="flex items-center justify-center gap-2 py-2">
+            <div className="w-2 h-2 rounded-full" style={{ background: "#00b050" }} />
+            <span className="text-xs text-slate-400">Validé par WestPay</span>
+            <div className="w-2 h-2 rounded-full" style={{ background: "#00b050" }} />
+          </div>
+        </div>
+
+        {/* Close button */}
+        <div className="px-6 pb-6">
+          <button
+            onClick={onClose}
+            className="w-full py-3 rounded-2xl text-sm font-bold transition-all"
+            style={{ background: "#f1f5f9", color: "#64748b", border: "none", cursor: "pointer" }}
+            data-testid="button-close-receipt"
+          >
+            Fermer
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MerchantTransactionsPanel({ token }: { token: string | null }) {
   const { t } = useLanguage();
   const { data: transactions = [], isLoading } = useMerchantFetch("/api/merchant/transactions", ["/api/merchant/transactions"], token);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterProvider, setFilterProvider] = useState("all");
+  const [selectedTx, setSelectedTx] = useState<any>(null);
 
   if (isLoading) return <MerchantLoadingSkeleton />;
 
@@ -589,7 +674,13 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
             const txPayerName = (tx as any).payerName;
             const statusColor = tx.status === "confirmed" ? { bg: "#d4edda", color: "#155724" } : tx.status === "pending" ? { bg: "#fff3cd", color: "#856404" } : { bg: "#f8d7da", color: "#721c24" };
             return (
-              <div key={tx.id} className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }} data-testid={`card-tx-${tx.id}`}>
+              <div
+                key={tx.id}
+                className="bg-white rounded-2xl p-4 shadow-sm cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5"
+                style={{ border: "1.5px solid #e8ecf0" }}
+                onClick={() => setSelectedTx(tx)}
+                data-testid={`card-tx-${tx.id}`}
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -606,7 +697,6 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs" style={{ color: "#888" }}>
                       {tx.payerNumber && <span><Phone className="w-3 h-3 inline mr-0.5" /><span data-testid={`text-payer-number-${tx.id}`}>{tx.payerNumber}</span></span>}
                       <span><Calendar className="w-3 h-3 inline mr-0.5" /><span data-testid={`text-tx-date-${tx.id}`}>{new Date(tx.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span></span>
-                      <span style={{ color: "#1976d2", fontWeight: 600 }}>Validé par RobotPay</span>
                     </div>
                   </div>
                   <div className="text-right shrink-0">
@@ -614,6 +704,7 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
                       {isTransfer ? "" : "+"}{tx.amount.toLocaleString("fr-FR")}
                     </p>
                     <p className="text-xs" style={{ color: "#aaa" }}>FCFA</p>
+                    <Receipt className="w-3.5 h-3.5 mt-1 ml-auto" style={{ color: "#cbd5e1" }} />
                   </div>
                 </div>
               </div>
@@ -621,6 +712,8 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
           })
         )}
       </div>
+
+      {selectedTx && <TransactionReceiptModal tx={selectedTx} onClose={() => setSelectedTx(null)} />}
     </div>
   );
 }
@@ -1210,6 +1303,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
   const [selectedOperator, setSelectedOperator] = useState("");
   const [amount, setAmount] = useState("");
   const [phone, setPhone] = useState("");
+  const [recipientName, setRecipientName] = useState("");
 
   const activeWallets = (balance as MerchantCountry[]).filter(w => w.active);
   const selectedWallet = activeWallets.find(w => String(w.id) === selectedWalletId);
@@ -1228,10 +1322,11 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
     setSelectedOperator("");
     setPhone("");
     setAmount("");
+    setRecipientName("");
   };
 
   const createMutation = useMutation({
-    mutationFn: async (data: { merchantCountryId: number; amount: number; phone: string; operator: string }) => {
+    mutationFn: async (data: { merchantCountryId: number; amount: number; phone: string; operator: string; recipientName?: string }) => {
       const res = await fetch("/api/merchant/withdrawals", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -1243,7 +1338,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/withdrawals"] });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/balance"] });
-      setAmount(""); setPhone(""); setSelectedOperator("");
+      setAmount(""); setPhone(""); setSelectedOperator(""); setRecipientName("");
       toast({ title: "Demande soumise", description: "Votre demande de reversement est en cours de traitement." });
     },
     onError: () => toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" }),
@@ -1258,7 +1353,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
       toast({ title: "Solde insuffisant", description: `Votre solde disponible est de ${selectedWallet.balance.toLocaleString("fr-FR")} ${countryToCurrency(selectedWallet.country)}.`, variant: "destructive" });
       return;
     }
-    createMutation.mutate({ merchantCountryId: Number(selectedWalletId), amount: amountNum, phone, operator: selectedOperator });
+    createMutation.mutate({ merchantCountryId: Number(selectedWalletId), amount: amountNum, phone, operator: selectedOperator, recipientName: recipientName.trim() || undefined });
   };
 
   const totalWithdrawn = (withdrawalList as Withdrawal[]).filter(w => w.status === "approved").reduce((s, w) => s + w.amount, 0);
@@ -1408,6 +1503,18 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                   })()}
                 </div>
                 <div>
+                  <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>Nom du bénéficiaire <span style={{ color: "#aaa", fontWeight: 400 }}>(optionnel)</span></label>
+                  <input
+                    type="text"
+                    value={recipientName}
+                    onChange={(e) => setRecipientName(e.target.value)}
+                    placeholder="Prénom et nom du destinataire"
+                    className="w-full rounded-xl px-4 py-2.5 text-sm outline-none transition-all"
+                    style={{ border: "1.5px solid #e2e8f0", background: "#fff", color: "#1a1a1a" }}
+                    data-testid="input-withdrawal-recipient-name"
+                  />
+                </div>
+                <div>
                   <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>{t("phone")}</label>
                   <input
                     type="text"
@@ -1457,6 +1564,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: "#888" }}>
                 <span className="font-medium" style={{ color: "#555" }}>{w.country}</span>
                 {(w as any).operator && <span style={{ color: "#1e88e5", fontWeight: 600 }}>{(w as any).operator}</span>}
+                {(w as any).recipientName && <span className="font-medium" style={{ color: "#333" }}><User className="w-3 h-3 inline mr-0.5" />{(w as any).recipientName}</span>}
                 <span><Phone className="w-3 h-3 inline mr-0.5" />{w.phone}</span>
                 <span>{new Date(w.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" })}</span>
                 <span className="px-1.5 py-0.5 rounded-full text-xs" style={{ background: "#f0f0f0", color: "#666" }}>{w.withdrawalMode === "auto" ? t("autoMode") : t("manualMode")}</span>

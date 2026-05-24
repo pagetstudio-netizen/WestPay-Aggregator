@@ -177,6 +177,7 @@ export const withdrawals = pgTable("withdrawals", {
   country: text("country").notNull(),
   amount: integer("amount").notNull(),
   phone: text("phone").notNull(),
+  recipientName: text("recipient_name"),
   operator: text("operator"),
   status: text("status").notNull().default("pending"),
   withdrawalMode: text("withdrawal_mode").notNull().default("manual"),
@@ -187,6 +188,17 @@ export const withdrawals = pgTable("withdrawals", {
   gateway: text("gateway").notNull().default("omnipay"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   processedAt: timestamp("processed_at"),
+});
+
+export const merchantLoginOtps = pgTable("merchant_login_otps", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(),
+  otpHash: text("otp_hash").notNull(),
+  tempToken: text("temp_token").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  used: boolean("used").default(false).notNull(),
+  attempts: integer("attempts").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const withdrawalOperators = pgTable("withdrawal_operators", {

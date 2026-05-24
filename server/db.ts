@@ -397,8 +397,24 @@ export async function runMigrations() {
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS fees integer DEFAULT 0;
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS provider_payout_fee integer;
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS gateway text NOT NULL DEFAULT 'omnipay';
+      ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS recipient_name text;
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS omnipay_code text;
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS mbiyo_code text;
+    `);
+
+    // ── Merchant login OTP table ────────────────────────────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS merchant_login_otps (
+        id serial PRIMARY KEY,
+        email text NOT NULL,
+        otp_hash text NOT NULL,
+        temp_token text NOT NULL,
+        expires_at timestamp NOT NULL,
+        used boolean DEFAULT false NOT NULL,
+        attempts integer DEFAULT 0 NOT NULL,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS merchant_login_otps_email_idx ON merchant_login_otps(email);
     `);
 
     // ── Index uniques ──────────────────────────────────────────────────────────────

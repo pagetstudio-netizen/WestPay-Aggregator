@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
-import { Eye, EyeOff, Loader2, Shield, KeyRound } from "lucide-react";
+import { Eye, EyeOff, Loader2, Shield, KeyRound, Lock, CheckCircle2, Zap, Globe } from "lucide-react";
 
 async function buildDeviceFingerprint(): Promise<string> {
   try {
@@ -21,7 +21,6 @@ async function buildDeviceFingerprint(): Promise<string> {
       navigator.languages?.join(",") || "",
     ];
 
-    // Canvas fingerprint
     try {
       const canvas = document.createElement("canvas");
       canvas.width = 240;
@@ -41,7 +40,6 @@ async function buildDeviceFingerprint(): Promise<string> {
       }
     } catch { /* canvas blocked */ }
 
-    // WebGL fingerprint
     try {
       const c = document.createElement("canvas");
       const gl = c.getContext("webgl") as WebGLRenderingContext | null;
@@ -56,7 +54,6 @@ async function buildDeviceFingerprint(): Promise<string> {
       }
     } catch { /* webgl blocked */ }
 
-    // Audio context fingerprint
     try {
       const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
       const oscillator = ac.createOscillator();
@@ -76,7 +73,6 @@ async function buildDeviceFingerprint(): Promise<string> {
     } catch { /* audio blocked */ }
 
     const raw = parts.join("|");
-    // SHA-256 via Web Crypto API
     const encoder = new TextEncoder();
     const dataBuffer = encoder.encode(raw);
     const hashBuffer = await crypto.subtle.digest("SHA-256", dataBuffer);
@@ -85,7 +81,6 @@ async function buildDeviceFingerprint(): Promise<string> {
     localStorage.setItem("_wp_dfp2", fp);
     return fp;
   } catch {
-    // Fallback: simple hash
     const raw = [navigator.userAgent, navigator.language, screen.width, screen.height].join("|");
     let hash = 0;
     for (let i = 0; i < raw.length; i++) {
@@ -96,6 +91,13 @@ async function buildDeviceFingerprint(): Promise<string> {
   }
 }
 
+const FEATURES = [
+  { icon: Zap, label: "Paiements Mobile Money instantanés" },
+  { icon: Globe, label: "Multi-opérateurs, multi-pays" },
+  { icon: Shield, label: "Sécurité renforcée & audit complet" },
+  { icon: CheckCircle2, label: "Tableau de bord temps réel" },
+];
+
 export default function AdminLogin() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -103,7 +105,6 @@ export default function AdminLogin() {
   const [isLoading, setIsLoading] = useState(false);
   const [ipStatus, setIpStatus] = useState<"checking" | "allowed" | "denied">("checking");
 
-  // 2FA state
   const [otpStep, setOtpStep] = useState(false);
   const [otpCode, setOtpCode] = useState("");
   const [otpToken, setOtpToken] = useState("");
@@ -117,14 +118,10 @@ export default function AdminLogin() {
     fetch("/api/auth/check-ip")
       .then((r) => r.json())
       .then((d) => {
-        if (d.allowed === false) {
-          setLocation("/ip-verify");
-        } else {
-          setIpStatus("allowed");
-        }
+        if (d.allowed === false) setLocation("/ip-verify");
+        else setIpStatus("allowed");
       })
       .catch(() => setIpStatus("allowed"));
-    // Pre-build fingerprint in background
     buildDeviceFingerprint().catch(() => {});
   }, [setLocation]);
 
@@ -160,7 +157,7 @@ export default function AdminLogin() {
         return;
       }
       login(data.token, { id: data.user.id, email: data.user.email, role: "admin" });
-      toast({ title: "Connexion réussie", description: "Redirection vers le tableau de bord..." });
+      toast({ title: "Connexion réussie", description: "Redirection..." });
       setTimeout(() => setLocation("/admin-access-958425546648484886646634808526522886433/dashboard"), 300);
     } catch (err: any) {
       toast({ title: "Erreur", description: err.message, variant: "destructive" });
@@ -193,14 +190,14 @@ export default function AdminLogin() {
 
   if (ipStatus === "checking") {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "#f5f5f5" }}>
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: "#00b050" }}>
-            <Shield className="w-6 h-6 text-white" />
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg" style={{ background: "linear-gradient(135deg,#00b050,#005c2e)" }}>
+            <Shield className="w-7 h-7 text-white" />
           </div>
           <div className="flex items-center gap-2">
-            <Loader2 className="w-4 h-4 animate-spin" style={{ color: "#00b050" }} />
-            <span className="text-sm font-medium" style={{ color: "#64748b" }}>Vérification de sécurité...</span>
+            <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+            <span className="text-sm font-medium text-slate-500">Vérification de sécurité...</span>
           </div>
         </div>
       </div>
@@ -208,195 +205,221 @@ export default function AdminLogin() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4" style={{ background: "#f5f5f5" }}>
+    <div className="min-h-screen flex bg-white">
       <style>{`
-        .wp-admin-input {
-          width: 100%;
-          padding: 0.65rem 0.875rem;
-          font-size: 0.9rem;
-          border: 1.5px solid #e2e8f0;
-          border-radius: 0.5rem;
-          background: #fff;
-          color: #1a1a1a;
-          outline: none;
-          transition: border-color 0.15s, box-shadow 0.15s;
+        .al-input {
+          width:100%;padding:0.7rem 0.9rem;font-size:0.9rem;
+          border:1.5px solid #e2e8f0;border-radius:10px;
+          background:#fafafa;color:#1a1a1a;outline:none;
+          transition:border-color 0.15s,box-shadow 0.15s,background 0.15s;
         }
-        .wp-admin-input:focus {
-          border-color: #00b050;
-          box-shadow: 0 0 0 3px rgba(0,176,80,0.1);
+        .al-input:focus { border-color:#00b050;box-shadow:0 0 0 3px rgba(0,176,80,0.1);background:#fff; }
+        .al-input::placeholder { color:#b0bec5; }
+        .al-btn {
+          width:100%;padding:0.8rem;font-size:0.95rem;font-weight:700;
+          background:linear-gradient(135deg,#00b050,#009a45);color:#fff;
+          border:none;border-radius:10px;cursor:pointer;
+          transition:opacity 0.15s,transform 0.1s,box-shadow 0.15s;
+          display:flex;align-items:center;justify-content:center;gap:0.5rem;
+          box-shadow:0 4px 14px rgba(0,176,80,0.3);letter-spacing:0.01em;
         }
-        .wp-admin-input::placeholder { color: #a0aec0; }
-        .wp-admin-btn {
-          width: 100%;
-          padding: 0.75rem;
-          font-size: 0.95rem;
-          font-weight: 600;
-          background: #00b050;
-          color: #fff;
-          border: none;
-          border-radius: 0.5rem;
-          cursor: pointer;
-          transition: background 0.15s, transform 0.1s;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 0.5rem;
+        .al-btn:hover:not(:disabled) { opacity:0.92;box-shadow:0 6px 20px rgba(0,176,80,0.35); }
+        .al-btn:active:not(:disabled) { transform:scale(0.98); }
+        .al-btn:disabled { opacity:0.45;cursor:not-allowed;box-shadow:none; }
+        .al-otp {
+          width:100%;padding:0.85rem 1rem;font-size:1.75rem;font-weight:800;
+          letter-spacing:0.5em;text-align:center;
+          border:2px solid #e2e8f0;border-radius:12px;
+          background:#fafafa;color:#1a1a1a;outline:none;
+          transition:border-color 0.15s,box-shadow 0.15s;
         }
-        .wp-admin-btn:hover:not(:disabled) { background: #009a45; }
-        .wp-admin-btn:active:not(:disabled) { transform: scale(0.98); }
-        .wp-admin-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .wp-otp-input {
-          width: 100%;
-          padding: 0.75rem 1rem;
-          font-size: 1.5rem;
-          font-weight: 700;
-          letter-spacing: 0.4em;
-          text-align: center;
-          border: 2px solid #e2e8f0;
-          border-radius: 0.5rem;
-          background: #fff;
-          color: #1a1a1a;
-          outline: none;
-          transition: border-color 0.15s, box-shadow 0.15s;
-        }
-        .wp-otp-input:focus {
-          border-color: #00b050;
-          box-shadow: 0 0 0 3px rgba(0,176,80,0.1);
-        }
+        .al-otp:focus { border-color:#00b050;box-shadow:0 0 0 3px rgba(0,176,80,0.1);background:#fff; }
       `}</style>
 
-      <div className="w-full max-w-[380px]">
-        <div className="text-center mb-7">
-          <img
-            src="/robotpay-logo.jpg"
-            alt="WestPay"
-            className="w-16 h-16 rounded-2xl object-cover mx-auto mb-4 shadow-sm"
-          />
-          <h1 className="text-2xl font-bold" style={{ color: "#1a1a1a" }}>
-            {otpStep ? "Vérification 2FA" : "Se connecter à votre compte"}
-          </h1>
-          {otpStep && (
-            <p className="text-sm mt-1" style={{ color: "#64748b" }}>Entrez le code reçu sur Telegram</p>
-          )}
+      {/* Left brand panel */}
+      <div className="hidden lg:flex lg:w-[52%] xl:w-[55%] flex-col justify-between p-12 relative overflow-hidden"
+        style={{ background: "linear-gradient(145deg,#00b050 0%,#005c2e 60%,#003d1e 100%)" }}>
+        <div className="absolute inset-0 opacity-10"
+          style={{ backgroundImage: "radial-gradient(circle at 20% 80%,#ffffff 0%,transparent 50%),radial-gradient(circle at 80% 20%,#ffffff 0%,transparent 40%)" }} />
+
+        <div className="relative z-10">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-11 h-11 rounded-xl bg-white/20 backdrop-blur flex items-center justify-center">
+              <img src="/robotpay-logo.jpg" alt="WestPay" className="w-9 h-9 rounded-lg object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display='none'; }} />
+            </div>
+            <span className="text-2xl font-black text-white tracking-tight">WestPay</span>
+          </div>
+          <p className="text-white/60 text-sm mt-1">Plateforme de paiement Mobile Money</p>
         </div>
 
-        <div className="bg-white rounded-2xl p-6 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+        <div className="relative z-10 space-y-6">
+          <div>
+            <h2 className="text-3xl xl:text-4xl font-black text-white leading-tight mb-3">
+              La plateforme de référence pour le Mobile Money en Afrique
+            </h2>
+            <p className="text-white/70 text-base leading-relaxed">
+              Agrégez, gérez et pilotez vos paiements Mobile Money sur l'ensemble de vos marchands en temps réel.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            {FEATURES.map(({ icon: Icon, label }) => (
+              <div key={label} className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center flex-shrink-0">
+                  <Icon className="w-4 h-4 text-white" />
+                </div>
+                <span className="text-white/85 text-sm font-medium">{label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="relative z-10 flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse" />
+          <span className="text-white/50 text-xs">Système opérationnel</span>
+        </div>
+      </div>
+
+      {/* Right form panel */}
+      <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-10 bg-white">
+        <div className="w-full max-w-[400px]">
+          {/* Mobile logo */}
+          <div className="flex lg:hidden items-center justify-center gap-3 mb-8">
+            <div className="w-10 h-10 rounded-xl overflow-hidden shadow">
+              <img src="/robotpay-logo.jpg" alt="WestPay" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display='none'; }} />
+            </div>
+            <span className="text-xl font-black text-slate-900">WestPay</span>
+          </div>
+
           {!otpStep ? (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="block text-sm font-semibold" style={{ color: "#1a1a1a" }}>
-                  Adresse email
-                </label>
-                <input
-                  type="email"
-                  className="wp-admin-input"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Votre adresse email"
-                  required
-                  data-testid="input-admin-email"
-                />
+            <>
+              <div className="mb-8">
+                <h1 className="text-2xl font-black text-slate-900 mb-1">Administration</h1>
+                <p className="text-slate-500 text-sm">Accès réservé aux administrateurs autorisés.</p>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="block text-sm font-semibold" style={{ color: "#1a1a1a" }}>
-                  Mot de passe
-                </label>
-                <div className="relative">
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="block text-sm font-semibold text-slate-700">Adresse email</label>
                   <input
-                    type={showPassword ? "text" : "password"}
-                    className="wp-admin-input"
-                    style={{ paddingRight: "2.5rem" }}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Mot de passe administrateur"
+                    type="email"
+                    className="al-input"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="admin@westpay.cloud"
                     required
-                    data-testid="input-admin-password"
+                    autoComplete="username"
+                    data-testid="input-admin-email"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2"
-                    style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: "#a0aec0" }}
-                    data-testid="button-toggle-password"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
                 </div>
-                <div className="flex justify-end mt-1">
-                  <button
-                    type="button"
-                    className="text-sm font-medium"
-                    style={{ background: "none", border: "none", cursor: "pointer", color: "#00b050", padding: 0 }}
-                    onClick={() => toast({ title: "Accès restreint", description: "Contactez un super-administrateur pour réinitialiser votre mot de passe." })}
-                    data-testid="link-admin-forgot-password"
-                  >
-                    Mot de passe oublié ?
-                  </button>
-                </div>
-              </div>
 
-              <button
-                type="submit"
-                disabled={isLoading || !email || !password}
-                className="wp-admin-btn"
-                style={{ marginTop: "0.5rem" }}
-                data-testid="button-admin-login"
-              >
-                {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                {isLoading ? "Connexion..." : "Se connecter"}
-              </button>
-            </form>
+                <div className="space-y-1.5">
+                  <label className="block text-sm font-semibold text-slate-700">Mot de passe</label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      className="al-input"
+                      style={{ paddingRight: "2.75rem" }}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••••••"
+                      required
+                      autoComplete="current-password"
+                      data-testid="input-admin-password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                      style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
+                      data-testid="button-toggle-password"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 transition-colors"
+                      style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 0" }}
+                      onClick={() => toast({ title: "Accès restreint", description: "Contactez un super-administrateur pour réinitialiser votre mot de passe." })}
+                      data-testid="link-admin-forgot-password"
+                    >
+                      Mot de passe oublié ?
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isLoading || !email || !password}
+                  className="al-btn"
+                  style={{ marginTop: "0.75rem" }}
+                  data-testid="button-admin-login"
+                >
+                  {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+                  {isLoading ? "Connexion..." : "Se connecter"}
+                </button>
+              </form>
+            </>
           ) : (
-            <form onSubmit={handleVerifyOtp} className="space-y-5">
-              <div className="flex items-center justify-center gap-3 p-3 rounded-lg" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
-                <KeyRound className="w-5 h-5 shrink-0" style={{ color: "#00b050" }} />
-                <p className="text-sm font-medium" style={{ color: "#166534" }}>Code envoyé sur Telegram — valide 5 minutes</p>
+            <>
+              <div className="mb-8">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4 mx-auto"
+                  style={{ background: "linear-gradient(135deg,#00b050,#005c2e)" }}>
+                  <Shield className="w-7 h-7 text-white" />
+                </div>
+                <h1 className="text-2xl font-black text-slate-900 text-center mb-1">Vérification 2FA</h1>
+                <p className="text-slate-500 text-sm text-center">Entrez le code reçu sur Telegram</p>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="block text-sm font-semibold text-center" style={{ color: "#1a1a1a" }}>
-                  Code de vérification
-                </label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={6}
-                  className="wp-otp-input"
-                  value={otpCode}
-                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                  placeholder="000000"
-                  autoFocus
-                  data-testid="input-otp-code"
-                />
-              </div>
+              <form onSubmit={handleVerifyOtp} className="space-y-5">
+                <div className="flex items-center gap-3 p-3.5 rounded-xl bg-emerald-50 border border-emerald-100">
+                  <KeyRound className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                  <p className="text-sm font-medium text-emerald-800">Code Telegram envoyé · valable 5 minutes</p>
+                </div>
 
-              <button
-                type="submit"
-                disabled={otpLoading || otpCode.length !== 6}
-                className="wp-admin-btn"
-                data-testid="button-verify-otp"
-              >
-                {otpLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
-                {otpLoading ? "Vérification..." : "Confirmer"}
-              </button>
+                <div className="space-y-1.5">
+                  <label className="block text-sm font-semibold text-slate-700 text-center">Code de vérification</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    className="al-otp"
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="000000"
+                    autoFocus
+                    data-testid="input-otp-code"
+                  />
+                </div>
 
-              <button
-                type="button"
-                onClick={() => { setOtpStep(false); setOtpCode(""); setOtpToken(""); }}
-                style={{ width: "100%", background: "none", border: "none", cursor: "pointer", color: "#64748b", fontSize: "0.85rem", padding: "0.25rem" }}
-                data-testid="button-back-to-login"
-              >
-                ← Retour à la connexion
-              </button>
-            </form>
+                <button
+                  type="submit"
+                  disabled={otpLoading || otpCode.length !== 6}
+                  className="al-btn"
+                  data-testid="button-verify-otp"
+                >
+                  {otpLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
+                  {otpLoading ? "Vérification..." : "Confirmer le code"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setOtpStep(false); setOtpCode(""); setOtpToken(""); }}
+                  className="w-full text-sm text-slate-400 hover:text-slate-600 transition-colors font-medium py-1"
+                  style={{ background: "none", border: "none", cursor: "pointer" }}
+                  data-testid="button-back-to-login"
+                >
+                  ← Retour à la connexion
+                </button>
+              </form>
+            </>
           )}
-        </div>
 
-        <div className="mt-6 text-center">
-          <p className="text-xs" style={{ color: "#a0aec0" }}>
-            Accès réservé aux administrateurs autorisés — WestPay
+          <p className="text-center text-xs text-slate-300 mt-8">
+            © {new Date().getFullYear()} WestPay · Accès sécurisé
           </p>
         </div>
       </div>

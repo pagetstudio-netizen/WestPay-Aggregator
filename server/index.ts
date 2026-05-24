@@ -1,4 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
+import helmet from "helmet";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
@@ -6,6 +7,19 @@ import { createServer } from "http";
 const app = express();
 // Trust the first proxy (Replit / reverse proxy) so req.ip returns the real client IP
 app.set("trust proxy", true);
+
+// ── Security headers ──────────────────────────────────────────────────────────
+app.use(helmet({
+  contentSecurityPolicy: false,       // Vite handles CSP in dev; Nginx in prod
+  crossOriginEmbedderPolicy: false,   // Required for canvas/WebGL fingerprinting
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+}));
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "geolocation=(), camera=(), microphone=()");
+  next();
+});
 const httpServer = createServer(app);
 
 declare module "http" {
