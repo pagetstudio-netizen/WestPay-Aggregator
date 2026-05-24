@@ -2059,27 +2059,31 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
   return (
     <div className="-m-4 md:-m-6 min-h-full" style={{ background: "#f2f3f5" }}>
 
-      {/* ── Hero header ── */}
-      <div className="px-5 pt-6 pb-5" style={{ background: "#fff", borderBottom: "1px solid #f0f0f0" }}>
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm shrink-0"
-            style={{ background: "linear-gradient(135deg, #7e57c2 0%, #512da8 100%)" }}>
-            <ArrowRightLeft className="w-6 h-6 text-white" />
+      {/* ── Hero header — gradient banner ── */}
+      <div className="px-5 pt-6 pb-5 relative overflow-hidden"
+        style={{ background: "linear-gradient(135deg,#512da8 0%,#7e57c2 60%,#9575cd 100%)" }}>
+        {/* Decorative circles */}
+        <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }} />
+        <div className="absolute top-8 -right-3 w-16 h-16 rounded-full" style={{ background: "rgba(255,255,255,0.06)" }} />
+        <div className="flex items-center gap-3 mb-5 relative z-10">
+          <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0"
+            style={{ background: "rgba(255,255,255,0.18)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.25)" }}>
+            <ArrowRightLeft className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h2 className="text-lg font-bold leading-tight" style={{ color: "#1a1a1a" }}>{t("walletTransfersTitle")}</h2>
-            <p className="text-xs mt-0.5" style={{ color: "#888" }}>Transférez entre wallets de la même zone monétaire</p>
+            <h2 className="text-base font-bold text-white leading-tight">{t("walletTransfersTitle")}</h2>
+            <p className="text-xs mt-0.5 text-white/70">Transférez entre wallets de la même zone monétaire</p>
           </div>
         </div>
         {/* Stat pills */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-2xl p-3.5" style={{ background: "#f3e5f5", border: "1.5px solid #e1bee7" }}>
-            <p className="text-xs font-semibold mb-1" style={{ color: "#7b1fa2" }}>Total transféré</p>
-            <p className="text-xl font-bold" style={{ color: "#4a148c" }}>{totalTransferred.toLocaleString("fr-FR")}<span className="text-xs ml-1 font-semibold" style={{ color: "#9c27b0" }}>F</span></p>
+        <div className="grid grid-cols-2 gap-3 relative z-10">
+          <div className="rounded-2xl p-3.5" style={{ background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.2)", backdropFilter: "blur(8px)" }}>
+            <p className="text-xs font-semibold mb-1 text-white/70">Total transféré</p>
+            <p className="text-xl font-bold text-white">{totalTransferred.toLocaleString("fr-FR")}<span className="text-xs ml-1 font-semibold text-white/60">F</span></p>
           </div>
-          <div className="rounded-2xl p-3.5" style={{ background: pendingCount > 0 ? "#fff8e1" : "#f3e5f5", border: `1.5px solid ${pendingCount > 0 ? "#ffe082" : "#e1bee7"}` }}>
-            <p className="text-xs font-semibold mb-1" style={{ color: pendingCount > 0 ? "#e65100" : "#7b1fa2" }}>En attente</p>
-            <p className="text-xl font-bold" style={{ color: pendingCount > 0 ? "#bf360c" : "#4a148c" }}>{pendingCount}</p>
+          <div className="rounded-2xl p-3.5" style={{ background: pendingCount > 0 ? "rgba(251,140,0,0.25)" : "rgba(255,255,255,0.15)", border: `1px solid ${pendingCount > 0 ? "rgba(251,140,0,0.5)" : "rgba(255,255,255,0.2)"}`, backdropFilter: "blur(8px)" }}>
+            <p className="text-xs font-semibold mb-1 text-white/70">En attente</p>
+            <p className="text-xl font-bold" style={{ color: pendingCount > 0 ? "#ffe082" : "#fff" }}>{pendingCount}</p>
           </div>
         </div>
       </div>
@@ -2116,32 +2120,36 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
           {/* Montant */}
           <div className="bg-white rounded-2xl overflow-hidden shadow-sm mb-4" style={{ border: "1.5px solid #e8ecf0" }}>
             <div className="px-5 py-4 flex items-center gap-2.5" style={{ borderBottom: "1px solid #f5f5f5" }}>
-              <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#f3e5f5" }}>
-                <DollarSign className="w-4 h-4" style={{ color: "#7e57c2" }} />
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#7e57c2,#512da8)" }}>
+                <DollarSign className="w-4 h-4 text-white" />
               </div>
-              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Montant</span>
+              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Montant à transférer</span>
             </div>
-            <div className="px-5 py-4">
-              <div className="flex items-center rounded-xl overflow-hidden" style={{ border: "1.5px solid #e2e8f0", background: "#fafafa" }}>
-                <span className="px-4 py-3.5 text-sm font-bold shrink-0" style={{ color: "#7e57c2", borderRight: "1px solid #e2e8f0" }}>
-                  {fromZone || "FCFA"}
-                </span>
-                <input
-                  type="number"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="0"
-                  min="1"
-                  className="flex-1 px-4 py-3.5 text-xl font-bold outline-none bg-transparent"
-                  style={{ color: "#1a1a1a" }}
-                  data-testid="input-virement-amount"
-                />
+            <div className="px-5 py-5">
+              <div className="rounded-2xl overflow-hidden" style={{ border: `2px solid ${parsedAmt > 0 ? "#7e57c2" : "#e2e8f0"}`, background: "#fafbff", transition: "border-color 0.2s" }}>
+                <div className="flex items-center">
+                  <div className="px-4 py-4 shrink-0 flex items-center justify-center" style={{ background: "linear-gradient(135deg,#7e57c2,#512da8)", minWidth: 64 }}>
+                    <span className="text-xs font-black text-white">{fromZone || "FCFA"}</span>
+                  </div>
+                  <input
+                    type="number"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    placeholder="0"
+                    min="1"
+                    className="flex-1 px-4 py-4 text-2xl font-black outline-none bg-transparent"
+                    style={{ color: parsedAmt > 0 ? "#512da8" : "#1a1a1a" }}
+                    data-testid="input-virement-amount"
+                  />
+                </div>
               </div>
               {fromMCObj && amount && parsedAmt > 0 && (
-                <p className="text-xs mt-2 flex items-center gap-1.5" style={{ color: "#888" }}>
-                  <Wallet className="w-3 h-3" />
-                  Solde disponible : <strong style={{ color: "#555" }}>{fromMCObj.balance.toLocaleString("fr-FR")} {fromZone}</strong>
-                </p>
+                <div className="mt-2.5 flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: insufficientBalance ? "#fff5f5" : "#f0f4ff", border: `1px solid ${insufficientBalance ? "#feb2b2" : "#e0e7ff"}` }}>
+                  <Wallet className="w-3.5 h-3.5 shrink-0" style={{ color: insufficientBalance ? "#c53030" : "#7e57c2" }} />
+                  <p className="text-xs" style={{ color: insufficientBalance ? "#c53030" : "#555" }}>
+                    Solde disponible : <strong>{fromMCObj.balance.toLocaleString("fr-FR")} {fromZone}</strong>
+                  </p>
+                </div>
               )}
             </div>
           </div>
@@ -2285,16 +2293,25 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
           <button
             type="submit"
             disabled={isDisabled}
-            className="w-full rounded-2xl py-4 text-sm font-bold flex items-center justify-center gap-2 transition-all shadow-sm"
+            className="w-full rounded-2xl py-4.5 text-sm font-bold flex items-center justify-center gap-2.5 transition-all shadow-lg active:scale-98"
             style={{
-              background: isDisabled ? "#d1d5db" : "linear-gradient(135deg, #7e57c2 0%, #512da8 100%)",
+              background: isDisabled
+                ? "#e5e7eb"
+                : insufficientBalance
+                ? "linear-gradient(135deg,#e53935,#b71c1c)"
+                : "linear-gradient(135deg,#512da8 0%,#7e57c2 50%,#9575cd 100%)",
               color: isDisabled ? "#9ca3af" : "#fff",
               border: "none",
+              paddingTop: 14,
+              paddingBottom: 14,
+              boxShadow: isDisabled ? "none" : "0 4px 20px rgba(81,45,168,0.35)",
             }}
             data-testid="button-submit-virement"
           >
             {createMutation.isPending
               ? <Loader2 className="w-5 h-5 animate-spin" />
+              : insufficientBalance
+              ? <AlertCircle className="w-5 h-5" />
               : <Send className="w-5 h-5" />}
             {createMutation.isPending ? t("processingLabel") : insufficientBalance ? t("insufficientFunds") : t("sendMoney")}
           </button>
@@ -2897,20 +2914,30 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
   if (view === "create" || view === "edit") {
     return (
       <div className="-m-4 md:-m-6" style={{ background: "#f2f3f5", minHeight: "100%" }}>
-        {/* Sticky header */}
-        <div className="sticky top-0 z-10 px-4 pt-5 pb-3 flex items-center gap-3" style={{ background: "#f2f3f5", borderBottom: "1px solid #e8ecf0" }}>
-          <button
-            onClick={() => { setView("list"); setEditLink(null); setForm(mkForm()); }}
-            className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
-            style={{ background: "#fff", border: "1.5px solid #e0e0e0" }}
-          >
-            <ChevronLeft className="w-4 h-4" style={{ color: "#333" }} />
-          </button>
-          <div>
-            <h2 className="text-base font-bold leading-tight" style={{ color: "#1a1a1a" }}>
-              {isEdit ? "Modifier le lien" : "Créer un lien de paiement"}
-            </h2>
-            <p className="text-xs" style={{ color: "#aaa" }}>Liens de Paiement / {isEdit ? editLink?.name : "Nouveau lien"}</p>
+        {/* Hero header — gradient banner */}
+        <div className="relative overflow-hidden px-4 pt-5 pb-5"
+          style={{ background: isEdit ? "linear-gradient(135deg,#1a237e 0%,#3949ab 100%)" : "linear-gradient(135deg,#00963f 0%,#00b050 60%,#43a047 100%)" }}>
+          {/* Decorative circles */}
+          <div className="absolute -top-5 -right-5 w-24 h-24 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }} />
+          <div className="absolute top-10 -right-2 w-14 h-14 rounded-full" style={{ background: "rgba(255,255,255,0.06)" }} />
+          <div className="flex items-center gap-3 relative z-10">
+            <button
+              onClick={() => { setView("list"); setEditLink(null); setForm(mkForm()); }}
+              className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-all active:scale-95"
+              style={{ background: "rgba(255,255,255,0.2)", border: "1px solid rgba(255,255,255,0.3)", backdropFilter: "blur(8px)" }}
+            >
+              <ChevronLeft className="w-4 h-4 text-white" />
+            </button>
+            <div className="w-9 h-9 rounded-2xl flex items-center justify-center shrink-0"
+              style={{ background: "rgba(255,255,255,0.18)", border: "1px solid rgba(255,255,255,0.25)" }}>
+              <Link className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-white leading-tight">
+                {isEdit ? "Modifier le lien" : "Créer un lien de paiement"}
+              </h2>
+              <p className="text-xs text-white/70">{isEdit ? editLink?.name : "Nouveau lien de paiement"}</p>
+            </div>
           </div>
         </div>
 
@@ -3291,15 +3318,22 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
             else if (!link.active) statusStyle = { bg: "#f5f5f5", color: "#757575", label: t("inactive") };
             const l = link as any;
             return (
-              <div key={link.id} className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #e8ecf0", opacity: inactive ? 0.65 : 1 }} data-testid={`card-payment-link-${link.id}`}>
+              <div key={link.id} className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0", opacity: inactive ? 0.65 : 1 }} data-testid={`card-payment-link-${link.id}`}>
+                {/* Top accent bar */}
+                <div className="h-1 w-full" style={{ background: inactive ? "#e0e0e0" : "linear-gradient(90deg,#00b050 0%,#3d5af1 100%)" }} />
+                <div className="p-4">
                 <div className="flex items-start gap-3">
-                  <img src={qrUrl} alt="QR" className="w-14 h-14 rounded-xl shrink-0" style={{ border: "1px solid #e8ecf0" }} />
+                  <div className="shrink-0">
+                    <img src={qrUrl} alt="QR" className="w-16 h-16 rounded-xl" style={{ border: "2px solid #e8ecf0" }} />
+                  </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2 mb-1">
                       <div className="min-w-0">
                         <p className="font-bold text-sm truncate" style={{ color: "#1a1a1a" }} data-testid={`text-link-name-${link.id}`}>{link.name}</p>
                         {l.description && <p className="text-xs truncate mt-0.5" style={{ color: "#888" }}>{l.description}</p>}
-                        <p className="text-xs mt-0.5" style={{ color: "#aaa" }}>{link.amountType === "fixed" ? `${link.amount?.toLocaleString()} F CFA` : t("flexibleAmount")}</p>
+                        <p className="text-xs mt-0.5 font-semibold" style={{ color: link.amountType === "fixed" ? "#3949ab" : "#00b050" }}>
+                          {link.amountType === "fixed" ? `${link.amount?.toLocaleString()} F CFA` : t("flexibleAmount")}
+                        </p>
                       </div>
                       <span className="text-xs px-2 py-0.5 rounded-full font-semibold shrink-0 whitespace-nowrap" style={{ background: statusStyle.bg, color: statusStyle.color }}>{statusStyle.label}</span>
                     </div>
@@ -3314,11 +3348,38 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
                       {link.expiresAt && <span className="text-xs px-1.5 py-0.5 rounded-full" style={{ background: "#e8eaf6", color: "#283593" }}>⏱ Expiration</span>}
                     </div>
 
-                    <div className="flex items-center gap-1 rounded-xl px-3 py-1.5 mb-2" style={{ background: "#f9fafb", border: "1px solid #e2e8f0" }}>
-                      <span className="text-xs truncate flex-1 font-mono" style={{ color: "#666" }}>{url}</span>
-                      <button className="p-1 rounded" onClick={() => copyLink(link.uniqueId)} style={{ color: "#888" }} data-testid={`button-copy-link-${link.id}`}><Copy className="w-3 h-3" /></button>
-                      <button className="p-1 rounded" onClick={() => window.open(url, "_blank")} style={{ color: "#888" }} data-testid={`button-open-link-${link.id}`}><ExternalLink className="w-3 h-3" /></button>
-                      <button className="p-1 rounded" onClick={() => shareLink(link.uniqueId)} style={{ color: "#888" }} data-testid={`button-share-link-${link.id}`}><Share2 className="w-3 h-3" /></button>
+                    {/* URL row — pro copy button */}
+                    <div className="rounded-xl overflow-hidden mb-2" style={{ border: "1.5px solid #e2e8f0" }}>
+                      <div className="flex items-center px-3 py-2" style={{ background: "#f8fafc" }}>
+                        <span className="text-xs truncate flex-1 font-mono" style={{ color: "#64748b" }}>{url}</span>
+                        <button
+                          onClick={() => window.open(url, "_blank")}
+                          className="ml-2 shrink-0 p-1.5 rounded-lg transition-all active:scale-95"
+                          style={{ background: "#e0e7ff", color: "#3949ab" }}
+                          data-testid={`button-open-link-${link.id}`}
+                          title="Ouvrir"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => shareLink(link.uniqueId)}
+                          className="ml-1.5 shrink-0 p-1.5 rounded-lg transition-all active:scale-95"
+                          style={{ background: "#e8f5e9", color: "#2e7d32" }}
+                          data-testid={`button-share-link-${link.id}`}
+                          title="Partager"
+                        >
+                          <Share2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <button
+                        onClick={() => copyLink(link.uniqueId)}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 text-xs font-bold transition-all active:scale-98"
+                        style={{ background: "linear-gradient(135deg,#00b050 0%,#00963f 100%)", color: "#fff", border: "none" }}
+                        data-testid={`button-copy-link-${link.id}`}
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        Copier le lien de paiement
+                      </button>
                     </div>
 
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs" style={{ color: "#888" }}>
@@ -3329,13 +3390,14 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
 
                   <div className="flex flex-col items-center gap-2 shrink-0">
                     <Switch checked={link.active} onCheckedChange={(checked) => updateMutation.mutate({ id: link.id, data: { active: checked } })} data-testid={`switch-link-active-${link.id}`} />
-                    <button className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#f0f4ff", border: "1px solid #c5cae9" }} onClick={() => openEdit(link)} data-testid={`button-edit-link-${link.id}`}>
-                      <Edit3 className="w-3 h-3" style={{ color: "#3949ab" }} />
+                    <button className="w-8 h-8 rounded-xl flex items-center justify-center transition-all active:scale-95" style={{ background: "#e8eaf6", border: "1.5px solid #c5cae9" }} onClick={() => openEdit(link)} data-testid={`button-edit-link-${link.id}`}>
+                      <Edit3 className="w-3.5 h-3.5" style={{ color: "#3949ab" }} />
                     </button>
-                    <button className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#fff0f0", border: "1px solid #ffcdd2" }} onClick={() => deleteMutation.mutate(link.id)} data-testid={`button-delete-link-${link.id}`}>
-                      <Trash2 className="w-3 h-3" style={{ color: "#c62828" }} />
+                    <button className="w-8 h-8 rounded-xl flex items-center justify-center transition-all active:scale-95" style={{ background: "#fce4ec", border: "1.5px solid #f48fb1" }} onClick={() => deleteMutation.mutate(link.id)} data-testid={`button-delete-link-${link.id}`}>
+                      <Trash2 className="w-3.5 h-3.5" style={{ color: "#c62828" }} />
                     </button>
                   </div>
+                </div>
                 </div>
               </div>
             );
