@@ -4293,10 +4293,19 @@ function NavItem({
         className="flex items-center justify-center rounded-xl shrink-0"
         style={{
           width: 36, height: 36,
-          background: active ? "rgba(255,255,255,0.2)" : "#f2f3f5",
+          background: active ? "rgba(255,255,255,0.22)" : "#eef0f3",
         }}
       >
-        <img src={img} alt={label} className="w-5 h-5 object-contain" style={{ filter: active ? "brightness(10)" : "none" }} />
+        <img
+          src={img}
+          alt={label}
+          className="w-5 h-5 object-contain transition-all duration-150"
+          style={{
+            filter: active
+              ? "brightness(0) invert(1)"
+              : "brightness(0) saturate(0%) opacity(55%)",
+          }}
+        />
       </div>
       {!collapsed && (
         <span className="text-sm font-semibold truncate" style={{ color: active ? "#fff" : "#1a1a1a" }}>
