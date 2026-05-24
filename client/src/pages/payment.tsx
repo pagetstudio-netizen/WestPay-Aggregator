@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Smartphone, ExternalLink, Bitcoin, X, RefreshCw, Clock, CreditCard } from "lucide-react";
+import { Loader2, Smartphone, ExternalLink, Bitcoin, X, RefreshCw, Clock } from "lucide-react";
 
 import waveIcon      from "@assets/zOMoVcU_1779635321598.png";
 import moovIcon      from "@assets/ZJCa7PK_1779635321640.jpg";
@@ -8,6 +8,7 @@ import mtnIcon       from "@assets/XzQ5b64_1779635321616.png";
 import tmoneyIcon    from "@assets/ruU3bQe_1779635321485.png";
 import orangeIcon    from "@assets/ctVnv9i_1779636596458.png";
 import robotpayLogo  from "@assets/20260524_144646_1779635303879.png";
+import bankCardIcon  from "@assets/mine-mod-bankcard-CLOhqwHj_1779636875827.png";
 
 /* ── types ─────────────────────────────────────────────────────────────── */
 type MerchantInfo = { name: string; slug: string; countries: string[] };
@@ -376,7 +377,7 @@ export default function PaymentPage() {
         <div style={{ width:"100%", maxWidth:400, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 20px 14px" }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             <div style={{ width:40, height:40, borderRadius:10, background:"#e8f0fe", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-              <CreditCard style={{ width:22, height:22, color:"#2563eb" }} />
+              <img src={bankCardIcon} alt="" style={{ width:24, height:24, filter:"brightness(0) saturate(100%) invert(24%) sepia(95%) saturate(1200%) hue-rotate(218deg) brightness(99%) contrast(97%)" }} />
             </div>
             <p style={{ fontWeight:600, fontSize:16, color:"#111827", lineHeight:1.2 }} data-testid="text-title">Effectuer un paiement</p>
           </div>
