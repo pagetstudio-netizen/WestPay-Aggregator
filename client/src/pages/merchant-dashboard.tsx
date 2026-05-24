@@ -462,80 +462,141 @@ function AnalysePanel({ token }: { token: string | null }) {
   );
 }
 
-function TransactionReceiptModal({ tx, onClose }: { tx: any; onClose: () => void }) {
+function TransactionDetailDrawer({ tx, onClose }: { tx: any; onClose: () => void }) {
+  const { toast } = useToast();
   const isTransfer = tx.amount < 0 || tx.txId?.startsWith("TR-");
-  const statusColor = tx.status === "confirmed" ? "#00b050" : tx.status === "pending" ? "#f59e0b" : "#ef4444";
-  const statusLabel = tx.status === "confirmed" ? "Confirmé" : tx.status === "pending" ? "En attente" : "Échoué";
+  const fee = tx.providerFee != null ? tx.providerFee : Math.round(Math.abs(tx.amount) * 0.03);
+  const net = Math.abs(tx.amount) - fee;
+
+  const statusCfg = tx.status === "confirmed"
+    ? { label: "Confirmé", bg: "#f0fdf4", color: "#16a34a", border: "#bbf7d0", dot: "#22c55e" }
+    : tx.status === "pending"
+    ? { label: "En attente", bg: "#fffbeb", color: "#d97706", border: "#fde68a", dot: "#f59e0b" }
+    : { label: "Échoué", bg: "#fef2f2", color: "#dc2626", border: "#fecaca", dot: "#ef4444" };
+
+  const providerLabel = (p: string) => {
+    if (p === "omnipay" || p === "mbiyo") return "Mobile Money";
+    if (p === "crypto") return "Crypto";
+    if (p === "sms") return "SMS";
+    return p || "—";
+  };
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text).then(() =>
+      toast({ title: `${label} copié`, description: text.substring(0, 40) })
+    );
+  };
+
+  const DetailRow = ({ label, value, mono = false, copyable = false }: { label: string; value: string; mono?: boolean; copyable?: boolean }) => (
+    <div className="flex items-center justify-between gap-3 py-3 border-b border-gray-50 last:border-0">
+      <span className="text-xs font-medium text-gray-400 flex-shrink-0 w-28">{label}</span>
+      <div className="flex items-center gap-2 flex-1 justify-end min-w-0">
+        <span className={`text-sm font-semibold text-gray-800 text-right truncate ${mono ? "font-mono text-xs" : ""}`}>{value}</span>
+        {copyable && (
+          <button onClick={() => copyToClipboard(value, label)} className="flex-shrink-0 p-1 rounded hover:bg-gray-100 transition-colors" data-testid={`button-copy-${label}`}>
+            <Copy className="w-3.5 h-3.5 text-gray-400" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
-      style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+      style={{ background: "rgba(15,23,42,0.45)", backdropFilter: "blur(6px)" }}
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm bg-white rounded-3xl overflow-hidden shadow-2xl"
-        style={{ maxHeight: "90vh", overflowY: "auto" }}
+        className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl overflow-hidden shadow-2xl"
+        style={{ maxHeight: "92vh", overflowY: "auto" }}
         onClick={(e) => e.stopPropagation()}
+        data-testid="drawer-transaction-detail"
       >
-        {/* Receipt Header */}
-        <div className="p-6 text-center" style={{ background: "linear-gradient(135deg,#00b050,#005c2e)" }}>
-          <div className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center mx-auto mb-3">
-            {tx.status === "confirmed" ? (
-              <CheckCircle2 className="w-8 h-8 text-white" />
-            ) : tx.status === "pending" ? (
-              <Loader2 className="w-8 h-8 text-white animate-spin" />
-            ) : (
-              <X className="w-8 h-8 text-white" />
-            )}
-          </div>
-          <p className="text-white/80 text-sm font-medium mb-1">{isTransfer ? "Transfert" : "Paiement reçu"}</p>
-          <p className="text-3xl font-black text-white">
-            {isTransfer ? "" : "+"}{Math.abs(tx.amount).toLocaleString("fr-FR")} <span className="text-xl text-white/80">FCFA</span>
-          </p>
+        {/* Drag handle (mobile) */}
+        <div className="flex justify-center pt-3 pb-1 sm:hidden">
+          <div className="w-10 h-1 rounded-full bg-gray-200" />
         </div>
 
-        {/* Status badge */}
-        <div className="flex justify-center -mt-3 mb-0">
-          <span className="px-4 py-1 rounded-full text-sm font-bold shadow-sm"
-            style={{ background: statusColor, color: "#fff" }}>
-            {statusLabel}
-          </span>
-        </div>
-
-        {/* Receipt body */}
-        <div className="p-6 space-y-0">
-          <div className="border-t border-dashed border-slate-200 my-4" />
-
-          {[
-            { label: "Référence", value: tx.txId, mono: true },
-            { label: "Payeur", value: (tx.payerName || tx.payer_name) || "—" },
-            { label: "Numéro", value: (tx.payerNumber || tx.payer_number) || "—" },
-            { label: "Pays", value: tx.country },
-            { label: "Mode", value: tx.provider === "omnipay" || tx.provider === "mbiyo" ? "Mobile Money" : tx.provider === "crypto" ? "Crypto" : tx.provider || "—" },
-            { label: "Date", value: new Date(tx.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }) },
-          ].map(({ label, value, mono }) => (
-            <div key={label} className="flex items-start justify-between gap-3 py-2.5 border-b border-slate-100 last:border-0">
-              <span className="text-sm text-slate-500 flex-shrink-0">{label}</span>
-              <span className={`text-sm font-semibold text-slate-800 text-right ${mono ? "font-mono" : ""}`} style={{ wordBreak: "break-all" }}>{value}</span>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: isTransfer ? "#fef2f2" : "#f0fdf4" }}>
+              {isTransfer
+                ? <ArrowUpRight className="w-5 h-5" style={{ color: "#dc2626" }} />
+                : <ArrowUpRight className="w-5 h-5 rotate-180" style={{ color: "#16a34a" }} />
+              }
             </div>
-          ))}
+            <div>
+              <p className="text-sm font-bold text-gray-900">{isTransfer ? "Transfert envoyé" : "Paiement reçu"}</p>
+              <p className="text-xs text-gray-400 font-mono">{tx.txId?.substring(0, 20)}…</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors" data-testid="button-close-detail">
+            <X className="w-4 h-4 text-gray-500" />
+          </button>
+        </div>
 
-          <div className="border-t border-dashed border-slate-200 my-4" />
-
-          <div className="flex items-center justify-center gap-2 py-2">
-            <div className="w-2 h-2 rounded-full" style={{ background: "#00b050" }} />
-            <span className="text-xs text-slate-400">Validé par WestPay</span>
-            <div className="w-2 h-2 rounded-full" style={{ background: "#00b050" }} />
+        {/* Amount block */}
+        <div className="px-5 py-5 text-center border-b border-gray-50">
+          <p className="text-4xl font-black text-gray-900 tracking-tight">
+            <span style={{ color: isTransfer ? "#dc2626" : "#16a34a" }}>{isTransfer ? "−" : "+"}</span>
+            {Math.abs(tx.amount).toLocaleString("fr-FR")}
+            <span className="text-lg font-semibold text-gray-400 ml-2">FCFA</span>
+          </p>
+          <div className="flex items-center justify-center gap-2 mt-3 flex-wrap">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold"
+              style={{ background: statusCfg.bg, color: statusCfg.color, border: `1px solid ${statusCfg.border}` }}>
+              <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: statusCfg.dot }} />
+              {statusCfg.label}
+            </span>
+            <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+              {isTransfer ? "Transfert" : "Encaissement"}
+            </span>
           </div>
         </div>
 
-        {/* Close button */}
-        <div className="px-6 pb-6">
+        {/* Fee summary */}
+        {!isTransfer && (
+          <div className="mx-5 mt-4 rounded-xl p-4 grid grid-cols-3 gap-2 text-center" style={{ background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+            <div>
+              <p className="text-xs text-gray-400 mb-1">Montant brut</p>
+              <p className="text-sm font-bold text-gray-800">{Math.abs(tx.amount).toLocaleString("fr-FR")} F</p>
+            </div>
+            <div style={{ borderLeft: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0" }}>
+              <p className="text-xs text-gray-400 mb-1">Frais (3%)</p>
+              <p className="text-sm font-bold" style={{ color: "#f59e0b" }}>{fee.toLocaleString("fr-FR")} F</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400 mb-1">Net reçu</p>
+              <p className="text-sm font-bold" style={{ color: "#16a34a" }}>{net.toLocaleString("fr-FR")} F</p>
+            </div>
+          </div>
+        )}
+
+        {/* Details */}
+        <div className="px-5 py-2 mt-2">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Détails</p>
+          <DetailRow label="Référence" value={tx.txId || "—"} mono copyable />
+          {(tx.payerName || tx.payer_name) && <DetailRow label="Payeur" value={tx.payerName || tx.payer_name} />}
+          {(tx.payerNumber || tx.payer_number) && <DetailRow label="Téléphone" value={tx.payerNumber || tx.payer_number} copyable />}
+          <DetailRow label="Pays" value={tx.country || "—"} />
+          <DetailRow label="Mode" value={providerLabel(tx.provider)} />
+          {tx.omnipayTxId && <DetailRow label="ID Opérateur" value={tx.omnipayTxId} mono copyable />}
+          <DetailRow label="Date" value={new Date(tx.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })} />
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 pb-6 pt-4">
+          <div className="flex items-center justify-center gap-1.5 mb-4">
+            <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+            <span className="text-xs text-gray-400">Transaction WestPay · Sécurisée</span>
+            <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+          </div>
           <button
             onClick={onClose}
-            className="w-full py-3 rounded-2xl text-sm font-bold transition-all"
-            style={{ background: "#f1f5f9", color: "#64748b", border: "none", cursor: "pointer" }}
+            className="w-full py-3 rounded-xl text-sm font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
             data-testid="button-close-receipt"
           >
             Fermer
@@ -558,162 +619,240 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
 
   const allTx = (transactions as (Transaction & { payerName?: string | null })[]);
 
-  const filtered = allTx.filter((t) => {
+  const filtered = allTx.filter((tx) => {
     const term = searchTerm.toLowerCase();
-    const matchSearch = !term || t.txId.toLowerCase().includes(term) || t.country.toLowerCase().includes(term) || (t.payerNumber || "").includes(term) || (t.payerName || "").toLowerCase().includes(term);
-    const matchStatus = filterStatus === "all" || t.status === filterStatus;
-    const matchProvider = filterProvider === "all" || t.provider === filterProvider;
+    const matchSearch = !term
+      || tx.txId.toLowerCase().includes(term)
+      || tx.country.toLowerCase().includes(term)
+      || (tx.payerNumber || "").includes(term)
+      || ((tx as any).payerName || "").toLowerCase().includes(term);
+    const matchStatus = filterStatus === "all" || tx.status === filterStatus;
+    const matchProvider = filterProvider === "all" || tx.provider === filterProvider;
     return matchSearch && matchStatus && matchProvider;
   });
 
   const downloadCSV = () => {
     const header = "TXID,Nom payeur,Numéro,Montant,Pays,Statut,Mode,Date\n";
-    const rows = filtered.map((t) =>
-      `${t.txId},"${(t as any).payerName || ""}",${t.payerNumber || ""},${t.amount},${t.country},${t.status},${t.provider},${new Date(t.createdAt).toLocaleString("fr-FR")}`
+    const rows = filtered.map((tx) =>
+      `${tx.txId},"${(tx as any).payerName || ""}",${tx.payerNumber || ""},${tx.amount},${tx.country},${tx.status},${tx.provider},${new Date(tx.createdAt).toLocaleString("fr-FR")}`
     ).join("\n");
     const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "transactions.csv"; a.click();
+    const a = document.createElement("a"); a.href = url; a.download = "transactions.csv"; a.click();
   };
+
+  const confirmedTotal = allTx.filter(tx => tx.status === "confirmed" && tx.amount > 0).reduce((s, tx) => s + tx.amount, 0);
+  const confirmedCount = allTx.filter(tx => tx.status === "confirmed").length;
+  const pendingCount = allTx.filter(tx => tx.status === "pending").length;
+  const failedCount = allTx.filter(tx => tx.status === "failed").length;
+
+  const getStatusCfg = (status: string) =>
+    status === "confirmed"
+      ? { label: "Confirmé", bg: "#f0fdf4", color: "#16a34a", border: "#bbf7d0", dot: "#22c55e" }
+      : status === "pending"
+      ? { label: "En attente", bg: "#fffbeb", color: "#d97706", border: "#fde68a", dot: "#f59e0b" }
+      : { label: "Échoué", bg: "#fef2f2", color: "#dc2626", border: "#fecaca", dot: "#ef4444" };
 
   const providerLabel = (p: string) => {
     if (p === "omnipay" || p === "mbiyo") return "Mobile Money";
-    if (p === "sms") return "SMS";
-    return p;
+    if (p === "crypto") return "Crypto";
+    return "SMS";
   };
 
-  const confirmedTotal = allTx.filter(t => t.status === "confirmed" && t.amount > 0).reduce((s, t) => s + t.amount, 0);
-  const confirmedCount = allTx.filter(t => t.status === "confirmed").length;
-  const pendingCount = allTx.filter(t => t.status === "pending").length;
-
   return (
-    <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
-      <div className="flex items-center justify-between gap-2 mb-5">
-        <h2 className="text-xl font-bold" style={{ color: "#333" }}>{t("transactionHistory")}</h2>
-        <button
-          onClick={downloadCSV}
-          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all"
-          style={{ background: "#fff", border: "1.5px solid #e8ecf0", color: "#333" }}
-          data-testid="button-merchant-export-csv"
-        >
-          <Download className="w-4 h-4" /> {t("exportCsv")}
-        </button>
-      </div>
-
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("summary")}</p>
-      <div className="grid grid-cols-3 gap-3 mb-6">
-        <div className="rounded-xl p-4" style={{ background: "#1976d2" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("totalVolume")}</p>
-          <p className="text-xl font-bold text-white">{confirmedTotal.toLocaleString("fr-FR")}<span className="text-xs ml-1 text-white/70">FCFA</span></p>
-        </div>
-        <div className="rounded-xl p-4" style={{ background: "#00b050" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("confirmed")}</p>
-          <p className="text-xl font-bold text-white">{confirmedCount}</p>
-        </div>
-        <div className="rounded-xl p-4" style={{ background: pendingCount > 0 ? "#fb8c00" : "#78909c" }}>
-          <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">{t("pending")}</p>
-          <p className="text-xl font-bold text-white">{pendingCount}</p>
+    <div className="min-h-full bg-white">
+      {/* Page header */}
+      <div className="px-4 pt-5 pb-4 border-b border-gray-100">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">Historique des transactions</h2>
+            <p className="text-xs text-gray-400 mt-0.5">{allTx.length} transaction{allTx.length !== 1 ? "s" : ""} au total</p>
+          </div>
+          <button
+            onClick={downloadCSV}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors"
+            data-testid="button-merchant-export-csv"
+          >
+            <Download className="w-3.5 h-3.5" /> Exporter
+          </button>
         </div>
       </div>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>{t("filter")}</p>
-      <div className="bg-white rounded-2xl p-3 mb-4 shadow-sm flex gap-2 flex-wrap" style={{ border: "1.5px solid #e8ecf0" }}>
-        <div className="relative flex-1 min-w-40">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: "#aaa" }} />
+      {/* Summary stats */}
+      <div className="px-4 py-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#eff6ff" }}>
+              <TrendingUp className="w-3.5 h-3.5" style={{ color: "#3b82f6" }} />
+            </div>
+            <span className="text-xs font-medium text-gray-400">Volume</span>
+          </div>
+          <p className="text-base font-black text-gray-900 leading-tight">{confirmedTotal.toLocaleString("fr-FR")}</p>
+          <p className="text-xs text-gray-400">FCFA</p>
+        </div>
+        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#f0fdf4" }}>
+              <CheckCircle2 className="w-3.5 h-3.5" style={{ color: "#16a34a" }} />
+            </div>
+            <span className="text-xs font-medium text-gray-400">Confirmées</span>
+          </div>
+          <p className="text-base font-black text-gray-900">{confirmedCount}</p>
+          <p className="text-xs text-gray-400">transactions</p>
+        </div>
+        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#fffbeb" }}>
+              <Clock className="w-3.5 h-3.5" style={{ color: "#d97706" }} />
+            </div>
+            <span className="text-xs font-medium text-gray-400">En attente</span>
+          </div>
+          <p className="text-base font-black text-gray-900">{pendingCount}</p>
+          <p className="text-xs text-gray-400">transactions</p>
+        </div>
+        <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "#fef2f2" }}>
+              <XCircle className="w-3.5 h-3.5" style={{ color: "#dc2626" }} />
+            </div>
+            <span className="text-xs font-medium text-gray-400">Échouées</span>
+          </div>
+          <p className="text-base font-black text-gray-900">{failedCount}</p>
+          <p className="text-xs text-gray-400">transactions</p>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="px-4 pb-3 flex flex-col sm:flex-row gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300" />
           <input
-            className="w-full rounded-xl pl-9 pr-3 py-2 text-sm outline-none"
-            style={{ border: "1.5px solid #e2e8f0", background: "#f9fafb", color: "#1a1a1a" }}
-            placeholder={t("searchTransactions")}
+            className="w-full rounded-xl pl-9 pr-3 py-2.5 text-sm outline-none border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-400 focus:border-green-400 focus:bg-white transition-colors"
+            placeholder="Référence, téléphone, payeur…"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             data-testid="input-merchant-search-tx"
           />
         </div>
-        <select
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-          className="rounded-xl px-3 py-2 text-sm outline-none"
-          style={{ border: "1.5px solid #e2e8f0", background: "#f9fafb", color: "#333" }}
-          data-testid="select-filter-status"
-        >
-          <option value="all">{t("allStatuses")}</option>
-          <option value="confirmed">{t("confirmed")}</option>
-          <option value="pending">{t("pending")}</option>
-          <option value="failed">{t("failed")}</option>
-        </select>
-        <select
-          value={filterProvider}
-          onChange={(e) => setFilterProvider(e.target.value)}
-          className="rounded-xl px-3 py-2 text-sm outline-none"
-          style={{ border: "1.5px solid #e2e8f0", background: "#f9fafb", color: "#333" }}
-          data-testid="select-filter-provider"
-        >
-          <option value="all">{t("all")}</option>
-          <option value="omnipay">Mobile Money</option>
-          <option value="sms">SMS</option>
-        </select>
+        <div className="flex gap-2">
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="rounded-xl px-3 py-2.5 text-sm border border-gray-200 bg-gray-50 text-gray-700 outline-none focus:border-green-400 focus:bg-white transition-colors"
+            data-testid="select-filter-status"
+          >
+            <option value="all">Tous les statuts</option>
+            <option value="confirmed">Confirmé</option>
+            <option value="pending">En attente</option>
+            <option value="failed">Échoué</option>
+          </select>
+          <select
+            value={filterProvider}
+            onChange={(e) => setFilterProvider(e.target.value)}
+            className="rounded-xl px-3 py-2.5 text-sm border border-gray-200 bg-gray-50 text-gray-700 outline-none focus:border-green-400 focus:bg-white transition-colors"
+            data-testid="select-filter-provider"
+          >
+            <option value="all">Tous</option>
+            <option value="omnipay">Mobile Money</option>
+            <option value="sms">SMS</option>
+            <option value="crypto">Crypto</option>
+          </select>
+        </div>
       </div>
 
+      {/* Results count */}
       {(searchTerm || filterStatus !== "all" || filterProvider !== "all") && (
-        <p className="text-xs mb-2" style={{ color: "#888" }}>{filtered.length} résultat{filtered.length !== 1 ? "s" : ""}</p>
+        <div className="px-4 pb-2">
+          <p className="text-xs text-gray-400">{filtered.length} résultat{filtered.length !== 1 ? "s" : ""}</p>
+        </div>
       )}
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-        {t("recentTransactions")} — {allTx.length}
-      </p>
-      <div className="space-y-3">
+      {/* Transaction list */}
+      <div className="px-4 pb-6">
         {filtered.length === 0 ? (
-          <div className="bg-white rounded-2xl p-8 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-            <CreditCard className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
-            <p className="text-sm" style={{ color: "#aaa" }}>{t("noTransactions")}</p>
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center mb-4">
+              <CreditCard className="w-7 h-7 text-gray-200" />
+            </div>
+            <p className="text-sm font-medium text-gray-400">Aucune transaction trouvée</p>
+            {searchTerm && <p className="text-xs text-gray-300 mt-1">Essayez un autre terme de recherche</p>}
           </div>
         ) : (
-          filtered.map((tx) => {
-            const isTransfer = tx.amount < 0 || tx.txId.startsWith("TR-");
-            const txPayerName = (tx as any).payerName;
-            const statusColor = tx.status === "confirmed" ? { bg: "#d4edda", color: "#155724" } : tx.status === "pending" ? { bg: "#fff3cd", color: "#856404" } : { bg: "#f8d7da", color: "#721c24" };
-            return (
-              <div
-                key={tx.id}
-                className="bg-white rounded-2xl p-4 shadow-sm cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5"
-                style={{ border: "1.5px solid #e8ecf0" }}
-                onClick={() => setSelectedTx(tx)}
-                data-testid={`card-tx-${tx.id}`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <span className="font-mono text-xs font-bold px-2 py-0.5 rounded" style={{ background: "#f0f4ff", color: "#3949ab" }} data-testid={`text-mtx-${tx.id}`}>{tx.txId}</span>
-                      <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: statusColor.bg, color: statusColor.color }}>
-                        {tx.status === "confirmed" ? t("confirmed") : tx.status === "pending" ? t("pending") : t("failed")}
-                      </span>
-                      <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "#f0f4ff", color: "#3949ab" }}>{tx.country}</span>
-                      {isTransfer && <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "#fce4ec", color: "#c62828" }}>{t("transfers")}</span>}
+          <div className="border border-gray-100 rounded-2xl overflow-hidden bg-white" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+            {/* Table header — desktop */}
+            <div className="hidden sm:grid grid-cols-[1fr_auto_auto_auto] gap-4 px-4 py-3 border-b border-gray-100 bg-gray-50">
+              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Référence / Payeur</span>
+              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider text-center">Pays</span>
+              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider text-center">Statut</span>
+              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider text-right">Montant</span>
+            </div>
+
+            {/* Rows */}
+            {filtered.map((tx, idx) => {
+              const isTransfer = tx.amount < 0 || tx.txId.startsWith("TR-");
+              const txPayerName = (tx as any).payerName;
+              const cfg = getStatusCfg(tx.status);
+
+              return (
+                <div
+                  key={tx.id}
+                  className={`flex sm:grid sm:grid-cols-[1fr_auto_auto_auto] gap-3 sm:gap-4 px-4 py-4 cursor-pointer hover:bg-gray-50 transition-colors items-center ${idx !== 0 ? "border-t border-gray-100" : ""}`}
+                  onClick={() => setSelectedTx(tx)}
+                  data-testid={`card-tx-${tx.id}`}
+                >
+                  {/* Left: icon + info */}
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                      style={{ background: isTransfer ? "#fef2f2" : tx.status === "confirmed" ? "#f0fdf4" : tx.status === "pending" ? "#fffbeb" : "#fef2f2" }}>
+                      {isTransfer
+                        ? <ArrowUpRight className="w-4 h-4" style={{ color: "#dc2626" }} />
+                        : tx.status === "confirmed"
+                        ? <ArrowUpRight className="w-4 h-4 rotate-180" style={{ color: "#16a34a" }} />
+                        : <Clock className="w-4 h-4" style={{ color: "#d97706" }} />
+                      }
                     </div>
-                    {txPayerName && (
-                      <p className="text-sm font-semibold mb-0.5" style={{ color: "#1a1a1a" }} data-testid={`text-payer-name-${tx.id}`}>{txPayerName}</p>
-                    )}
-                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs" style={{ color: "#888" }}>
-                      {tx.payerNumber && <span><Phone className="w-3 h-3 inline mr-0.5" /><span data-testid={`text-payer-number-${tx.id}`}>{tx.payerNumber}</span></span>}
-                      <span><Calendar className="w-3 h-3 inline mr-0.5" /><span data-testid={`text-tx-date-${tx.id}`}>{new Date(tx.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span></span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-mono font-semibold text-gray-700 truncate" data-testid={`text-mtx-${tx.id}`}>{tx.txId}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                        {txPayerName && <span className="text-xs text-gray-500 font-medium" data-testid={`text-payer-name-${tx.id}`}>{txPayerName}</span>}
+                        {tx.payerNumber && <span className="text-xs text-gray-400" data-testid={`text-payer-number-${tx.id}`}>· {tx.payerNumber}</span>}
+                        <span className="text-xs text-gray-300">· {new Date(tx.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</span>
+                      </div>
                     </div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-lg font-bold" style={{ color: isTransfer ? "#e53935" : "#00b050" }} data-testid={`text-tx-amount-${tx.id}`}>
-                      {isTransfer ? "" : "+"}{tx.amount.toLocaleString("fr-FR")}
+
+                  {/* Country — hidden on mobile, shown inline */}
+                  <span className="hidden sm:block text-xs font-medium text-gray-500 bg-gray-100 px-2.5 py-1 rounded-lg text-center whitespace-nowrap">{tx.country}</span>
+
+                  {/* Status */}
+                  <span
+                    className="hidden sm:inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap"
+                    style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}
+                    data-testid={`text-status-${tx.id}`}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: cfg.dot }} />
+                    {cfg.label}
+                  </span>
+
+                  {/* Amount — always visible */}
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-sm font-bold" style={{ color: isTransfer ? "#dc2626" : "#16a34a" }} data-testid={`text-tx-amount-${tx.id}`}>
+                      {isTransfer ? "−" : "+"}{Math.abs(tx.amount).toLocaleString("fr-FR")}
                     </p>
-                    <p className="text-xs" style={{ color: "#aaa" }}>FCFA</p>
-                    <Receipt className="w-3.5 h-3.5 mt-1 ml-auto" style={{ color: "#cbd5e1" }} />
+                    <p className="text-xs text-gray-300">FCFA</p>
+                    {/* Mobile status dot */}
+                    <div className="sm:hidden flex justify-end mt-1">
+                      <span className="w-2 h-2 rounded-full" style={{ background: cfg.dot }} />
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })
+              );
+            })}
+          </div>
         )}
       </div>
 
-      {selectedTx && <TransactionReceiptModal tx={selectedTx} onClose={() => setSelectedTx(null)} />}
+      {selectedTx && <TransactionDetailDrawer tx={selectedTx} onClose={() => setSelectedTx(null)} />}
     </div>
   );
 }
