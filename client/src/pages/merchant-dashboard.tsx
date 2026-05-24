@@ -882,95 +882,168 @@ function ApiKeysPanel({ token }: { token: string | null }) {
 
   if (isLoading) return <MerchantLoadingSkeleton />;
 
+  const keyList = apiKeys as MerchantCountry[];
+  const activeCount = keyList.filter(k => k.active).length;
+
   return (
-    <div className="-m-4 md:-m-6 p-4 md:p-6 min-h-full" style={{ background: "#e8eaed" }}>
-      <div className="flex items-center justify-between gap-2 mb-5">
-        <div>
-          <h2 className="text-xl font-bold" style={{ color: "#333" }}>{t("apiKeysTitle")}</h2>
-          <p className="text-xs mt-0.5" style={{ color: "#888" }}>{t("apiKeysDesc")}</p>
-        </div>
-        <button
-          onClick={() => window.open("/api-docs", "_blank")}
-          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold"
-          style={{ background: "#fff", border: "1.5px solid #e8ecf0", color: "#333" }}
-          data-testid="button-open-api-docs"
-        >
-          <BookOpen className="w-4 h-4" /> {t("apiDocumentation")}
-        </button>
-      </div>
+    <div className="-m-4 md:-m-6 min-h-full" style={{ background: "#f2f3f5" }}>
 
-      <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "#888" }}>
-        {t("yourApiKeys")} — {(apiKeys as MerchantCountry[]).length}
-      </p>
-      <div className="space-y-3 mb-5">
-        {(apiKeys as MerchantCountry[]).length === 0 ? (
-          <div className="bg-white rounded-2xl p-6 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-            <Key className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
-            <p className="text-sm" style={{ color: "#aaa" }}>{t("noApiKeys")}</p>
-          </div>
-        ) : (
-          (apiKeys as MerchantCountry[]).map((key, idx) => (
-            <div key={key.id} className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-              <div className="flex items-center justify-between gap-2 mb-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: COUNTRY_COLORS[idx % COUNTRY_COLORS.length] }}>
-                    <Key className="w-4 h-4 text-white" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold" style={{ color: "#1a1a1a" }}>{key.country}</p>
-                    <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: key.active ? "#d4edda" : "#f8d7da", color: key.active ? "#155724" : "#721c24" }}>
-                      {key.active ? t("active") : t("inactive")}
-                    </span>
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    if (confirm(t("confirm"))) {
-                      regenerateMutation.mutate(key.id);
-                    }
-                  }}
-                  disabled={regenerateMutation.isPending}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
-                  style={{ background: "#f0f4ff", color: "#3949ab", border: "1px solid #c5cae9" }}
-                  data-testid={`button-regenerate-key-${key.id}`}
-                >
-                  {regenerateMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                  {t("reset")}
-                </button>
-              </div>
-              <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: "#f9fafb", border: "1px solid #e2e8f0" }}>
-                <code className="text-xs font-mono flex-1 break-all" style={{ color: "#555" }} data-testid={`text-apikey-${key.id}`}>{key.apiKey}</code>
-                <button
-                  onClick={() => { navigator.clipboard.writeText(key.apiKey); toast({ title: t("copied") }); }}
-                  className="p-1.5 rounded-lg shrink-0 transition-all hover:bg-gray-200"
-                  style={{ color: "#888" }}
-                  data-testid={`button-copy-key-${key.id}`}
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                </button>
-              </div>
+      {/* ── Hero header ── */}
+      <div className="px-5 pt-6 pb-5" style={{ background: "#fff", borderBottom: "1px solid #f0f0f0" }}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm shrink-0"
+              style={{ background: "linear-gradient(135deg, #3949ab 0%, #1a237e 100%)" }}>
+              <Key className="w-6 h-6 text-white" />
             </div>
-          ))
-        )}
-      </div>
-
-      <div className="bg-white rounded-2xl p-4 shadow-sm" style={{ border: "1.5px dashed #c5cae9" }}>
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#f0f4ff" }}>
-            <BookOpen className="w-5 h-5" style={{ color: "#3949ab" }} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold" style={{ color: "#1a1a1a" }}>{t("integrationGuide")}</p>
-            <p className="text-xs" style={{ color: "#888" }}>{t("apiKeysDesc")}</p>
+            <div>
+              <h2 className="text-lg font-bold leading-tight" style={{ color: "#1a1a1a" }}>
+                {t("apiKeysTitle")}
+              </h2>
+              <p className="text-xs mt-0.5" style={{ color: "#888" }}>
+                Gérez vos clés d'accès par pays
+              </p>
+            </div>
           </div>
           <button
             onClick={() => window.open("/api-docs", "_blank")}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold"
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold shrink-0 shadow-sm transition-all active:scale-95"
             style={{ background: "#3949ab", color: "#fff", border: "none" }}
-            data-testid="button-docs-link"
+            data-testid="button-open-api-docs"
           >
-            <ExternalLink className="w-3.5 h-3.5" /> {t("openLink")}
+            <BookOpen className="w-3.5 h-3.5" />
+            Guide d'intégration
           </button>
+        </div>
+
+        {/* Stat pills */}
+        <div className="flex gap-2 mt-4">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl" style={{ background: "#e8f5e9" }}>
+            <div className="w-1.5 h-1.5 rounded-full" style={{ background: "#00b050" }} />
+            <span className="text-xs font-bold" style={{ color: "#2e7d32" }}>{activeCount} pays actif{activeCount > 1 ? "s" : ""}</span>
+          </div>
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl" style={{ background: "#e8eaf6" }}>
+            <Key className="w-3 h-3" style={{ color: "#3949ab" }} />
+            <span className="text-xs font-bold" style={{ color: "#3949ab" }}>{keyList.length} clé{keyList.length > 1 ? "s" : ""} au total</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Security notice ── */}
+      <div className="mx-4 mt-4 rounded-2xl p-3.5 flex items-start gap-3"
+        style={{ background: "#fffbea", border: "1.5px solid #fef3c7" }}>
+        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "#d97706" }} />
+        <p className="text-xs leading-relaxed" style={{ color: "#92400e" }}>
+          Vos clés API sont <strong>confidentielles</strong>. Ne les partagez jamais publiquement. En cas de compromission, régénérez-les immédiatement.
+        </p>
+      </div>
+
+      {/* ── Keys list ── */}
+      <div className="p-4 space-y-3">
+        {keyList.length === 0 ? (
+          <div className="bg-white rounded-2xl p-10 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
+            <div className="w-14 h-14 rounded-2xl mx-auto mb-3 flex items-center justify-center" style={{ background: "#f0f4ff" }}>
+              <Key className="w-7 h-7" style={{ color: "#c5cae9" }} />
+            </div>
+            <p className="font-bold text-sm mb-1" style={{ color: "#1a1a1a" }}>{t("noApiKeys")}</p>
+            <p className="text-xs" style={{ color: "#aaa" }}>Contactez votre administrateur pour activer des pays</p>
+          </div>
+        ) : (
+          keyList.map((key, idx) => {
+            const color = COUNTRY_COLORS[idx % COUNTRY_COLORS.length];
+            const flagMap: Record<string, string> = {
+              "Togo": "🇹🇬", "Benin": "🇧🇯", "Ivory Coast": "🇨🇮", "Senegal": "🇸🇳",
+              "Cameroon": "🇨🇲", "Guinea": "🇬🇳", "Mali": "🇲🇱", "Burkina Faso": "🇧🇫",
+              "Niger": "🇳🇪", "DRC": "🇨🇩", "Congo": "🇨🇬", "Gabon": "🇬🇦",
+            };
+            return (
+              <div key={key.id} className="bg-white rounded-2xl overflow-hidden shadow-sm"
+                style={{ border: "1.5px solid #e8ecf0" }}
+                data-testid={`card-apikey-${key.id}`}>
+
+                {/* Card header */}
+                <div className="px-5 py-4 flex items-center justify-between gap-3"
+                  style={{ borderBottom: "1px solid #f5f5f5" }}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-xl"
+                      style={{ background: color + "18", border: `1.5px solid ${color}30` }}>
+                      {flagMap[key.country] || "🌍"}
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold" style={{ color: "#1a1a1a" }}>{key.country}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <div className="w-1.5 h-1.5 rounded-full" style={{ background: key.active ? "#00b050" : "#e53935" }} />
+                        <span className="text-xs font-semibold" style={{ color: key.active ? "#2e7d32" : "#c62828" }}>
+                          {key.active ? t("active") : t("inactive")}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => { if (confirm(t("confirm"))) regenerateMutation.mutate(key.id); }}
+                    disabled={regenerateMutation.isPending}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
+                    style={{ background: "#f0f4ff", color: "#3949ab", border: "1.5px solid #c5cae9" }}
+                    data-testid={`button-regenerate-key-${key.id}`}
+                  >
+                    {regenerateMutation.isPending
+                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      : <RefreshCw className="w-3.5 h-3.5" />}
+                    Régénérer
+                  </button>
+                </div>
+
+                {/* Key display */}
+                <div className="px-5 py-4">
+                  <p className="text-xs font-bold mb-2" style={{ color: "#888" }}>CLÉ API</p>
+                  <div className="flex items-center gap-2 rounded-xl px-3.5 py-3"
+                    style={{ background: "#f8f9fc", border: "1.5px solid #e8ecf0" }}>
+                    <Lock className="w-3.5 h-3.5 shrink-0" style={{ color: "#bbb" }} />
+                    <code className="text-xs font-mono flex-1 break-all leading-relaxed"
+                      style={{ color: "#444" }}
+                      data-testid={`text-apikey-${key.id}`}>
+                      {key.apiKey}
+                    </code>
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(key.apiKey); toast({ title: "Clé copiée !" }); }}
+                      className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all active:scale-90"
+                      style={{ background: "#e8eaf6", color: "#3949ab" }}
+                      data-testid={`button-copy-key-${key.id}`}
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <p className="text-xs mt-2 flex items-center gap-1" style={{ color: "#bbb" }}>
+                    <Shield className="w-3 h-3" />
+                    Incluez cette clé dans le header <code className="font-mono" style={{ color: "#888" }}>X-API-Key</code> de vos requêtes
+                  </p>
+                </div>
+              </div>
+            );
+          })
+        )}
+
+        {/* ── Integration guide banner ── */}
+        <div className="rounded-2xl overflow-hidden shadow-sm" style={{ background: "linear-gradient(135deg, #3949ab 0%, #1a237e 100%)" }}>
+          <div className="px-5 py-5 flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0"
+              style={{ background: "rgba(255,255,255,0.15)" }}>
+              <BookOpen className="w-6 h-6 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-white leading-tight">{t("integrationGuide")}</p>
+              <p className="text-xs mt-0.5 text-white/70">Exemples de code, webhooks et référence complète</p>
+            </div>
+            <button
+              onClick={() => window.open("/api-docs", "_blank")}
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold shrink-0 transition-all active:scale-95"
+              style={{ background: "#fff", color: "#3949ab", border: "none" }}
+              data-testid="button-docs-link"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              Ouvrir
+            </button>
+          </div>
         </div>
       </div>
     </div>
