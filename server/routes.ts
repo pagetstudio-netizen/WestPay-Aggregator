@@ -970,8 +970,9 @@ export async function registerRoutes(
         notifyAdminMerchantLogin({ email: merchant.email, merchantName: merchant.name, ip: clientIp, device: ua, success: true }).catch(() => {});
       }
 
-      // ── Bypass OTP pour le compte de test (dev uniquement) ───────────────────
-      if (process.env.NODE_ENV !== "production" && merchant.email === "test@westpay.dev") {
+      // ── Bypass OTP pour les comptes de test ──────────────────────────────────
+      const OTP_BYPASS_EMAILS = ["test@westpay.dev", "test@testmerchant.com"];
+      if (OTP_BYPASS_EMAILS.includes(merchant.email.toLowerCase())) {
         const JWT_SECRET_KEY = process.env.JWT_SECRET || JWT_SECRET;
         const token = jwt.sign(
           { merchantId: merchant.id, email: merchant.email, role: "merchant", slug: merchant.slug, name: merchant.name },
