@@ -1,8 +1,8 @@
 import { defineConfig } from "drizzle-kit";
 
-const dbUrl = process.env.DATABASE_URL;
+const dbUrl = process.env.CUSTOM_DATABASE_URL || process.env.DATABASE_URL;
 if (!dbUrl) {
-  throw new Error("DATABASE_URL must be set");
+  throw new Error("CUSTOM_DATABASE_URL ou DATABASE_URL doit être défini");
 }
 
 export default defineConfig({
