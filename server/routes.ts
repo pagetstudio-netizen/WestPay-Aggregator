@@ -47,6 +47,7 @@ import {
 } from "./mbiyo";
 import {
   initiatePayment as sendavaInitiatePayment,
+  initiateWithdraw as sendavaInitiateWithdraw,
   confirmOtp as sendavaConfirmOtp,
   verifyPayment as sendavaVerifyPayment,
   getBalance as sendavaGetBalance,
@@ -5257,9 +5258,11 @@ export async function registerRoutes(
       if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
 
       const payoutOpRecord = operator ? await storage.getWithdrawalOperatorByNameAndCountry(operator, mc.country) : null;
-      const useMbiyoPayout = payoutOpRecord?.gateway?.toLowerCase() === "mbiyo";
+      const payoutGatewayLower = payoutOpRecord?.gateway?.toLowerCase();
+      const useMbiyoPayout = payoutGatewayLower === "mbiyo";
+      const useSendavaPayout = payoutGatewayLower === "sendavapay";
 
-      if (useMbiyoPayout && amount < 500) {
+      if ((useMbiyoPayout || useSendavaPayout) && amount < 500) {
         return res.status(400).json({ message: "Le montant minimum de retrait est de 500 FCFA." });
       }
 
@@ -5300,7 +5303,7 @@ export async function registerRoutes(
         status: "pending",
         withdrawalMode: "auto",
         adminNote: null,
-        gateway: useMbiyoPayout ? "mbiyo" : "omnipay",
+        gateway: useMbiyoPayout ? "mbiyo" : useSendavaPayout ? "sendavapay" : "omnipay",
       });
 
       const wdRawIp = (req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "").split(",")[0].trim();
@@ -5424,6 +5427,60 @@ export async function registerRoutes(
               console.error(`[WITHDRAWAL FALLBACK] OmniPay fallback échoué: ${fbErr.message}`);
             }
           }
+          await storage.updateWithdrawalStatus(w.id, "failed", techMsg, reference);
+          notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
+          notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
+          await storage.incrementMerchantCountryBalance(mc.id, amount);
+          return res.status(500).json({ message: "Retrait non abouti. Votre solde a été restitué." });
+        }
+      } else if (useSendavaPayout) {
+        const sendavaApiKey = await getSendavaApiKey();
+        const sendavaApiSecret = await getSendavaApiSecret();
+        if (!sendavaApiKey || !sendavaApiSecret) {
+          await storage.updateWithdrawalStatus(w.id, "failed", "Cles API SendavaPay non configurees", reference);
+          await storage.incrementMerchantCountryBalance(mc.id, amount);
+          return res.status(500).json({ message: "Service de retrait non configure. Contactez l'administrateur." });
+        }
+        try {
+          const msisdnFull = prependDialCode(phone, mc.country);
+          const countryCode = SENDAVAPAY_COUNTRY_CODES[mc.country] || "";
+          const sendavaOperator = toSendavaOperator(operator || "");
+          const callbackBaseUrl = process.env.NODE_ENV === "production" ? "https://westpay.cloud" : `${req.protocol}://${req.get("host")}`;
+          const callbackUrl = `${callbackBaseUrl}/api/sendavapay/payout-callback`;
+          console.log(`[WITHDRAWAL SENDAVAPAY] Params: msisdn=${msisdnFull} op=${sendavaOperator} country=${countryCode}`);
+
+          const result = await sendavaInitiateWithdraw(sendavaApiKey, sendavaApiSecret, {
+            amount: netAmount,
+            phoneNumber: msisdnFull,
+            operator: sendavaOperator,
+            country: countryCode,
+            reference,
+            callbackUrl,
+            beneficiary: merchant.name,
+          });
+
+          const spStatusLower = (result.status || "").toLowerCase();
+          const spInitOk = result.success && !["failed", "failure", "cancelled", "canceled", "rejected"].includes(spStatusLower);
+          if (spInitOk) {
+            const spRef = result.reference || reference;
+            const spFee = result.fee != null ? Math.round(parseFloat(String(result.fee)) || withdrawalFee) : withdrawalFee;
+            await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement SendavaPay - Ref: ${spRef}`, spRef, spFee, spFee);
+            console.log(`[WITHDRAWAL SENDAVAPAY] Initie (statut: ${result.status}) - ref=${spRef}`);
+            return res.json({ ...w, status: "pending", omnipayRef: spRef, fees: spFee, netAmount, autoProcessed: true, gateway: "sendavapay" });
+          } else {
+            const errMsg = result.message || "Echec du transfert SendavaPay";
+            console.warn(`[WITHDRAWAL SENDAVAPAY] Echec: ${errMsg}`);
+            await storage.updateWithdrawalStatus(w.id, "failed", `Retrait non abouti: ${errMsg}`, reference);
+            notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
+            notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
+            await storage.incrementMerchantCountryBalance(mc.id, amount);
+            return res.status(400).json({ message: "Retrait non abouti. Votre solde a été restitué." });
+          }
+        } catch (spErr: any) {
+          const errDetail = spErr?.cause?.message || spErr?.message || "unknown";
+          const isTimeout = errDetail.includes("abort") || errDetail.includes("timeout") || errDetail.includes("UND_ERR");
+          const techMsg = isTimeout ? "Timeout connexion SendavaPay" : `Erreur technique: ${errDetail}`;
+          console.error(`[WITHDRAWAL SENDAVAPAY] Erreur catch — retrait #${w.id} | ${techMsg}`);
           await storage.updateWithdrawalStatus(w.id, "failed", techMsg, reference);
           notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
           notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});

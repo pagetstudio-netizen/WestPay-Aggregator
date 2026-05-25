@@ -95,6 +95,26 @@ export interface SendavaPayVerifyResponse {
   message?: string;
 }
 
+export interface SendavaPayWithdrawRequest {
+  amount: number;
+  phoneNumber: string;
+  operator: string;
+  country: string;
+  reference?: string;
+  callbackUrl?: string;
+  beneficiary?: string;
+}
+
+export interface SendavaPayWithdrawResponse {
+  success: boolean;
+  status?: string;
+  reference?: string;
+  txid?: string;
+  message?: string;
+  fee?: string | number;
+  currency?: string;
+}
+
 export interface SendavaPayBalanceResponse {
   success: boolean;
   balance?: Array<{ currency: string; amount: number }> | number;
@@ -197,6 +217,28 @@ export async function confirmOtp(
   console.log(`[SENDAVAPAY] Confirmation OTP ref=${params.reference}`);
   const result = await sendavaRequest<SendavaPayOtpResponse>("/api/sdk/confirm-otp", "POST", apiKey, apiSecret, payload);
   console.log(`[SENDAVAPAY] OTP réponse: success=${result.success} status=${result.status}`);
+  return result;
+}
+
+export async function initiateWithdraw(
+  apiKey: string,
+  apiSecret: string,
+  params: SendavaPayWithdrawRequest,
+): Promise<SendavaPayWithdrawResponse> {
+  const payload: Record<string, any> = {
+    amount: params.amount,
+    phoneNumber: params.phoneNumber,
+    operator: params.operator,
+    country: params.country,
+  };
+  if (params.reference) payload.reference = params.reference;
+  if (params.callbackUrl) payload.callbackUrl = params.callbackUrl;
+  if (params.beneficiary) payload.beneficiary = params.beneficiary;
+
+  const maskedPhone = params.phoneNumber ? params.phoneNumber.replace(/(\d{3})\d+(\d{2})/, "$1****$2") : "?";
+  console.log(`[SENDAVAPAY] Initiation retrait: ${params.amount} - Tel: ${maskedPhone} - Op: ${params.operator} - Pays: ${params.country}`);
+  const result = await sendavaRequest<SendavaPayWithdrawResponse>("/api/sdk/withdraw", "POST", apiKey, apiSecret, payload);
+  console.log(`[SENDAVAPAY] Reponse retrait: success=${result.success} status=${result.status} ref=${result.reference}`);
   return result;
 }
 
