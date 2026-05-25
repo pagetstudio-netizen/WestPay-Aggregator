@@ -580,7 +580,6 @@ export default function PaymentPage() {
                   <div style={{ background:"#dbeafe", borderRadius:12, padding:12, textAlign:"center", fontSize:14, fontWeight:500, color:"#1e40af" }}>
                     Cliquez ci-dessous pour valider votre paiement de {fmt(amount)} {currency}
                   </div>
-                  {omniFees > 0 && <p style={{ textAlign:"center", fontSize:12, color:"#6b7280" }}>Frais : {fmt(omniFees)} {currency}</p>}
                   <button type="button" onClick={() => { if (paymentUrl) { window.open(paymentUrl,"_blank"); if (paymentId) startPolling(paymentId); } }}
                     className="paybtn" style={{ background:"#f5c100", color:"#111" }}>
                     <ExternalLink style={{ width:16, height:16 }} /> Valider le paiement
@@ -604,7 +603,6 @@ export default function PaymentPage() {
                     <p style={{ fontSize:13, color:"#6b7280", marginTop:6 }}>
                       Demande de <strong style={{ color:"#1d4ed8" }}>{fmt(amount)} {currency}</strong> envoyée sur votre appareil.
                     </p>
-                    {omniFees > 0 && <p style={{ fontSize:12, color:"#9ca3af", marginTop:4 }}>Frais : {fmt(omniFees)} {currency}</p>}
                   </div>
                   {maliOrange && (
                     <div style={{ background:"#fff7ed", border:"1.5px solid #fed7aa", borderRadius:12, padding:"10px 14px" }}>
