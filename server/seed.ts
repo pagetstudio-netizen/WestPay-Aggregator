@@ -67,6 +67,11 @@ export async function seedDatabase() {
     console.error("[SECURITY] Erreur vérification comptes compromis:", err.message)
   );
 
+  // Compte test toujours présent (dev + production)
+  await ensureTestMerchantExists().catch(err =>
+    console.error("[SEED] Erreur création compte test:", err.message)
+  );
+
   // Protection permanente : ne JAMAIS recréer de compte admin automatiquement
   // Ce flag est posé une fois en DB et ne peut pas être retiré par un redémarrage
   const adminSeedDisabled = await storage.getSetting("admin_seed_permanently_disabled");
@@ -222,4 +227,47 @@ async function ensurePinsExist() {
       console.log(`PIN backfilled for merchant ${merchant.name}`);
     }
   }
+}
+
+async function ensureTestMerchantExists() {
+  const existing = await storage.getMerchantByEmail("test@westpay.dev");
+  if (existing) return;
+
+  const passwordHash = await bcrypt.hash("Test@2026!", 10);
+  const pinHash = await bcrypt.hash("123456", 10);
+  const webhookSecret = crypto.randomBytes(20).toString("hex");
+
+  const merchant = await storage.createMerchant({
+    name: "Compte Test",
+    email: "test@westpay.dev",
+    slug: "test-merchant",
+    passwordHash,
+    suspended: false,
+    webhookSecret,
+  });
+
+  await storage.addMerchantCountry({
+    merchantId: merchant.id,
+    country: "Togo",
+    apiKey: generateSecureApiKey("Togo"),
+    balance: 0,
+    active: true,
+  });
+  await storage.addMerchantCountry({
+    merchantId: merchant.id,
+    country: "Cote d'Ivoire",
+    apiKey: generateSecureApiKey("Cote d'Ivoire"),
+    balance: 0,
+    active: true,
+  });
+  await storage.addMerchantCountry({
+    merchantId: merchant.id,
+    country: "Senegal",
+    apiKey: generateSecureApiKey("Senegal"),
+    balance: 0,
+    active: true,
+  });
+
+  await storage.upsertMerchantPin(merchant.id, pinHash);
+  console.log("[SEED] Compte test créé : test@westpay.dev (slug: test-merchant)");
 }
