@@ -9,6 +9,7 @@ import tmoneyIcon    from "@assets/ruU3bQe_1779635321485.png";
 import orangeIcon    from "@assets/ctVnv9i_1779636596458.png";
 import robotpayLogo  from "@assets/20260524_144646_1779637077787.png";
 import bankCardIcon  from "@assets/mine-mod-bankcard-CLOhqwHj_1779636875827.png";
+import phoneHandIcon from "@assets/file_00000000d2f47246aaf6fa11ae0a4003_1779726190358.png";
 
 /* ── types ─────────────────────────────────────────────────────────────── */
 type MerchantInfo = { name: string; slug: string; countries: string[] };
@@ -595,8 +596,8 @@ export default function PaymentPage() {
                 </>) : (<>
                   <div style={{ textAlign:"center", padding:"14px 0" }}>
                     <div className="anim-pulse" style={{ display:"inline-block" }}>
-                      <div style={{ width:80, height:80, borderRadius:"50%", background:"#eff6ff", display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto" }}>
-                        <Smartphone style={{ width:38, height:38, color:"#2563eb" }} />
+                      <div style={{ width:100, height:100, borderRadius:"50%", background:"#eff6ff", display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto" }}>
+                        <img src={phoneHandIcon} alt="téléphone" style={{ width:72, height:72, objectFit:"contain" }} />
                       </div>
                     </div>
                     <p style={{ fontWeight:700, fontSize:15, color:"#111", marginTop:14 }}>Validez sur votre téléphone</p>
@@ -625,61 +626,77 @@ export default function PaymentPage() {
 
             {/* ══ STEP 3 ══════════════════════════════════════════════ */}
             {step === 3 && (
-              <div style={{ display:"flex", flexDirection:"column", gap:16, paddingTop:8 }} data-testid="step3">
-                <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
-                  <div className="anim-pop">
-                    <div style={{ width:96, height:96, borderRadius:"50%", background:"radial-gradient(circle,#dcfce7 60%,#bbf7d0 100%)", border:"5px solid #86efac", boxShadow:"0 0 0 8px #dcfce7", display:"flex", alignItems:"center", justifyContent:"center" }}>
-                      <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-                        <path className="anim-draw" d="M10 25 L20 35 L38 14" stroke="#00b050" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </div>
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:0, paddingTop:8 }} data-testid="step3">
+
+                {/* ── Checkmark hero ── */}
+                <div className="anim-pop" style={{ marginBottom:16 }}>
+                  <div style={{ width:110, height:110, borderRadius:"50%", background:"#fff", border:"5px solid #22c55e", boxShadow:"0 0 0 10px #dcfce7", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    <svg width="60" height="60" viewBox="0 0 60 60" fill="none">
+                      <circle cx="30" cy="30" r="28" fill="#22c55e" />
+                      <path className="anim-draw" d="M16 31 L26 41 L44 20" stroke="#fff" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
                   </div>
-                  <p style={{ fontSize:11, fontWeight:700, color:"#00b050", textTransform:"uppercase", letterSpacing:".12em", marginTop:12 }}>Paiement approuvé</p>
                 </div>
 
-                <div style={{ borderRadius:14, padding:"18px 20px", textAlign:"center", background:"linear-gradient(135deg,#1d4ed8 0%,#3b82f6 100%)" }}>
-                  <p style={{ color:"rgba(255,255,255,.65)", fontSize:11, textTransform:"uppercase", letterSpacing:".08em", marginBottom:4 }}>Montant débité</p>
-                  <p style={{ color:"#fff", fontWeight:800, fontSize:38, letterSpacing:"-1px" }}>
-                    {fmt(amount)}<span style={{ fontSize:20, fontWeight:500, opacity:.75, marginLeft:8 }}>{currency}</span>
+                {/* ── Title ── */}
+                <p style={{ fontWeight:800, fontSize:20, color:"#111", textAlign:"center", marginBottom:4 }}>Paiement effectué avec succès</p>
+                {merchantInfo && (
+                  <p style={{ fontSize:13, color:"#6b7280", textAlign:"center", marginBottom:20 }}>via <strong style={{ color:"#374151" }}>{merchantInfo.name}</strong></p>
+                )}
+
+                {/* ── Amount card ── */}
+                <div style={{ width:"100%", borderRadius:16, padding:"20px 24px", textAlign:"center", background:"linear-gradient(135deg,#16a34a 0%,#22c55e 100%)", marginBottom:16 }}>
+                  <p style={{ color:"rgba(255,255,255,.75)", fontSize:11, textTransform:"uppercase", letterSpacing:".1em", marginBottom:6 }}>Montant payé</p>
+                  <p style={{ color:"#fff", fontWeight:900, fontSize:42, letterSpacing:"-1px", lineHeight:1 }}>
+                    {fmt(amount)}<span style={{ fontSize:22, fontWeight:500, opacity:.8, marginLeft:8 }}>{currency}</span>
                   </p>
-                  {merchantInfo && <p style={{ color:"rgba(255,255,255,.55)", fontSize:12, marginTop:6 }}>{merchantInfo.name}</p>}
                 </div>
 
-                <div style={{ border:"1.5px solid #e5e7eb", borderRadius:14, overflow:"hidden" }}>
+                {/* ── Details card ── */}
+                <div style={{ width:"100%", border:"1.5px solid #e5e7eb", borderRadius:16, overflow:"hidden", marginBottom:16 }}>
                   {omniRef && (
-                    <div style={{ display:"flex", justifyContent:"space-between", padding:"11px 16px", borderBottom:"1px solid #f3f4f6" }}>
-                      <span style={{ fontSize:12, color:"#6b7280" }}>Référence</span>
-                      <span style={{ fontSize:12, fontFamily:"monospace", fontWeight:600, color:"#111" }}>{omniRef}</span>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"13px 18px", borderBottom:"1px solid #f3f4f6" }}>
+                      <span style={{ fontSize:12, color:"#6b7280", fontWeight:500 }}>Référence</span>
+                      <span style={{ fontSize:12, fontFamily:"monospace", fontWeight:700, color:"#111", background:"#f3f4f6", padding:"3px 10px", borderRadius:8 }}>{omniRef}</span>
                     </div>
                   )}
-                  <div style={{ display:"flex", justifyContent:"space-between", padding:"11px 16px", borderBottom:"1px solid #f3f4f6" }}>
-                    <span style={{ fontSize:12, color:"#6b7280" }}>Statut</span>
-                    <span style={{ fontSize:12, fontWeight:600, background:"#dcfce7", color:"#166534", padding:"2px 10px", borderRadius:99 }}>Confirmé</span>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"13px 18px", borderBottom: confirmedAt ? "1px solid #f3f4f6" : "none" }}>
+                    <span style={{ fontSize:12, color:"#6b7280", fontWeight:500 }}>Statut</span>
+                    <span style={{ fontSize:12, fontWeight:700, background:"#dcfce7", color:"#166534", padding:"3px 12px", borderRadius:99, display:"flex", alignItems:"center", gap:5 }}>
+                      <span style={{ width:7, height:7, borderRadius:"50%", background:"#22c55e", display:"inline-block" }} />
+                      Confirmé
+                    </span>
                   </div>
                   {confirmedAt && (<>
-                    <div style={{ display:"flex", justifyContent:"space-between", padding:"11px 16px", borderBottom:"1px solid #f3f4f6" }}>
-                      <span style={{ fontSize:12, color:"#6b7280" }}>Date</span>
-                      <span style={{ fontSize:12, color:"#374151" }}>{fmtD(confirmedAt)}</span>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"13px 18px", borderBottom:"1px solid #f3f4f6" }}>
+                      <span style={{ fontSize:12, color:"#6b7280", fontWeight:500 }}>Date</span>
+                      <span style={{ fontSize:12, color:"#374151", fontWeight:600 }}>{fmtD(confirmedAt)}</span>
                     </div>
-                    <div style={{ display:"flex", justifyContent:"space-between", padding:"11px 16px" }}>
-                      <span style={{ fontSize:12, color:"#6b7280", display:"flex", alignItems:"center", gap:4 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"13px 18px" }}>
+                      <span style={{ fontSize:12, color:"#6b7280", fontWeight:500, display:"flex", alignItems:"center", gap:4 }}>
                         <Clock style={{ width:12, height:12 }} /> Heure
                       </span>
-                      <span style={{ fontSize:12, fontWeight:600, color:"#374151" }}>{fmtT(confirmedAt)}</span>
+                      <span style={{ fontSize:12, fontWeight:700, color:"#374151" }}>{fmtT(confirmedAt)}</span>
                     </div>
                   </>)}
                 </div>
 
+                {/* ── Redirect / close ── */}
                 {redirectUrl ? (
-                  <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                    <p style={{ textAlign:"center", fontSize:12, color:"#9ca3af" }}>Redirection dans <strong style={{ color:"#374151" }}>{countdown}s</strong>...</p>
+                  <div style={{ width:"100%", display:"flex", flexDirection:"column", gap:10, alignItems:"center" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:8, background:"#f0fdf4", border:"1.5px solid #86efac", borderRadius:12, padding:"10px 18px", width:"100%" }}>
+                      <Loader2 style={{ width:15, height:15, color:"#16a34a", animation:"spin 1s linear infinite", flexShrink:0 }} />
+                      <p style={{ fontSize:13, color:"#166534", margin:0 }}>
+                        Redirection dans <strong>{countdown}s</strong> vers le site marchand...
+                      </p>
+                    </div>
                     <a href={(() => { try { const u = new URL(/^https?:\/\//i.test(redirectUrl) ? redirectUrl : `https://${redirectUrl}`); u.searchParams.set("status","success"); u.searchParams.set("amount",String(amount)); u.searchParams.set("ref",omniRef||""); return u.toString(); } catch { return "#"; } })()}
-                      className="paybtn" style={{ textDecoration:"none", background:"#f5c100", color:"#111" }} data-testid="link-redirect">
-                      Retourner sur le site
+                      className="paybtn" style={{ textDecoration:"none", background:"#22c55e", color:"#fff", width:"100%", textAlign:"center" }} data-testid="link-redirect">
+                      Retourner sur le site maintenant
                     </a>
                   </div>
                 ) : (
-                  <p style={{ textAlign:"center", fontSize:13, color:"#9ca3af" }}>Vous pouvez fermer cette page.</p>
+                  <p style={{ textAlign:"center", fontSize:13, color:"#9ca3af", marginTop:4 }}>Vous pouvez fermer cette page.</p>
                 )}
               </div>
             )}
