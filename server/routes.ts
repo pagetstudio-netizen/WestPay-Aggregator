@@ -4906,14 +4906,15 @@ export async function registerRoutes(
   // ==================== SUPPORT / AIDE ====================
   app.post("/api/support/help", async (req, res) => {
     try {
-      const { name, email, whatsapp, message, page } = req.body;
-      if (!name || !email || !message) {
-        return res.status(400).json({ message: "Nom, email et message sont requis" });
+      const { name, whatsapp, message, merchantName, merchantSlug } = req.body;
+      if (!name || !message) {
+        return res.status(400).json({ message: "Nom et message sont requis" });
       }
       const now = new Date();
       const date = now.toLocaleDateString("fr-FR");
       const time = now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-      const text = `🆘 *Nouvelle demande support*\n\n👤 *Nom :* ${name}\n📧 *Email :* ${email}\n📱 *WhatsApp :* ${whatsapp || "Non renseigné"}\n💬 *Message :*\n${message}\n\n🌐 *Page :* ${page || "paiement"}\n📅 *Date :* ${date}\n🕐 *Heure :* ${time}`;
+      const merchantInfo = merchantName ? `🏪 *Marchand :* ${merchantName}${merchantSlug ? ` (${merchantSlug})` : ""}` : "🏪 *Marchand :* Inconnu";
+      const text = `🆘 *Nouvelle demande d'aide — Page de paiement*\n\n${merchantInfo}\n\n👤 *Nom :* ${name}\n📱 *WhatsApp :* ${whatsapp || "Non renseigné"}\n💬 *Message :*\n${message}\n\n📅 *Date :* ${date}  🕐 *Heure :* ${time}`;
       const { notifyAdminGroup } = await import("./telegram-bot");
       await notifyAdminGroup(text);
       res.json({ success: true });
