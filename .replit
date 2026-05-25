@@ -47,9 +47,6 @@ waitForPort = 5000
 PORT = "5000"
 NODE_ENV = "development"
 XOF_PER_USD = "600"
-DATABASE_URL = "postgresql://postgres:Cotedivoire228@@db.bauubqsgtuoxxsufqklp.supabase.co:5432/postgres"
-"Supabase annon key" = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhdXVicXNndHVveHhzdWZxa2xwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2OTc1MjMsImV4cCI6MjA5NTI3MzUyM30.ZVeCaFrCwRNPNBfYsnqoUOvsNqI_xPp6I6r2kqWD3og"
-"Database supabase" = "postgresql://postgres.rsjbjnnzaueqnzngwwct:Cotedivoire228@@aws-1-us-east-1.pooler.supabase.com:6543/postgres"
 
 [postMerge]
 path = "scripts/post-merge.sh"

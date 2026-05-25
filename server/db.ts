@@ -7,11 +7,10 @@ if (!dbUrl) {
   throw new Error("DATABASE_URL must be set");
 }
 
-const isProduction = process.env.NODE_ENV === "production";
 export const pool = new Pool({
   connectionString: dbUrl,
-  ssl: isProduction
-    ? { rejectUnauthorized: true }
+  ssl: dbUrl.includes("localhost") || dbUrl.includes("127.0.0.1") || dbUrl.includes("/var/run")
+    ? false
     : { rejectUnauthorized: false },
   max: 10,
 });
