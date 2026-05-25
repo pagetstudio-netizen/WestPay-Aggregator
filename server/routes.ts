@@ -1099,7 +1099,7 @@ export async function registerRoutes(
         });
       }
 
-      return res.json({ requiresOtp: true, tempToken, otpVia });
+      return res.json({ requiresOtp: true, tempToken, otpVia, merchantName: merchant.name });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

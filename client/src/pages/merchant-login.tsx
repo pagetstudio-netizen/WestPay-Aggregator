@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { Eye, EyeOff, Loader2, Shield, Lock, Mail, CheckCircle2, Zap, Globe, ArrowRight } from "lucide-react";
+import { SiTelegram } from "react-icons/si";
 import Captcha, { generateCaptchaCode } from "@/components/Captcha";
 
 const FEATURES = [
@@ -47,6 +48,7 @@ export default function MerchantLogin() {
   const [otpCode, setOtpCode] = useState("");
   const [otpToken, setOtpToken] = useState("");
   const [otpEmail, setOtpEmail] = useState("");
+  const [otpMerchantName, setOtpMerchantName] = useState("");
   const [otpVia, setOtpVia] = useState<"email" | "telegram">("email");
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpResendLoading, setOtpResendLoading] = useState(false);
@@ -104,6 +106,7 @@ export default function MerchantLogin() {
       if (data.requiresOtp) {
         setOtpToken(data.tempToken);
         setOtpEmail(email);
+        setOtpMerchantName(data.merchantName || "");
         setOtpStep(true);
         setOtpCountdown(60);
         setOtpVia(data.otpVia || "email");
@@ -416,21 +419,15 @@ export default function MerchantLogin() {
             <>
               <div className="mb-8">
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-5 mx-auto"
-                  style={{ background: otpVia === "telegram" ? "linear-gradient(135deg,#229ED9,#0d6fa8)" : "linear-gradient(135deg,#00b050,#005c2e)" }}>
-                  {otpVia === "telegram"
-                    ? <svg className="w-8 h-8 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L7.088 13.47l-2.95-.924c-.64-.203-.658-.64.135-.954l11.566-4.458c.537-.194 1.006.131.835.952l.26-.865z"/></svg>
-                    : <Mail className="w-8 h-8 text-white" />
-                  }
+                  style={{ background: "linear-gradient(135deg,#229ED9,#0d6fa8)" }}>
+                  <SiTelegram className="w-9 h-9 text-white" />
                 </div>
                 <h1 className="text-2xl font-black text-slate-900 text-center mb-2">
-                  {otpVia === "telegram" ? "Vérification Telegram" : "Vérification email"}
+                  Vérification Telegram
                 </h1>
                 <p className="text-slate-500 text-sm text-center leading-relaxed">
-                  {otpVia === "telegram" ? (
-                    <>Un code à 6 chiffres a été envoyé dans<br /><span className="font-semibold text-slate-700">votre groupe Telegram</span></>
-                  ) : (
-                    <>Un code à 6 chiffres a été envoyé à<br /><span className="font-semibold text-slate-700">{otpEmail}</span></>
-                  )}
+                  Un code à 6 chiffres a été envoyé dans le groupe Telegram de<br />
+                  <span className="font-semibold text-slate-700">{otpMerchantName || "votre compte"}</span>
                 </p>
               </div>
 
