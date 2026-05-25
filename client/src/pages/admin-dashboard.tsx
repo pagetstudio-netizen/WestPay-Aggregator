@@ -3415,7 +3415,7 @@ const COUNTRIES_LIST = [
   "Tchad", "Centrafrique", "Guinee Equatoriale",
 ];
 const OPERATOR_TYPES = ["Mobile Money", "Virement bancaire", "Carte bancaire", "Cryptomonnaie", "Autre"];
-const GATEWAYS = ["OmniPay", "Mbiyo", "WiniPayer", "MaishaPay", "Manuel"];
+const GATEWAYS = ["OmniPay", "Mbiyo", "WiniPayer", "MaishaPay", "SendavaPay", "Manuel"];
 
 function SortableOpRow({
   op, onEdit, onDelete, onToggle, onUploadLogo, onRemoveLogo, uploadingFor,
