@@ -1,5 +1,8 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
 import { storage } from "./storage";
 import { db } from "./db";
 import { pool } from "./db";
@@ -55,6 +58,27 @@ import {
   SENDAVAPAY_COUNTRY_CODES,
   type SendavaPayWebhookPayload,
 } from "./sendavapay";
+
+// ── Multer — logo opérateur ───────────────────────────────────────────────────
+const LOGOS_DIR = path.resolve(process.cwd(), "uploads", "operator-logos");
+if (!fs.existsSync(LOGOS_DIR)) fs.mkdirSync(LOGOS_DIR, { recursive: true });
+
+const logoStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, LOGOS_DIR),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase() || ".png";
+    cb(null, `op-${Date.now()}-${Math.random().toString(36).substr(2, 6)}${ext}`);
+  },
+});
+const logoUpload = multer({
+  storage: logoStorage,
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"];
+    if (allowed.includes(path.extname(file.originalname).toLowerCase())) cb(null, true);
+    else cb(new Error("Format non supporté (jpg, png, webp, gif, svg)"));
+  },
+});
 
 const JWT_SECRET = process.env.SESSION_SECRET || process.env.JWT_SECRET || "westpay-secret-key-change-me";
 if (!process.env.SESSION_SECRET && !process.env.JWT_SECRET) {
@@ -5591,6 +5615,58 @@ export async function registerRoutes(
     }
   });
 
+  // Upload logo for an operator
+  app.post("/api/admin/operator-logo/:id", authMiddleware("admin"), (req, res, next) => {
+    logoUpload.single("logo")(req, res, async (err) => {
+      if (err) return res.status(400).json({ message: err.message });
+      try {
+        const id = Number(req.params.id);
+        if (!req.file) return res.status(400).json({ message: "Aucun fichier reçu" });
+        const existing = await storage.getWithdrawalOperatorById(id);
+        if (!existing) return res.status(404).json({ message: "Opérateur introuvable" });
+        // Delete old logo file if it exists and is a local file
+        if (existing.logo && existing.logo.startsWith("/uploads/")) {
+          const oldPath = path.resolve(process.cwd(), existing.logo.slice(1));
+          try { if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath); } catch {}
+        }
+        const logoUrl = `/uploads/operator-logos/${req.file.filename}`;
+        const updated = await storage.updateWithdrawalOperator(id, { logo: logoUrl });
+        res.json(updated);
+      } catch (e: any) {
+        res.status(500).json({ message: e.message });
+      }
+    });
+  });
+
+  // Remove logo for an operator
+  app.delete("/api/admin/operator-logo/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const existing = await storage.getWithdrawalOperatorById(id);
+      if (!existing) return res.status(404).json({ message: "Opérateur introuvable" });
+      if (existing.logo && existing.logo.startsWith("/uploads/")) {
+        const oldPath = path.resolve(process.cwd(), existing.logo.slice(1));
+        try { if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath); } catch {}
+      }
+      const updated = await storage.updateWithdrawalOperator(id, { logo: null });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Batch reorder operators
+  app.put("/api/admin/withdrawal-operators/reorder", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { updates } = req.body as { updates: { id: number; sortOrder: number }[] };
+      if (!Array.isArray(updates)) return res.status(400).json({ message: "updates[] requis" });
+      await storage.updateOperatorsSortOrder(updates);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.post("/api/admin/withdrawal-operators", authMiddleware("admin"), async (req, res) => {
     try {
       const { name, type, country, dailyLimit, gateway, omnipayCode, mbiyoCode, active } = req.body;
@@ -5619,7 +5695,7 @@ export async function registerRoutes(
   app.put("/api/admin/withdrawal-operators/:id", authMiddleware("admin"), async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const { name, type, country, dailyLimit, gateway, omnipayCode, mbiyoCode, active, maintenanceAll, maintenanceDeposits, maintenanceWithdrawals, maintenancePaymentLinks, maintenanceApiPayment } = req.body;
+      const { name, type, country, dailyLimit, gateway, omnipayCode, mbiyoCode, logo, sortOrder, active, maintenanceAll, maintenanceDeposits, maintenanceWithdrawals, maintenancePaymentLinks, maintenanceApiPayment } = req.body;
       const updated = await storage.updateWithdrawalOperator(id, {
         ...(name !== undefined && { name }),
         ...(type !== undefined && { type }),
@@ -5628,6 +5704,8 @@ export async function registerRoutes(
         ...(gateway !== undefined && { gateway }),
         ...(omnipayCode !== undefined && { omnipayCode: omnipayCode?.trim() || null }),
         ...(mbiyoCode !== undefined && { mbiyoCode: mbiyoCode?.trim() || null }),
+        ...(logo !== undefined && { logo: logo || null }),
+        ...(sortOrder !== undefined && { sortOrder: Number(sortOrder) }),
         ...(active !== undefined && { active }),
         ...(maintenanceAll !== undefined && { maintenanceAll }),
         ...(maintenanceDeposits !== undefined && { maintenanceDeposits }),

@@ -156,6 +156,7 @@ export interface IStorage {
   createWithdrawalOperator(data: InsertWithdrawalOperator): Promise<WithdrawalOperator>;
   updateWithdrawalOperator(id: number, data: Partial<InsertWithdrawalOperator>): Promise<WithdrawalOperator>;
   deleteWithdrawalOperator(id: number): Promise<void>;
+  updateOperatorsSortOrder(updates: { id: number; sortOrder: number }[]): Promise<void>;
 
   getCryptoAggregators(): Promise<CryptoAggregator[]>;
   getCryptoAggregatorById(id: number): Promise<CryptoAggregator | undefined>;
@@ -994,9 +995,15 @@ export class DatabaseStorage implements IStorage {
     if (country) conditions.push(eq(withdrawalOperators.country, country));
     if (activeOnly) conditions.push(eq(withdrawalOperators.active, true));
     if (conditions.length > 0) {
-      return db.select().from(withdrawalOperators).where(and(...conditions)).orderBy(withdrawalOperators.name);
+      return db.select().from(withdrawalOperators).where(and(...conditions)).orderBy(withdrawalOperators.sortOrder, withdrawalOperators.name);
     }
-    return db.select().from(withdrawalOperators).orderBy(withdrawalOperators.country, withdrawalOperators.name);
+    return db.select().from(withdrawalOperators).orderBy(withdrawalOperators.country, withdrawalOperators.sortOrder, withdrawalOperators.name);
+  }
+
+  async updateOperatorsSortOrder(updates: { id: number; sortOrder: number }[]): Promise<void> {
+    for (const { id, sortOrder } of updates) {
+      await db.update(withdrawalOperators).set({ sortOrder }).where(eq(withdrawalOperators.id, id));
+    }
   }
 
   async getWithdrawalOperatorById(id: number): Promise<WithdrawalOperator | undefined> {

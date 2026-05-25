@@ -460,7 +460,7 @@ export default function PaymentPage() {
                           data-testid={`radio-${m.name.replace(/\s+/g,"-").toLowerCase()}`}
                           title={m.name}>
                           {img
-                            ? <img src={img} alt={m.name} style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius:"50%", display:"block" }} />
+                            ? <img src={img} alt={m.name} draggable={false} onContextMenu={e => e.preventDefault()} onDragStart={e => e.preventDefault()} style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius:"50%", display:"block", pointerEvents:"none", userSelect:"none", WebkitUserDrag:"none" } as React.CSSProperties} />
                             : <div style={{ width:"100%", height:"100%", borderRadius:"50%", background:meta.bg, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:800, color:"#fff", letterSpacing:"0.03em" }}>{meta.abbr}</div>
                           }
                         </div>

@@ -1,4 +1,7 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { getAvatarUrl, getInitials, getAvatarColor } from "@/lib/avatar";
 import { useAuth } from "@/lib/auth";
 import { useLocation } from "wouter";
@@ -28,7 +31,7 @@ import {
   RefreshCw, Lock, BookOpen, FileText, Webhook, Zap, ToggleLeft, ToggleRight, Link2,
   Link, BarChart3, TrendingUp, Eye, ToggleLeft as Toggle, ExternalLink, Filter,
   Check, ChevronsUpDown, ArrowUpRight, Edit3, Wallet, AlertTriangle, RotateCcw, Bitcoin,
-  Monitor, EyeOff, KeyRound, Mail
+  Monitor, EyeOff, KeyRound, Mail, GripVertical, ImagePlus, X
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
@@ -3414,6 +3417,110 @@ const COUNTRIES_LIST = [
 const OPERATOR_TYPES = ["Mobile Money", "Virement bancaire", "Carte bancaire", "Cryptomonnaie", "Autre"];
 const GATEWAYS = ["OmniPay", "Mbiyo", "WiniPayer", "MaishaPay", "Manuel"];
 
+function SortableOpRow({
+  op, onEdit, onDelete, onToggle, onUploadLogo, onRemoveLogo, uploadingFor,
+}: {
+  op: WithdrawalOperator;
+  onEdit: (op: WithdrawalOperator) => void;
+  onDelete: (id: number) => void;
+  onToggle: (op: WithdrawalOperator, field: string, value: boolean) => void;
+  onUploadLogo: (id: number, file: File) => void;
+  onRemoveLogo: (id: number) => void;
+  uploadingFor: number | null;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: op.id });
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    position: "relative",
+    zIndex: isDragging ? 10 : undefined,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="p-3 rounded border bg-muted/20 space-y-3" data-testid={`operator-row-${op.id}`}>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground touch-none shrink-0 p-1">
+            <GripVertical className="w-4 h-4" />
+          </div>
+          <div className="relative group shrink-0">
+            {(op as any).logo ? (
+              <img src={(op as any).logo} alt={op.name} className="w-10 h-10 rounded-full object-cover border" />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-muted border flex items-center justify-center">
+                <span className="text-xs font-bold text-muted-foreground">{op.name.substring(0, 2).toUpperCase()}</span>
+              </div>
+            )}
+            <button
+              type="button"
+              className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+              onClick={() => fileInputRef.current?.click()}
+              title="Changer le logo"
+            >
+              {uploadingFor === op.id ? (
+                <Loader2 className="w-4 h-4 text-white animate-spin" />
+              ) : (
+                <ImagePlus className="w-4 h-4 text-white" />
+              )}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+              className="hidden"
+              onChange={e => {
+                const file = e.target.files?.[0];
+                if (file) onUploadLogo(op.id, file);
+                e.target.value = "";
+              }}
+            />
+          </div>
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-semibold text-sm">{op.name}</span>
+              <Badge variant="outline" className="text-xs py-0">{op.type}</Badge>
+              <Badge variant="secondary" className="text-xs py-0">{op.country}</Badge>
+              {!op.active && <Badge variant="destructive" className="text-xs py-0">Inactif</Badge>}
+            </div>
+            <span className="text-xs text-muted-foreground">
+              Passerelle : {op.gateway}{op.gateway?.toLowerCase() === "mbiyo" && op.mbiyoCode ? ` (${op.mbiyoCode})` : op.gateway?.toLowerCase() === "mbiyo" ? " ⚠️ code réseau manquant" : ""} · Limite : {op.dailyLimit.toLocaleString("fr-FR")} FCFA/j
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-1">
+          {(op as any).logo && (
+            <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive h-7 w-7 p-0" title="Supprimer le logo" onClick={() => onRemoveLogo(op.id)} data-testid={`button-remove-logo-${op.id}`}>
+              <X className="w-3 h-3" />
+            </Button>
+          )}
+          <Switch checked={op.active} onCheckedChange={(v) => onToggle(op, "active", v)} data-testid={`switch-op-active-${op.id}`} />
+          <Button size="sm" variant="ghost" onClick={() => onEdit(op)} data-testid={`button-edit-op-${op.id}`}><Eye className="w-3 h-3" /></Button>
+          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => onDelete(op.id)} data-testid={`button-delete-op-${op.id}`}><Trash2 className="w-3 h-3" /></Button>
+        </div>
+      </div>
+      <div className="border-t pt-2">
+        <p className="text-xs text-muted-foreground mb-2 font-medium">Maintenance (bloquer) :</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5">
+          {[
+            { label: "Toutes les pages", field: "maintenanceAll", val: op.maintenanceAll },
+            { label: "Dépôts", field: "maintenanceDeposits", val: op.maintenanceDeposits },
+            { label: "Retraits", field: "maintenanceWithdrawals", val: op.maintenanceWithdrawals },
+            { label: "Liens de paiement", field: "maintenancePaymentLinks", val: op.maintenancePaymentLinks },
+            { label: "API paiement", field: "maintenanceApiPayment", val: op.maintenanceApiPayment },
+          ].map(({ label, field, val }) => (
+            <label key={field} className="flex items-center gap-1.5 cursor-pointer">
+              <Switch checked={val} onCheckedChange={(v) => onToggle(op, field, v)} className="scale-75 origin-left" data-testid={`switch-${field}-${op.id}`} />
+              <span className={`text-xs ${val ? "text-red-500 font-medium" : "text-muted-foreground"}`}>{label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WithdrawalOperatorsPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
@@ -3422,14 +3529,18 @@ function WithdrawalOperatorsPanel() {
   const [opDialogOpen, setOpDialogOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<WithdrawalOperator | null>(null);
   const [filterCountry, setFilterCountry] = useState("all");
+  const [uploadingLogoFor, setUploadingLogoFor] = useState<number | null>(null);
+  const [localOps, setLocalOps] = useState<WithdrawalOperator[]>([]);
 
-  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "OmniPay", omnipayCode: "", mbiyoCode: "", logo: "", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false };
+  useEffect(() => { setLocalOps(opList as WithdrawalOperator[]); }, [opList]);
+
+  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "OmniPay", omnipayCode: "", mbiyoCode: "", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false };
   const [form, setForm] = useState(emptyForm);
 
   const openCreate = () => { setEditingOp(null); setForm(emptyForm); setOpDialogOpen(true); };
   const openEdit = (op: WithdrawalOperator) => {
     setEditingOp(op);
-    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, omnipayCode: op.omnipayCode || "", mbiyoCode: op.mbiyoCode || "", logo: (op as any).logo || "", active: op.active, maintenanceAll: op.maintenanceAll, maintenanceDeposits: op.maintenanceDeposits, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment });
+    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, omnipayCode: op.omnipayCode || "", mbiyoCode: op.mbiyoCode || "", active: op.active, maintenanceAll: op.maintenanceAll, maintenanceDeposits: op.maintenanceDeposits, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment });
     setOpDialogOpen(true);
   };
 
@@ -3467,8 +3578,61 @@ function WithdrawalOperatorsPanel() {
     queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawal-operators"] });
   };
 
-  const allOps = opList as WithdrawalOperator[];
-  const filtered = filterCountry === "all" ? allOps : allOps.filter(o => o.country === filterCountry);
+  const uploadLogo = async (opId: number, file: File) => {
+    setUploadingLogoFor(opId);
+    try {
+      const fd = new FormData();
+      fd.append("logo", file);
+      const res = await fetch(`/api/admin/operator-logo/${opId}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message); }
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawal-operators"] });
+      toast({ title: "Logo mis à jour" });
+    } catch (e: any) {
+      toast({ title: "Erreur upload", description: e.message, variant: "destructive" });
+    } finally {
+      setUploadingLogoFor(null);
+    }
+  };
+
+  const removeLogo = async (opId: number) => {
+    const res = await fetch(`/api/admin/operator-logo/${opId}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+    if (res.ok) {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawal-operators"] });
+      toast({ title: "Logo supprimé" });
+    }
+  };
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  const filtered = filterCountry === "all" ? localOps : localOps.filter(o => o.country === filterCountry);
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIdx = filtered.findIndex(o => o.id === Number(active.id));
+    const newIdx = filtered.findIndex(o => o.id === Number(over.id));
+    if (oldIdx === -1 || newIdx === -1) return;
+    const newFiltered = arrayMove(filtered, oldIdx, newIdx);
+    const filteredIds = new Set(filtered.map(o => o.id));
+    let fi = 0;
+    const newFull = localOps.map(op => filteredIds.has(op.id) ? newFiltered[fi++] : op);
+    setLocalOps(newFull);
+    try {
+      await fetch("/api/admin/withdrawal-operators/reorder", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ updates: newFull.map((op, i) => ({ id: op.id, sortOrder: i })) }),
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawal-operators"] });
+    } catch {}
+  };
 
   return (
     <div className="space-y-4">
@@ -3495,59 +3659,24 @@ function WithdrawalOperatorsPanel() {
       ) : filtered.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-6">Aucun opérateur configuré.</p>
       ) : (
-        <div className="space-y-2">
-          {filtered.map((op) => (
-            <div key={op.id} className="p-3 rounded border bg-muted/20 space-y-3" data-testid={`operator-row-${op.id}`}>
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-3">
-                  {(op as any).logo ? (
-                    <img src={(op as any).logo} alt={op.name} className="w-10 h-10 rounded-full object-cover border shrink-0" />
-                  ) : (
-                    <div className="w-10 h-10 rounded-full bg-muted border flex items-center justify-center shrink-0">
-                      <span className="text-xs font-bold text-muted-foreground">{op.name.substring(0,2).toUpperCase()}</span>
-                    </div>
-                  )}
-                  <div className="flex flex-col">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-sm">{op.name}</span>
-                      <Badge variant="outline" className="text-xs py-0">{op.type}</Badge>
-                      <Badge variant="secondary" className="text-xs py-0">{op.country}</Badge>
-                      {!op.active && <Badge variant="destructive" className="text-xs py-0">Inactif</Badge>}
-                    </div>
-                    <span className="text-xs text-muted-foreground">
-                      Passerelle : {op.gateway}{op.gateway?.toLowerCase() === "mbiyo" && op.mbiyoCode ? ` (${op.mbiyoCode})` : op.gateway?.toLowerCase() === "mbiyo" ? " ⚠️ code réseau manquant" : ""} · Limite : {op.dailyLimit.toLocaleString("fr-FR")} FCFA/j
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Switch checked={op.active} onCheckedChange={(v) => toggleMaint(op, "active", v)} data-testid={`switch-op-active-${op.id}`} />
-                  <Button size="sm" variant="ghost" onClick={() => openEdit(op)} data-testid={`button-edit-op-${op.id}`}><Eye className="w-3 h-3" /></Button>
-                  <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => deleteMutation.mutate(op.id)} data-testid={`button-delete-op-${op.id}`}><Trash2 className="w-3 h-3" /></Button>
-                </div>
-              </div>
-
-              <div className="border-t pt-2">
-                <p className="text-xs text-muted-foreground mb-2 font-medium">Maintenance (bloquer) :</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5">
-                  {[
-                    { label: "Toutes les pages", field: "maintenanceAll", val: op.maintenanceAll },
-                    { label: "Dépôts", field: "maintenanceDeposits", val: op.maintenanceDeposits },
-                    { label: "Retraits", field: "maintenanceWithdrawals", val: op.maintenanceWithdrawals },
-                    { label: "Liens de paiement", field: "maintenancePaymentLinks", val: op.maintenancePaymentLinks },
-                    { label: "API paiement", field: "maintenanceApiPayment", val: op.maintenanceApiPayment },
-                  ].map(({ label, field, val }) => (
-                    <label key={field} className="flex items-center gap-1.5 cursor-pointer">
-                      <Switch checked={val} onCheckedChange={(v) => toggleMaint(op, field, v)}
-                        className="scale-75 origin-left"
-                        data-testid={`switch-${field}-${op.id}`} />
-                      <span className={`text-xs ${val ? "text-red-500 font-medium" : "text-muted-foreground"}`}>{label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={filtered.map(o => o.id)} strategy={verticalListSortingStrategy}>
+            <div className="space-y-2">
+              {filtered.map((op) => (
+                <SortableOpRow
+                  key={op.id}
+                  op={op}
+                  onEdit={openEdit}
+                  onDelete={id => deleteMutation.mutate(id)}
+                  onToggle={toggleMaint}
+                  onUploadLogo={uploadLogo}
+                  onRemoveLogo={removeLogo}
+                  uploadingFor={uploadingLogoFor}
+                />
+              ))}
             </div>
-          ))}
-        </div>
+          </SortableContext>
+        </DndContext>
       )}
 
       <Dialog open={opDialogOpen} onOpenChange={setOpDialogOpen}>
@@ -3559,16 +3688,6 @@ function WithdrawalOperatorsPanel() {
             <div className="space-y-2">
               <Label>Nom</Label>
               <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Ex: Moov Money" data-testid="input-op-name" />
-            </div>
-            <div className="space-y-2">
-              <Label>Logo (URL de l'image)</Label>
-              <div className="flex items-center gap-2">
-                <Input value={(form as any).logo || ""} onChange={e => setForm(f => ({ ...f, logo: e.target.value }))} placeholder="https://exemple.com/logo.png" data-testid="input-op-logo" className="flex-1" />
-                {(form as any).logo && (
-                  <img src={(form as any).logo} alt="preview" className="w-10 h-10 rounded-full object-cover border shrink-0" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground">URL d'une image PNG/JPG. Laisser vide pour utiliser le logo par défaut.</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
@@ -3601,24 +3720,14 @@ function WithdrawalOperatorsPanel() {
             {form.gateway?.toLowerCase() === "omnipay" && (
               <div className="space-y-2">
                 <Label>Code opérateur OmniPay</Label>
-                <Input
-                  value={form.omnipayCode}
-                  onChange={e => setForm(f => ({ ...f, omnipayCode: e.target.value }))}
-                  placeholder="Ex: mtn, orange, moov, wave, mixx..."
-                  data-testid="input-op-omnipay-code"
-                />
+                <Input value={form.omnipayCode} onChange={e => setForm(f => ({ ...f, omnipayCode: e.target.value }))} placeholder="Ex: mtn, orange, moov, wave, mixx..." data-testid="input-op-omnipay-code" />
                 <p className="text-xs text-muted-foreground">Code opérateur envoyé à OmniPay. Laisser vide pour laisser OmniPay détecter automatiquement via le numéro. Requis pour Wave (<code>wave</code>) et Mixx (<code>mixx</code>).</p>
               </div>
             )}
             {form.gateway?.toLowerCase() === "mbiyo" && (
               <div className="space-y-2">
                 <Label>Code réseau Mbiyo</Label>
-                <Input
-                  value={form.mbiyoCode}
-                  onChange={e => setForm(f => ({ ...f, mbiyoCode: e.target.value }))}
-                  placeholder="Ex: mtn, moov, wave, celtiis, orange..."
-                  data-testid="input-op-mbiyo-code"
-                />
+                <Input value={form.mbiyoCode} onChange={e => setForm(f => ({ ...f, mbiyoCode: e.target.value }))} placeholder="Ex: mtn, moov, wave, celtiis, orange..." data-testid="input-op-mbiyo-code" />
                 <p className="text-xs text-muted-foreground">Code réseau exact attendu par Mbiyo pour les retraits (ex: <code>mtn</code>, <code>moov</code>, <code>wave</code>, <code>celtiis</code>). Obligatoire si la passerelle est Mbiyo.</p>
               </div>
             )}

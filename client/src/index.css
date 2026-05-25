@@ -351,3 +351,19 @@
     inset: -1px;
   }
 }
+
+/* ── Global image protection — prevent download / drag / right-click ── */
+img {
+  -webkit-user-drag: none;
+  -moz-user-drag: none;
+  user-drag: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Admin tool images (logos in list) can still be right-clicked by admin */
+.admin-logo-img {
+  -webkit-user-drag: auto;
+  user-drag: auto;
+}
