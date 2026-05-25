@@ -52,6 +52,7 @@ export interface IStorage {
   deleteMerchantCountry(id: number): Promise<void>;
   updateMerchantCountryBalance(id: number, balance: number): Promise<void>;
   incrementMerchantCountryBalance(id: number, amount: number): Promise<void>;
+  decrementMerchantCountryBalanceAtomic(id: number, amount: number): Promise<boolean>;
   findMerchantCountryBySimAndCountry(merchantId: number, country: string): Promise<MerchantCountry | undefined>;
   findMerchantCountryByApiKey(apiKey: string): Promise<MerchantCountry | undefined>;
   updateMerchantCountryApiKey(id: number, apiKey: string): Promise<void>;
@@ -327,6 +328,17 @@ export class DatabaseStorage implements IStorage {
     await db.update(merchantCountries)
       .set({ balance: sql`${merchantCountries.balance} + ${amount}` })
       .where(eq(merchantCountries.id, id));
+  }
+
+  async decrementMerchantCountryBalanceAtomic(id: number, amount: number): Promise<boolean> {
+    const result = await db.update(merchantCountries)
+      .set({ balance: sql`${merchantCountries.balance} - ${amount}` })
+      .where(and(
+        eq(merchantCountries.id, id),
+        sql`${merchantCountries.balance} >= ${amount}`
+      ))
+      .returning({ id: merchantCountries.id });
+    return result.length > 0;
   }
 
   async findMerchantCountryBySimAndCountry(merchantId: number, country: string): Promise<MerchantCountry | undefined> {

@@ -7016,86 +7016,115 @@ export default function AdminDashboard() {
   if (authLoading) return <div className="min-h-screen bg-background flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
   if (!user || user.role !== "admin") return <div className="min-h-screen bg-background flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
 
-  const menuItems: { title: string; icon: any; tab: AdminTab }[] = [
-    { title: "Vue d'ensemble", icon: BarChart3, tab: "overview" },
-    { title: "Analytique", icon: TrendingUp, tab: "analytics" },
-    { title: "Marchands", icon: Users, tab: "merchants" },
-    { title: "Liens de paiement", icon: Link, tab: "paymentlinks" },
-    { title: "Transactions", icon: ArrowRightLeft, tab: "transactions" },
-    { title: "Pays & API", icon: Globe, tab: "countries" },
-    { title: "Numeros SIM", icon: Phone, tab: "numbers" },
-    { title: "SMS recus", icon: MessageSquare, tab: "sms" },
-    { title: "API & PIN", icon: Key, tab: "apikeys" },
-    { title: "Paiement", icon: Zap, tab: "omnipay" },
-    { title: "Mbiyo", icon: Globe, tab: "mbiyo" },
-    { title: "SendavaPay", icon: Zap, tab: "sendavapay" },
-    { title: "Crypto", icon: Bitcoin, tab: "cryptoagg" },
-    { title: "Retraits Crypto", icon: Download, tab: "cryptowithdrawals" },
-    { title: "Virements", icon: ArrowUpRight, tab: "virements" },
-    { title: "Reversements", icon: Download, tab: "reversements" },
-    { title: "Administrateurs", icon: Shield, tab: "admins" },
-    { title: "Sécurité IP", icon: Lock, tab: "security" },
-    { title: "Parametres", icon: Settings, tab: "settings" },
-    { title: "SDK API", icon: BookOpen, tab: "sdk" },
-    { title: "Notifications", icon: Mail, tab: "notifications" },
+  type MenuGroup = { label: string; items: { title: string; icon: any; tab: AdminTab }[] };
+  const menuGroups: MenuGroup[] = [
+    {
+      label: "Tableau de bord",
+      items: [
+        { title: "Vue d'ensemble", icon: BarChart3, tab: "overview" },
+        { title: "Analytique", icon: TrendingUp, tab: "analytics" },
+      ],
+    },
+    {
+      label: "Marchands",
+      items: [
+        { title: "Marchands", icon: Users, tab: "merchants" },
+        { title: "Transactions", icon: ArrowRightLeft, tab: "transactions" },
+        { title: "Liens de paiement", icon: Link, tab: "paymentlinks" },
+        { title: "Virements", icon: ArrowUpRight, tab: "virements" },
+        { title: "Reversements", icon: Download, tab: "reversements" },
+      ],
+    },
+    {
+      label: "Infrastructure",
+      items: [
+        { title: "Pays & API", icon: Globe, tab: "countries" },
+        { title: "Numéros SIM", icon: Phone, tab: "numbers" },
+        { title: "SMS reçus", icon: MessageSquare, tab: "sms" },
+        { title: "API & PIN", icon: Key, tab: "apikeys" },
+      ],
+    },
+    {
+      label: "Passerelles",
+      items: [
+        { title: "OmniPay", icon: Zap, tab: "omnipay" },
+        { title: "Mbiyo", icon: Globe, tab: "mbiyo" },
+        { title: "SendavaPay", icon: Zap, tab: "sendavapay" },
+        { title: "Crypto", icon: Bitcoin, tab: "cryptoagg" },
+        { title: "Retraits Crypto", icon: Download, tab: "cryptowithdrawals" },
+      ],
+    },
+    {
+      label: "Administration",
+      items: [
+        { title: "Administrateurs", icon: Shield, tab: "admins" },
+        { title: "Sécurité IP", icon: Lock, tab: "security" },
+        { title: "Paramètres", icon: Settings, tab: "settings" },
+        { title: "SDK API", icon: BookOpen, tab: "sdk" },
+        { title: "Notifications", icon: Mail, tab: "notifications" },
+      ],
+    },
   ];
 
+  const activeTabTitle = menuGroups.flatMap(g => g.items).find(i => i.tab === activeTab)?.title ?? "Administration";
+
   const style = {
-    "--sidebar-width": "16rem",
+    "--sidebar-width": "15rem",
     "--sidebar-width-icon": "3.5rem",
   };
 
   return (
     <SidebarProvider style={style as React.CSSProperties}>
       <div className="flex h-screen w-full">
-        <Sidebar>
+        <Sidebar className="border-r border-sidebar-border bg-sidebar">
           <SidebarContent>
+            {/* ── Logo / Brand ─────────────────────────────────────────── */}
             <SidebarGroup>
-              <div className="px-3 py-4">
+              <div className="px-3 py-3">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center shadow-sm shrink-0">
-                    <Shield className="w-5 h-5 text-primary-foreground" />
+                  <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shadow-sm shrink-0">
+                    <Shield className="w-4 h-4 text-primary-foreground" />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-sm font-bold text-sidebar-foreground leading-tight">WestPay</p>
-                    <p className="text-xs text-muted-foreground leading-tight">Administration</p>
+                    <p className="text-sm font-bold text-sidebar-foreground leading-tight tracking-tight">WestPay</p>
+                    <p className="text-[10px] text-muted-foreground leading-tight font-medium uppercase tracking-widest">Admin</p>
                   </div>
                 </div>
               </div>
             </SidebarGroup>
-            <Separator />
-            <SidebarGroup>
-              <SidebarGroupLabel>Navigation</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {menuItems.map((item) => (
-                    <SidebarMenuItem key={item.tab}>
-                      <SidebarMenuButton
-                        onClick={() => setActiveTab(item.tab)}
-                        isActive={activeTab === item.tab}
-                        data-testid={`nav-${item.tab}`}
-                      >
-                        <item.icon className="w-4 h-4" />
-                        <span>{item.title}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          </SidebarContent>
-        </Sidebar>
+            <Separator className="opacity-60" />
 
-        <div className="flex flex-col flex-1 min-w-0">
-          <header className="flex items-center justify-between gap-2 px-4 py-2.5 border-b sticky top-0 z-50 bg-background/95 backdrop-blur-sm shadow-xs">
-            <div className="flex items-center gap-2">
-              <SidebarTrigger data-testid="button-sidebar-toggle" />
-              <span className="w-px h-5 bg-border hidden sm:block" />
-              <h1 className="text-sm font-semibold text-foreground hidden sm:block">Administration</h1>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-2 bg-primary/8 border border-primary/15 rounded-full pl-1 pr-3 py-1">
-                <div className="w-6 h-6 rounded-full overflow-hidden shrink-0">
+            {/* ── Grouped Navigation ───────────────────────────────────── */}
+            {menuGroups.map((group) => (
+              <SidebarGroup key={group.label} className="py-1">
+                <SidebarGroupLabel className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/70 px-3 py-1.5">
+                  {group.label}
+                </SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {group.items.map((item) => (
+                      <SidebarMenuItem key={item.tab}>
+                        <SidebarMenuButton
+                          onClick={() => setActiveTab(item.tab)}
+                          isActive={activeTab === item.tab}
+                          data-testid={`nav-${item.tab}`}
+                          className="gap-2.5 rounded-lg text-sm font-medium"
+                        >
+                          <item.icon className="w-4 h-4 shrink-0" />
+                          <span>{item.title}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            ))}
+
+            {/* ── Bottom: admin email ───────────────────────────────────── */}
+            <div className="mt-auto">
+              <Separator className="opacity-60" />
+              <div className="px-3 py-3 flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-full overflow-hidden shrink-0 ring-2 ring-primary/20">
                   <img
                     src={getAvatarUrl(user.email, 48)}
                     alt={user.email}
@@ -7103,7 +7132,35 @@ export default function AdminDashboard() {
                     onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
                   />
                 </div>
-                <span className="text-xs font-medium text-primary truncate max-w-40">{user.email}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-sidebar-foreground truncate leading-tight">{user.email}</p>
+                  <p className="text-[10px] text-muted-foreground leading-tight">Administrateur</p>
+                </div>
+              </div>
+            </div>
+          </SidebarContent>
+        </Sidebar>
+
+        <div className="flex flex-col flex-1 min-w-0">
+          {/* ── Top Header ────────────────────────────────────────────── */}
+          <header className="flex items-center justify-between gap-2 px-4 py-2.5 border-b sticky top-0 z-50 bg-background/95 backdrop-blur-sm shadow-xs">
+            <div className="flex items-center gap-3">
+              <SidebarTrigger data-testid="button-sidebar-toggle" className="text-muted-foreground hover:text-foreground" />
+              <span className="w-px h-4 bg-border hidden sm:block" />
+              <div className="hidden sm:flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                <h1 className="text-sm font-semibold text-foreground">{activeTabTitle}</h1>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground hidden md:block">{user.email}</span>
+              <div className="w-7 h-7 rounded-full overflow-hidden ring-2 ring-primary/20">
+                <img
+                  src={getAvatarUrl(user.email, 48)}
+                  alt={user.email}
+                  className="w-full h-full object-cover"
+                  onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                />
               </div>
             </div>
           </header>

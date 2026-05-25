@@ -80,12 +80,9 @@ const logoUpload = multer({
   },
 });
 
-const JWT_SECRET = process.env.SESSION_SECRET || process.env.JWT_SECRET || "westpay-secret-key-change-me";
-if (!process.env.SESSION_SECRET && !process.env.JWT_SECRET) {
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("[SECURITY] SESSION_SECRET must be set in production — refusing to start with weak default.");
-  }
-  console.warn("[SECURITY WARNING] SESSION_SECRET not set — using insecure fallback. Set it before deploying to production!");
+const JWT_SECRET = process.env.SESSION_SECRET || process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error("[SECURITY] SESSION_SECRET must be set — refusing to start without it. Generate one with: node -e \"console.log(require('crypto').randomBytes(64).toString('hex'))\"");
 }
 
 async function getOmnipayApiKey(): Promise<string | undefined> {
@@ -700,7 +697,7 @@ export async function registerRoutes(
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
         await storage.createAdminOtp(email, code, expiresAt);
         notifyAdminOtp({ email, code, ip: clientIp }).catch(() => {});
-        const tempToken = jwt.sign({ email, purpose: "otp_verify", adminId: admin.id }, process.env.JWT_SECRET || "westpay-secret", { expiresIn: "6m" });
+        const tempToken = jwt.sign({ email, purpose: "otp_verify", adminId: admin.id }, JWT_SECRET, { expiresIn: "6m" });
         return res.json({ requires2fa: true, tempToken });
       }
 
@@ -719,7 +716,7 @@ export async function registerRoutes(
       const { tempToken, code } = req.body;
       if (!tempToken || !code) return res.status(400).json({ message: "Données manquantes" });
       let payload: any;
-      try { payload = jwt.verify(tempToken, process.env.JWT_SECRET || "westpay-secret"); } catch { return res.status(401).json({ message: "Session expirée" }); }
+      try { payload = jwt.verify(tempToken, JWT_SECRET); } catch { return res.status(401).json({ message: "Session expirée" }); }
       if (payload.purpose !== "otp_verify") return res.status(401).json({ message: "Token invalide" });
       const otp = await storage.getAdminOtp(payload.email);
       if (!otp || otp.code !== String(code).trim() || new Date() > otp.expiresAt) {
@@ -1027,13 +1024,12 @@ export async function registerRoutes(
         notifyAdminMerchantLogin({ email: merchant.email, merchantName: merchant.name, ip: clientIp, device: ua, success: true }).catch(() => {});
       }
 
-      // ── Bypass OTP pour les comptes de test ──────────────────────────────────
+      // ── Bypass OTP uniquement en développement local ─────────────────────────
       const OTP_BYPASS_EMAILS = ["test@westpay.dev", "test@testmerchant.com", "demo@westpay.dev"];
-      if (OTP_BYPASS_EMAILS.includes(merchant.email.toLowerCase())) {
-        const JWT_SECRET_KEY = process.env.JWT_SECRET || JWT_SECRET;
+      if (process.env.NODE_ENV !== "production" && OTP_BYPASS_EMAILS.includes(merchant.email.toLowerCase())) {
         const token = jwt.sign(
           { merchantId: merchant.id, email: merchant.email, role: "merchant", slug: merchant.slug, name: merchant.name },
-          JWT_SECRET_KEY,
+          JWT_SECRET,
           { expiresIn: "7d" }
         );
         return res.json({ token, user: { id: merchant.id, email: merchant.email, name: merchant.name, slug: merchant.slug } });
@@ -1045,7 +1041,7 @@ export async function registerRoutes(
       const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
       const tempToken = jwt.sign(
         { merchantId: merchant.id, email: merchant.email, purpose: "merchant_otp", slug: merchant.slug, name: merchant.name },
-        process.env.JWT_SECRET || JWT_SECRET,
+        JWT_SECRET,
         { expiresIn: "6m" }
       );
 
@@ -1097,7 +1093,7 @@ export async function registerRoutes(
 
       let payload: any;
       try {
-        payload = jwt.verify(tempToken, process.env.JWT_SECRET || JWT_SECRET);
+        payload = jwt.verify(tempToken, JWT_SECRET);
       } catch {
         return res.status(401).json({ message: "Session expirée, veuillez vous reconnecter." });
       }
@@ -3433,7 +3429,19 @@ export async function registerRoutes(
           return res.status(500).json({ message: "Configuration marchand/pays introuvable" });
         }
 
-        await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
+        // ── IDEMPOTENCE ATOMIQUE : Compare-And-Swap sur le statut ─────────────
+        // On ne passe à "omnipay_confirmed" QUE si le statut est encore "pending".
+        // Si deux callbacks arrivent simultanément, un seul UPDATE réussira.
+        const casResult = await pool.query(
+          `UPDATE pending_payments SET status = 'omnipay_confirmed'
+           WHERE id = $1 AND status NOT IN ('confirmed','omnipay_confirmed','omnipay_error')
+           RETURNING id`,
+          [pending.id]
+        );
+        if (!casResult.rowCount || casResult.rowCount === 0) {
+          console.log(`[OMNIPAY CALLBACK] Déjà traité (CAS) ref=${payload.reference}`);
+          return res.json({ status: "already_processed" });
+        }
 
         {
           const txId = `OP-${payload.id || payload.reference}`;
@@ -5073,6 +5081,13 @@ export async function registerRoutes(
       if (fromMC.balance < totalNeeded) {
         return res.status(400).json({ message: `Solde insuffisant. Vous avez ${fromMC.balance.toLocaleString("fr-FR")} ${fromZone}, vous avez besoin de ${totalNeeded.toLocaleString("fr-FR")} ${fromZone} (montant + frais)` });
       }
+
+      // ── DÉBIT ATOMIQUE transfert (élimine la race condition) ──────────────────
+      const transferDebited = await storage.decrementMerchantCountryBalanceAtomic(fromMC.id, totalNeeded);
+      if (!transferDebited) {
+        return res.status(400).json({ message: "Solde insuffisant (vérification atomique échouée)" });
+      }
+
       const transfer = await storage.createWalletTransfer({
         merchantId,
         fromCountryId: fromMC.id,
@@ -5085,9 +5100,6 @@ export async function registerRoutes(
         netAmount: parsedAmount,
         status: "pending",
       });
-      await db.update(merchantCountries)
-        .set({ balance: sql`${merchantCountries.balance} - ${parsedAmount + fee}` })
-        .where(eq(merchantCountries.id, fromMC.id));
 
       notifyAdminWalletTransfer({ id: transfer.id, merchantName: wtMerchantForFee?.name || `#${merchantId}`, fromCountry: fromMC.country, toCountry: toMC.country, amount: parsedAmount, fee, currency: fromZone, status: "pending" }).catch(() => {});
 
@@ -5215,15 +5227,11 @@ export async function registerRoutes(
       const payoutOpRecord = operator ? await storage.getWithdrawalOperatorByNameAndCountry(operator, mc.country) : null;
       const useMbiyoPayout = payoutOpRecord?.gateway?.toLowerCase() === "mbiyo";
 
-      // Montant minimum pour Mbiyo (Mbiyo rejette les montants trop faibles)
       if (useMbiyoPayout && amount < 500) {
         return res.status(400).json({ message: "Le montant minimum de retrait est de 500 FCFA." });
       }
 
-      // ── PROTECTION ANTI-DOUBLON ────────────────────────────────────────────────
-      // Bloquer si un retrait identique (même marchand + phone + montant + pays)
-      // est déjà en cours (pending) ou approuvé dans les dernières 2 heures.
-      // Évite les doubles envois quand le marchand relance rapidement après un échec.
+      // ── ANTI-DOUBLON (vérification avant lock) ────────────────────────────────
       const recentDuplicate = await pool.query(
         `SELECT id, status, created_at FROM withdrawals
          WHERE merchant_id = $1 AND phone = $2 AND amount = $3 AND country = $4
@@ -5241,6 +5249,14 @@ export async function registerRoutes(
         });
       }
 
+      // ── DÉBIT ATOMIQUE (SELECT … WHERE balance >= amount) ─────────────────────
+      // Élimine la race condition : le solde ne peut pas devenir négatif même
+      // si deux requêtes simultanées passent la vérification précédente.
+      const debited = await storage.decrementMerchantCountryBalanceAtomic(mc.id, amount);
+      if (!debited) {
+        return res.status(400).json({ message: "Solde insuffisant (vérification atomique échouée)" });
+      }
+
       const w = await storage.createWithdrawal({
         merchantId,
         merchantCountryId: mc.id,
@@ -5254,7 +5270,6 @@ export async function registerRoutes(
         adminNote: null,
         gateway: useMbiyoPayout ? "mbiyo" : "omnipay",
       });
-      await storage.decrementMerchantCountryBalance(mc.id, amount);
 
       const wdRawIp = (req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "").split(",")[0].trim();
       getGeoInfo(wdRawIp).then(wdGeo => {
