@@ -317,6 +317,8 @@ export default function PaymentPage() {
         @keyframes draw{0%{stroke-dashoffset:100}100%{stroke-dashoffset:0}}
         @keyframes pulse{0%,100%{transform:scale(.95);opacity:1}50%{transform:scale(1.05);opacity:.7}}
         @keyframes shake{0%,100%{transform:translateX(0)}15%{transform:translateX(-7px)}30%{transform:translateX(7px)}45%{transform:translateX(-5px)}60%{transform:translateX(5px)}75%{transform:translateX(-3px)}90%{transform:translateX(3px)}}
+        @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+        @keyframes fadeInOverlay{from{opacity:0}to{opacity:1}}
         *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
         .anim-pop{animation:pop .45s cubic-bezier(.175,.885,.32,1.275) forwards}
         .anim-draw{stroke-dasharray:100;stroke-dashoffset:100;animation:draw .4s ease-out .35s forwards}
@@ -736,80 +738,80 @@ export default function PaymentPage() {
         </div>
       )}
 
-      {/* ── Help modal ── */}
+      {/* ── Help bottom sheet ── */}
       {showHelpModal && (
-        <div className="overlay" onClick={e => { if (e.target===e.currentTarget) { setShowHelpModal(false); setHelpSent(false); setHelpName(""); setHelpWhatsapp(""); setHelpMessage(""); } }}>
-          <div className="modal">
-            {/* Header */}
-            <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:16 }}>
-              <div>
-                <p style={{ fontWeight:800, fontSize:18, color:"#111", margin:0 }}>Besoin d'aide ?</p>
-                <p style={{ fontSize:13, color:"#6b7280", marginTop:4 }}>Notre équipe vous répond rapidement</p>
-              </div>
-              <button onClick={() => { setShowHelpModal(false); setHelpSent(false); setHelpName(""); setHelpWhatsapp(""); setHelpMessage(""); }}
-                style={{ width:32, height:32, borderRadius:"50%", border:"1.5px solid #e5e7eb", background:"#fff", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-                <X style={{ width:15, height:15, color:"#6b7280" }} />
-              </button>
+        <div
+          onClick={e => { if (e.target===e.currentTarget) { setShowHelpModal(false); setHelpSent(false); setHelpName(""); setHelpWhatsapp(""); setHelpMessage(""); } }}
+          style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.45)", zIndex:1000, display:"flex", flexDirection:"column", justifyContent:"flex-end", animation:"fadeInOverlay .2s ease" }}>
+          <div style={{ background:"#fff", borderRadius:"24px 24px 0 0", width:"100%", maxHeight:"92vh", display:"flex", flexDirection:"column", animation:"slideUp .3s cubic-bezier(.32,.72,0,1)", boxShadow:"0 -4px 32px rgba(0,0,0,.18)" }}>
+
+            {/* drag handle */}
+            <div style={{ display:"flex", justifyContent:"center", padding:"12px 0 4px" }}>
+              <div style={{ width:40, height:4, borderRadius:2, background:"#e5e7eb" }} />
             </div>
 
-            {helpSent ? (
-              <div style={{ textAlign:"center", padding:"24px 0" }}>
-                <div style={{ width:56, height:56, borderRadius:"50%", background:"#e8f5e9", display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 14px" }}>
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2e7d32" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            {/* scrollable content */}
+            <div style={{ overflowY:"auto", flex:1, padding:"12px 20px 0" }}>
+
+              {/* Header */}
+              <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:18 }}>
+                <div>
+                  <p style={{ fontWeight:800, fontSize:19, color:"#111", margin:0 }}>Besoin d'aide ?</p>
+                  <p style={{ fontSize:13, color:"#6b7280", marginTop:4 }}>Notre équipe vous répond rapidement</p>
                 </div>
-                <p style={{ fontWeight:700, fontSize:16, color:"#111", marginBottom:6 }}>Message envoyé !</p>
-                <p style={{ fontSize:13, color:"#6b7280", lineHeight:1.5 }}>Notre équipe vous contactera sur WhatsApp très prochainement.</p>
                 <button onClick={() => { setShowHelpModal(false); setHelpSent(false); setHelpName(""); setHelpWhatsapp(""); setHelpMessage(""); }}
-                  style={{ marginTop:20, width:"100%", padding:"12px 16px", borderRadius:12, border:"none", background:"#1a7f3c", cursor:"pointer", fontSize:14, fontWeight:700, color:"#fff" }}>
-                  Fermer
+                  style={{ width:32, height:32, borderRadius:"50%", border:"1.5px solid #e5e7eb", background:"#f9fafb", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                  <X style={{ width:15, height:15, color:"#6b7280" }} />
                 </button>
               </div>
-            ) : (
-              <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-                <div>
-                  <label style={{ fontSize:13, fontWeight:600, color:"#374151", display:"block", marginBottom:6 }}>
-                    Nom <span style={{ color:"#ef4444" }}>*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={helpName}
-                    onChange={e => setHelpName(e.target.value)}
-                    placeholder="Votre nom"
-                    className="inp"
-                    style={{ fontSize:14 }}
-                  />
-                </div>
 
-                <div>
-                  <label style={{ fontSize:13, fontWeight:600, color:"#374151", display:"block", marginBottom:6 }}>
-                    Numéro WhatsApp
-                  </label>
-                  <input
-                    type="tel"
-                    value={helpWhatsapp}
-                    onChange={e => setHelpWhatsapp(e.target.value)}
-                    placeholder="+229 00 00 00 00"
-                    className="inp"
-                    style={{ fontSize:14 }}
-                  />
+              {helpSent ? (
+                <div style={{ textAlign:"center", padding:"32px 0 24px" }}>
+                  <div style={{ width:60, height:60, borderRadius:"50%", background:"#e8f5e9", display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 16px" }}>
+                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#2e7d32" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  </div>
+                  <p style={{ fontWeight:700, fontSize:17, color:"#111", marginBottom:8 }}>Message envoyé !</p>
+                  <p style={{ fontSize:13, color:"#6b7280", lineHeight:1.6 }}>Notre équipe vous contactera sur WhatsApp très prochainement.</p>
                 </div>
+              ) : (
+                <div style={{ display:"flex", flexDirection:"column", gap:16, paddingBottom:8 }}>
+                  <div>
+                    <label style={{ fontSize:13, fontWeight:600, color:"#374151", display:"block", marginBottom:7 }}>
+                      Nom <span style={{ color:"#ef4444" }}>*</span>
+                    </label>
+                    <input type="text" value={helpName} onChange={e => setHelpName(e.target.value)}
+                      placeholder="Votre nom" className="inp" style={{ fontSize:15 }} />
+                  </div>
 
-                <div>
-                  <label style={{ fontSize:13, fontWeight:600, color:"#374151", display:"block", marginBottom:6 }}>
-                    Message <span style={{ color:"#ef4444" }}>*</span>
-                  </label>
-                  <textarea
-                    value={helpMessage}
-                    onChange={e => setHelpMessage(e.target.value)}
-                    placeholder="Décrivez votre problème..."
-                    rows={4}
-                    className="inp"
-                    style={{ fontSize:14, resize:"none", fontFamily:"inherit" }}
-                  />
+                  <div>
+                    <label style={{ fontSize:13, fontWeight:600, color:"#374151", display:"block", marginBottom:7 }}>
+                      Numéro WhatsApp <span style={{ fontWeight:400, color:"#9ca3af" }}>(optionnel)</span>
+                    </label>
+                    <input type="tel" value={helpWhatsapp} onChange={e => setHelpWhatsapp(e.target.value)}
+                      placeholder="+229 00 00 00 00" className="inp" style={{ fontSize:15 }} />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize:13, fontWeight:600, color:"#374151", display:"block", marginBottom:7 }}>
+                      Message <span style={{ color:"#ef4444" }}>*</span>
+                    </label>
+                    <textarea value={helpMessage} onChange={e => setHelpMessage(e.target.value)}
+                      placeholder="Décrivez votre problème..." rows={4} className="inp"
+                      style={{ fontSize:15, resize:"none", fontFamily:"inherit" }} />
+                  </div>
                 </div>
+              )}
+            </div>
 
-                <button
-                  type="button"
+            {/* sticky green button at bottom */}
+            <div style={{ padding:"16px 20px 28px", background:"#fff" }}>
+              {helpSent ? (
+                <button onClick={() => { setShowHelpModal(false); setHelpSent(false); setHelpName(""); setHelpWhatsapp(""); setHelpMessage(""); }}
+                  style={{ width:"100%", padding:"16px", borderRadius:14, border:"none", background:"#1a7f3c", cursor:"pointer", fontSize:16, fontWeight:700, color:"#fff" }}>
+                  Fermer
+                </button>
+              ) : (
+                <button type="button"
                   disabled={helpSending || !helpName.trim() || !helpMessage.trim()}
                   onClick={async () => {
                     if (!helpName.trim() || !helpMessage.trim()) return;
@@ -826,23 +828,19 @@ export default function PaymentPage() {
                           merchantSlug: merchantInfo?.slug || merchantSlug,
                         }),
                       });
-                      if (r.ok) {
-                        setHelpSent(true);
-                      } else {
-                        toast({ title: "Erreur d'envoi", description: "Veuillez réessayer.", variant: "destructive" });
-                      }
+                      if (r.ok) { setHelpSent(true); }
+                      else { toast({ title: "Erreur d'envoi", description: "Veuillez réessayer.", variant: "destructive" }); }
                     } catch {
                       toast({ title: "Erreur réseau", description: "Vérifiez votre connexion.", variant: "destructive" });
-                    } finally {
-                      setHelpSending(false);
-                    }
+                    } finally { setHelpSending(false); }
                   }}
-                  style={{ width:"100%", padding:"14px 16px", borderRadius:12, border:"none", background: (!helpName.trim() || !helpMessage.trim()) ? "#9ca3af" : "#1a7f3c", cursor: (!helpName.trim() || !helpMessage.trim()) ? "not-allowed" : "pointer", fontSize:15, fontWeight:700, color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
-                  {helpSending && <Loader2 style={{ width:16, height:16, animation:"spin 1s linear infinite" }} />}
+                  style={{ width:"100%", padding:"16px", borderRadius:14, border:"none", background: (!helpName.trim() || !helpMessage.trim()) ? "#b0c9b7" : "#1a7f3c", cursor: (!helpName.trim() || !helpMessage.trim()) ? "not-allowed" : "pointer", fontSize:16, fontWeight:700, color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", gap:8, transition:"background .15s" }}>
+                  {helpSending && <Loader2 style={{ width:18, height:18, animation:"spin 1s linear infinite" }} />}
                   Envoyer le message
                 </button>
-              </div>
-            )}
+              )}
+            </div>
+
           </div>
         </div>
       )}
