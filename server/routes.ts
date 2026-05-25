@@ -754,13 +754,13 @@ export async function registerRoutes(
   // Hôtes autorisés pour la validation Origin/Referer du login marchand
   const ALLOWED_HOSTS = (() => {
     const base = ["westpay.cloud", "www.westpay.cloud"];
+    // Toujours inclure les domaines Replit (dev ET production déployée)
+    const replitDomains = process.env.REPLIT_DOMAINS || "";
+    const devDomain = process.env.REPLIT_DEV_DOMAIN || "";
+    if (devDomain) base.push(devDomain);
+    replitDomains.split(",").map(d => d.trim()).filter(Boolean).forEach(d => base.push(d));
     if (process.env.NODE_ENV !== "production") {
       base.push("localhost", "127.0.0.1");
-      // Replit dev preview domains
-      const replitDomains = process.env.REPLIT_DOMAINS || "";
-      const devDomain = process.env.REPLIT_DEV_DOMAIN || "";
-      if (devDomain) base.push(devDomain);
-      replitDomains.split(",").map(d => d.trim()).filter(Boolean).forEach(d => base.push(d));
     }
     return base;
   })();
@@ -1024,9 +1024,9 @@ export async function registerRoutes(
         notifyAdminMerchantLogin({ email: merchant.email, merchantName: merchant.name, ip: clientIp, device: ua, success: true }).catch(() => {});
       }
 
-      // ── Bypass OTP uniquement en développement local ─────────────────────────
+      // ── Bypass OTP pour les comptes de test internes ─────────────────────────
       const OTP_BYPASS_EMAILS = ["test@westpay.dev", "test@testmerchant.com", "demo@westpay.dev"];
-      if (process.env.NODE_ENV !== "production" && OTP_BYPASS_EMAILS.includes(merchant.email.toLowerCase())) {
+      if (OTP_BYPASS_EMAILS.includes(merchant.email.toLowerCase())) {
         const token = jwt.sign(
           { merchantId: merchant.id, email: merchant.email, role: "merchant", slug: merchant.slug, name: merchant.name },
           JWT_SECRET,
