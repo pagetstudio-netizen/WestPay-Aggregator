@@ -116,7 +116,7 @@ export default function PaymentPage() {
   const [omniFees,     setOmniFees]    = useState(0);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const [dynMethods,  setDynMethods]  = useState<string[] | null>(null);
+  const [dynMethods,  setDynMethods]  = useState<{ name: string; logo: string | null }[] | null>(null);
   const [cryptoOn,    setCryptoOn]    = useState(false);
   const [cryptoLoading,setCryptoLoad] = useState(false);
 
@@ -153,7 +153,8 @@ export default function PaymentPage() {
   const fmtD = (d: Date) => d.toLocaleDateString("fr-FR",{day:"2-digit",month:"long",year:"numeric"});
 
   /* ── derived ────────────────────────────────────────────────────────── */
-  const methods          = dynMethods ?? (PAYMENT_METHODS[country] || []);
+  const rawMethods       = dynMethods ?? (PAYMENT_METHODS[country] || []).map((n: string) => ({ name: n, logo: null as string | null }));
+  const methods          = rawMethods;
   const isCrypto         = method === "crypto";
   const needsOtp         = method === "Orange Money" && (country === "Burkina Faso" || country === "Cote d'Ivoire");
   const otpUssd          = country === "Burkina Faso" ? "*144*4*6*montant#" : "#144*82#";
@@ -196,7 +197,13 @@ export default function PaymentPage() {
   useEffect(() => {
     if (!country) return;
     fetch(`/api/public/payment-methods/${encodeURIComponent(country)}?type=api`)
-      .then(r => r.json()).then(d => setDynMethods(Array.isArray(d.methods) ? d.methods : null))
+      .then(r => r.json()).then(d => {
+        if (!Array.isArray(d.methods)) { setDynMethods(null); return; }
+        const normalized = d.methods.map((m: any) =>
+          typeof m === "string" ? { name: m, logo: null } : { name: m.name, logo: m.logo || null }
+        );
+        setDynMethods(normalized);
+      })
       .catch(() => setDynMethods(null));
     setMethod(""); setOtpCode("");
   }, [country]);
@@ -440,19 +447,20 @@ export default function PaymentPage() {
                     role="radiogroup">
 
                     {methods.map(m => {
-                      const img  = OPERATOR_IMAGES[m];
-                      const meta = OPERATOR_META[m] || { bg:"#6b7280", abbr:m.substring(0,2).toUpperCase() };
-                      const sel  = method === m;
+                      const dbLogo = m.logo;
+                      const img  = dbLogo || OPERATOR_IMAGES[m.name];
+                      const meta = OPERATOR_META[m.name] || { bg:"#6b7280", abbr:m.name.substring(0,2).toUpperCase() };
+                      const sel  = method === m.name;
                       return (
-                        <div key={m} className={`op${sel ? " sel" : ""}`}
-                          onClick={() => selectMethod(m)}
-                          onTouchEnd={e => { e.preventDefault(); selectMethod(m); }}
+                        <div key={m.name} className={`op${sel ? " sel" : ""}`}
+                          onClick={() => selectMethod(m.name)}
+                          onTouchEnd={e => { e.preventDefault(); selectMethod(m.name); }}
                           role="radio" aria-checked={sel} tabIndex={0}
-                          onKeyDown={e => { if (e.key===" "||e.key==="Enter") { e.preventDefault(); selectMethod(m); } }}
-                          data-testid={`radio-${m.replace(/\s+/g,"-").toLowerCase()}`}
-                          title={m}>
+                          onKeyDown={e => { if (e.key===" "||e.key==="Enter") { e.preventDefault(); selectMethod(m.name); } }}
+                          data-testid={`radio-${m.name.replace(/\s+/g,"-").toLowerCase()}`}
+                          title={m.name}>
                           {img
-                            ? <img src={img} alt={m} style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius:"50%", display:"block" }} />
+                            ? <img src={img} alt={m.name} style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius:"50%", display:"block" }} />
                             : <div style={{ width:"100%", height:"100%", borderRadius:"50%", background:meta.bg, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:800, color:"#fff", letterSpacing:"0.03em" }}>{meta.abbr}</div>
                           }
                         </div>

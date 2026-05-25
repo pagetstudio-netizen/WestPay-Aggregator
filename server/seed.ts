@@ -246,27 +246,16 @@ async function ensureTestMerchantExists() {
     webhookSecret,
   });
 
-  await storage.addMerchantCountry({
-    merchantId: merchant.id,
-    country: "Togo",
-    apiKey: generateSecureApiKey("Togo"),
-    balance: 0,
-    active: true,
-  });
-  await storage.addMerchantCountry({
-    merchantId: merchant.id,
-    country: "Cote d'Ivoire",
-    apiKey: generateSecureApiKey("Cote d'Ivoire"),
-    balance: 0,
-    active: true,
-  });
-  await storage.addMerchantCountry({
-    merchantId: merchant.id,
-    country: "Senegal",
-    apiKey: generateSecureApiKey("Senegal"),
-    balance: 0,
-    active: true,
-  });
+  const testCountries = ["Togo", "Cote d'Ivoire", "Senegal", "Benin", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon", "Guinee", "Gambie"];
+  for (const country of testCountries) {
+    await storage.addMerchantCountry({
+      merchantId: merchant.id,
+      country,
+      apiKey: generateSecureApiKey(country),
+      balance: 0,
+      active: true,
+    });
+  }
 
   await storage.upsertMerchantPin(merchant.id, pinHash);
   console.log("[SEED] Compte test créé : test@westpay.dev (slug: test-merchant)");

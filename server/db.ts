@@ -403,6 +403,7 @@ export async function runMigrations() {
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS recipient_name text;
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS omnipay_code text;
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS mbiyo_code text;
+      ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS logo text;
       ALTER TABLE payment_links ADD COLUMN IF NOT EXISTS description text;
       ALTER TABLE payment_links ADD COLUMN IF NOT EXISTS countries text[];
       ALTER TABLE payment_links ADD COLUMN IF NOT EXISTS confirmation_message text;

@@ -1558,6 +1558,21 @@ function CountriesPanel() {
     onError: () => toast({ title: "Erreur", description: "Impossible de modifier", variant: "destructive" }),
   });
 
+  const deleteCountryMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/admin/merchant-country/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Erreur suppression");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/countries"] });
+      toast({ title: "Pays supprimé" });
+    },
+    onError: () => toast({ title: "Erreur", description: "Impossible de supprimer", variant: "destructive" }),
+  });
+
 
   if (isLoading) return <LoadingSkeleton />;
 
@@ -1743,6 +1758,16 @@ function CountriesPanel() {
                           <Edit3 className="w-3 h-3 mr-1" />Solde
                         </Button>
                       )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => { if (confirm(`Supprimer ${mc.country} pour ${mc.merchantName || "ce marchand"} ?`)) deleteCountryMutation.mutate(mc.id); }}
+                        disabled={deleteCountryMutation.isPending}
+                        data-testid={`button-delete-country-${mc.id}`}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -3398,13 +3423,13 @@ function WithdrawalOperatorsPanel() {
   const [editingOp, setEditingOp] = useState<WithdrawalOperator | null>(null);
   const [filterCountry, setFilterCountry] = useState("all");
 
-  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "OmniPay", omnipayCode: "", mbiyoCode: "", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false };
+  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "OmniPay", omnipayCode: "", mbiyoCode: "", logo: "", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false };
   const [form, setForm] = useState(emptyForm);
 
   const openCreate = () => { setEditingOp(null); setForm(emptyForm); setOpDialogOpen(true); };
   const openEdit = (op: WithdrawalOperator) => {
     setEditingOp(op);
-    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, omnipayCode: op.omnipayCode || "", mbiyoCode: op.mbiyoCode || "", active: op.active, maintenanceAll: op.maintenanceAll, maintenanceDeposits: op.maintenanceDeposits, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment });
+    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, omnipayCode: op.omnipayCode || "", mbiyoCode: op.mbiyoCode || "", logo: (op as any).logo || "", active: op.active, maintenanceAll: op.maintenanceAll, maintenanceDeposits: op.maintenanceDeposits, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment });
     setOpDialogOpen(true);
   };
 
@@ -3475,6 +3500,13 @@ function WithdrawalOperatorsPanel() {
             <div key={op.id} className="p-3 rounded border bg-muted/20 space-y-3" data-testid={`operator-row-${op.id}`}>
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div className="flex items-center gap-3">
+                  {(op as any).logo ? (
+                    <img src={(op as any).logo} alt={op.name} className="w-10 h-10 rounded-full object-cover border shrink-0" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-full bg-muted border flex items-center justify-center shrink-0">
+                      <span className="text-xs font-bold text-muted-foreground">{op.name.substring(0,2).toUpperCase()}</span>
+                    </div>
+                  )}
                   <div className="flex flex-col">
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-sm">{op.name}</span>
@@ -3527,6 +3559,16 @@ function WithdrawalOperatorsPanel() {
             <div className="space-y-2">
               <Label>Nom</Label>
               <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Ex: Moov Money" data-testid="input-op-name" />
+            </div>
+            <div className="space-y-2">
+              <Label>Logo (URL de l'image)</Label>
+              <div className="flex items-center gap-2">
+                <Input value={(form as any).logo || ""} onChange={e => setForm(f => ({ ...f, logo: e.target.value }))} placeholder="https://exemple.com/logo.png" data-testid="input-op-logo" className="flex-1" />
+                {(form as any).logo && (
+                  <img src={(form as any).logo} alt="preview" className="w-10 h-10 rounded-full object-cover border shrink-0" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">URL d'une image PNG/JPG. Laisser vide pour utiliser le logo par défaut.</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">

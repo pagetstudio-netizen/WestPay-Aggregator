@@ -1767,6 +1767,17 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/admin/merchant-country/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ message: "ID invalide" });
+      await storage.deleteMerchantCountry(id);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/admin/countries", authMiddleware("admin"), async (_req, res) => {
     try {
       const countries = await storage.getMerchantCountries();
@@ -2605,7 +2616,7 @@ export async function registerRoutes(
         if (type === "api" && op.maintenanceApiPayment) return false;
         return true;
       });
-      res.json({ methods: activeOps.map(o => o.name) });
+      res.json({ methods: activeOps.map(o => ({ name: o.name, logo: o.logo || null })) });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

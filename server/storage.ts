@@ -49,6 +49,7 @@ export interface IStorage {
   getMerchantCountries(merchantId?: number): Promise<MerchantCountry[]>;
   getMerchantCountryById(id: number): Promise<MerchantCountry | undefined>;
   addMerchantCountry(mc: InsertMerchantCountry): Promise<MerchantCountry>;
+  deleteMerchantCountry(id: number): Promise<void>;
   updateMerchantCountryBalance(id: number, balance: number): Promise<void>;
   incrementMerchantCountryBalance(id: number, amount: number): Promise<void>;
   findMerchantCountryBySimAndCountry(merchantId: number, country: string): Promise<MerchantCountry | undefined>;
@@ -311,6 +312,10 @@ export class DatabaseStorage implements IStorage {
   async addMerchantCountry(mc: InsertMerchantCountry): Promise<MerchantCountry> {
     const [created] = await db.insert(merchantCountries).values(mc).returning();
     return created;
+  }
+
+  async deleteMerchantCountry(id: number): Promise<void> {
+    await db.delete(merchantCountries).where(eq(merchantCountries.id, id));
   }
 
   async updateMerchantCountryBalance(id: number, balance: number): Promise<void> {
