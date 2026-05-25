@@ -90,6 +90,16 @@ const MAX_FAILED = 5;
 const LOCK_DURATION_MS = 60 * 60 * 1000;
 const failedAttempts = new Map<string, { count: number; lockedUntil: Date | null }>();
 
+// ─── Broadcast conversationnel (groupe admin) ─────────────────────────────────
+interface BroadcastSession {
+  step: "waiting_content" | "waiting_buttons";
+  message: string;
+  fileId?: string;
+  buttons: Array<{ text: string; url: string }>;
+  initiator: string;
+}
+const broadcastSessions = new Map<string, BroadcastSession>(); // chatId -> session
+
 function isRateLimited(userId: string): boolean {
   const r = failedAttempts.get(userId);
   if (!r) return false;
@@ -572,54 +582,156 @@ export function initTelegramBot(): Telegraf | null {
     } catch { await ctx.reply("❌ Erreur."); }
   });
 
-  // ─── /broadcast (groupe admin uniquement) ─────────────────────────────────
+  // ─── /broadcast (groupe admin — flux conversationnel) ─────────────────────
   bot.command("broadcast", async (ctx) => {
     const chatId = String(ctx.chat.id);
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
-    if (!isGroup) {
+    if (!isGroup || !await isAdminGroup(chatId)) {
       await ctx.reply("❌ Cette commande est réservée au groupe admin.");
       return;
     }
-    const authorized = await isAdminGroup(chatId);
-    if (!authorized) return;
 
-    const text = ctx.message.text || "";
-    const parts = text.split(" ");
-    parts.shift();
-    const message = parts.join(" ").trim();
+    broadcastSessions.set(chatId, {
+      step: "waiting_content",
+      message: "",
+      buttons: [],
+      initiator: formatUser(ctx),
+    });
 
-    if (!message) {
+    await ctx.reply(
+      "📢 *Nouveau broadcast*\n\n" +
+      "Envoyez maintenant votre message.\n\n" +
+      "• Texte seul → envoyez le texte\n" +
+      "• Avec image → envoyez une photo avec le texte en *légende*\n\n" +
+      "Vous pouvez utiliser *gras*, _italique_, `code` (Markdown Telegram).\n\n" +
+      "Envoyez /annuler pour annuler.",
+      { parse_mode: "Markdown" }
+    );
+  });
+
+  // ─── /annuler (annule le broadcast en cours) ──────────────────────────────
+  bot.command("annuler", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    if (broadcastSessions.has(chatId)) {
+      broadcastSessions.delete(chatId);
+      await ctx.reply("❌ Broadcast annulé.");
+    }
+  });
+
+  // ─── Photo reçue dans le groupe admin (pour le broadcast) ─────────────────
+  bot.on("photo", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    const session = broadcastSessions.get(chatId);
+    if (!session || session.step !== "waiting_content") return;
+    if (!await isAdminGroup(chatId)) return;
+
+    const photos = ctx.message.photo;
+    const bestPhoto = photos[photos.length - 1];
+    const caption = ctx.message.caption?.trim() || session.message;
+
+    session.fileId = bestPhoto.file_id;
+    session.message = caption;
+    session.step = "waiting_buttons";
+    broadcastSessions.set(chatId, session);
+
+    await ctx.reply(
+      "✅ Photo reçue" + (caption ? ` avec le texte :\n_${caption}_` : " (sans texte)") + "\n\n" +
+      "📎 *Voulez-vous ajouter des boutons ?*\n\n" +
+      "Format (un par ligne) :\n`Texte du bouton | https://lien.com`\n\n" +
+      "Exemple :\n`Se connecter | https://westpay.cloud/merchant-login`\n\n" +
+      "Ou envoyez /skip pour diffuser sans boutons.",
+      { parse_mode: "Markdown" }
+    );
+  });
+
+  // ─── /skip — diffuser sans boutons ────────────────────────────────────────
+  bot.command("skip", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    const session = broadcastSessions.get(chatId);
+    if (!session || session.step !== "waiting_buttons") return;
+    if (!await isAdminGroup(chatId)) return;
+
+    broadcastSessions.delete(chatId);
+    await ctx.reply("📤 Diffusion en cours...");
+    const result = await broadcastToMerchants({
+      message: session.message,
+      fileId: session.fileId,
+      buttons: undefined,
+    });
+    await ctx.reply(
+      `✅ *Diffusion terminée*\n\n📤 Envoyé : *${result.sent}*\n❌ Échec : *${result.failed}*`,
+      { parse_mode: "Markdown" }
+    );
+  });
+
+  // ─── Messages texte (flux broadcast conversationnel) ─────────────────────
+  bot.on("message", async (ctx, next) => {
+    const chatId = String(ctx.chat.id);
+    const session = broadcastSessions.get(chatId);
+    if (!session) return next();
+    if (!await isAdminGroup(chatId)) return next();
+
+    const msg = ctx.message as any;
+    const text: string = msg.text || "";
+
+    // Skip if it's a command (handled separately)
+    if (text.startsWith("/")) return next();
+
+    if (session.step === "waiting_content") {
+      if (!text.trim()) return next();
+      session.message = text.trim();
+      session.step = "waiting_buttons";
+      broadcastSessions.set(chatId, session);
       await ctx.reply(
-        "📢 *Diffusion de message*\n\nUsage :\n`/broadcast Votre message ici`\n\nLe message sera envoyé à tous les groupes connectés.",
+        `✅ Message enregistré :\n_${text.slice(0, 200)}${text.length > 200 ? "…" : ""}_\n\n` +
+        "📎 *Voulez-vous ajouter des boutons ?*\n\n" +
+        "Format (un par ligne) :\n`Texte du bouton | https://lien.com`\n\n" +
+        "Ou envoyez /skip pour diffuser sans boutons.",
         { parse_mode: "Markdown" }
       );
       return;
     }
 
-    const knownGroups = await getKnownGroups();
-    if (knownGroups.length === 0) {
-      await ctx.reply("⚠️ Aucun groupe enregistré. Configurez d'abord des groupes marchands via `/setmarchand`.", { parse_mode: "Markdown" });
+    if (session.step === "waiting_buttons") {
+      // Parse button lines: "Texte | https://url"
+      const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+      const parsedButtons: Array<{ text: string; url: string }> = [];
+      const errors: string[] = [];
+
+      for (const line of lines) {
+        const sep = line.indexOf("|");
+        if (sep === -1) { errors.push(`• "${line}" — séparateur | manquant`); continue; }
+        const btnText = line.slice(0, sep).trim();
+        const btnUrl = line.slice(sep + 1).trim();
+        if (!btnText || !btnUrl) { errors.push(`• "${line}" — texte ou URL vide`); continue; }
+        if (!btnUrl.startsWith("http")) { errors.push(`• "${line}" — URL invalide (doit commencer par http)`); continue; }
+        parsedButtons.push({ text: btnText, url: btnUrl });
+      }
+
+      if (errors.length > 0 && parsedButtons.length === 0) {
+        await ctx.reply(
+          `❌ *Erreurs dans les boutons :*\n${errors.join("\n")}\n\n` +
+          "Format attendu : `Texte | https://lien.com` (un par ligne)",
+          { parse_mode: "Markdown" }
+        );
+        return;
+      }
+
+      broadcastSessions.delete(chatId);
+      await ctx.reply("📤 Diffusion en cours...");
+
+      const buttonsPayload = parsedButtons.length > 0 ? [parsedButtons] : undefined;
+      const result = await broadcastToMerchants({
+        message: session.message,
+        fileId: session.fileId,
+        buttons: buttonsPayload,
+      });
+
+      let reply = `✅ *Diffusion terminée*\n\n📤 Envoyé : *${result.sent}*\n❌ Échec : *${result.failed}*`;
+      if (errors.length > 0) reply += `\n\n⚠️ ${errors.length} bouton(s) ignoré(s) (format invalide)`;
+      await ctx.reply(reply, { parse_mode: "Markdown" });
       return;
     }
-
-    const sender = formatUser(ctx);
-    const broadcastMsg = `📢 *Message de WestPay*\n\n${message}\n\n_— ${sender}_`;
-
-    let sent = 0;
-    let failed = 0;
-    for (const groupId of knownGroups) {
-      try {
-        await bot!.telegram.sendMessage(groupId, broadcastMsg, { parse_mode: "Markdown" });
-        sent++;
-      } catch {
-        failed++;
-      }
-    }
-
-    await ctx.reply(
-      `✅ *Diffusion terminée*\n\n📤 Envoyé : *${sent}* groupe(s)\n❌ Échec : *${failed}* groupe(s)`,
-      { parse_mode: "Markdown" }
-    );
   });
 
   // ─── /restreint (groupe admin uniquement) ─────────────────────────────────
@@ -1463,15 +1575,16 @@ function buildInlineKeyboard(buttons: InlineButton[][]): { inline_keyboard: { te
 async function safeSendWithMedia(
   chatId: string,
   message: string,
-  imageUrl?: string,
+  imageSource?: string,
   buttons?: InlineButton[][]
 ): Promise<void> {
   if (!bot) return;
   const replyMarkup = buttons && buttons.length > 0 ? buildInlineKeyboard(buttons) : undefined;
 
-  if (imageUrl && imageUrl.startsWith("http")) {
+  if (imageSource) {
     try {
-      await bot.telegram.sendPhoto(chatId, imageUrl, {
+      // imageSource peut être une URL http ou un file_id Telegram
+      await bot.telegram.sendPhoto(chatId, imageSource, {
         caption: message,
         parse_mode: "Markdown",
         ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
@@ -1503,6 +1616,7 @@ async function safeSendWithMedia(
 export async function broadcastToMerchants(options: {
   message: string;
   imageUrl?: string;
+  fileId?: string;
   buttons?: InlineButton[][];
   targetChatIds?: string[];
 }): Promise<{ sent: number; failed: number; skipped: number }> {
@@ -1526,7 +1640,7 @@ export async function broadcastToMerchants(options: {
   for (const chatId of chatIds) {
     if (!chatId) { skipped++; continue; }
     try {
-      await safeSendWithMedia(chatId, options.message, options.imageUrl, options.buttons);
+      await safeSendWithMedia(chatId, options.message, options.fileId || options.imageUrl, options.buttons);
       sent++;
       await new Promise(r => setTimeout(r, 100));
     } catch (err: any) {

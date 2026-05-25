@@ -31,7 +31,7 @@ import {
   RefreshCw, Lock, BookOpen, FileText, Webhook, Zap, ToggleLeft, ToggleRight, Link2,
   Link, BarChart3, TrendingUp, Eye, ToggleLeft as Toggle, ExternalLink, Filter,
   Check, ChevronsUpDown, ArrowUpRight, Edit3, Wallet, AlertTriangle, RotateCcw, Bitcoin,
-  Monitor, EyeOff, KeyRound, Mail, GripVertical, ImagePlus, X
+  Monitor, EyeOff, KeyRound, Mail, GripVertical, ImagePlus, X, Upload
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
@@ -5347,10 +5347,14 @@ function TelegramBroadcastPanel({ merchants }: { merchants: Merchant[] }) {
 
   const [mode, setMode] = useState<"all" | "specific">("all");
   const [message, setMessage] = useState("");
+  const [imageMode, setImageMode] = useState<"url" | "file">("url");
   const [imageUrl, setImageUrl] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string>("");
   const [buttons, setButtons] = useState<TgButton[]>([]);
   const [selectedMerchantIds, setSelectedMerchantIds] = useState<number[]>([]);
   const [isSending, setIsSending] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [lastResult, setLastResult] = useState<{ sent: number; failed: number; message: string } | null>(null);
 
   const { data: tgMerchants = [] } = useAdminFetch("/api/admin/telegram/merchants-with-telegram", ["/api/admin/telegram/merchants-with-telegram"]);
@@ -5372,6 +5376,15 @@ function TelegramBroadcastPanel({ merchants }: { merchants: Merchant[] }) {
     setSelectedMerchantIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onload = ev => setImagePreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+  };
+
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!message.trim()) { toast({ title: "Message requis", variant: "destructive" }); return; }
@@ -5379,6 +5392,31 @@ function TelegramBroadcastPanel({ merchants }: { merchants: Merchant[] }) {
 
     const validButtons = buttons.filter(b => b.text.trim() && b.url.trim());
     const buttonsPayload = validButtons.length > 0 ? [validButtons] : [];
+
+    let finalImageUrl: string | undefined = imageMode === "url" ? imageUrl.trim() || undefined : undefined;
+
+    // Upload file first if needed
+    if (imageMode === "file" && imageFile) {
+      setIsUploading(true);
+      try {
+        const formData = new FormData();
+        formData.append("image", imageFile);
+        const upRes = await fetch("/api/admin/telegram/upload-image", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+        const upData = await upRes.json();
+        if (!upRes.ok) throw new Error(upData.message || "Erreur upload");
+        finalImageUrl = upData.url;
+      } catch (err: any) {
+        toast({ title: "Erreur upload image", description: err.message, variant: "destructive" });
+        setIsUploading(false);
+        return;
+      } finally {
+        setIsUploading(false);
+      }
+    }
 
     setIsSending(true);
     setLastResult(null);
@@ -5388,7 +5426,7 @@ function TelegramBroadcastPanel({ merchants }: { merchants: Merchant[] }) {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           message: message.trim(),
-          imageUrl: imageUrl.trim() || undefined,
+          imageUrl: finalImageUrl,
           buttons: buttonsPayload,
           target: mode,
           merchantIds: mode === "specific" ? selectedMerchantIds : undefined,
@@ -5400,6 +5438,8 @@ function TelegramBroadcastPanel({ merchants }: { merchants: Merchant[] }) {
       toast({ title: "✅ " + data.message });
       setMessage("");
       setImageUrl("");
+      setImageFile(null);
+      setImagePreview("");
       setButtons([]);
       setSelectedMerchantIds([]);
     } catch (err: any) {
@@ -5505,27 +5545,76 @@ function TelegramBroadcastPanel({ merchants }: { merchants: Merchant[] }) {
               <p className="text-xs text-muted-foreground mt-1">Vous pouvez utiliser *gras*, _italique_, `code` (format Markdown Telegram).</p>
             </div>
 
-            {/* Image URL */}
+            {/* Image */}
             <div>
-              <Label htmlFor="tg-image" className="text-sm font-semibold flex items-center gap-2">
-                Image
-                <span className="text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded-full">optionnel</span>
-              </Label>
-              <Input
-                id="tg-image"
-                type="url"
-                value={imageUrl}
-                onChange={e => setImageUrl(e.target.value)}
-                placeholder="https://exemple.com/image.jpg"
-                className="mt-1.5"
-                data-testid="input-tg-image"
-              />
-              {imageUrl && imageUrl.startsWith("http") && (
-                <div className="mt-2 rounded-xl overflow-hidden border border-border w-full max-h-40">
-                  <img src={imageUrl} alt="Aperçu" className="w-full h-40 object-cover" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-sm font-semibold flex items-center gap-2">
+                  Image
+                  <span className="text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded-full">optionnel</span>
+                </Label>
+                <div className="flex rounded-lg border overflow-hidden text-xs">
+                  <button type="button" onClick={() => { setImageMode("url"); setImageFile(null); setImagePreview(""); }}
+                    className={`px-3 py-1.5 font-medium transition-colors ${imageMode === "url" ? "bg-blue-600 text-white" : "bg-background text-muted-foreground hover:bg-muted"}`}
+                    data-testid="button-img-mode-url">
+                    Lien URL
+                  </button>
+                  <button type="button" onClick={() => { setImageMode("file"); setImageUrl(""); }}
+                    className={`px-3 py-1.5 font-medium transition-colors ${imageMode === "file" ? "bg-blue-600 text-white" : "bg-background text-muted-foreground hover:bg-muted"}`}
+                    data-testid="button-img-mode-file">
+                    Télécharger
+                  </button>
                 </div>
+              </div>
+
+              {imageMode === "url" ? (
+                <>
+                  <Input
+                    id="tg-image"
+                    type="url"
+                    value={imageUrl}
+                    onChange={e => setImageUrl(e.target.value)}
+                    placeholder="https://exemple.com/image.jpg"
+                    data-testid="input-tg-image-url"
+                  />
+                  {imageUrl && imageUrl.startsWith("http") && (
+                    <div className="mt-2 rounded-xl overflow-hidden border border-border w-full max-h-40">
+                      <img src={imageUrl} alt="Aperçu" className="w-full h-40 object-cover" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground mt-1">URL publique accessible en https.</p>
+                </>
+              ) : (
+                <>
+                  <label htmlFor="tg-image-file"
+                    className="mt-1 flex flex-col items-center justify-center w-full rounded-xl border-2 border-dashed border-border cursor-pointer hover:border-blue-400 hover:bg-blue-50/30 dark:hover:bg-blue-950/10 transition-colors p-5 gap-2"
+                    data-testid="label-tg-image-file">
+                    {imagePreview ? (
+                      <img src={imagePreview} alt="Aperçu" className="max-h-36 rounded-lg object-contain" />
+                    ) : (
+                      <>
+                        <Upload className="w-6 h-6 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">Cliquez pour sélectionner une image</span>
+                        <span className="text-xs text-muted-foreground">JPG, PNG, WEBP, GIF · max 10 Mo</span>
+                      </>
+                    )}
+                    <input
+                      id="tg-image-file"
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      className="hidden"
+                      onChange={handleFileChange}
+                      data-testid="input-tg-image-file"
+                    />
+                  </label>
+                  {imageFile && (
+                    <div className="flex items-center justify-between mt-2 px-3 py-2 rounded-lg bg-muted/40 border text-xs">
+                      <span className="text-muted-foreground truncate">{imageFile.name}</span>
+                      <button type="button" onClick={() => { setImageFile(null); setImagePreview(""); }} className="text-destructive hover:text-destructive/80 ml-2 shrink-0" data-testid="button-remove-image">✕</button>
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground mt-1">L'image sera hébergée et envoyée avec le texte en légende.</p>
+                </>
               )}
-              <p className="text-xs text-muted-foreground mt-1">L'image sera envoyée avec le texte en légende. URL publique obligatoire (https).</p>
             </div>
 
             {/* Inline Buttons */}
@@ -5583,13 +5672,13 @@ function TelegramBroadcastPanel({ merchants }: { merchants: Merchant[] }) {
             </div>
 
             {/* Preview */}
-            {(message.trim() || imageUrl.trim() || buttons.filter(b => b.text && b.url).length > 0) && (
+            {(message.trim() || imageUrl.trim() || imagePreview || buttons.filter(b => b.text && b.url).length > 0) && (
               <div className="rounded-xl border border-blue-200 bg-blue-50/50 dark:bg-blue-950/10 p-4">
                 <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-widest mb-3">Aperçu du message</p>
                 <div className="bg-white dark:bg-zinc-900 rounded-xl border p-3 space-y-2 shadow-sm">
-                  {imageUrl && imageUrl.startsWith("http") && (
+                  {(imagePreview || (imageUrl && imageUrl.startsWith("http"))) && (
                     <div className="rounded-lg overflow-hidden">
-                      <img src={imageUrl} alt="" className="w-full max-h-32 object-cover" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                      <img src={imagePreview || imageUrl} alt="" className="w-full max-h-32 object-cover" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
                     </div>
                   )}
                   <p className="text-sm text-foreground whitespace-pre-wrap">{message || "—"}</p>
@@ -5610,11 +5699,13 @@ function TelegramBroadcastPanel({ merchants }: { merchants: Merchant[] }) {
             {/* Send button */}
             <Button
               type="submit"
-              disabled={isSending || !message.trim() || (mode === "specific" && selectedMerchantIds.length === 0)}
+              disabled={isSending || isUploading || !message.trim() || (mode === "specific" && selectedMerchantIds.length === 0)}
               className="w-full bg-blue-600 hover:bg-blue-700 text-white"
               data-testid="button-send-telegram"
             >
-              {isSending ? (
+              {isUploading ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Upload image…</>
+              ) : isSending ? (
                 <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Envoi en cours…</>
               ) : (
                 <><MessageSquare className="w-4 h-4 mr-2" />

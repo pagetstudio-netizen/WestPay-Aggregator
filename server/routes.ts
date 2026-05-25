@@ -63,6 +63,26 @@ import {
 const LOGOS_DIR = path.resolve(process.cwd(), "uploads", "operator-logos");
 if (!fs.existsSync(LOGOS_DIR)) fs.mkdirSync(LOGOS_DIR, { recursive: true });
 
+// ── Multer — images broadcast ─────────────────────────────────────────────────
+const BROADCAST_DIR = path.resolve(process.cwd(), "uploads", "broadcast");
+if (!fs.existsSync(BROADCAST_DIR)) fs.mkdirSync(BROADCAST_DIR, { recursive: true });
+const broadcastStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, BROADCAST_DIR),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
+    cb(null, `bc-${Date.now()}-${Math.random().toString(36).substr(2, 6)}${ext}`);
+  },
+});
+const broadcastUpload = multer({
+  storage: broadcastStorage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
+    if (allowed.includes(path.extname(file.originalname).toLowerCase())) cb(null, true);
+    else cb(new Error("Format non supporté (jpg, png, webp, gif)"));
+  },
+});
+
 const logoStorage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, LOGOS_DIR),
   filename: (_req, file, cb) => {
@@ -1491,6 +1511,18 @@ export async function registerRoutes(
     } catch (err: any) {
       console.error("[TELEGRAM BROADCAST]", err);
       res.status(500).json({ message: err.message || "Erreur serveur" });
+    }
+  });
+
+  app.post("/api/admin/telegram/upload-image", authMiddleware("admin"), broadcastUpload.single("image"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "Aucun fichier fourni" });
+      const domain = process.env.REPLIT_DOMAINS?.split(",")[0] || process.env.REPLIT_DEV_DOMAIN;
+      const base = domain ? `https://${domain}` : "";
+      const url = `${base}/uploads/broadcast/${req.file.filename}`;
+      res.json({ url });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message || "Erreur upload" });
     }
   });
 
