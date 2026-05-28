@@ -715,6 +715,11 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(pendingPayments.txId, txId), eq(pendingPayments.status, "submitted")));
   }
 
+  async getPendingPayment(id: number): Promise<PendingPayment | undefined> {
+    const [p] = await db.select().from(pendingPayments).where(eq(pendingPayments.id, id));
+    return p;
+  }
+
   async updatePendingPaymentTxId(id: number, txId: string): Promise<PendingPayment> {
     const [updated] = await db.update(pendingPayments).set({ txId }).where(eq(pendingPayments.id, id)).returning();
     return updated;
@@ -722,6 +727,10 @@ export class DatabaseStorage implements IStorage {
 
   async updatePendingPaymentStatus(id: number, status: string): Promise<void> {
     await db.update(pendingPayments).set({ status }).where(eq(pendingPayments.id, id));
+  }
+
+  async updatePendingPaymentError(id: number, status: string, errorMessage: string): Promise<void> {
+    await db.update(pendingPayments).set({ status, errorMessage }).where(eq(pendingPayments.id, id));
   }
 
   async cleanupExpiredPayments(): Promise<number> {

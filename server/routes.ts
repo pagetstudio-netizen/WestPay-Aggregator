@@ -1992,7 +1992,7 @@ export async function registerRoutes(
         operator: p.paymentMethod,
         provider: null,
         omnipayReference: p.omnipayReference,
-        errorMessage: null,
+        errorMessage: (p as any).errorMessage || null,
         createdAt: p.createdAt,
       }));
 
@@ -2919,6 +2919,33 @@ export async function registerRoutes(
           countries: activeCountries.map(c => c.country),
         },
       });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Signalement d'échec côté frontend (paiement initié mais USSD/OTP raté) ──
+  app.post("/api/payment/report-failure", async (req, res) => {
+    try {
+      const { paymentId, errorMessage } = req.body;
+      if (!paymentId || !errorMessage) {
+        return res.status(400).json({ message: "paymentId et errorMessage requis" });
+      }
+      const id = parseInt(String(paymentId), 10);
+      if (isNaN(id)) return res.status(400).json({ message: "paymentId invalide" });
+
+      const pending = await storage.getPendingPayment(id);
+      if (!pending) return res.status(404).json({ message: "Paiement introuvable" });
+
+      // Ne pas écraser un statut déjà finalisé (confirmed/failed)
+      if (!["pending", "omnipay_pending", "submitted"].includes(pending.status)) {
+        return res.json({ ok: true });
+      }
+
+      const truncated = String(errorMessage).slice(0, 500);
+      await storage.updatePendingPaymentError(id, "failed", truncated);
+      console.log(`[PAYMENT REPORT] Échec signalé pour pending #${id}: ${truncated}`);
+      res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

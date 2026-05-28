@@ -138,6 +138,7 @@ export const pendingPayments = pgTable("pending_payments", {
   omnipayTxId: text("omnipay_tx_id"),
   omnipayPaymentUrl: text("omnipay_payment_url"),
   gateway: text("gateway").default("omnipay").notNull(),
+  errorMessage: text("error_message"),
   expiresAt: timestamp("expires_at").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

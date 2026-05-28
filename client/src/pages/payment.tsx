@@ -349,8 +349,17 @@ export default function PaymentPage() {
         startPolling(pId);
       }
     } catch (e: any) {
+      const reason = e.message || "Erreur lors de l'initiation du paiement SendavaPay";
       setFailed(true);
-      setFailReason(e.message || "Erreur lors de l'initiation du paiement SendavaPay");
+      setFailReason(reason);
+      // Signaler l'échec au backend pour que l'admin voie la vraie raison
+      if (pId) {
+        fetch("/api/payment/report-failure", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paymentId: pId, errorMessage: reason }),
+        }).catch(() => {});
+      }
     } finally {
       setSndInitiating(false);
     }
