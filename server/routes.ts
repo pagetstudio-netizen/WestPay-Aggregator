@@ -47,8 +47,9 @@ import {
 } from "./mbiyo";
 import {
   createPayment as sendavaCreatePayment,
-  initiateWithdraw as sendavaInitiateWithdraw,
+  getPaymentStatus as sendavaGetPaymentStatus,
   verifyPayment as sendavaVerifyPayment,
+  initiateWithdraw as sendavaInitiateWithdraw,
   getBalance as sendavaGetBalance,
   getTransactions as sendavaGetTransactions,
   configureWebhook as sendavaConfigureWebhook,
@@ -2984,11 +2985,9 @@ export async function registerRoutes(
         const countryCode = SENDAVAPAY_COUNTRY_CODES[country] || "";
         const currency = SENDAVAPAY_CURRENCY_MAP[countryCode] || "XOF";
         const webhookUrl = `${callbackBaseUrl}/api/sendavapay/callback`;
-        const customerRedirectUrl = redirectUrl
-          ? `${callbackBaseUrl}/api/payment/sendavapay/return?ref=${reference}&redirect=${encodeURIComponent(redirectUrl)}`
-          : `${callbackBaseUrl}/pay?ref=${reference}&sendava_status=complete`;
 
         try {
+          // Étape 1 (backend) : créer le paiement → obtenir paymentToken + reference
           const sendavaResult = await sendavaCreatePayment(sendavaApiKey, {
             amount: parsedAmount,
             currency,
@@ -2996,13 +2995,12 @@ export async function registerRoutes(
             customerName: payerName || undefined,
             customerPhone: msisdn || undefined,
             description: `Paiement WestPay - ${merchantSlug}`,
-            redirectUrl: customerRedirectUrl,
             webhookUrl,
             externalReference: reference,
           });
 
-          if (!sendavaResult.success || !sendavaResult.data?.paymentUrl) {
-            const errorMsg = sendavaResult.message || "Erreur de paiement. Veuillez reessayer.";
+          if (!sendavaResult.success || !sendavaResult.data?.paymentToken) {
+            const errorMsg = sendavaResult.message || (sendavaResult as any).error || "Erreur de paiement. Veuillez reessayer.";
             storage.createTransaction({
               merchantId: merchant.id,
               country,
@@ -3020,9 +3018,10 @@ export async function registerRoutes(
             return res.status(400).json({ message: errorMsg });
           }
 
-          const spReference = sendavaResult.data.reference || reference;
-          const paymentUrl = sendavaResult.data.paymentUrl;
+          const spReference = sendavaResult.data.reference;
+          const paymentToken = sendavaResult.data.paymentToken;
 
+          // Stocker le paiement en attente (l'invite USSD sera déclenchée par le frontend via CORS)
           const pending = await storage.createPendingPayment({
             merchantId: merchant.id,
             country,
@@ -3035,28 +3034,32 @@ export async function registerRoutes(
             redirectUrl: redirectUrl || null,
             omnipayReference: spReference,
             omnipayTxId: null,
-            omnipayPaymentUrl: paymentUrl,
+            omnipayPaymentUrl: null,
             gateway: "sendavapay",
             expiresAt,
           });
 
           await storage.createApiLog({
             merchantId: merchant.id,
-            action: "sendavapay_payment_initiated",
+            action: "sendavapay_payment_created",
             ip: req.ip || "",
-            description: `Paiement SendavaPay initie - Ref: ${spReference} - Montant: ${parsedAmount} - Pays: ${countryCode} - URL: ${paymentUrl}`,
+            description: `Paiement SendavaPay créé - Ref: ${spReference} - Montant: ${parsedAmount} ${currency} - Pays: ${countryCode}`,
           });
 
+          // Étape 2 (frontend) : transmettre paymentToken + reference au client
+          // Le frontend appellera directement l'API CORS SendavaPay pour déclencher l'invite USSD
           return res.json({
             success: true,
             paymentId: pending.id,
             sendavapay: true,
+            sendavapayToken: true,
             omnipayReference: spReference,
-            paymentUrl,
+            paymentToken,
+            countryCode,
             fees: 0,
           });
         } catch (sendavaErr: any) {
-          console.error("[SENDAVAPAY] Erreur initiation:", sendavaErr.message);
+          console.error("[SENDAVAPAY] Erreur création paiement:", sendavaErr.message);
           return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
         }
       } else if (useMbiyo) {
@@ -3662,7 +3665,7 @@ export async function registerRoutes(
           const sendavaKey = await getSendavaApiKey();
           if (sendavaKey) {
             try {
-              const statusResult = await sendavaVerifyPayment(sendavaKey, pending.omnipayReference);
+              const statusResult = await sendavaGetPaymentStatus(sendavaKey, pending.omnipayReference);
               const spStatus = (statusResult.data?.status || "").toLowerCase();
               const spSuccess = ["completed", "paid", "successful", "success", "approved"].includes(spStatus);
               const spFailed = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(spStatus);

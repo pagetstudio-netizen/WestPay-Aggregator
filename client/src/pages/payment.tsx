@@ -71,6 +71,27 @@ function currencyForCountry(c: string) {
   return "XOF";
 }
 
+/* ── SendavaPay helpers ─────────────────────────────────────────────────── */
+const SENDAVA_CC: Record<string, string> = {
+  "Togo": "TG", "Benin": "BJ", "Cameroun": "CM", "Burkina Faso": "BF",
+  "Cote d'Ivoire": "CI", "Mali": "ML", "Senegal": "SN", "Guinee": "GN",
+  "Congo RDC": "COD", "Congo Brazzaville": "COG",
+};
+
+function findSendavaServiceId(services: Array<{id: string; name: string; slug: string}>, operatorName: string): string | null {
+  if (!services?.length) return null;
+  const lower = operatorName.toLowerCase().trim();
+  const exact = services.find(s => s.name.toLowerCase() === lower);
+  if (exact) return exact.id;
+  const keywords = lower.split(/[\s\-_]+/);
+  const partial = services.find(s => {
+    const sn = s.name.toLowerCase();
+    const ss = s.slug.toLowerCase();
+    return keywords.some(kw => kw.length > 2 && (sn.includes(kw) || ss.includes(kw)));
+  });
+  return partial?.id ?? services[0]?.id ?? null;
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    COMPONENT
 ══════════════════════════════════════════════════════════════════════════ */
@@ -126,6 +147,16 @@ export default function PaymentPage() {
   const [confirmedAt,  setConfirmedAt] = useState<Date | null>(null);
   const [showOtpModal, setShowOtpModal]= useState(false);
   const [showHelpModal,setShowHelpModal]= useState(false);
+
+  /* ── SendavaPay v2 CORS flow ──────────────────────────────────────────── */
+  const [sndPaymentToken, setSndPaymentToken] = useState<string | null>(null);
+  const [sndReference,    setSndReference]    = useState<string | null>(null);
+  const [sndPayId,        setSndPayId]        = useState("");
+  const [sndOrderId,      setSndOrderId]      = useState("");
+  const [sndOtpRequired,  setSndOtpRequired]  = useState(false);
+  const [sndOtp,          setSndOtp]          = useState("");
+  const [sndConfirming,   setSndConfirming]   = useState(false);
+  const [sndInitiating,   setSndInitiating]   = useState(false);
   const [helpName,     setHelpName]     = useState("");
   const [helpWhatsapp, setHelpWhatsapp] = useState("");
   const [helpMessage,  setHelpMessage]  = useState("");
@@ -266,16 +297,91 @@ export default function PaymentPage() {
       const d = await r.json();
       if (!r.ok) throw new Error(d.message);
       setPaymentId(d.paymentId); setOmniRef(d.omnipayReference); setOmniFees(d.fees || 0); setShowOtpModal(false);
-      if (d.sendavapay && d.paymentUrl) { window.location.href = d.paymentUrl; return; }
-      else if (d.paymentUrl) { setPaymentUrl(d.paymentUrl); setStep(2); }
+      if (d.sendavapay && d.sendavapayToken && d.paymentToken) {
+        /* ── SendavaPay v2: déclencher l'invite USSD côté client (CORS) ── */
+        setSndPaymentToken(d.paymentToken);
+        setSndReference(d.omnipayReference);
+        setStep(2);
+        const cc = d.countryCode || SENDAVA_CC[country] || "";
+        await triggerSendavaPayment(d.omnipayReference, d.paymentToken, cc, payerPhone.trim(), payerName.trim(), d.paymentId);
+        return;
+      }
+      if (d.paymentUrl) { setPaymentUrl(d.paymentUrl); setStep(2); }
       else { setStep(2); startPolling(d.paymentId); }
     } catch { toast({ title:"Paiement non abouti", description:"Vérifiez vos informations et réessayez.", variant:"destructive" }); }
     finally { setIsSubmitting(false); }
   };
 
+  /* ── SendavaPay v2 — déclencher l'invite USSD via API CORS ────────────── */
+  const triggerSendavaPayment = async (
+    ref: string, token: string, countryCode: string,
+    phone: string, name: string, pId: number,
+  ) => {
+    setSndInitiating(true);
+    try {
+      /* 1. Récupérer les opérateurs disponibles pour ce pays */
+      const svRes = await fetch(`https://sendavapay.com/api/soleaspay/services/${countryCode}`);
+      if (!svRes.ok) throw new Error("Opérateurs non disponibles");
+      const svData = await svRes.json();
+      const services: Array<{id: string; name: string; slug: string}> = svData.data || [];
+
+      /* 2. Trouver l'ID de service correspondant à l'opérateur sélectionné */
+      const serviceId = findSendavaServiceId(services, method);
+      if (!serviceId) throw new Error(`Opérateur "${method}" non disponible pour ce pays`);
+
+      /* 3. Initier le paiement (USSD push) directement depuis le frontend */
+      const initRes = await fetch(`https://sendavapay.com/api/pay-api/${ref}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentToken: token, payerName: name, payerPhone: phone, payerCountry: countryCode, serviceId }),
+      });
+      const initData = await initRes.json();
+
+      if (!initData.success) throw new Error(initData.message || "Erreur lors de l'initiation");
+
+      if (initData.requiresOtp) {
+        /* Orange Money → demande OTP */
+        setSndPayId(initData.payId || "");
+        setSndOrderId(initData.orderId || "");
+        setSndOtpRequired(true);
+      } else {
+        /* Pas d'OTP — l'invite USSD a été envoyée sur le téléphone */
+        startPolling(pId);
+      }
+    } catch (e: any) {
+      setFailed(true);
+      setFailReason(e.message || "Erreur lors de l'initiation du paiement SendavaPay");
+    } finally {
+      setSndInitiating(false);
+    }
+  };
+
+  /* ── SendavaPay v2 — soumettre l'OTP ──────────────────────────────────── */
+  const confirmSndOtp = async () => {
+    if (!sndPaymentToken || !sndReference || !sndOtp.trim()) return;
+    setSndConfirming(true);
+    try {
+      const res = await fetch(`https://sendavapay.com/api/pay-api/${sndReference}/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentToken: sndPaymentToken, payId: sndPayId, orderId: sndOrderId, otp: sndOtp.trim() }),
+      });
+      const d = await res.json();
+      if (!d.success) throw new Error(d.message || "Code OTP incorrect");
+      setSndOtpRequired(false);
+      if (paymentId) startPolling(paymentId);
+    } catch (e: any) {
+      toast({ title: "Code OTP invalide", description: e.message, variant: "destructive" });
+    } finally {
+      setSndConfirming(false);
+    }
+  };
+
   const retry = () => {
     if (pollingRef.current) clearInterval(pollingRef.current);
     setOmniPolling(false); setFailed(false); setFailReason(""); setPaymentUrl(null);
+    setSndPaymentToken(null); setSndReference(null); setSndOtpRequired(false);
+    setSndPayId(""); setSndOrderId(""); setSndOtp(""); setSndConfirming(false); setSndInitiating(false);
     setStep(1);
   };
 
@@ -530,6 +636,50 @@ export default function PaymentPage() {
                     <button type="button" onClick={retry} className="paybtn" style={{ background:"#f5c100", color:"#111" }}>
                       <RefreshCw style={{ width:16, height:16 }} /> Réessayer
                     </button>
+                  </div>
+
+                ) : sndInitiating ? (
+                  /* ── SendavaPay: connexion USSD en cours ─────────────────────── */
+                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:14, textAlign:"center", padding:"14px 0" }}>
+                    <div className="anim-pulse">
+                      <div style={{ width:80, height:80, borderRadius:"50%", background:"#fef9c3", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                        <Loader2 style={{ width:38, height:38, color:"#ca8a04", animation:"spin 1s linear infinite" }} />
+                      </div>
+                    </div>
+                    <p style={{ fontWeight:700, fontSize:15, color:"#111" }}>Connexion en cours…</p>
+                    <p style={{ fontSize:13, color:"#6b7280" }}>Envoi de l'invite de paiement sur votre téléphone</p>
+                  </div>
+
+                ) : sndOtpRequired ? (
+                  /* ── SendavaPay: OTP Orange Money requis ──────────────────────── */
+                  <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+                    <div style={{ background:"#fff7ed", border:"1.5px solid #fed7aa", borderRadius:14, padding:"14px 16px" }}>
+                      <div style={{ display:"flex", alignItems:"flex-start", gap:12 }}>
+                        <div style={{ width:42, height:42, borderRadius:10, background:"#FF6600", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                          <Smartphone style={{ width:20, height:20, color:"#fff" }} />
+                        </div>
+                        <div>
+                          <p style={{ fontWeight:600, fontSize:13, color:"#c2410c", marginBottom:4 }}>Orange Money — Code OTP</p>
+                          <p style={{ fontSize:12, color:"#92400e" }}>Un code OTP a été envoyé par SMS au <strong>{payerPhone}</strong>. Entrez-le ci-dessous pour confirmer votre paiement.</p>
+                        </div>
+                      </div>
+                    </div>
+                    <label style={{ fontSize:12, fontWeight:600, color:"#374151" }}>Code OTP reçu par SMS</label>
+                    <input
+                      type="text" inputMode="numeric" maxLength={8}
+                      value={sndOtp} onChange={e => setSndOtp(e.target.value.replace(/\D/g,""))}
+                      placeholder="Code OTP" autoFocus data-testid="input-snd-otp"
+                      className="inp"
+                      style={{ textAlign:"center", fontSize:24, fontWeight:700, letterSpacing:"0.2em" }}
+                    />
+                    <button type="button" className="paybtn" data-testid="button-snd-otp-confirm"
+                      disabled={sndConfirming || !sndOtp.trim()}
+                      style={{ background:"#FF6600", color:"#fff" }}
+                      onClick={confirmSndOtp}>
+                      {sndConfirming && <Loader2 style={{ width:16, height:16, animation:"spin 1s linear infinite" }} />}
+                      Confirmer le paiement
+                    </button>
+                    <button type="button" className="ghost" onClick={retry}>← Annuler</button>
                   </div>
 
                 ) : paymentUrl ? (<>

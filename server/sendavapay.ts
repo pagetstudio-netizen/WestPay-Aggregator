@@ -22,34 +22,34 @@ export const SENDAVAPAY_CURRENCY_MAP: Record<string, string> = {
   "COD": "CDF",
 };
 
-export interface SendavaCreatePaymentRequest {
-  amount: number;
-  currency: string;
-  description?: string;
-  customerName?: string;
-  customerEmail?: string;
-  customerPhone?: string;
-  payerCountry: string;
-  redirectUrl?: string;
-  webhookUrl?: string;
-  externalReference?: string;
-}
-
 export interface SendavaCreatePaymentResponse {
   success: boolean;
   data?: {
     reference: string;
+    paymentToken: string;
+    expiresAt: string;
     amount: number;
     currency: string;
     status: string;
-    paymentUrl: string;
     walletRouting?: {
       detectedCountry: string;
       targetWallet: string;
-      note: string;
     };
-    createdAt: string;
   };
+  error?: string;
+  message?: string;
+}
+
+export interface SendavaPaymentStatusResponse {
+  success: boolean;
+  data?: {
+    reference: string;
+    status: string;
+    amount: string;
+    currency: string;
+    completedAt?: string;
+  };
+  error?: string;
   message?: string;
 }
 
@@ -57,11 +57,19 @@ export interface SendavaVerifyPaymentResponse {
   success: boolean;
   data?: {
     reference: string;
+    externalReference?: string;
     amount: string;
+    fee: string;
+    currency: string;
     status: string;
+    customerEmail?: string;
+    customerPhone?: string;
+    customerName?: string;
     paymentMethod?: string;
+    createdAt: string;
     completedAt?: string;
   };
+  error?: string;
   message?: string;
 }
 
@@ -88,10 +96,10 @@ export interface SendavaWithdrawResponse {
     operator: string;
     country: string;
     countryName: string;
-    walletDebited: string;
     status: string;
-    message: string;
+    createdAt: string;
   };
+  error?: string;
   message?: string;
 }
 
@@ -106,6 +114,7 @@ export interface SendavaBalanceResponse {
     }>;
     totalWallets: number;
   };
+  error?: string;
   message?: string;
 }
 
@@ -114,6 +123,7 @@ export interface SendavaTransactionsResponse {
   data?: {
     transactions: Array<{
       reference: string;
+      externalReference?: string;
       type: string;
       amount: string;
       fee: string;
@@ -126,22 +136,30 @@ export interface SendavaTransactionsResponse {
     }>;
     total: number;
   };
+  error?: string;
   message?: string;
 }
 
 export interface SendavaWebhookPayload {
   event?: string;
   reference?: string;
-  amount?: string;
-  currency?: string;
+  externalReference?: string;
   status?: string;
+  amount?: string;
+  fee?: string;
+  currency?: string;
   customerPhone?: string;
   paymentMethod?: string;
   timestamp?: string;
 }
 
-export function verifyWebhookSignature(webhookSecret: string, signature: string, rawBody: string): boolean {
-  const expected = `sha256=${crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex")}`;
+/**
+ * Vérifie la signature HMAC du webhook SendavaPay.
+ * IMPORTANT: rawBody doit être le Buffer brut — pas JSON.stringify.
+ */
+export function verifyWebhookSignature(webhookSecret: string, signature: string, rawBody: Buffer | string): boolean {
+  const data = typeof rawBody === "string" ? Buffer.from(rawBody) : rawBody;
+  const expected = `sha256=${crypto.createHmac("sha256", webhookSecret).update(data).digest("hex")}`;
   return expected === signature;
 }
 
@@ -158,18 +176,15 @@ async function sendavaRequest<T>(
   try {
     let url = `${SENDAVAPAY_BASE_URL}${endpoint}`;
     if (queryParams && Object.keys(queryParams).length > 0) {
-      const qs = new URLSearchParams(queryParams).toString();
-      url = `${url}?${qs}`;
+      url = `${url}?${new URLSearchParams(queryParams).toString()}`;
     }
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
-    };
 
     const response = await fetch(url, {
       method,
-      headers,
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
       body: payload ? JSON.stringify(payload) : undefined,
       signal: controller.signal,
     });
@@ -179,16 +194,29 @@ async function sendavaRequest<T>(
     return data as T;
   } catch (err: any) {
     clearTimeout(timeout);
-    if (err.name === "AbortError") {
-      throw new Error("SendavaPay: Timeout de connexion (30s)");
-    }
+    if (err.name === "AbortError") throw new Error("SendavaPay: Timeout (30s)");
     throw new Error(`SendavaPay: ${err.message}`);
   }
 }
 
+/**
+ * Crée un paiement côté serveur.
+ * Retourne reference + paymentToken (valide 30 min) à transmettre au frontend.
+ */
 export async function createPayment(
   apiKey: string,
-  params: SendavaCreatePaymentRequest,
+  params: {
+    amount: number;
+    currency: string;
+    payerCountry: string;
+    description?: string;
+    customerName?: string;
+    customerEmail?: string;
+    customerPhone?: string;
+    webhookUrl?: string;
+    externalReference?: string;
+    metadata?: Record<string, any>;
+  },
 ): Promise<SendavaCreatePaymentResponse> {
   const payload: Record<string, any> = {
     amount: params.amount,
@@ -199,31 +227,34 @@ export async function createPayment(
   if (params.customerName) payload.customerName = params.customerName;
   if (params.customerEmail) payload.customerEmail = params.customerEmail;
   if (params.customerPhone) payload.customerPhone = params.customerPhone;
-  if (params.redirectUrl) payload.redirectUrl = params.redirectUrl;
   if (params.webhookUrl) payload.webhookUrl = params.webhookUrl;
   if (params.externalReference) payload.externalReference = params.externalReference;
+  if (params.metadata) payload.metadata = params.metadata;
 
-  console.log(`[SENDAVAPAY] Création paiement: ${params.amount} ${params.currency} - Pays: ${params.payerCountry}`);
+  console.log(`[SENDAVAPAY] Création paiement: ${params.amount} ${params.currency} — pays: ${params.payerCountry} — ref ext: ${params.externalReference}`);
   const result = await sendavaRequest<SendavaCreatePaymentResponse>("/create-payment", "POST", apiKey, payload);
-  console.log(`[SENDAVAPAY] Réponse: success=${result.success} ref=${result.data?.reference} paymentUrl=${result.data?.paymentUrl}`);
+  console.log(`[SENDAVAPAY] Réponse create-payment: success=${result.success} ref=${result.data?.reference} tokenOk=${!!result.data?.paymentToken}`);
   return result;
 }
 
-export async function verifyPayment(
-  apiKey: string,
-  reference: string,
-): Promise<SendavaVerifyPaymentResponse> {
-  const payload = { reference };
-  console.log(`[SENDAVAPAY] Vérification paiement ref=${reference}`);
-  const result = await sendavaRequest<SendavaVerifyPaymentResponse>("/verify-payment", "POST", apiKey, payload);
-  console.log(`[SENDAVAPAY] Statut: ${result.data?.status}`);
-  return result;
+/**
+ * Récupère le statut d'un paiement (polling léger).
+ */
+export async function getPaymentStatus(apiKey: string, reference: string): Promise<SendavaPaymentStatusResponse> {
+  return sendavaRequest<SendavaPaymentStatusResponse>(`/payment-status/${encodeURIComponent(reference)}`, "GET", apiKey);
 }
 
-export async function initiateWithdraw(
-  apiKey: string,
-  params: SendavaWithdrawRequest,
-): Promise<SendavaWithdrawResponse> {
+/**
+ * Vérifie un paiement — retourne les détails complets (à appeler avant de valider une commande).
+ */
+export async function verifyPayment(apiKey: string, reference: string): Promise<SendavaVerifyPaymentResponse> {
+  return sendavaRequest<SendavaVerifyPaymentResponse>("/verify-payment", "POST", apiKey, { reference });
+}
+
+/**
+ * Effectue un retrait (pay-out) depuis votre wallet vers un numéro Mobile Money.
+ */
+export async function initiateWithdraw(apiKey: string, params: SendavaWithdrawRequest): Promise<SendavaWithdrawResponse> {
   const payload: Record<string, any> = {
     amount: params.amount,
     phoneNumber: params.phoneNumber,
@@ -234,83 +265,66 @@ export async function initiateWithdraw(
   if (params.description) payload.description = params.description;
   if (params.externalReference) payload.externalReference = params.externalReference;
 
-  const maskedPhone = params.phoneNumber ? params.phoneNumber.replace(/(\d{3})\d+(\d{2})/, "$1****$2") : "?";
-  console.log(`[SENDAVAPAY] Retrait: ${params.amount} ${params.currency} - Tel: ${maskedPhone} - Op: ${params.operator} - Pays: ${params.country}`);
+  const masked = params.phoneNumber.replace(/(\d{3})\d+(\d{2})/, "$1****$2");
+  console.log(`[SENDAVAPAY] Retrait: ${params.amount} ${params.currency} — ${masked} — ${params.operator} — ${params.country}`);
   const result = await sendavaRequest<SendavaWithdrawResponse>("/withdraw", "POST", apiKey, payload);
   console.log(`[SENDAVAPAY] Retrait réponse: success=${result.success} ref=${result.data?.reference}`);
   return result;
 }
 
-export async function getBalance(
-  apiKey: string,
-  countryCode?: string,
-): Promise<SendavaBalanceResponse> {
-  const queryParams = countryCode ? { country: countryCode } : undefined;
-  return sendavaRequest<SendavaBalanceResponse>("/balance", "GET", apiKey, undefined, queryParams);
+/**
+ * Consulte les soldes des wallets (tous les pays ou un pays spécifique).
+ */
+export async function getBalance(apiKey: string, countryCode?: string): Promise<SendavaBalanceResponse> {
+  return sendavaRequest<SendavaBalanceResponse>("/balance", "GET", apiKey, undefined, countryCode ? { country: countryCode } : undefined);
 }
 
+/**
+ * Liste toutes les transactions (pay-in + pay-out).
+ */
 export async function getTransactions(apiKey: string): Promise<SendavaTransactionsResponse> {
   return sendavaRequest<SendavaTransactionsResponse>("/transactions", "GET", apiKey);
 }
 
+/**
+ * Configure l'URL webhook globale pour la clé SDK.
+ * Retourne webhookSecret (à stocker en variable d'environnement — affiché une seule fois).
+ */
 export async function configureWebhook(
   apiKey: string,
   webhookUrl: string,
-): Promise<{ success: boolean; data?: { webhookUrl: string; webhookSecret: string; message: string }; message?: string }> {
+): Promise<{ success: boolean; data?: { webhookUrl: string; webhookSecret: string }; message?: string }> {
   return sendavaRequest("/webhook", "PUT", apiKey, { webhookUrl });
 }
 
+/**
+ * Génère une référence interne unique pour le mapping pending_payments.
+ */
 export function generateReference(): string {
-  const timestamp = Date.now().toString(36).toUpperCase();
-  const random = crypto.randomBytes(4).toString("hex").toUpperCase();
-  return `SP${timestamp}${random}`;
+  const ts = Date.now().toString(36).toUpperCase();
+  const rnd = crypto.randomBytes(4).toString("hex").toUpperCase();
+  return `SP${ts}${rnd}`;
 }
 
+/**
+ * Mappe un nom d'opérateur WestPay vers le slug SendavaPay pour les retraits.
+ */
 export function toSendavaOperator(operatorName: string, countryCode: string): string {
   const name = operatorName.toLowerCase().trim();
   const country = countryCode.toUpperCase();
 
   const mapping: Record<string, Record<string, string>> = {
-    "TG": {
-      "tmoney": "tmoney", "t-money": "tmoney",
-      "moov": "flooz", "moov money": "flooz",
-      "togocel": "togocel",
-    },
-    "BJ": {
-      "mtn": "mtn_bj", "mtn mobile money": "mtn_bj",
-      "moov": "moov_bj", "moov money": "moov_bj",
-    },
-    "SN": {
-      "orange": "orange_sn", "orange money": "orange_sn",
-      "wave": "wave_sn",
-      "free": "free_sn", "free money": "free_sn",
-    },
-    "CI": {
-      "orange": "orange_ci", "orange money": "orange_ci",
-      "mtn": "mtn_ci", "mtn mobile money": "mtn_ci",
-      "wave": "wave_ci",
-      "moov": "moov_ci", "moov money": "moov_ci",
-    },
-    "ML": {
-      "orange": "orange_ml", "orange money": "orange_ml",
-      "wave": "wave_ml",
-      "moov": "moov_ml", "moov money": "moov_ml",
-    },
-    "CM": {
-      "orange": "orange_cm", "orange money": "orange_cm",
-      "mtn": "mtn_cm", "mtn mobile money": "mtn_cm",
-    },
-    "BF": {
-      "orange": "orange_bf", "orange money": "orange_bf",
-      "moov": "moov_bf", "moov money": "moov_bf",
-      "coris": "coris_bf", "coris money": "coris_bf",
-    },
-    "GN": {
-      "orange": "orange_gn", "orange money": "orange_gn",
-      "mtn": "mtn_gn", "mtn mobile money": "mtn_gn",
-    },
+    "TG": { "tmoney": "tmoney", "t-money": "tmoney", "moov": "moov", "moov money": "moov" },
+    "BJ": { "mtn": "mtn", "mtn mobile money": "mtn", "moov": "moov", "moov money": "moov" },
+    "SN": { "orange": "orange", "orange money": "orange", "wave": "wave", "free": "free", "free money": "free", "mixx by yas": "wave" },
+    "CI": { "orange": "orange", "orange money": "orange", "mtn": "mtn", "mtn mobile money": "mtn", "wave": "wave", "moov": "moov", "moov money": "moov" },
+    "ML": { "orange": "orange", "orange money": "orange", "wave": "wave", "moov": "moov", "moov money": "moov" },
+    "CM": { "orange": "orange", "orange money": "orange", "mtn": "mtn", "mtn mobile money": "mtn" },
+    "BF": { "orange": "orange", "orange money": "orange", "moov": "moov", "moov money": "moov", "coris": "coris", "coris money": "coris" },
+    "GN": { "orange": "orange", "orange money": "orange", "mtn": "mtn", "mtn mobile money": "mtn" },
+    "COD": { "vodacom": "vodacom", "m-pesa": "vodacom", "airtel": "airtel", "airtel money": "airtel", "orange": "orange", "orange money": "orange" },
+    "COG": { "airtel": "airtel", "airtel money": "airtel", "mtn": "mtn", "mtn mobile money": "mtn" },
   };
 
-  const countryMap = mapping[country] || {};
-  return countryMap[name] || name;
+  return mapping[country]?.[name] || name;
 }
