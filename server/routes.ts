@@ -128,11 +128,11 @@ async function getMbiyoWebhookSecret(): Promise<string | undefined> {
 }
 
 async function getSendavaApiKey(): Promise<string | undefined> {
-  return process.env.SENDAVAPAY_API_KEY || await storage.getSetting("sendavapay_api_key");
+  return process.env.SENDAVA_API_KEY || process.env.SENDAVAPAY_API_KEY || await storage.getSetting("sendavapay_api_key");
 }
 
 async function getSendavaWebhookSecret(): Promise<string | undefined> {
-  return process.env.SENDAVAPAY_WEBHOOK_SECRET || await storage.getSetting("sendavapay_webhook_secret");
+  return process.env.SENDAVA_WEBHOOK_SECRET || process.env.SENDAVAPAY_WEBHOOK_SECRET || await storage.getSetting("sendavapay_webhook_secret");
 }
 
 const COLLECTION_FEE_RATE = 0.055;
