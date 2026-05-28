@@ -3761,14 +3761,18 @@ export async function registerRoutes(
 
   app.get("/api/admin/omnipay/settings", authMiddleware("admin"), async (_req, res) => {
     try {
-      const apiKey = await getOmnipayApiKey();
-      const callbackKey = await getOmnipayCallbackKey();
-      const payoutApiKey = await storage.getSetting("omnipay_payout_api_key");
+      // Pour l'affichage admin, lire la DB directement (l'env var est une surcharge runtime, pas affichée)
+      const dbApiKey = await storage.getSetting("omnipay_api_key");
+      const dbCallbackKey = await storage.getSetting("omnipay_callback_key");
+      const dbPayoutApiKey = await storage.getSetting("omnipay_payout_api_key");
+      const envOverride = !!process.env.OMNIPAY_API_KEY;
+      const activeApiKey = await getOmnipayApiKey(); // clé réellement utilisée (env > db)
       res.json({
-        apiKey: apiKey || "",
-        callbackKey: callbackKey || "",
-        payoutApiKey: payoutApiKey || "",
-        configured: !!apiKey,
+        apiKey: dbApiKey || "",
+        callbackKey: dbCallbackKey || "",
+        payoutApiKey: dbPayoutApiKey || "",
+        configured: !!activeApiKey,
+        envOverride,
       });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -4045,12 +4049,15 @@ export async function registerRoutes(
 
   app.get("/api/admin/mbiyo/settings", authMiddleware("admin"), async (_req, res) => {
     try {
-      const apiKey = await getMbiyoApiKey();
-      const webhookSecret = await getMbiyoWebhookSecret();
+      const dbApiKey = await storage.getSetting("mbiyo_api_key");
+      const dbWebhookSecret = await storage.getSetting("mbiyo_webhook_secret");
+      const envOverride = !!process.env.MBIYO_API_KEY;
+      const activeApiKey = await getMbiyoApiKey();
       res.json({
-        apiKey: apiKey || "",
-        webhookSecret: webhookSecret || "",
-        configured: !!apiKey,
+        apiKey: dbApiKey || "",
+        webhookSecret: dbWebhookSecret || "",
+        configured: !!activeApiKey,
+        envOverride,
       });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -4246,12 +4253,15 @@ export async function registerRoutes(
 
   app.get("/api/admin/sendavapay/settings", authMiddleware("admin"), async (_req, res) => {
     try {
-      const apiKey = await getSendavaApiKey();
-      const webhookSecret = await getSendavaWebhookSecret();
+      const dbApiKey = await storage.getSetting("sendavapay_api_key");
+      const dbWebhookSecret = await storage.getSetting("sendavapay_webhook_secret");
+      const envOverride = !!process.env.SENDAVAPAY_API_KEY;
+      const activeApiKey = await getSendavaApiKey();
       res.json({
-        apiKey: apiKey || "",
-        webhookSecret: webhookSecret ? "configured" : "",
-        configured: !!apiKey,
+        apiKey: dbApiKey || "",
+        webhookSecret: dbWebhookSecret ? "configured" : "",
+        configured: !!activeApiKey,
+        envOverride,
         callbackUrl: "https://westpay.cloud/api/sendavapay/callback",
       });
     } catch (err: any) {
@@ -4263,7 +4273,7 @@ export async function registerRoutes(
     try {
       const { apiKey, webhookSecret } = req.body;
       if (apiKey !== undefined) await storage.setSetting("sendavapay_api_key", apiKey);
-      if (webhookSecret !== undefined) await storage.setSetting("sendavapay_webhook_secret", webhookSecret);
+      if (webhookSecret !== undefined && webhookSecret !== "") await storage.setSetting("sendavapay_webhook_secret", webhookSecret);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });

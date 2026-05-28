@@ -2401,6 +2401,12 @@ function OmniPayPanel() {
           </CardTitle>
         </CardHeader>
         <CardContent>
+          {omnipaySettings?.envOverride && (
+            <div className="mb-4 flex items-start gap-2 rounded-md border border-yellow-300 bg-yellow-50 dark:bg-yellow-900/20 dark:border-yellow-700 px-3 py-2 text-xs text-yellow-800 dark:text-yellow-300">
+              <span className="mt-0.5">⚠️</span>
+              <span>Une variable d'environnement <code className="font-mono font-bold">OMNIPAY_API_KEY</code> est active et prend la priorité au runtime. La clé ci-dessous est sauvegardée en base de données mais n'est pas utilisée tant que la variable d'env est définie.</span>
+            </div>
+          )}
           <form onSubmit={(e) => { e.preventDefault(); saveMutation.mutate(); }} className="space-y-4">
             <div className="space-y-2">
               <Label>Cle API Westpay (apikey)</Label>
@@ -2556,6 +2562,12 @@ function MbiyoPanel() {
           </CardTitle>
         </CardHeader>
         <CardContent>
+          {mbiyoSettings?.envOverride && (
+            <div className="mb-4 flex items-start gap-2 rounded-md border border-yellow-300 bg-yellow-50 dark:bg-yellow-900/20 dark:border-yellow-700 px-3 py-2 text-xs text-yellow-800 dark:text-yellow-300">
+              <span className="mt-0.5">⚠️</span>
+              <span>Une variable d'environnement <code className="font-mono font-bold">MBIYO_API_KEY</code> est active et prend la priorité au runtime. La clé ci-dessous est sauvegardée en base de données mais n'est pas utilisée tant que la variable d'env est définie.</span>
+            </div>
+          )}
           <form onSubmit={(e) => { e.preventDefault(); saveMutation.mutate(); }} className="space-y-4">
             <div className="space-y-2">
               <Label>Cle API Mbiyo (Bearer token)</Label>
@@ -2664,7 +2676,7 @@ function SendavaPayPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
   const [apiKey, setApiKey] = useState("");
-  const [apiSecret, setApiSecret] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
   const [isInitialized, setIsInitialized] = useState(false);
 
   const { data: settings, isLoading: settingsLoading } = useAdminFetch("/api/admin/sendavapay/settings", ["/api/admin/sendavapay/settings"]);
@@ -2672,7 +2684,7 @@ function SendavaPayPanel() {
   useEffect(() => {
     if (settings && !isInitialized) {
       setApiKey(settings.apiKey || "");
-      setApiSecret(settings.apiSecret || "");
+      setWebhookSecret(settings.webhookSecret === "configured" ? "" : (settings.webhookSecret || ""));
       setIsInitialized(true);
     }
   }, [settings, isInitialized]);
@@ -2694,7 +2706,7 @@ function SendavaPayPanel() {
       const res = await fetch("/api/admin/sendavapay/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ apiKey, apiSecret }),
+        body: JSON.stringify({ apiKey, webhookSecret }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
       return res.json();
@@ -2808,11 +2820,17 @@ function SendavaPayPanel() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {settings?.envOverride && (
+            <div className="flex items-start gap-2 rounded-md border border-yellow-300 bg-yellow-50 dark:bg-yellow-900/20 dark:border-yellow-700 px-3 py-2 text-xs text-yellow-800 dark:text-yellow-300">
+              <span className="mt-0.5">⚠️</span>
+              <span>Une variable d'environnement <code className="font-mono font-bold">SENDAVAPAY_API_KEY</code> est active et prend la priorité au runtime. La clé ci-dessous est sauvegardée en base de données mais n'est pas utilisée tant que la variable d'env est définie.</span>
+            </div>
+          )}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">API Key</label>
               <input
-                type="password"
+                type="text"
                 value={apiKey}
                 onChange={e => setApiKey(e.target.value)}
                 placeholder="Votre cle API SendavaPay"
@@ -2821,12 +2839,14 @@ function SendavaPayPanel() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">API Secret</label>
+              <label className="text-sm font-medium text-foreground">
+                Webhook Secret {settings?.webhookSecret === "configured" && <span className="text-xs text-green-600 font-normal ml-1">(déjà configuré)</span>}
+              </label>
               <input
                 type="password"
-                value={apiSecret}
-                onChange={e => setApiSecret(e.target.value)}
-                placeholder="Votre secret API SendavaPay"
+                value={webhookSecret}
+                onChange={e => setWebhookSecret(e.target.value)}
+                placeholder={settings?.webhookSecret === "configured" ? "Laisser vide pour ne pas changer" : "Votre secret webhook SendavaPay"}
                 className="w-full px-3 py-2 text-sm border border-input rounded-md bg-background text-foreground outline-none focus:ring-2 focus:ring-ring"
                 data-testid="input-sendavapay-api-secret"
               />
