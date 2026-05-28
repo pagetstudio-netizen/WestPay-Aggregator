@@ -121,12 +121,6 @@ export default function PaymentPage() {
   const [cryptoOn,    setCryptoOn]    = useState(false);
   const [cryptoLoading,setCryptoLoad] = useState(false);
 
-  const [sndOtpRequired,  setSndOtpRequired] = useState(false);
-  const [sndUssdCode,     setSndUssdCode]    = useState<string | null>(null);
-  const [sndOtp,          setSndOtp]         = useState("");
-  const [sndConfirming,   setSndConfirming]  = useState(false);
-  const [sndConfirmed,    setSndConfirmed]   = useState(false);
-
   const [failed,       setFailed]      = useState(false);
   const [failReason,   setFailReason]  = useState("");
   const [confirmedAt,  setConfirmedAt] = useState<Date | null>(null);
@@ -157,8 +151,6 @@ export default function PaymentPage() {
   const rawMethods       = dynMethods ?? (PAYMENT_METHODS[country] || []).map((n: string) => ({ name: n, logo: null as string | null }));
   const methods          = rawMethods;
   const isCrypto         = method === "crypto";
-  const needsOtp         = method === "Orange Money" && (country === "Burkina Faso" || country === "Cote d'Ivoire");
-  const otpUssd          = country === "Burkina Faso" ? "*144*4*6*montant#" : "#144*82#";
   const maliOrange       = method === "Orange Money" && country === "Mali";
   const dialCode         = DIAL_CODES[country] || "+";
 
@@ -247,7 +239,6 @@ export default function PaymentPage() {
     if (!method) { toast({ title:"Méthode requise", description:"Sélectionnez un opérateur.", variant:"destructive" }); return; }
     if (isCrypto) { doInitiate(); return; }
     if (!payerPhone.trim()) { toast({ title:"Numéro requis", description:"Entrez votre numéro.", variant:"destructive" }); return; }
-    if (needsOtp && !otpCode.trim()) { setShowOtpModal(true); return; }
     doInitiate();
   };
 
@@ -267,34 +258,22 @@ export default function PaymentPage() {
     try {
       const r = await fetch("/api/payment/initiate", {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ merchantSlug, country, amount, payerPhone:payerPhone.trim(), payerName:payerName.trim(), paymentMethod:method, redirectUrl:redirectUrl||null, firstName:"Client", lastName:"RobotPay", operator: method.toLowerCase().includes("wave") ? "wave" : undefined, otp: needsOtp ? otpCode.trim() : undefined }),
+        body: JSON.stringify({ merchantSlug, country, amount, payerPhone:payerPhone.trim(), payerName:payerName.trim(), paymentMethod:method, redirectUrl:redirectUrl||null, firstName:"Client", lastName:"RobotPay", operator: method.toLowerCase().includes("wave") ? "wave" : undefined }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.message);
       setPaymentId(d.paymentId); setOmniRef(d.omnipayReference); setOmniFees(d.fees || 0); setShowOtpModal(false);
-      if (d.sendavapay && d.otpRequired) { setSndOtpRequired(true); setSndUssdCode(d.ussdCode||null); setSndConfirmed(false); setSndOtp(""); setStep(2); }
+      if (d.sendavapay && d.paymentUrl) { window.location.href = d.paymentUrl; return; }
       else if (d.paymentUrl) { setPaymentUrl(d.paymentUrl); setStep(2); }
       else { setStep(2); startPolling(d.paymentId); }
     } catch { toast({ title:"Paiement non abouti", description:"Vérifiez vos informations et réessayez.", variant:"destructive" }); }
     finally { setIsSubmitting(false); }
   };
 
-  const confirmSndOtp = async () => {
-    if (!paymentId || !sndOtp.trim()) return;
-    setSndConfirming(true);
-    try {
-      const r = await fetch("/api/payment/sendavapay/confirm-otp", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ paymentId, otp:sndOtp.trim() }) });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.message);
-      setSndConfirmed(true); startPolling(paymentId);
-    } catch (e: any) { toast({ title:"Code OTP invalide", description:e.message, variant:"destructive" }); }
-    finally { setSndConfirming(false); }
-  };
-
   const retry = () => {
     if (pollingRef.current) clearInterval(pollingRef.current);
     setOmniPolling(false); setFailed(false); setFailReason(""); setPaymentUrl(null);
-    setSndOtpRequired(false); setSndOtp(""); setSndConfirmed(false); setStep(1);
+    setStep(1);
   };
 
   /* ── loading / error ────────────────────────────────────────────────── */
@@ -550,32 +529,6 @@ export default function PaymentPage() {
                     </button>
                   </div>
 
-                ) : sndOtpRequired && !sndConfirmed ? (<>
-                  <div style={{ background:"#fff7ed", borderRadius:12, padding:12, textAlign:"center", fontSize:14, fontWeight:500, color:"#92400e" }}>
-                    Validation Orange Money — Code OTP requis
-                  </div>
-                  {sndUssdCode && (
-                    <div style={{ background:"#fff7ed", border:"1.5px solid #fed7aa", borderRadius:12, padding:"10px 14px" }}>
-                      <p style={{ fontSize:12, fontWeight:600, color:"#c2410c", marginBottom:4 }}>Composez sur votre téléphone</p>
-                      <p style={{ fontSize:14, fontFamily:"monospace", fontWeight:700, color:"#c2410c" }}>{sndUssdCode}</p>
-                    </div>
-                  )}
-                  <input type="text" inputMode="numeric" maxLength={8} value={sndOtp}
-                    onChange={e => setSndOtp(e.target.value.replace(/\D/g,""))}
-                    placeholder="Code OTP reçu par SMS" className="inp" data-testid="input-snd-otp" />
-                  <button type="button" onClick={confirmSndOtp} disabled={sndConfirming || !sndOtp.trim()}
-                    className="paybtn" style={{ background:"#f5c100", color:"#111" }}>
-                    {sndConfirming && <Loader2 style={{ width:16, height:16, animation:"spin 1s linear infinite" }} />}
-                    Confirmer le paiement
-                  </button>
-                  <button type="button" onClick={retry} className="ghost">← Retour</button>
-
-                </>) : sndOtpRequired && sndConfirmed ? (
-                  <div style={{ textAlign:"center", padding:"24px 0" }}>
-                    <Loader2 style={{ width:36, height:36, color:"#2563eb", animation:"spin 1s linear infinite", margin:"0 auto" }} />
-                    <p style={{ fontSize:13, color:"#6b7280", marginTop:12 }}>Vérification en cours...</p>
-                  </div>
-
                 ) : paymentUrl ? (<>
                   <div style={{ background:"#dbeafe", borderRadius:12, padding:12, textAlign:"center", fontSize:14, fontWeight:500, color:"#1e40af" }}>
                     Cliquez ci-dessous pour valider votre paiement de {fmt(amount)} {currency}
@@ -709,57 +662,6 @@ export default function PaymentPage() {
 
       </div>
 
-      {/* ════════════ OTP MODAL ════════════════════════════════════════ */}
-      {showOtpModal && (
-        <div className="overlay" onClick={e => { if (e.target===e.currentTarget) setShowOtpModal(false); }}>
-          <div className="modal">
-            <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:20 }}>
-              <div>
-                <p style={{ fontWeight:700, fontSize:17, color:"#111" }}>Code OTP requis</p>
-                <p style={{ fontSize:13, color:"#6b7280", marginTop:2 }}>Orange Money</p>
-              </div>
-              <button onClick={() => setShowOtpModal(false)}
-                style={{ width:32, height:32, borderRadius:"50%", border:"1.5px solid #e5e7eb", background:"#fff", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
-                <X style={{ width:15, height:15, color:"#6b7280" }} />
-              </button>
-            </div>
-
-            <div style={{ background:"#fff7ed", border:"1.5px solid #fed7aa", borderRadius:14, padding:"14px 16px", marginBottom:18 }}>
-              <div style={{ display:"flex", alignItems:"flex-start", gap:12 }}>
-                <div style={{ width:42, height:42, borderRadius:10, background:"#FF6600", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-                  <Smartphone style={{ width:20, height:20, color:"#fff" }} />
-                </div>
-                <div>
-                  <p style={{ fontWeight:600, fontSize:13, color:"#c2410c", marginBottom:6 }}>Composez sur votre téléphone</p>
-                  <p style={{ fontFamily:"monospace", fontWeight:800, fontSize:16, background:"#fff", color:"#c2410c", padding:"3px 10px", borderRadius:7, border:"1px solid #fed7aa", display:"inline-block" }}>
-                    {otpUssd}
-                  </p>
-                  <p style={{ fontSize:12, color:"#92400e", marginTop:6 }}>pour générer le code OTP et mettez-le ici.</p>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-              <label style={{ fontSize:12, fontWeight:600, color:"#374151" }}>Votre code OTP</label>
-              <input type="text" inputMode="numeric" maxLength={8} value={otpCode}
-                onChange={e => setOtpCode(e.target.value.replace(/\D/g,""))}
-                placeholder="Code reçu par téléphone" autoFocus data-testid="input-otp"
-                className="inp"
-                style={{ textAlign:"center", fontSize:22, fontWeight:700, letterSpacing:"0.22em" }} />
-              <button type="button" className="paybtn" data-testid="button-otp-confirm"
-                disabled={isSubmitting || !otpCode.trim()}
-                style={{ background:"#f5c100", color:"#111" }}
-                onClick={() => { if (!otpCode.trim()) { toast({ title:"Code OTP requis", variant:"destructive" }); return; } doInitiate(); }}>
-                {isSubmitting && <Loader2 style={{ width:16, height:16, animation:"spin 1s linear infinite" }} />}
-                Confirmer et payer
-              </button>
-              <button type="button" className="ghost" onClick={() => setShowOtpModal(false)} style={{ justifyContent:"center", width:"100%" }}>
-                Annuler
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── Help bottom sheet ── */}
       {showHelpModal && (
