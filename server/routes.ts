@@ -3015,6 +3015,11 @@ export async function registerRoutes(
 
         try {
           // Étape 1 (backend) : créer le paiement → obtenir paymentToken + reference
+          const returnRef = reference;
+          const returnBase = callbackBaseUrl;
+          const sendavaReturnUrl = redirectUrl
+            ? `${returnBase}/api/payment/sendavapay/return?ref=${encodeURIComponent(returnRef)}&redirect=${encodeURIComponent(redirectUrl)}`
+            : `${returnBase}/api/payment/sendavapay/return?ref=${encodeURIComponent(returnRef)}`;
           const sendavaResult = await sendavaCreatePayment(sendavaApiKey, {
             amount: parsedAmount,
             currency,
@@ -3024,6 +3029,7 @@ export async function registerRoutes(
             description: `Paiement WestPay - ${merchantSlug}`,
             webhookUrl,
             externalReference: reference,
+            metadata: { merchantSlug, country, returnUrl: sendavaReturnUrl },
           });
 
           if (!sendavaResult.success || !sendavaResult.data?.paymentToken) {
@@ -3077,6 +3083,7 @@ export async function registerRoutes(
 
           // Étape 2 (frontend) : transmettre paymentToken + reference au client
           // Le frontend appellera directement l'API CORS SendavaPay pour déclencher l'invite USSD
+          const payerPhoneE164 = msisdn.startsWith("+") ? msisdn : `+${msisdn}`;
           return res.json({
             success: true,
             paymentId: pending.id,
@@ -3085,6 +3092,7 @@ export async function registerRoutes(
             omnipayReference: spReference,
             paymentToken,
             countryCode,
+            payerPhoneE164,
             fees: 0,
           });
         } catch (sendavaErr: any) {

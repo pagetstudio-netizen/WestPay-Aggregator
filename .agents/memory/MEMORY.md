@@ -1,0 +1,1 @@
+- [SendavaPay SDK integration](sendavapay-integration.md) — CORS endpoints blocked by Cloudflare; use official JS SDK from browser, not server-side proxy.
