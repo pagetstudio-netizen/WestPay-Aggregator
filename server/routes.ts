@@ -4083,7 +4083,13 @@ export async function registerRoutes(
   app.get("/api/sendavapay/proxy/services/:countryCode", async (req, res) => {
     try {
       const { countryCode } = req.params;
-      const upstream = await fetch(`https://sendavapay.com/api/soleaspay/services/${encodeURIComponent(countryCode)}`);
+      const sendavaApiKey = await getSendavaApiKey();
+      const authHeaders: Record<string, string> = sendavaApiKey
+        ? { "Authorization": `Bearer ${sendavaApiKey}` }
+        : {};
+      const upstream = await fetch(`https://sendavapay.com/api/soleaspay/services/${encodeURIComponent(countryCode)}`, {
+        headers: authHeaders,
+      });
       const data = await upstream.json();
       res.status(upstream.status).json(data);
     } catch (err: any) {
@@ -4096,9 +4102,13 @@ export async function registerRoutes(
   app.post("/api/sendavapay/proxy/pay/:ref", async (req, res) => {
     try {
       const { ref } = req.params;
+      const sendavaApiKey = await getSendavaApiKey();
+      const authHeaders: Record<string, string> = sendavaApiKey
+        ? { "Authorization": `Bearer ${sendavaApiKey}` }
+        : {};
       const upstream = await fetch(`https://sendavapay.com/api/pay-api/${encodeURIComponent(ref)}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify(req.body),
       });
       const data = await upstream.json();
@@ -4113,9 +4123,13 @@ export async function registerRoutes(
   app.post("/api/sendavapay/proxy/pay/:ref/verify", async (req, res) => {
     try {
       const { ref } = req.params;
+      const sendavaApiKey = await getSendavaApiKey();
+      const authHeaders: Record<string, string> = sendavaApiKey
+        ? { "Authorization": `Bearer ${sendavaApiKey}` }
+        : {};
       const upstream = await fetch(`https://sendavapay.com/api/pay-api/${encodeURIComponent(ref)}/verify`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify(req.body),
       });
       const data = await upstream.json();
