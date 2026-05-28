@@ -319,8 +319,8 @@ export default function PaymentPage() {
   ) => {
     setSndInitiating(true);
     try {
-      /* 1. Récupérer les opérateurs disponibles pour ce pays */
-      const svRes = await fetch(`https://sendavapay.com/api/soleaspay/services/${countryCode}`);
+      /* 1. Récupérer les opérateurs disponibles pour ce pays (via proxy backend) */
+      const svRes = await fetch(`/api/sendavapay/proxy/services/${countryCode}`);
       if (!svRes.ok) throw new Error("Opérateurs non disponibles");
       const svData = await svRes.json();
       const services: Array<{id: string; name: string; slug: string}> = svData.data || [];
@@ -329,8 +329,8 @@ export default function PaymentPage() {
       const serviceId = findSendavaServiceId(services, method);
       if (!serviceId) throw new Error(`Opérateur "${method}" non disponible pour ce pays`);
 
-      /* 3. Initier le paiement (USSD push) directement depuis le frontend */
-      const initRes = await fetch(`https://sendavapay.com/api/pay-api/${ref}`, {
+      /* 3. Initier le paiement (USSD push) via proxy backend */
+      const initRes = await fetch(`/api/sendavapay/proxy/pay/${ref}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paymentToken: token, payerName: name, payerPhone: phone, payerCountry: countryCode, serviceId }),
@@ -361,7 +361,7 @@ export default function PaymentPage() {
     if (!sndPaymentToken || !sndReference || !sndOtp.trim()) return;
     setSndConfirming(true);
     try {
-      const res = await fetch(`https://sendavapay.com/api/pay-api/${sndReference}/verify`, {
+      const res = await fetch(`/api/sendavapay/proxy/pay/${sndReference}/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paymentToken: sndPaymentToken, payId: sndPayId, orderId: sndOrderId, otp: sndOtp.trim() }),

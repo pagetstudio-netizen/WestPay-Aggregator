@@ -4041,6 +4041,55 @@ export async function registerRoutes(
 
   // ==================== SENDAVAPAY ROUTES ====================
 
+  // ── Proxy routes (évite les blocages CORS depuis le navigateur) ──────────
+
+  // 1. Liste des opérateurs disponibles pour un pays
+  app.get("/api/sendavapay/proxy/services/:countryCode", async (req, res) => {
+    try {
+      const { countryCode } = req.params;
+      const upstream = await fetch(`https://sendavapay.com/api/soleaspay/services/${encodeURIComponent(countryCode)}`);
+      const data = await upstream.json();
+      res.status(upstream.status).json(data);
+    } catch (err: any) {
+      console.error("[SENDAVAPAY PROXY] /services erreur:", err.message);
+      res.status(502).json({ success: false, message: "Erreur proxy SendavaPay services" });
+    }
+  });
+
+  // 2. Initier le paiement USSD push
+  app.post("/api/sendavapay/proxy/pay/:ref", async (req, res) => {
+    try {
+      const { ref } = req.params;
+      const upstream = await fetch(`https://sendavapay.com/api/pay-api/${encodeURIComponent(ref)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req.body),
+      });
+      const data = await upstream.json();
+      res.status(upstream.status).json(data);
+    } catch (err: any) {
+      console.error("[SENDAVAPAY PROXY] /pay erreur:", err.message);
+      res.status(502).json({ success: false, message: "Erreur proxy SendavaPay pay" });
+    }
+  });
+
+  // 3. Vérifier l'OTP
+  app.post("/api/sendavapay/proxy/pay/:ref/verify", async (req, res) => {
+    try {
+      const { ref } = req.params;
+      const upstream = await fetch(`https://sendavapay.com/api/pay-api/${encodeURIComponent(ref)}/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req.body),
+      });
+      const data = await upstream.json();
+      res.status(upstream.status).json(data);
+    } catch (err: any) {
+      console.error("[SENDAVAPAY PROXY] /verify erreur:", err.message);
+      res.status(502).json({ success: false, message: "Erreur proxy SendavaPay verify" });
+    }
+  });
+
   app.post("/api/sendavapay/callback", async (req, res) => {
     try {
       const rawBody = (req.rawBody as Buffer)?.toString() || JSON.stringify(req.body);
