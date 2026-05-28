@@ -1348,6 +1348,17 @@ function TransactionsPanel() {
     return <Badge variant="secondary" className="text-xs">En attente</Badge>;
   };
 
+  const getProviderName = (provider: string | null | undefined, ref: string | null | undefined): string => {
+    const p = (provider || "").toLowerCase();
+    const r = ref || "";
+    if (p === "sendavapay" || r.startsWith("sdk_") || r.startsWith("SP-")) return "SendavaPay";
+    if (p === "mbiyo" || r.startsWith("MBY") || r.startsWith("MB-")) return "Mbiyo";
+    if (p === "omnipay" || r.startsWith("OP-") || r.startsWith("TR-")) return "OmniPay";
+    if (p === "westpay") return "Mbiyo";
+    if (p === "sms") return "SMS";
+    return "WestPay";
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1445,7 +1456,7 @@ function TransactionsPanel() {
                             {getTypeBadge(tx.type)}
                             <Badge variant="secondary" className="text-xs">{tx.country}</Badge>
                             {getStatusBadge(tx.status)}
-                            {tx.provider && <Badge variant="outline" className="text-xs">{tx.provider === "sms" ? "SMS" : "Mobile Money"}</Badge>}
+                            {tx.provider && <Badge variant="outline" className="text-xs">{getProviderName(tx.provider, tx.omnipayReference)}</Badge>}
                           </div>
                           <div className="flex items-center gap-3 flex-wrap mt-1.5">
                             <p className="text-sm font-medium text-foreground">{tx.amount?.toLocaleString("fr-FR")} F CFA</p>
@@ -1456,10 +1467,10 @@ function TransactionsPanel() {
                           {tx.omnipayReference && isPendingInProgress && (
                             <div className="mt-2 flex items-center gap-2 rounded-md border border-yellow-300 bg-yellow-50 dark:bg-yellow-900/20 dark:border-yellow-700 px-3 py-2">
                               <div className="flex-1 min-w-0">
-                                <p className="text-xs font-semibold text-yellow-700 dark:text-yellow-400 mb-0.5">Référence à fournir à OmniPay</p>
+                                <p className="text-xs font-semibold text-yellow-700 dark:text-yellow-400 mb-0.5">Référence {getProviderName(tx.provider, tx.omnipayReference)}</p>
                                 <code className="text-xs font-mono text-yellow-900 dark:text-yellow-200 break-all">{tx.omnipayReference}</code>
                               </div>
-                              <Button size="sm" variant="outline" className="shrink-0 h-7 text-xs border-yellow-400 text-yellow-700 hover:bg-yellow-100 dark:text-yellow-300" onClick={() => copyToClipboard(tx.omnipayReference, "Référence OmniPay")} data-testid={`button-copy-ref-${tx.id}`}>
+                              <Button size="sm" variant="outline" className="shrink-0 h-7 text-xs border-yellow-400 text-yellow-700 hover:bg-yellow-100 dark:text-yellow-300" onClick={() => copyToClipboard(tx.omnipayReference, `Référence ${getProviderName(tx.provider, tx.omnipayReference)}`)} data-testid={`button-copy-ref-${tx.id}`}>
                                 <Copy className="w-3 h-3 mr-1" />Copier
                               </Button>
                             </div>
@@ -1467,7 +1478,7 @@ function TransactionsPanel() {
                           {tx.omnipayReference && !isPendingInProgress && (
                             <div className="flex items-center gap-1 mt-1">
                               <p className="text-xs text-muted-foreground font-mono truncate max-w-[200px]" title={tx.omnipayReference}>Réf: {tx.omnipayReference}</p>
-                              <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={() => copyToClipboard(tx.omnipayReference, "Référence Westpay")} title="Copier la référence" data-testid={`button-copy-ref-${tx.id}`}>
+                              <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={() => copyToClipboard(tx.omnipayReference, `Référence ${getProviderName(tx.provider, tx.omnipayReference)}`)} title="Copier la référence" data-testid={`button-copy-ref-${tx.id}`}>
                                 <Copy className="w-3 h-3" />
                               </Button>
                             </div>

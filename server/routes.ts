@@ -1990,7 +1990,7 @@ export async function registerRoutes(
         merchantName: merchantMap.get(p.merchantId) || `Marchand #${p.merchantId}`,
         payerNumber: p.payerPhone,
         operator: p.paymentMethod,
-        provider: null,
+        provider: (p as any).gateway || null,
         omnipayReference: p.omnipayReference,
         errorMessage: (p as any).errorMessage || null,
         createdAt: p.createdAt,
