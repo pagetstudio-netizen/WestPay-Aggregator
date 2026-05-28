@@ -3027,7 +3027,9 @@ export async function registerRoutes(
           });
 
           if (!sendavaResult.success || !sendavaResult.data?.paymentToken) {
-            const errorMsg = sendavaResult.message || (sendavaResult as any).error || "Erreur de paiement. Veuillez reessayer.";
+            const rawError = sendavaResult.message || (sendavaResult as any).error || "Erreur de paiement. Veuillez reessayer.";
+            const userMsg = "Service de paiement temporairement indisponible. Veuillez reessayer dans quelques instants.";
+            console.error(`[SENDAVAPAY] Erreur interne API: ${rawError}`);
             storage.createTransaction({
               merchantId: merchant.id,
               country,
@@ -3040,9 +3042,9 @@ export async function registerRoutes(
               omnipayTxId: null,
               operator: paymentMethod || null,
               omnipayReference: reference,
-              errorMessage: errorMsg,
+              errorMessage: rawError,
             }).catch(() => {});
-            return res.status(400).json({ message: errorMsg });
+            return res.status(400).json({ message: userMsg });
           }
 
           const spReference = sendavaResult.data.reference;
