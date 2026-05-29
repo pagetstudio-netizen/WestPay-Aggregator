@@ -47,10 +47,6 @@ waitForPort = 5000
 PORT = "5000"
 NODE_ENV = "development"
 XOF_PER_USD = "600"
-CUSTOM_DATABASE_URL = "postgresql://postgres.bauubqsgtuoxxsufqklp:cotedivoire228@aws-1-us-west-2.pooler.supabase.com:5432/postgres"
-TELEGRAM_OTP_BOT_TOKEN = "8904995228:AAGyiD7ENwGtKG1gfNJkvThKBWbQaw0xWf4"
-SENDAVA_WEBHOOK_SECRET = "whsec_4a0d37311c2b34848398cc996cfd13cf88dd3a6b411d12d8"
-SENDAVA_API_KEY = "sdk_y9BBM9Mlx1Z2UsLXCzP3Jutd896r7C2Y"
 
 [postMerge]
 path = "scripts/post-merge.sh"
