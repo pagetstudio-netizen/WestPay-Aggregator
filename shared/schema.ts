@@ -139,6 +139,9 @@ export const pendingPayments = pgTable("pending_payments", {
   omnipayPaymentUrl: text("omnipay_payment_url"),
   gateway: text("gateway").default("omnipay").notNull(),
   errorMessage: text("error_message"),
+  paymentToken: text("payment_token"),
+  sendavaToken: text("sendava_token"),
+  sendavaPaymentUrl: text("sendava_payment_url"),
   expiresAt: timestamp("expires_at").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

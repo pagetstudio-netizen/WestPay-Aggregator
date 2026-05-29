@@ -398,6 +398,9 @@ export async function runMigrations() {
       ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS payer_name text;
       ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS gateway text NOT NULL DEFAULT 'omnipay';
       ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS error_message text;
+      ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS payment_token text;
+      ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS sendava_token text;
+      ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS sendava_payment_url text;
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS operator text;
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS omnipay_ref text;
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS fees integer DEFAULT 0;
