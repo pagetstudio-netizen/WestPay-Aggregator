@@ -377,7 +377,16 @@ export default function PaymentPage() {
       const initData = await initRes.json();
       setSndInitiating(false);
 
-      if (!initData.success) throw new Error(initData.message || "Erreur initialisation paiement");
+      if (!initData.success) {
+        /* SERVER_ERROR = bug réponse SendavaPay mais paiement probablement initié côté opérateur.
+           PAYMENT_IN_PROGRESS = token déjà actif (retry ou double-clic).
+           Dans les deux cas on passe en polling plutôt que d'afficher une erreur. */
+        if (initData.code === "SERVER_ERROR" || initData.code === "PAYMENT_IN_PROGRESS") {
+          startPolling(pId);
+          return;
+        }
+        throw new Error(initData.error || initData.message || "Erreur initialisation paiement");
+      }
 
       if (initData.requiresRedirect && initData.redirectUrl) {
         /* Wave / redirect → ouvrir URL + polling */
