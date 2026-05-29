@@ -129,8 +129,13 @@ export default function PaymentPage() {
   const [showOtpModal, setShowOtpModal]= useState(false);
   const [showHelpModal,setShowHelpModal]= useState(false);
 
-  /* ── SendavaPay SDK flow ──────────────────────────────────────────────── */
-  const [sndInitiating,   setSndInitiating]   = useState(false);
+  /* ── SendavaPay API flow ──────────────────────────────────────────────── */
+  const [sndInitiating,    setSndInitiating]    = useState(false);
+  const [sndOtpRequired,   setSndOtpRequired]   = useState(false);
+  const [sndOtpToken,      setSndOtpToken]      = useState<string | null>(null);
+  const [sndOtp,           setSndOtp]           = useState("");
+  const [sndOtpSubmitting, setSndOtpSubmitting] = useState(false);
+  const [sndPaymentToken,  setSndPaymentToken]  = useState<string | null>(null);
   const [helpName,     setHelpName]     = useState("");
   const [helpWhatsapp, setHelpWhatsapp] = useState("");
   const [helpMessage,  setHelpMessage]  = useState("");
@@ -272,9 +277,10 @@ export default function PaymentPage() {
       if (!r.ok) throw new Error(d.message);
       setPaymentId(d.paymentId); setOmniRef(d.omnipayReference); setOmniFees(d.fees || 0); setShowOtpModal(false);
       if (d.sendavapay && d.sendavapayToken && d.paymentToken) {
-        /* ── SendavaPay: ouvrir le widget officiel JS SDK ── */
+        /* ── SendavaPay: API CORS flow ── */
+        setSndPaymentToken(d.paymentToken);
         setStep(2);
-        launchSendavaSDK(d.paymentToken, d.paymentId);
+        initiateSendavaPayment(d.paymentToken, d.paymentId, d.countryCode, d.payerPhoneE164);
         return;
       }
       if (d.paymentUrl) { setPaymentUrl(d.paymentUrl); setStep(2); }
@@ -283,48 +289,135 @@ export default function PaymentPage() {
     finally { setIsSubmitting(false); }
   };
 
-  /* ── SendavaPay SDK — widget officiel chargé depuis le navigateur ────── */
-  const launchSendavaSDK = async (token: string, pId: number) => {
+  /* ── SendavaPay : résolution de l'ID opérateur ──────────────────────── */
+  /* Noms SendavaPay réels (confirmés via API /operators/:cc) :
+     CI: Orange Money(29/otp), MTN Money(30), Moov Money(31), Wave(32)
+     SN: Orange Money(57), Wave(58), Mixx(59)
+     TG: T-Money(37), Moov Money(38)  */
+  const SNDV_DISPLAY_TO_BRAND: Record<string, string> = {
+    "tmoney": "tmoney", "moov money": "moov", "moov": "moov",
+    "mtn mobile money": "mtn", "mtn money": "mtn", "mtn": "mtn",
+    "orange money": "orange", "orange": "orange",
+    "wave": "wave",
+    "mixx by yas": "mixx", "mixx": "mixx",
+    "free money": "free", "free": "free",
+    "coris money": "coris", "coris": "coris",
+    "airtel money": "airtel", "airtel": "airtel",
+    "m-pesa": "mpesa", "mpesa": "mpesa",
+    "vodacom": "vodacom",
+    "africell money": "africell", "africell": "africell",
+    "celtiis": "celtiis",
+  };
+
+  const resolveOperatorId = (ops: any[], methodName: string, _cc: string): string | null => {
+    /* normalise: supprime espaces/tirets/underscores + minuscules */
+    const norm = (s: string) => s.toLowerCase().replace(/[\s\-_]+/g, "");
+    const low = methodName.toLowerCase().trim();
+    const normLow = norm(low);
+
+    /* 1. Correspondance normalisée exacte sur le nom */
+    const exactNorm = ops.find((o: any) => norm(o.name) === normLow);
+    if (exactNorm) return exactNorm.id;
+
+    /* 2. Notre nom contient le nom API ou vice-versa (ex: "MTN Mobile Money" ↔ "MTN Money") */
+    const contained = ops.find((o: any) => {
+      const on = norm(o.name);
+      return normLow.includes(on) || on.includes(normLow);
+    });
+    if (contained) return contained.id;
+
+    /* 3. Matching par marque depuis la table DISPLAY_TO_BRAND */
+    const brand = SNDV_DISPLAY_TO_BRAND[low];
+    if (brand) {
+      const branded = ops.find((o: any) => norm(o.name).includes(brand) || norm(o.id).includes(brand));
+      if (branded) return branded.id;
+    }
+
+    /* 4. Mots-clés extraits du nom affiché */
+    const BRAND_KEYWORDS = ["mtn","orange","moov","wave","mixx","airtel","vodacom","mpesa","tmoney","coris","free","africell","celtiis"];
+    for (const kw of BRAND_KEYWORDS) {
+      if (normLow.includes(kw)) {
+        const found = ops.find((o: any) => norm(o.name).includes(kw) || norm(o.id).includes(kw));
+        if (found) return found.id;
+      }
+    }
+
+    return ops[0]?.id ?? null;
+  };
+
+  /* ── SendavaPay : API CORS — initier le paiement ─────────────────────── */
+  const sndReportFailure = (pId: number, reason: string) => {
+    fetch("/api/payment/report-failure", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ paymentId:pId, errorMessage:reason }) }).catch(() => {});
+  };
+
+  const initiateSendavaPayment = async (token: string, pId: number, countryCode: string, payerPhoneE164: string) => {
     setSndInitiating(true);
     try {
-      if (!(window as any).SendavaPay) {
-        await new Promise<void>((resolve, reject) => {
-          const s = document.createElement("script");
-          s.src = "https://sendavapay.com/sdk/sendavapay.js";
-          s.onload = () => resolve();
-          s.onerror = () => reject(new Error("Impossible de charger le widget de paiement. Vérifiez votre connexion."));
-          document.head.appendChild(s);
-        });
-      }
-      setSndInitiating(false);
-      const Sendava = (window as any).SendavaPay;
-      if (!Sendava?.init) throw new Error("Widget de paiement non disponible");
-      Sendava.init({
-        token,
-        onSuccess: (_data: any) => {
-          startPolling(pId);
-        },
-        onFailed: (data: any) => {
-          const reason = data?.message || "Paiement non abouti. Réessayez.";
-          setFailed(true);
-          setFailReason(reason);
-          fetch("/api/payment/report-failure", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ paymentId: pId, errorMessage: reason }),
-          }).catch(() => {});
-        },
+      /* 1. Récupérer la liste des opérateurs (endpoint public CORS) */
+      const opsRes = await fetch(`https://sendavapay.com/api/sdk/v1/operators/${countryCode}`);
+      const opsData = await opsRes.json();
+      const ops: any[] = opsData.data || [];
+
+      /* 2. Trouver l'ID opérateur correspondant au choix de l'utilisateur */
+      const operatorId = resolveOperatorId(ops, method, countryCode);
+      if (!operatorId) throw new Error(`Opérateur indisponible: ${method}`);
+
+      /* 3. Déclencher le paiement (endpoint CORS, auth par paymentToken) */
+      const initRes = await fetch("https://sendavapay.com/api/sdk/v1/initiate-payment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paymentToken: token,
+          payerName: payerName || "Client",
+          payerPhone: payerPhoneE164,
+          payerCountry: countryCode,
+          operatorId,
+        }),
       });
+      const initData = await initRes.json();
+      setSndInitiating(false);
+
+      if (!initData.success) throw new Error(initData.message || "Erreur initialisation paiement");
+
+      if (initData.requiresRedirect && initData.redirectUrl) {
+        /* Wave / redirect → ouvrir URL + polling */
+        setPaymentUrl(initData.redirectUrl);
+        startPolling(pId);
+      } else if (initData.requiresOtp) {
+        /* Orange Money et similaires → afficher formulaire OTP */
+        setSndOtpRequired(true);
+        setSndOtpToken(initData.otpToken || null);
+      } else {
+        /* USSD push direct → polling */
+        startPolling(pId);
+      }
     } catch (e: any) {
-      const reason = e.message || "Erreur chargement widget de paiement";
+      const reason = e.message || "Erreur de connexion au service de paiement";
       setSndInitiating(false);
       setFailed(true);
       setFailReason(reason);
-      fetch("/api/payment/report-failure", {
+      sndReportFailure(pId, reason);
+    }
+  };
+
+  /* ── SendavaPay : soumettre le code OTP ──────────────────────────────── */
+  const submitSendavaOtp = async () => {
+    if (!sndOtpToken || !sndOtp.trim()) return;
+    setSndOtpSubmitting(true);
+    try {
+      const res = await fetch("https://sendavapay.com/api/sdk/v1/submit-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentId: pId, errorMessage: reason }),
-      }).catch(() => {});
+        body: JSON.stringify({ otpToken: sndOtpToken, otp: sndOtp.trim() }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.message || "Code OTP invalide");
+      setSndOtpRequired(false);
+      if (paymentId) startPolling(paymentId);
+    } catch (e: any) {
+      toast({ title: "OTP invalide", description: e.message, variant: "destructive" });
+    } finally {
+      setSndOtpSubmitting(false);
     }
   };
 
@@ -332,6 +425,7 @@ export default function PaymentPage() {
     if (pollingRef.current) clearInterval(pollingRef.current);
     setOmniPolling(false); setFailed(false); setFailReason(""); setPaymentUrl(null);
     setSndInitiating(false);
+    setSndOtpRequired(false); setSndOtpToken(null); setSndOtp(""); setSndOtpSubmitting(false); setSndPaymentToken(null);
     setStep(1);
   };
 
@@ -598,6 +692,40 @@ export default function PaymentPage() {
                     </div>
                     <p style={{ fontWeight:700, fontSize:15, color:"#111" }}>Connexion en cours…</p>
                     <p style={{ fontSize:13, color:"#6b7280" }}>Envoi de l'invite de paiement sur votre téléphone</p>
+                  </div>
+
+                ) : sndOtpRequired ? (
+                  /* ── SendavaPay OTP ────────────────────────────────────────── */
+                  <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+                    <div style={{ background:"#fff7ed", border:"1.5px solid #fed7aa", borderRadius:14, padding:"14px 16px" }}>
+                      <div style={{ display:"flex", alignItems:"flex-start", gap:12 }}>
+                        <div style={{ width:42, height:42, borderRadius:10, background:"#FF6600", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                          <Smartphone style={{ width:20, height:20, color:"#fff" }} />
+                        </div>
+                        <div>
+                          <p style={{ fontWeight:700, fontSize:14, color:"#c2410c", marginBottom:4 }}>Code OTP requis</p>
+                          <p style={{ fontSize:12, color:"#92400e" }}>Un code OTP a été envoyé par SMS sur votre numéro. Saisissez-le ci-dessous pour valider le paiement.</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      <label style={{ fontSize:12, fontWeight:600, color:"#374151" }}>Code OTP</label>
+                      <input
+                        type="text" inputMode="numeric" maxLength={8}
+                        value={sndOtp} onChange={e => setSndOtp(e.target.value.replace(/\D/g,""))}
+                        placeholder="123456"
+                        data-testid="input-snd-otp"
+                        style={{ padding:"12px 14px", fontSize:22, fontWeight:700, letterSpacing:"0.25em", textAlign:"center", border:"1.5px solid #d1d5db", borderRadius:12, outline:"none", background:"#fff", color:"#111" }}
+                      />
+                    </div>
+                    <button type="button" onClick={submitSendavaOtp}
+                      disabled={sndOtpSubmitting || sndOtp.trim().length < 4}
+                      className="paybtn" data-testid="button-snd-otp-submit"
+                      style={{ background:"#f5c100", color:"#111" }}>
+                      {sndOtpSubmitting && <Loader2 style={{ width:16, height:16, animation:"spin 1s linear infinite" }} />}
+                      Confirmer le paiement
+                    </button>
+                    <button type="button" onClick={retry} className="ghost">← Retour</button>
                   </div>
 
                 ) : paymentUrl ? (<>
