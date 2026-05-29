@@ -134,7 +134,6 @@ export default function PaymentPage() {
   const [showHelpModal,setShowHelpModal]= useState(false);
 
   /* ── SendavaPay API flow ──────────────────────────────────────────────── */
-  const [sndInitiating,    setSndInitiating]    = useState(false);
   const [sndOtpRequired,   setSndOtpRequired]   = useState(false);
   const [sndOtpToken,      setSndOtpToken]      = useState<string | null>(null);
   const [sndOtp,           setSndOtp]           = useState("");
@@ -355,7 +354,6 @@ export default function PaymentPage() {
   };
 
   const initiateSendavaPayment = async (token: string, pId: number, countryCode: string, payerPhoneE164: string) => {
-    setSndInitiating(true);
     try {
       /* 1. Récupérer la liste des opérateurs (endpoint public CORS) */
       const opsRes = await fetch(`https://sendavapay.com/api/sdk/v1/operators/${countryCode}`);
@@ -379,7 +377,6 @@ export default function PaymentPage() {
         }),
       });
       const initData = await initRes.json();
-      setSndInitiating(false);
 
       if (!initData.success) {
         /* SERVER_ERROR = bug réponse SendavaPay mais paiement probablement initié côté opérateur.
@@ -406,7 +403,6 @@ export default function PaymentPage() {
       }
     } catch (e: any) {
       const reason = e.message || "Erreur de connexion au service de paiement";
-      setSndInitiating(false);
       setFailed(true);
       setFailReason(reason);
       sndReportFailure(pId, reason);
@@ -437,7 +433,6 @@ export default function PaymentPage() {
   const retry = () => {
     if (pollingRef.current) clearInterval(pollingRef.current);
     setOmniPolling(false); setFailed(false); setFailReason(""); setPaymentUrl(null);
-    setSndInitiating(false);
     setSndOtpRequired(false); setSndOtpToken(null); setSndOtp(""); setSndOtpSubmitting(false); setSndPaymentToken(null);
     setStep(1);
   };
@@ -693,18 +688,6 @@ export default function PaymentPage() {
                     <button type="button" onClick={retry} className="paybtn" style={{ background:"#f5c100", color:"#111" }}>
                       <RefreshCw style={{ width:16, height:16 }} /> Réessayer
                     </button>
-                  </div>
-
-                ) : sndInitiating ? (
-                  /* ── SendavaPay: connexion USSD en cours ─────────────────────── */
-                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:14, textAlign:"center", padding:"14px 0" }}>
-                    <div className="anim-pulse">
-                      <div style={{ width:80, height:80, borderRadius:"50%", background:"#fef9c3", display:"flex", alignItems:"center", justifyContent:"center" }}>
-                        <Loader2 style={{ width:38, height:38, color:"#ca8a04", animation:"spin 1s linear infinite" }} />
-                      </div>
-                    </div>
-                    <p style={{ fontWeight:700, fontSize:15, color:"#111" }}>Connexion en cours…</p>
-                    <p style={{ fontSize:13, color:"#6b7280" }}>Envoi de l'invite de paiement sur votre téléphone</p>
                   </div>
 
                 ) : sndOtpRequired ? (
