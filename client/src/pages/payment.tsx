@@ -10,6 +10,8 @@ import orangeIcon    from "@assets/ctVnv9i_1779636596458.png";
 import robotpayLogo  from "@assets/20260524_144646_1779637077787.png";
 import bankCardIcon  from "@assets/mine-mod-bankcard-CLOhqwHj_1779636875827.png";
 import phoneHandIcon from "@assets/file_00000000d2f47246aaf6fa11ae0a4003_1779726190358.png";
+import mixxIcon      from "@assets/mixxByYas-web-page_1763835083140-t9C-E95C_1780044772406.png";
+import mpesaIcon     from "@assets/M-pesa-logo_1780044772360.png";
 
 /* ── types ─────────────────────────────────────────────────────────────── */
 type MerchantInfo = { name: string; slug: string; countries: string[] };
@@ -51,6 +53,8 @@ const OPERATOR_IMAGES: Record<string, string> = {
   "MTN Mobile Money": mtnIcon,
   "TMoney":           tmoneyIcon,
   "Orange Money":     orangeIcon,
+  "Mixx by Yas":      mixxIcon,
+  "M-Pesa":           mpesaIcon,
 };
 const OPERATOR_META: Record<string, { bg: string; abbr: string }> = {
   "Orange Money":  { bg: "#FF6600", abbr: "OM" },
