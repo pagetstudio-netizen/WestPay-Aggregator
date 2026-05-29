@@ -11,7 +11,7 @@ import {
   ShieldCheck, Copy, Check, Bitcoin, Zap, ArrowDownCircle,
 } from "lucide-react";
 
-const BASE_URL = "https://westpay.cloud";
+const BASE_URL = "https://west-pay-aggregator--kouadioblanchar.replit.app";
 
 // ─── Composant copie ─────────────────────────────────────────────────────────
 

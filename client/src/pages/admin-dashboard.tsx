@@ -867,7 +867,7 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
 function AdminPaymentLinksPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
-  const baseUrl = "https://westpay.cloud";
+  const baseUrl = "https://west-pay-aggregator--kouadioblanchar.replit.app";
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterType, setFilterType] = useState("all");
@@ -2334,7 +2334,7 @@ function OmniPayPanel() {
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
-  const callbackUrl = "https://westpay.cloud/api/omnipay/callback";
+  const callbackUrl = "https://west-pay-aggregator--kouadioblanchar.replit.app/api/omnipay/callback";
 
   if (settingsLoading) return <LoadingSkeleton />;
 
@@ -2484,8 +2484,8 @@ function MbiyoPanel() {
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
-  const payinCallbackUrl = "https://westpay.cloud/api/mbiyo/callback";
-  const payoutCallbackUrl = "https://westpay.cloud/api/mbiyo/payout-callback";
+  const payinCallbackUrl = "https://west-pay-aggregator--kouadioblanchar.replit.app/api/mbiyo/callback";
+  const payoutCallbackUrl = "https://west-pay-aggregator--kouadioblanchar.replit.app/api/mbiyo/payout-callback";
 
   if (settingsLoading) return <LoadingSkeleton />;
 
@@ -2730,7 +2730,7 @@ function SendavaPayPanel() {
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
-  const callbackUrl = "https://westpay.cloud/api/sendavapay/callback";
+  const callbackUrl = "https://west-pay-aggregator--kouadioblanchar.replit.app/api/sendavapay/callback";
 
   if (settingsLoading) return <LoadingSkeleton />;
 

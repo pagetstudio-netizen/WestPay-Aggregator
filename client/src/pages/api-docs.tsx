@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import Captcha, { generateCaptchaCode } from "@/components/Captcha";
 
-const BASE_URL = "https://westpay.cloud";
+const BASE_URL = "https://west-pay-aggregator--kouadioblanchar.replit.app";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);

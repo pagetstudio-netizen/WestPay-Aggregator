@@ -2981,7 +2981,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Numero de telephone requis" });
       }
 
-      const callbackBaseUrl = process.env.NODE_ENV === "production" ? "https://westpay.cloud" : `${req.protocol}://${req.get("host")}`;
+      const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
       const dialCodes: Record<string, string> = {
         "Togo": "228", "Benin": "229", "Cote d'Ivoire": "225",
         "Senegal": "221", "Mali": "223", "Burkina Faso": "226",
@@ -4284,7 +4284,7 @@ export async function registerRoutes(
         webhookSecret: dbWebhookSecret ? "configured" : "",
         configured: !!activeApiKey,
         envOverride,
-        callbackUrl: "https://westpay.cloud/api/sendavapay/callback",
+        callbackUrl: `${process.env.APP_URL || "https://west-pay-aggregator--kouadioblanchar.replit.app"}/api/sendavapay/callback`,
       });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -4329,7 +4329,7 @@ export async function registerRoutes(
     try {
       const apiKey = await getSendavaApiKey();
       if (!apiKey) return res.status(400).json({ message: "Service de paiement non configure." });
-      const result = await sendavaConfigureWebhook(apiKey, "https://westpay.cloud/api/sendavapay/callback");
+      const result = await sendavaConfigureWebhook(apiKey, `${process.env.APP_URL || "https://west-pay-aggregator--kouadioblanchar.replit.app"}/api/sendavapay/callback`);
       if (result.success && result.data?.webhookSecret) {
         await storage.setSetting("sendavapay_webhook_secret", result.data.webhookSecret);
       }
@@ -5441,7 +5441,7 @@ export async function registerRoutes(
           const countryCode = mbiyoCountryCode(mc.country);
           const currency = mbiyoCurrency(mc.country);
           const network = payoutOpRecord?.mbiyoCode || mbiyoNetwork(operator || "");
-          const callbackBaseUrl = process.env.NODE_ENV === "production" ? "https://westpay.cloud" : `${req.protocol}://${req.get("host")}`;
+          const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
           const callbackUrl = `${callbackBaseUrl}/api/mbiyo/payout-callback`;
           console.log(`[WITHDRAWAL MBIYO] Params: msisdn=${msisdnFull} network=${network} country=${countryCode} currency=${currency}`);
 
@@ -5698,7 +5698,7 @@ export async function registerRoutes(
             const currency = mbiyoCurrency(w.country);
             const wdOpRecord = w.operator ? await storage.getWithdrawalOperatorByNameAndCountry(w.operator, w.country) : null;
             const network = wdOpRecord?.mbiyoCode || mbiyoNetwork(w.operator || "");
-            const callbackBaseUrl = process.env.NODE_ENV === "production" ? "https://westpay.cloud" : `${req.protocol}://${req.get("host")}`;
+            const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
             const callbackUrl = `${callbackBaseUrl}/api/mbiyo/payout-callback`;
             console.log(`[ADMIN APPROVE WD MBIYO] Transfert: ${w.amount} vers ${msisdnFull}, ref: ${reference}, network: ${network}`);
             const result = await mbiyoInitiatePayout({
