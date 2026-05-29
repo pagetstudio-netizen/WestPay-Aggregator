@@ -113,7 +113,10 @@ app.use((req, res, next) => {
       setupWebhook(app, webhookSecret);
       await registerWebhookUrl(webhookUrl);
     } else {
-      console.log("[TELEGRAM] Mode developpement — bot actif (envoi uniquement)");
+      // En développement : activer le polling pour recevoir les commandes du groupe
+      await telegramBot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
+      startPolling();
+      console.log("[TELEGRAM] Mode developpement — polling actif (envoi + reception)");
     }
   }
 
