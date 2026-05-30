@@ -3203,17 +3203,17 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
 
         {/* Stats row inside header */}
         <div className="grid grid-cols-3 gap-2.5 mt-5 relative z-10">
-          <div className="rounded-2xl p-3" style={{ background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.18)", backdropFilter: "blur(6px)" }}>
-            <p className="text-xs font-bold text-white/60 uppercase tracking-widest mb-1">{t("links")}</p>
+          <div className="rounded-2xl p-3" style={{ background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.35)", backdropFilter: "blur(10px)" }}>
+            <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">链接</p>
             <p className="text-2xl font-black text-white">{links.length}</p>
           </div>
-          <div className="rounded-2xl p-3" style={{ background: "rgba(0,176,80,0.25)", border: "1px solid rgba(0,176,80,0.35)" }}>
-            <p className="text-xs font-bold text-white/60 uppercase tracking-widest mb-1">{t("payments")}</p>
+          <div className="rounded-2xl p-3" style={{ background: "rgba(0,176,80,0.40)", border: "1.5px solid rgba(0,176,80,0.60)" }}>
+            <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">支付</p>
             <p className="text-2xl font-black text-white">{totalPayments}</p>
           </div>
-          <div className="rounded-2xl p-3" style={{ background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.18)", backdropFilter: "blur(6px)" }}>
-            <p className="text-xs font-bold text-white/60 uppercase tracking-widest mb-1">{t("volume")}</p>
-            <p className="text-base font-black text-white leading-tight">{(totalRevenue/1000).toFixed(0)}<span className="text-xs font-semibold text-white/60">K F</span></p>
+          <div className="rounded-2xl p-3" style={{ background: "rgba(251,191,36,0.22)", border: "1.5px solid rgba(251,191,36,0.45)" }}>
+            <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">交易额</p>
+            <p className="text-sm font-black text-white leading-tight">{totalRevenue.toLocaleString("fr-FR")} <span className="text-xs font-semibold text-white/70">FCFA</span></p>
           </div>
         </div>
       </div>
