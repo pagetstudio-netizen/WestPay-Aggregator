@@ -22,7 +22,7 @@ import {
   Copy, Globe, DollarSign, Hash, TrendingUp, Search, RefreshCw, BookOpen, Lock, ExternalLink,
   Webhook, Send, CheckCircle2, XCircle, Clock, ArrowUpRight, Zap, Link, QrCode, Eye, EyeOff,
   Trash2, Plus, ToggleLeft, ToggleRight, Edit3, BarChart3, MessageCircle, Phone, Receipt, User, Calendar, CreditCard, Filter,
-  Bell, Mail, HelpCircle, Power, Menu, X, ChevronLeft, ChevronRight, Bitcoin, Share2,
+  Bell, Mail, HelpCircle, Power, Menu, X, ChevronLeft, ChevronRight, ChevronDown, Bitcoin, Share2,
   Shield, Building2, AlertCircle
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
@@ -2756,6 +2756,8 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
     else { navigator.clipboard.writeText(url); toast({ title: "Lien copié !" }); }
   };
 
+  const [openActionsId, setOpenActionsId] = useState<number | null>(null);
+
   const openCreate = () => { setForm(mkForm()); setEditLink(null); setShowAdvanced(false); setView("create"); };
   const openEdit = (link: PaymentLink) => {
     const l = link as any;
@@ -3138,156 +3140,182 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
 
   // ─── LIST VIEW ───────────────────────────────────────────────────────────────
   return (
-    <div className="-m-4 md:-m-6 min-h-full" style={{ background: "#f2f3f5" }}>
+    <div className="-m-4 md:-m-6 min-h-full" style={{ background: "#f0f2f5" }}>
 
-      {/* ── Hero header gradient ── */}
-      <div className="relative overflow-hidden px-4 pt-6 pb-5"
-        style={{ background: "linear-gradient(135deg,#1a237e 0%,#3949ab 60%,#5c6bc0 100%)" }}>
-        <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full" style={{ background: "rgba(255,255,255,0.07)" }} />
-        <div className="absolute top-10 right-4 w-16 h-16 rounded-full" style={{ background: "rgba(255,255,255,0.05)" }} />
-        <div className="flex items-center justify-between relative z-10">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0"
-              style={{ background: "rgba(255,255,255,0.18)", border: "1px solid rgba(255,255,255,0.25)", backdropFilter: "blur(8px)" }}>
-              <Link className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-white leading-tight">{t("paymentLinksTitle")}</h2>
-              <p className="text-xs text-white/60 mt-0.5">{t("paymentLinksDesc")}</p>
-            </div>
-          </div>
-          <button
-            onClick={openCreate}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95 shrink-0"
-            style={{ background: "#00b050", color: "#fff", border: "none", boxShadow: "0 4px 14px rgba(0,176,80,0.4)" }}
-            data-testid="button-create-payment-link"
-          >
-            <Plus className="w-4 h-4" /> {t("newLink")}
-          </button>
-        </div>
-
-        {/* Stats row inside header */}
-        <div className="grid grid-cols-3 gap-2.5 mt-5 relative z-10">
-          <div className="rounded-2xl p-3" style={{ background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.35)", backdropFilter: "blur(10px)" }}>
-            <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">链接</p>
-            <p className="text-2xl font-black text-white">{links.length}</p>
-          </div>
-          <div className="rounded-2xl p-3" style={{ background: "rgba(0,176,80,0.40)", border: "1.5px solid rgba(0,176,80,0.60)" }}>
-            <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">支付</p>
-            <p className="text-2xl font-black text-white">{totalPayments}</p>
-          </div>
-          <div className="rounded-2xl p-3" style={{ background: "rgba(251,191,36,0.22)", border: "1.5px solid rgba(251,191,36,0.45)" }}>
-            <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-1">交易额</p>
-            <p className="text-sm font-black text-white leading-tight">{totalRevenue.toLocaleString("fr-FR")} <span className="text-xs font-semibold text-white/70">FCFA</span></p>
-          </div>
-        </div>
+      {/* ── Add button ── */}
+      <div className="flex justify-center pt-5 pb-4 px-4">
+        <button
+          onClick={openCreate}
+          data-testid="button-create-payment-link"
+          className="flex items-center gap-2 px-8 py-2.5 rounded-full text-white font-bold text-base transition-all active:scale-95"
+          style={{ background: "#3d7cf5", boxShadow: "0 2px 10px rgba(61,124,245,0.35)" }}
+        >
+          <Plus className="w-5 h-5" strokeWidth={3} />
+          Ajouter
+        </button>
       </div>
 
-      <div className="p-4 pb-6 space-y-3">
+      {/* ── Divider ── */}
+      <div style={{ height: "1px", background: "#dde0e6", margin: "0 0 4px" }} />
 
-        {isLoading ? <MerchantLoadingSkeleton /> : links.length === 0 ? (
-          <div className="bg-white rounded-2xl p-10 text-center shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-            <div className="w-14 h-14 rounded-2xl mx-auto mb-3 flex items-center justify-center" style={{ background: "linear-gradient(135deg,#1a237e,#3949ab)" }}>
-              <Link className="w-7 h-7 text-white" />
-            </div>
-            <p className="font-bold text-sm mb-1" style={{ color: "#1a1a1a" }}>{t("noLinks")}</p>
-            <p className="text-xs mb-4" style={{ color: "#aaa" }}>{t("noLinksDesc")}</p>
-            <button onClick={openCreate} className="px-5 py-2.5 rounded-xl text-sm font-bold" style={{ background: "linear-gradient(135deg,#00b050,#00963f)", color: "#fff", boxShadow: "0 4px 14px rgba(0,176,80,0.3)" }}>
-              {t("createLink")}
-            </button>
+      {/* ── Content ── */}
+      <div className="px-3 pt-3 pb-8 space-y-3">
+        {isLoading ? (
+          <div className="space-y-3 pt-4">
+            {[1,2].map(i => <Skeleton key={i} className="h-48 w-full rounded-2xl" />)}
+          </div>
+        ) : links.length === 0 ? (
+          /* ── Empty state ── */
+          <div className="flex flex-col items-center pt-4 pb-8">
+            <p className="text-center font-bold mb-6" style={{ fontSize: "22px", color: "#1a1a1a", lineHeight: 1.4 }}>
+              目前没有链接 请创建收款链接
+            </p>
+            <img
+              src="/worker-gear.jpeg"
+              alt="No links"
+              className="w-72 max-w-full object-contain"
+              style={{ filter: "drop-shadow(0 4px 16px rgba(0,0,0,0.10))" }}
+            />
           </div>
         ) : (
-          <>
-            {links.map((link) => {
-              const url = `${baseUrl}/link/${link.uniqueId}`;
-              const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}`;
-              const isExpired = link.expiresAt && new Date() > new Date(link.expiresAt as any);
-              const isLimited = link.paymentLimit && link.paymentCount >= link.paymentLimit;
-              const inactive = !link.active || isExpired || isLimited;
-              const l = link as any;
+          /* ── Cards ── */
+          links.map((link) => {
+            const url = `${baseUrl}/link/${link.uniqueId}`;
+            const isExpired = link.expiresAt && new Date() > new Date(link.expiresAt as any);
+            const isLimited = link.paymentLimit && link.paymentCount >= link.paymentLimit;
+            const inactive = !link.active || isExpired || isLimited;
+            const showActions = openActionsId === link.id;
+            const initials = link.name.substring(0, 2).toUpperCase();
 
-              const statusDot = inactive
-                ? { dot: "#9ca3af", label: isExpired ? t("expired") : isLimited ? t("limitReached") : t("inactive"), bg: "#f5f5f5", color: "#757575" }
-                : { dot: "#22c55e", label: t("statusActive"), bg: "#f0fdf4", color: "#16a34a" };
+            const dateStr = (() => {
+              const d = new Date(link.createdAt as any);
+              const day = String(d.getDate()).padStart(2, "0");
+              const mon = String(d.getMonth() + 1).padStart(2, "0");
+              const yr = d.getFullYear();
+              const hh = String(d.getHours()).padStart(2, "0");
+              const mm = String(d.getMinutes()).padStart(2, "0");
+              const ss = String(d.getSeconds()).padStart(2, "0");
+              return `${day}/${mon}/${yr} à ${hh}:${mm}:${ss}`;
+            })();
 
-              return (
-                <div key={link.id} className="bg-white rounded-2xl overflow-hidden"
-                  style={{ border: "1.5px solid #e8ecf0", opacity: inactive ? 0.75 : 1, boxShadow: "0 1px 8px rgba(26,35,126,0.06)" }}
-                  data-testid={`card-payment-link-${link.id}`}>
+            return (
+              <div key={link.id}
+                className="bg-white rounded-2xl overflow-visible relative"
+                style={{ border: "1px solid #e0e4ea", boxShadow: "0 1px 6px rgba(0,0,0,0.07)" }}
+                data-testid={`card-payment-link-${link.id}`}>
 
-                  {/* ── Header ── */}
-                  <div className="relative overflow-hidden px-3.5 py-3 flex items-center justify-between gap-2"
-                    style={{ background: inactive ? "linear-gradient(135deg,#607d8b,#78909c)" : "linear-gradient(135deg,#1a237e 0%,#3949ab 100%)" }}>
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0" style={{ border: "1.5px solid rgba(255,255,255,0.25)" }}>
-                        <img src={qrUrl} alt="QR" className="w-full h-full object-cover" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-bold text-sm text-white truncate leading-tight" data-testid={`text-link-name-${link.id}`}>{link.name}</p>
-                        {l.description && <p className="text-xs text-white/55 truncate">{l.description}</p>}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span className="text-xs font-bold px-2 py-0.5 rounded-full"
-                        style={{ background: link.amountType === "fixed" ? "rgba(0,176,80,0.9)" : "rgba(245,158,11,0.9)", color: "#fff" }}>
-                        {link.amountType === "fixed" ? `${link.amount?.toLocaleString()} F` : "Libre"}
+                <div className="p-4">
+                  {/* ── Top row: icon + name ── */}
+                  <div className="flex items-start justify-between mb-3">
+                    {/* Icon */}
+                    <div className="w-16 h-16 rounded-lg flex items-center justify-center shrink-0"
+                      style={{ background: "#fff", border: "2px solid #cfd8e8" }}>
+                      <span className="font-black text-xl" style={{ color: "#2a6dd9", fontFamily: "serif", letterSpacing: "-1px" }}>
+                        {initials}
                       </span>
-                      <Switch checked={link.active} onCheckedChange={(checked) => updateMutation.mutate({ id: link.id, data: { active: checked } })} data-testid={`switch-link-active-${link.id}`} />
+                    </div>
+                    {/* Name */}
+                    <p className="font-bold text-lg text-right" style={{ color: "#1a1a1a" }}
+                      data-testid={`text-link-name-${link.id}`}>
+                      {link.name}
+                    </p>
+                  </div>
+
+                  {/* ── Info rows ── */}
+                  <div className="space-y-1.5 text-sm" style={{ color: "#333" }}>
+                    <div className="flex items-center justify-between">
+                      <span style={{ color: "#555" }}>Env :</span>
+                      <span className="font-bold" style={{ color: "#1db954" }}>PROD</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span style={{ color: "#555" }}>Balance Prod :</span>
+                      <span className="font-bold" style={{ color: "#1a1a1a" }}>
+                        {link.totalRevenue > 0 ? link.totalRevenue.toLocaleString("fr-FR", { minimumFractionDigits: 2 }) : "0,00"} XOF
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span style={{ color: "#555" }}>Transaction :</span>
+                      <span className="font-bold" style={{ color: "#1a1a1a" }}>{link.paymentCount}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span style={{ color: "#555" }}>Statut :</span>
+                      <span className="text-xs font-bold px-3 py-1 rounded-md text-white"
+                        style={{ background: inactive ? "#888" : "#1db954" }}>
+                        {inactive ? (isExpired ? "Expiré" : isLimited ? "Limite atteinte" : "Inactif") : "Active"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span style={{ color: "#555" }}>Date :</span>
+                      <span style={{ color: "#1a1a1a" }}>{dateStr}</span>
                     </div>
                   </div>
 
-                  {/* ── Body ── */}
-                  <div className="px-3.5 pt-2.5 pb-3 space-y-2.5">
+                  {/* ── Actions button ── */}
+                  <div className="flex justify-end mt-3 relative">
+                    <button
+                      onClick={() => setOpenActionsId(showActions ? null : link.id)}
+                      className="flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-semibold text-white transition-all active:scale-95"
+                      style={{ background: "#6b7280" }}
+                      data-testid={`button-actions-${link.id}`}
+                    >
+                      Actions
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    </button>
 
-                    {/* Status row */}
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full"
-                        style={{ background: statusDot.bg, color: statusDot.color, border: `1px solid ${statusDot.dot}25` }}>
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: statusDot.dot }} />
-                        {statusDot.label}
-                      </span>
-                      {l.collectBillingAddress && <span className="text-xs px-1.5 py-0.5 rounded-full font-medium" style={{ background: "#e8f5e9", color: "#2e7d32" }}>📋</span>}
-                      {l.notificationEmail && <span className="text-xs px-1.5 py-0.5 rounded-full font-medium" style={{ background: "#fce4ec", color: "#ad1457" }}>✉</span>}
-                      {link.paymentLimit && <span className="text-xs px-1.5 py-0.5 rounded-full font-medium" style={{ background: "#f3e5f5", color: "#6a1b9a" }}>{link.paymentCount}/{link.paymentLimit}</span>}
-                      {link.expiresAt && <span className="text-xs px-1.5 py-0.5 rounded-full font-medium" style={{ background: "#e8eaf6", color: "#283593" }}>⏱</span>}
-                    </div>
-
-                    {/* URL + actions row */}
-                    <div className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl" style={{ background: "#f8fafc", border: "1px solid #e2e8f0" }}>
-                      <span className="text-xs font-mono flex-1 truncate" style={{ color: "#64748b" }}>{url}</span>
-                      <button onClick={() => copyLink(link.uniqueId)} className="shrink-0 p-1.5 rounded-lg transition-all active:scale-95" style={{ background: "#00b050", color: "#fff" }} data-testid={`button-copy-link-${link.id}`} title="Copier">
-                        <Copy className="w-3.5 h-3.5" />
-                      </button>
-                      <button onClick={() => window.open(url, "_blank")} className="shrink-0 p-1.5 rounded-lg transition-all active:scale-95" style={{ background: "#e0e7ff", color: "#3949ab" }} data-testid={`button-open-link-${link.id}`} title="Ouvrir">
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </button>
-                      <button onClick={() => shareLink(link.uniqueId)} className="shrink-0 p-1.5 rounded-lg transition-all active:scale-95" style={{ background: "#e8f5e9", color: "#2e7d32" }} data-testid={`button-share-link-${link.id}`} title="Partager">
-                        <Share2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    {/* Footer: stats + edit/delete */}
-                    <div className="flex items-center justify-between pt-0.5">
-                      <div className="flex items-center gap-2">
-                        <BarChart3 className="w-3.5 h-3.5" style={{ color: "#00b050" }} />
-                        <span className="text-xs font-semibold" style={{ color: "#555" }}>{link.paymentCount} paiements</span>
-                        <span className="text-xs font-bold" style={{ color: "#00b050" }}>{link.totalRevenue.toLocaleString()} F</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <button className="w-7 h-7 rounded-lg flex items-center justify-center transition-all active:scale-95" style={{ background: "#eef2ff", border: "1px solid #c7d2fe" }} onClick={() => openEdit(link)} data-testid={`button-edit-link-${link.id}`}>
-                          <Edit3 className="w-3 h-3" style={{ color: "#3730a3" }} />
+                    {showActions && (
+                      <div className="absolute right-0 top-full mt-1 z-50 bg-white rounded-xl overflow-hidden"
+                        style={{ border: "1px solid #e0e4ea", boxShadow: "0 8px 24px rgba(0,0,0,0.14)", minWidth: "160px" }}>
+                        <button
+                          onClick={() => { setOpenActionsId(null); copyLink(link.uniqueId); }}
+                          className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors"
+                          style={{ color: "#333" }}
+                          data-testid={`button-copy-link-${link.id}`}>
+                          <Copy className="w-4 h-4 text-blue-500" /> Copier le lien
                         </button>
-                        <button className="w-7 h-7 rounded-lg flex items-center justify-center transition-all active:scale-95" style={{ background: "#fff1f2", border: "1px solid #fecdd3" }} onClick={() => deleteMutation.mutate(link.id)} data-testid={`button-delete-link-${link.id}`}>
-                          <Trash2 className="w-3 h-3" style={{ color: "#e11d48" }} />
+                        <button
+                          onClick={() => { setOpenActionsId(null); window.open(url, "_blank"); }}
+                          className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors"
+                          style={{ color: "#333" }}
+                          data-testid={`button-open-link-${link.id}`}>
+                          <ExternalLink className="w-4 h-4 text-indigo-500" /> Ouvrir
+                        </button>
+                        <button
+                          onClick={() => { setOpenActionsId(null); shareLink(link.uniqueId); }}
+                          className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors"
+                          style={{ color: "#333" }}
+                          data-testid={`button-share-link-${link.id}`}>
+                          <Share2 className="w-4 h-4 text-green-500" /> Partager
+                        </button>
+                        <div style={{ height: "1px", background: "#f0f0f0" }} />
+                        <button
+                          onClick={() => { setOpenActionsId(null); openEdit(link); }}
+                          className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors"
+                          style={{ color: "#3949ab" }}
+                          data-testid={`button-edit-link-${link.id}`}>
+                          <Edit3 className="w-4 h-4" /> Modifier
+                        </button>
+                        <button
+                          onClick={() => { setOpenActionsId(null); updateMutation.mutate({ id: link.id, data: { active: !link.active } }); }}
+                          className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors"
+                          style={{ color: link.active ? "#d97706" : "#16a34a" }}
+                          data-testid={`button-toggle-link-${link.id}`}>
+                          {link.active ? <><span className="w-4 h-4 flex items-center justify-center">⏸</span> Désactiver</> : <><span className="w-4 h-4 flex items-center justify-center">▶</span> Activer</>}
+                        </button>
+                        <div style={{ height: "1px", background: "#f0f0f0" }} />
+                        <button
+                          onClick={() => { setOpenActionsId(null); deleteMutation.mutate(link.id); }}
+                          className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-red-50 transition-colors"
+                          style={{ color: "#e11d48" }}
+                          data-testid={`button-delete-link-${link.id}`}>
+                          <Trash2 className="w-4 h-4" /> Supprimer
                         </button>
                       </div>
-                    </div>
-
+                    )}
                   </div>
                 </div>
-              );
-            })}
-          </>
+              </div>
+            );
+          })
         )}
       </div>
     </div>
