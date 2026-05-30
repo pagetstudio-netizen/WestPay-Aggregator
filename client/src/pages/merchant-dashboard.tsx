@@ -1572,12 +1572,13 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
   const { data: withdrawalList = [], isLoading: wdLoading } = useMerchantFetch("/api/merchant/withdrawals", ["/api/merchant/withdrawals"], token);
   const { data: me } = useMerchantFetch("/api/merchant/me", ["/api/merchant/me"], token);
   const feeExempt = !!(me as any)?.feeExempt;
-  const { data: platformFlags } = useQuery<{ withdrawalsDisabled: boolean }>({
+  const { data: platformFlags } = useQuery<{ withdrawalsDisabled: boolean; withdrawalMinAmount: number }>({
     queryKey: ["/api/public/platform-flags"],
     queryFn: () => fetch("/api/public/platform-flags").then(r => r.json()),
     refetchInterval: 60000,
   });
   const withdrawalsDisabled = !!platformFlags?.withdrawalsDisabled;
+  const withdrawalMinAmount = platformFlags?.withdrawalMinAmount ?? 200;
 
   const [selectedWalletId, setSelectedWalletId] = useState("");
   const [selectedOperator, setSelectedOperator] = useState("");
@@ -1633,6 +1634,10 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
     if (!selectedWalletId || !selectedOperator || !amount || !phone) return;
     const amountNum = parseInt(amount);
     if (isNaN(amountNum) || amountNum <= 0) return;
+    if (amountNum < withdrawalMinAmount) {
+      toast({ title: "Montant trop faible", description: `Le montant minimum de retrait est de ${withdrawalMinAmount.toLocaleString("fr-FR")} FCFA.`, variant: "destructive" });
+      return;
+    }
     if (selectedWallet && amountNum > selectedWallet.balance) {
       toast({ title: "Solde insuffisant", description: `Votre solde disponible est de ${selectedWallet.balance.toLocaleString("fr-FR")} ${countryToCurrency(selectedWallet.country)}.`, variant: "destructive" });
       return;
@@ -1808,13 +1813,16 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
               </div>
               <div className="space-y-3">
                 <div>
-                  <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>{t("amount")} ({countryToCurrency(selectedWallet.country)})</label>
+                  <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>
+                    {t("amount")} ({countryToCurrency(selectedWallet.country)})
+                    <span className="ml-2 text-xs font-normal" style={{ color: "#888" }}>min. {withdrawalMinAmount.toLocaleString("fr-FR")}</span>
+                  </label>
                   <input
                     type="number"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
-                    placeholder="Ex: 50000"
-                    min="1"
+                    placeholder={`Min. ${withdrawalMinAmount.toLocaleString("fr-FR")}`}
+                    min={withdrawalMinAmount}
                     max={selectedWallet.balance}
                     className="w-full rounded-xl px-4 py-2.5 text-sm outline-none transition-all"
                     style={{ border: "1.5px solid #e2e8f0", background: "#fff", color: "#1a1a1a" }}

@@ -5049,8 +5049,12 @@ export async function registerRoutes(
 
   app.get("/api/public/platform-flags", async (_req, res) => {
     try {
-      const withdrawalsDisabled = await storage.getSetting("withdrawals_disabled");
-      res.json({ withdrawalsDisabled: withdrawalsDisabled === "true" });
+      const [withdrawalsDisabled, minAmountRaw] = await Promise.all([
+        storage.getSetting("withdrawals_disabled"),
+        storage.getSetting("withdrawal_min_amount"),
+      ]);
+      const withdrawalMinAmount = minAmountRaw ? parseInt(minAmountRaw) || 200 : 200;
+      res.json({ withdrawalsDisabled: withdrawalsDisabled === "true", withdrawalMinAmount });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -5058,9 +5062,15 @@ export async function registerRoutes(
 
   app.put("/api/admin/platform-flags", authMiddleware("admin"), async (req, res) => {
     try {
-      const { withdrawalsDisabled } = req.body;
+      const { withdrawalsDisabled, withdrawalMinAmount } = req.body;
       if (withdrawalsDisabled !== undefined) {
         await storage.setSetting("withdrawals_disabled", withdrawalsDisabled ? "true" : "false");
+      }
+      if (withdrawalMinAmount !== undefined) {
+        const parsed = parseInt(withdrawalMinAmount);
+        if (!isNaN(parsed) && parsed >= 1) {
+          await storage.setSetting("withdrawal_min_amount", String(parsed));
+        }
       }
       res.json({ success: true });
     } catch (err: any) {
@@ -5374,8 +5384,10 @@ export async function registerRoutes(
       const useMbiyoPayout = payoutGatewayLower === "mbiyo";
       const useSendavaPayout = payoutGatewayLower === "sendavapay";
 
-      if ((useMbiyoPayout || useSendavaPayout) && amount < 500) {
-        return res.status(400).json({ message: "Le montant minimum de retrait est de 500 FCFA." });
+      const minAmountRaw = await storage.getSetting("withdrawal_min_amount");
+      const withdrawalMinAmount = minAmountRaw ? parseInt(minAmountRaw) || 200 : 200;
+      if ((useMbiyoPayout || useSendavaPayout) && amount < withdrawalMinAmount) {
+        return res.status(400).json({ message: `Le montant minimum de retrait est de ${withdrawalMinAmount} FCFA.` });
       }
 
       // ── ANTI-DOUBLON (vérification avant lock) ────────────────────────────────

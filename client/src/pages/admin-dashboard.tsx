@@ -3784,11 +3784,13 @@ function AdminWithdrawalsPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
   const { data: wdList = [], isLoading } = useAdminFetch("/api/admin/withdrawals", ["/api/admin/withdrawals"]);
-  const { data: platformFlags, refetch: refetchFlags } = useQuery<{ withdrawalsDisabled: boolean }>({
+  const { data: platformFlags, refetch: refetchFlags } = useQuery<{ withdrawalsDisabled: boolean; withdrawalMinAmount: number }>({
     queryKey: ["/api/public/platform-flags"],
     queryFn: () => fetch("/api/public/platform-flags").then(r => r.json()),
   });
   const [isTogglingWd, setIsTogglingWd] = useState(false);
+  const [minAmountInput, setMinAmountInput] = useState("");
+  const [isSavingMin, setIsSavingMin] = useState(false);
 
   const toggleWithdrawals = async (disabled: boolean) => {
     setIsTogglingWd(true);
@@ -3805,6 +3807,30 @@ function AdminWithdrawalsPanel() {
       toast({ title: "Erreur", variant: "destructive" });
     } finally {
       setIsTogglingWd(false);
+    }
+  };
+
+  const saveMinAmount = async () => {
+    const val = parseInt(minAmountInput);
+    if (isNaN(val) || val < 1) {
+      toast({ title: "Montant invalide", description: "Entrez un nombre entier positif.", variant: "destructive" });
+      return;
+    }
+    setIsSavingMin(true);
+    try {
+      const res = await fetch("/api/admin/platform-flags", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ withdrawalMinAmount: val }),
+      });
+      if (!res.ok) throw new Error("Erreur");
+      await refetchFlags();
+      setMinAmountInput("");
+      toast({ title: "Minimum mis à jour", description: `Le retrait minimum est maintenant de ${val.toLocaleString("fr-FR")} FCFA.` });
+    } catch {
+      toast({ title: "Erreur", variant: "destructive" });
+    } finally {
+      setIsSavingMin(false);
     }
   };
 
@@ -3900,6 +3926,40 @@ function AdminWithdrawalsPanel() {
             disabled={isTogglingWd}
             data-testid="switch-withdrawals-enabled"
           />
+        </div>
+      </div>
+
+      {/* Montant minimum de retrait */}
+      <div className="flex items-center justify-between gap-4 p-4 rounded-xl border-2 border-blue-200 bg-blue-50 dark:bg-blue-950/20">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="w-3 h-3 rounded-full shrink-0 bg-blue-500" />
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-foreground">Montant minimum de retrait</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Actuel : <span className="font-bold text-blue-600">{(platformFlags?.withdrawalMinAmount ?? 200).toLocaleString("fr-FR")} FCFA</span>
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <input
+            type="number"
+            min="1"
+            placeholder="Ex: 200"
+            value={minAmountInput}
+            onChange={e => setMinAmountInput(e.target.value)}
+            className="w-28 px-3 py-1.5 text-sm rounded-lg border border-blue-300 bg-white dark:bg-gray-800 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            data-testid="input-withdrawal-min-amount"
+            onKeyDown={e => e.key === "Enter" && saveMinAmount()}
+          />
+          <button
+            onClick={saveMinAmount}
+            disabled={isSavingMin || !minAmountInput}
+            className="px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+            data-testid="button-save-min-amount"
+          >
+            {isSavingMin ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+            Enregistrer
+          </button>
         </div>
       </div>
 
