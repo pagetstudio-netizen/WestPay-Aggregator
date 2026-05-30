@@ -297,7 +297,7 @@ export function initTelegramBot(): Telegraf | null {
       if (linked) {
         await ctx.reply(`✅ Votre compte *${linked.name}* est déjà lié.\n\nTapez /aide pour voir vos commandes.`, { parse_mode: "Markdown" });
       } else {
-        await ctx.reply("🔒 Ce bot est réservé aux marchands WestPay autorisés.\n\nSi vous êtes marchand, demandez votre code d'activation à votre administrateur.", { parse_mode: "Markdown" });
+        await ctx.reply("🔒 此机器人仅供已获授权的 WestPay 商户使用。\n\n如果您是商户，请向您的管理员申请激活码。", { parse_mode: "Markdown" });
       }
       return;
     }
@@ -1340,7 +1340,7 @@ export function initTelegramBot(): Telegraf | null {
 
     const merchant = await storage.getMerchantByTelegramChatId(chatId);
     if (!merchant) {
-      await ctx.reply("🔒 Ce bot est réservé aux marchands WestPay autorisés.\n\nSi vous êtes marchand, demandez votre code d'activation à votre administrateur.");
+      await ctx.reply("🔒 此机器人仅供已获授权的 WestPay 商户使用。\n\n如果您是商户，请向您的管理员申请激活码。");
     }
   });
 
