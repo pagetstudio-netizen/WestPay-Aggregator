@@ -186,28 +186,43 @@ async function getAIKey(provider: "openai" | "groq" | "gemini"): Promise<string 
 
 // ─── Shared system prompt ─────────────────────────────────────────────────────
 function buildSystemPrompt(merchantContext: string): string {
-  return `You are a professional customer support agent named "WestPay Assistant" for WestPay, a Mobile Money payment aggregator platform serving West Africa (Togo, Benin, Burkina Faso, Côte d'Ivoire, Mali, Senegal, and more).
+  return `You are a professional first-line customer support agent named "WestPay Assistant" for WestPay, a Mobile Money payment aggregator platform serving West Africa.
 
-STRICT RULES — FOLLOW WITHOUT EXCEPTION:
-- LANGUAGE: You MUST always respond in English ONLY. NEVER respond in French or any other language. Even if the user writes in French, always reply in English. This is a hard rule — no exceptions.
-- Be friendly, warm, concise, and professional. Max 3-4 sentences unless a detailed explanation is needed.
-- NEVER use markdown formatting (no **, no *, no #, no backticks). Plain text only.
-- You have access to the merchant's real-time account data below. Use it for accurate, specific answers.
-- If asked about balance, withdrawals, or transactions, always refer to the actual data provided.
+LANGUAGE — ABSOLUTE RULE:
+You MUST always respond in English ONLY. NEVER write in French or any other language. Even if the user writes in French, Ewe, Fon, or any other language, your response must always be in English. No exceptions.
 
-WESTPAY PLATFORM KNOWLEDGE:
-- API integration: get API key from dashboard > "API & SDK" tab, use POST /api/payment/initiate with X-API-Key header, configure webhook to receive payment confirmations, docs at /api-docs.
-- Payment flow: USSD push sent to customer phone automatically. Wave operator redirects to a payment URL. Payments confirm in seconds to a few minutes.
-- Withdrawals: processed within 24-48 business hours. Reference format: OP-XXXX (payments), TR-XXXX (transfers).
-- Supported operators: MTN, Orange, Moov, Wave, TMoney, Flooz across Togo, Benin, Burkina Faso, Ivory Coast, Mali, Senegal.
-- Crypto payments: supported via OxaPay (USDT, BTC, ETH, TRX, BNB, LTC and more). No geographic restriction. Activated per merchant from "Crypto" tab in dashboard.
-- Payment links: created from dashboard > "Payment Links" tab. Fixed or variable amounts.
-- Commission is automatically deducted per payment per the merchant contract.
-- Password reset: click "Forgot password" on the login page.
-- Country/operator activation: managed from dashboard > "Countries & Operators" section.
-- Support contacts on Telegram: @Atfchalvt, @geeorbotpay, @pankeyrobotpay, @astapay
-- Do not invent information. If unsure, say you will escalate to the technical team.
-- Sound human and natural, not robotic.
+HONESTY — ABSOLUTE RULE:
+NEVER invent, guess, or fabricate information. If you don't know something, say so and offer to escalate. Never pretend to have performed an action you haven't done. Never give fictional transaction details, balances, or statuses.
+
+WHAT YOU CAN DO (information only — you cannot execute actions):
+- Show the merchant's real-time balance, withdrawals, and transaction history using the data provided below.
+- Explain platform features: API integration, webhooks, payment links, crypto payments, operator setup.
+- Guide merchants through the dashboard (where to find API keys, payment links, settings, etc.).
+- Ask for transaction references (OP-XXXX, TR-XXXX) and acknowledge them for escalation.
+- Provide processing time expectations: payments confirm in seconds to minutes, withdrawals in 24-48 business hours.
+- Explain why a payment may have failed: invalid number, insufficient customer balance, operator network issue.
+
+WHAT YOU CANNOT DO — be honest and redirect to the technical team:
+- You CANNOT modify, add, or adjust any balance. Say: "I'm not able to modify balances — this is handled exclusively by the technical team. Please contact @Atfchalvt or @geeorbotpay and they will take care of it within a few minutes."
+- You CANNOT approve, reject, or process withdrawals manually. Say: "Withdrawals are processed by the technical team within 24-48 business hours. If it's been longer, contact @Atfchalvt or @geeorbotpay with your withdrawal reference."
+- You CANNOT change commission rates, fees, or pricing. Say: "Commission rates are set in your contract. To renegotiate, contact our commercial team via @Atfchalvt."
+- You CANNOT reset passwords directly. Say: "Use the 'Forgot password' link on the login page. If you're locked out, contact the administrator."
+- You CANNOT create, delete, or suspend accounts. Say: "Account management is done by the platform administrator — contact @Atfchalvt."
+- You CANNOT add or remove countries/operators directly. Say: "Country and operator activation is done by the technical team — contact @Atfchalvt."
+- You CANNOT refund a payment. Say: "Refunds must be processed by the technical team — share the OP-XXXX reference with @Atfchalvt."
+
+TONE: Be warm, honest, professional, and concise. Max 3-4 sentences unless a step-by-step explanation is genuinely needed. Sound human, not robotic. Never overpromise.
+
+FORMATTING: Plain text only. No markdown, no **, no *, no #, no backticks.
+
+WESTPAY PLATFORM FACTS:
+- API: GET key from dashboard "API & SDK" tab, POST /api/payment/initiate, X-API-Key header, docs at /api-docs, configure webhook for confirmations.
+- Operators: MTN, Orange, Moov, Wave, TMoney, Flooz — Togo, Benin, Burkina Faso, Ivory Coast, Mali, Senegal.
+- Crypto: via OxaPay (USDT, BTC, ETH, TRX, BNB, LTC+). Global, no country limit. Activate from dashboard "Crypto" tab.
+- Payment links: dashboard "Payment Links" tab. Fixed or variable amounts.
+- Wave payments: customer gets a payment URL link instead of USSD.
+- Transaction refs: OP-XXXX = payment, TR-XXXX = transfer, WP = internal.
+- Support Telegram handles: @Atfchalvt, @geeorbotpay, @pankeyrobotpay, @astapay
 
 ${merchantContext}`;
 }
@@ -401,37 +416,86 @@ async function buildNaturalResponse(text: string, merchantId: number, _lang?: st
     return pick(["Perfect, I'm here if you need anything.", "Got it! Feel free to reach out anytime.", "Alright, just say the word."]);
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CANNOT-DO ACTIONS — always checked FIRST before informational responses
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ── Balance modification request ──────────────────────────────────────────
+  const balanceModifyPattern = /\b(modifier|modifie|changer|change|augmenter|augmente|ajouter|ajoute|recharger|recharge|créditer|crediter|mettre à jour|mettre a jour|update|add.*balance|add.*solde|top.?up|increase.*balance|set.*balance|charge.*balance|correct.*balance|ajuster|adjust|fix.*balance|rectifier|corriger|rajouter)\b.*\b(solde|balance|argent|fonds|funds|account|compte)\b|\b(solde|balance|argent|fonds|funds|account|compte)\b.*\b(modifier|changer|augmenter|ajouter|recharger|créditer|mettre à jour|update|top.?up|increase|set|charge|correct|ajuster|adjust|fix|rectifier|corriger|rajouter)\b/i;
+  if (balanceModifyPattern.test(lower)) {
+    return "I'm not able to modify or adjust balances — this is handled exclusively by our technical team. Please contact @Atfchalvt or @geeorbotpay directly on Telegram and they will take care of it within a few minutes.";
+  }
+
+  // ── Refund request ────────────────────────────────────────────────────────
+  if (/\b(rembourser|remboursement|remboursé|refund|refunded|reverse|reversal|annuler (le |un )?paiement|cancel.*payment|rendre (l'argent|les fonds))\b/i.test(lower)) {
+    return "I'm not able to process refunds directly. Please share the transaction reference (OP-XXXX) with @Atfchalvt or @geeorbotpay on Telegram — the technical team will handle it promptly.";
+  }
+
+  // ── Withdrawal approval / force processing ────────────────────────────────
+  if (/\b(approuver|approuve|valider|valide|forcer|force|débloquer|debloquer|unlock|approve|validate|process.*now|traiter.*maintenant|payer.*maintenant|pay.*now)\b.*\b(retrait|withdrawal|virement|transfer|payout)\b|\b(retrait|withdrawal|virement|transfer|payout)\b.*\b(approuver|valider|forcer|débloquer|unlock|approve|validate|process|traiter|payer)\b/i.test(lower)) {
+    return "I'm not able to manually approve or force withdrawals. Withdrawals are processed by the technical team within 24-48 business hours. If yours has been pending longer than that, please contact @Atfchalvt or @geeorbotpay with your withdrawal reference and they'll look into it.";
+  }
+
+  // ── Commission / fee change request ──────────────────────────────────────
+  if (/\b(changer|modifier|réduire|reduire|baisser|augmenter|négocier|negocier|change|modify|reduce|lower|decrease|increase|negotiate|update)\b.*\b(commission|frais|taux|fee|fees|rate|tarif)\b|\b(commission|frais|taux|fee|fees|rate|tarif)\b.*\b(changer|modifier|réduire|baisser|augmenter|négocier|change|modify|reduce|lower|decrease|increase|negotiate|update)\b/i.test(lower)) {
+    return "I'm not able to modify commission rates or fees — these are set in your merchant contract. To discuss a rate change, please reach out to our commercial team via @Atfchalvt on Telegram.";
+  }
+
+  // ── Account creation / deletion / suspension ──────────────────────────────
+  if (/\b(créer|creer|ouvrir|supprimer|effacer|suspendre|bloquer|débloquer|activer|désactiver|create|open|delete|remove|suspend|block|unblock|activate|deactivate)\b.*\b(compte|account|marchand|merchant|profil|profile)\b/i.test(lower)) {
+    return "Account management (creation, deletion, suspension) is handled by the platform administrator. Please contact @Atfchalvt on Telegram and they will process your request.";
+  }
+
+  // ── Add / remove country or operator ─────────────────────────────────────
+  if (/\b(ajouter|rajouter|activer|désactiver|supprimer|enlever|add|activate|deactivate|enable|disable|remove)\b.*\b(pays|country|opérateur|operator|réseau|network|mtn|orange|moov|wave|tmoney|flooz)\b/i.test(lower)) {
+    return "Country and operator activation is managed by the technical team on our end. Please contact @Atfchalvt or @geeorbotpay on Telegram with your merchant name and the country/operator you need, and they'll set it up for you.";
+  }
+
+  // ── Password reset request (action) ──────────────────────────────────────
+  if (/\b(réinitialiser|reinitialiser|changer|modifier|reset|change|update)\b.*\b(mot de passe|password|mdp|pass)\b|\b(mot de passe|password|mdp|pass)\b.*\b(réinitialiser|oublié|perdu|reset|forgot|lost|change|update)\b/i.test(lower)) {
+    return "To reset your password, use the \"Forgot password\" link on the merchant login page — a reset link will be sent to your registered email. If you no longer have access to that email, contact @Atfchalvt on Telegram for manual assistance.";
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // INFORMATIONAL RESPONSES
+  // ═══════════════════════════════════════════════════════════════════════════
+
   // ── Transaction reference lookup (OP-XXXX or TR-XXXX) ────────────────────────
   const refMatch = text.match(/\b(OP|TR|WP)-[A-Z0-9]{4,}\b/i);
   if (refMatch) {
     const ref = refMatch[0].toUpperCase();
-    return `I've noted the reference ${ref}. I'll check the status of this transaction for you. In the meantime, ensure the customer's phone received the USSD prompt. If the issue persists, I'll escalate to our technical team immediately.`;
+    return `I've noted the reference ${ref}. I'll escalate this to our technical team for investigation. In the meantime, please ensure the customer's phone received the USSD prompt. Our team will get back to you as quickly as possible.`;
   }
 
   // ── Phone number detected ─────────────────────────────────────────────────────
   if (/(\+?2[0-9]{10,12}|0[67][0-9]{8})/.test(lower)) {
-    return "I've noted the phone number. Could you also share the transaction reference (format OP-XXXX) or the amount involved? I'll look into it for you.";
+    return "I've noted the phone number. Could you also share the transaction reference (format OP-XXXX) and the amount involved? That will help our technical team investigate more efficiently.";
   }
 
   // ── API / Integration ────────────────────────────────────────────────────────
   if (/\b(intégr|integr|api|sdk|webhook|clé api|api key|documentation|doc|developer|développeur|implémenter|implement|integrate|integration|endpoint|requête|request|callback|http|curl|postman|json)\b/.test(lower)) {
-    return `To integrate the WestPay API:\n\n1. Get your API key from your dashboard (tab "API & SDK")\n2. Full documentation at /api-docs\n3. Payment endpoint: POST /api/payment/initiate\n4. Configure your webhook to receive automatic payment confirmations\n\nThe API uses key-based auth via X-API-Key header. Do you need a code example or help with a specific part?`;
+    return `To integrate the WestPay API:\n\n1. Get your API key from your dashboard (tab "API & SDK")\n2. Full documentation at /api-docs\n3. Payment endpoint: POST /api/payment/initiate\n4. Add X-API-Key header with your key\n5. Configure your webhook URL to receive payment confirmations\n\nDo you need help with a specific step?`;
   }
 
-  // ── Balance / Solde ──────────────────────────────────────────────────────────
-  if (/\b(balance|solde|combien (j'ai|il y a|reste|j'ai reçu)|how much|available|disponible|argent|fonds|funds|voir (mon|le) solde|mon compte|account balance)\b/.test(lower)) {
+  // ── Balance / Solde (read only) ──────────────────────────────────────────────
+  if (/\b(balance|solde|combien (j'ai|il y a|reste|j'ai reçu)|how much|available|disponible|voir (mon|le) solde|mon compte|account balance)\b/.test(lower)) {
     return getBalanceText(merchantId);
   }
 
-  // ── Withdrawals / Retraits ────────────────────────────────────────────────────
-  if (/\b(retrait|retraits|withdrawal|withdraw|payout|virement|reversement|virer|débloquer|décaisser|cashout|cash out)\b/.test(lower)
-    || /\b(faire (un )?retrait|demande de retrait|sortir (mon|les|l')argent|transférer|transfer)\b/.test(lower)) {
+  // ── Withdrawals status (read only) ────────────────────────────────────────────
+  if (/\b(retrait|retraits|withdrawal|withdraw|payout|virement|reversement|cashout|cash out|statut.*retrait|withdrawal.*status)\b/.test(lower)
+    || /\b(voir (mes|les) retraits|mes retraits|my withdrawals|liste.*retrait)\b/.test(lower)) {
     return getWithdrawalsText(merchantId);
   }
 
+  // ── Transfer money to customer ────────────────────────────────────────────────
+  if (/\b(transférer|transfer|virer|envoyer (de l'argent|des fonds)|send (money|funds)|payer (un client|le client)|pay.*customer)\b/.test(lower)) {
+    return "To transfer funds to a customer, go to your dashboard and use the \"Transfers\" tab. Enter the recipient's phone number, operator, country, and amount. The transfer will be processed via the Mobile Money network. If you encounter any issue, share the TR-XXXX reference with our team.";
+  }
+
   // ── Waiting / Not yet received ────────────────────────────────────────────────
-  if (/\b(en attente|pending|pas encore|toujours pas|not yet|still waiting|haven't received|n'est pas arrivé|pas arrivé|pas reçu|non reçu|not received|where is|où est|where('s| is) my)\b/.test(lower)) {
-    return "I understand your concern. Please share the transaction reference (OP-XXXX format) or the phone number involved. I'll check the real-time status and get back to you right away.";
+  if (/\b(en attente|pending|pas encore|toujours pas|not yet|still waiting|haven't received|pas arrivé|pas reçu|non reçu|not received|where is|où est|where('s| is) my)\b/.test(lower)) {
+    return "I understand your concern. Please share the transaction reference (OP-XXXX format) or the phone number involved. I'll pass this to our technical team who will check the real-time status and respond to you as quickly as possible.";
   }
 
   // ── Transactions / Historique ────────────────────────────────────────────────
@@ -440,71 +504,71 @@ async function buildNaturalResponse(text: string, merchantId: number, _lang?: st
   }
 
   // ── Stats / Volume ───────────────────────────────────────────────────────────
-  if (/\b(stat|stats|statistique|statistic|volume|total|performance|chiffre|rapport|report|résumé|summary|combien (j'ai fait|j'ai encaissé|total))\b/.test(lower)) {
+  if (/\b(stat|stats|statistique|statistic|volume|total|performance|rapport|report|résumé|summary|combien (j'ai fait|j'ai encaissé|total))\b/.test(lower)) {
     return getStatsText(merchantId);
   }
 
   // ── Payment failed / Declined ────────────────────────────────────────────────
   if (/\b(échoué|echec|échec|failed|failure|refusé|refuse|declined|rejeté|rejected|annulé|canceled|ne passe pas|doesn't go through|paiement bloqué)\b/.test(lower)) {
-    return "A failed payment can have several causes: invalid number, insufficient customer balance, or temporary operator network issue. Can you share the OP-XXXX reference? I'll check the server-side details for you.";
+    return "A failed payment typically has one of these causes: invalid or inactive phone number, insufficient customer balance, or a temporary operator network issue. Please share the OP-XXXX reference so our technical team can check the server-side details and give you a precise answer.";
   }
 
   // ── Problème / Erreur ────────────────────────────────────────────────────────
-  if (/\b(problème|probleme|soucis|souci|problem|issue|bug|erreur|error|fail|failed|ne (fonctionne|marche) pas|doesn't work|not working|bloqué|blocked|planté|crash)\b/.test(lower)) {
+  if (/\b(problème|probleme|soucis|souci|problem|issue|bug|erreur|error|ne (fonctionne|marche) pas|doesn't work|not working|bloqué|blocked|planté|crash)\b/.test(lower)) {
     return pick([
-      "I'm sorry to hear that. Could you describe the issue and share the transaction reference if available? I'll escalate this to our technical team right away.",
-      "Got it — please describe what's happening and include the transaction reference if you have it. I'll flag this to our tech team immediately.",
+      "I'm sorry to hear that. Please describe the issue and include the transaction reference (OP-XXXX) if you have one — I'll escalate this to our technical team right away.",
+      "Got it. Please tell me more about what's happening and share the transaction reference if available. I'll flag this to our tech team immediately.",
     ]);
   }
 
   // ── Délai / Timing ───────────────────────────────────────────────────────────
   if (/\b(délai|delai|combien de temps|how long|durée|duration|processing time|temps (de|d')attente|temps de traitement|prend (du temps|longtemps))\b/.test(lower)) {
-    return "Mobile Money payments confirm within seconds to a few minutes after the customer validates the USSD prompt. For Wave, the customer receives a payment link. Withdrawals are processed within 24–48 business hours. Beyond that, contact us with the OP-XXXX reference.";
+    return "Mobile Money payments confirm within seconds to a few minutes after the customer validates the USSD prompt. For Wave, the customer receives a payment link. Withdrawals are processed within 24-48 business hours. If something has been pending longer than expected, contact us with the reference (OP-XXXX or TR-XXXX).";
   }
 
-  // ── Frais / Commission ───────────────────────────────────────────────────────
+  // ── Frais / Commission (informational only) ───────────────────────────────────
   if (/\b(frais|commission|tarif|fee|fees|taux|rate|déduire|déduit|retenu|how much (do you charge|is the fee|are the fees)|combien (ça coûte|vous prenez|vous déduisez|est déduit))\b/.test(lower)) {
-    return "Your fees are defined in your merchant contract. You can view your commission rate in your dashboard under \"Settings\". The commission is automatically deducted from each received payment. To renegotiate, contact our sales team.";
+    return "Your commission rate is defined in your merchant contract and is automatically deducted from each received payment. You can view your current rate in your dashboard under \"Settings\". To discuss a rate change, contact our team via @Atfchalvt on Telegram.";
   }
 
-  // ── Mot de passe / Connexion ─────────────────────────────────────────────────
-  if (/\b(mot de passe|password|mdp|connexion|connecter|login|se connecter|oublié|forgot|réinitialiser|reset|accès|access|se connecte plus|cannot login|can't login)\b/.test(lower)) {
-    return "To reset your password, click \"Forgot password\" on the login page. A reset link will be sent to your email. If you don't have access to your email, please contact the platform administrator.";
+  // ── Login / Access issues (informational) ────────────────────────────────────
+  if (/\b(mot de passe|password|mdp|connexion|connecter|login|se connecter|oublié|forgot|accès|access|se connecte plus|cannot login|can't login|locked out)\b/.test(lower)) {
+    return "To access your account, go to the merchant login page and click \"Forgot password\" — a reset link will be sent to your registered email. If you're locked out or don't have access to your email, contact @Atfchalvt on Telegram for direct assistance.";
   }
 
-  // ── Opérateurs / Pays ────────────────────────────────────────────────────────
-  if (/\b(opérateur|operator|pays|country|countries|mtn|orange|moov|wave|tmoney|flooz|airtel|mpesa|mobile money|activer|désactiver|ajouter un pays|togo|benin|bénin|burkina|côte d'ivoire|cote d'ivoire|mali|sénégal|senegal)\b/.test(lower)) {
-    return "WestPay supports MTN, Orange, Moov, Wave, TMoney, Flooz, and more across West Africa (Togo, Benin, Burkina Faso, Ivory Coast, Mali, Senegal…). Country/operator activation is managed from your dashboard under \"Countries & Operators\". A disabled country will stop accepting incoming payments.";
+  // ── Opérateurs / Pays (informational) ────────────────────────────────────────
+  if (/\b(opérateur|operator|pays|country|countries|mtn|orange|moov|wave|tmoney|flooz|airtel|mpesa|mobile money|togo|benin|bénin|burkina|côte d'ivoire|cote d'ivoire|mali|sénégal|senegal)\b/.test(lower)) {
+    return "WestPay supports MTN, Orange, Moov, Wave, TMoney, Flooz and more across West Africa (Togo, Benin, Burkina Faso, Ivory Coast, Mali, Senegal…). To add or activate a country/operator on your account, contact @Atfchalvt or @geeorbotpay on Telegram — the technical team handles these activations.";
   }
 
   // ── Crypto ───────────────────────────────────────────────────────────────────
   if (/\b(crypto|bitcoin|btc|eth|usdt|tron|trx|bnb|ethereum|litecoin|ltc|dogecoin|doge|cryptomonnaie|cryptocurrency|oxapay|stablecoin)\b/.test(lower)) {
-    return "WestPay supports crypto payments via OxaPay (USDT, BTC, ETH, TRX, BNB, LTC and more). Activation is done from your dashboard under the \"Crypto\" tab. No geographic restriction — available to all your customers. See /api-docs for integration.";
+    return "WestPay supports crypto payments via OxaPay (USDT, BTC, ETH, TRX, BNB, LTC and more). No geographic restriction — available globally. To enable crypto on your account, contact @Atfchalvt on Telegram. Once active, integration details are in your dashboard under the \"Crypto\" tab and at /api-docs.";
   }
 
-  // ── Contact / Support humain ─────────────────────────────────────────────────
-  if (/\b(contacter|contact|support|assistance|parler à quelqu'un|speak to someone|human|agent|équipe|team|urgence|urgent|escalade|escalate)\b/.test(lower)) {
-    return "Our support team is available on Telegram: @Atfchalvt, @geeorbotpay, @pankeyrobotpay, @astapay. For technical urgencies, mention your merchant ID and transaction reference (OP-XXXX).";
+  // ── Contact / Escalate to human ─────────────────────────────────────────────
+  if (/\b(contacter|contact|support|assistance|parler à quelqu'un|speak to someone|human|agent|équipe|team|urgence|urgent|escalade|escalate|responsable|manager)\b/.test(lower)) {
+    return "Our support team is available on Telegram: @Atfchalvt, @geeorbotpay, @pankeyrobotpay, @astapay. For urgent technical issues, please mention your merchant name and the transaction reference (OP-XXXX or TR-XXXX) so they can assist you faster.";
   }
 
-  // ── Aide générale / What can you do ──────────────────────────────────────────
+  // ── What can you do ──────────────────────────────────────────────────────────
   if (/\b(que (peux-tu|pouvez-vous|peut-on)|what can you|que fais-tu|what do you do|aide-moi|aidez-moi|help me|j'ai besoin d'aide|i need help|comment ça marche|how does this work|quoi faire|what to do)\b/.test(lower)) {
-    return `I'm your WestPay assistant. Here's what I can help you with:\n\nCheck your available balance\nView pending withdrawals\nShow recent transactions and stats\nAnswer API and webhook integration questions\nExplain payment delays and fees\nHelp with blocked or failed payments\n\nJust tell me what you need!`;
+    return `I'm your WestPay first-line support assistant. Here's what I can help with:\n\nView your available balance, pending withdrawals, and recent transactions\nExplain API integration and webhook setup\nGuide you through dashboard features\nExplain payment delays and failure reasons\nEscalate complex issues to the technical team\n\nNote: I cannot modify balances, approve withdrawals, or change settings — those require the technical team. Just tell me what you need!`;
   }
 
-  // ── Lien de paiement / Payment link ──────────────────────────────────────────
+  // ── Payment link ──────────────────────────────────────────────────────────────
   if (/\b(lien de paiement|payment link|lien paiement|page de paiement|payment page|share.*link|envoyer.*lien|send.*link)\b/.test(lower)) {
-    return "You can create payment links from your dashboard under the \"Payment Links\" tab. Each link can have a fixed or variable amount, and you can share it directly with your customers. Payments are confirmed automatically.";
+    return "You can create payment links from your dashboard under the \"Payment Links\" tab. Each link can have a fixed or variable amount, and you can share it directly with your customers via any channel. Payments confirm automatically and are credited to your balance.";
   }
 
-  // ── Client / Customer questions ───────────────────────────────────────────────
-  if (/\b(client|customer|acheteur|buyer|utilisateur|user|ils (n'arrivent|ne peuvent)|they can't|customer.*problem|client.*problème)\b/.test(lower)) {
-    return "For customer-side issues, first verify the Mobile Money number is correct and active on the operator. If the customer doesn't receive the USSD prompt, they can retry after a few minutes. Share the OP-XXXX reference so I can check on our end.";
+  // ── Customer-side issues ─────────────────────────────────────────────────────
+  if (/\b(client|customer|acheteur|buyer|utilisateur|ils (n'arrivent|ne peuvent)|they can't|customer.*problem)\b/.test(lower)) {
+    return "For customer-side issues, first verify the Mobile Money number is correct and active on the operator. If the customer did not receive the USSD prompt, they can retry after a few minutes. For Wave, the customer must click the payment link. Share the OP-XXXX reference so our technical team can investigate on the server side.";
   }
 
-  // ── Amounts mentioned ─────────────────────────────────────────────────────────
+  // ── Amount mentioned ─────────────────────────────────────────────────────────
   if (/\b(\d[\d\s]*(?:fcfa|xof|cfa|f\b|francs?)?)\b/i.test(lower)) {
-    return "I see you're mentioning an amount. Is this about a pending payment, a withdrawal, or a balance check? Let me know the context and share the transaction reference if you have one.";
+    return "I see you're mentioning an amount. Could you clarify — is this about a pending payment, a withdrawal, or a balance discrepancy? If you have a transaction reference (OP-XXXX), please share it so I can pass the details to our technical team.";
   }
 
   // ── Intelligent fallback ──────────────────────────────────────────────────────
@@ -512,15 +576,15 @@ async function buildNaturalResponse(text: string, merchantId: number, _lang?: st
 
   if (/\?/.test(text) || /^(comment|pourquoi|quand|quoi|combien|est-ce que|is|can|how|why|what|when|where|does|do|could|would|should)\b/.test(lower)) {
     return pick([
-      "Good question! To help you better, could you give me a bit more detail? I can check your balance, withdrawals, transactions, or answer any platform question.",
-      "I'm here to help with that. Could you clarify a bit? For example: is this about a payment, a withdrawal, or a technical question?",
+      "Good question! To help you accurately, could you give me a bit more detail? I can check your balance, withdrawals, transactions, explain platform features, or escalate to the technical team.",
+      "I'm here to help. Could you clarify a bit more? For example: is this about a payment, a withdrawal, a technical issue, or a platform feature?",
     ]);
   }
 
   return pick([
-    "I understand. Could you give me more details so I can help you properly? If you have a transaction reference, feel free to share it.",
-    "Got it. Tell me more — I can check your payments, balance, or help with an API integration.",
-    "I see. To assist you better, could you clarify whether this is about a payment, a withdrawal, or something else?",
+    "Understood. Could you give me a bit more detail? If there's a transaction involved, the reference (OP-XXXX or TR-XXXX) will help our team investigate faster.",
+    "Got it. Tell me more — I can check your payments or balance, explain platform features, or escalate this to the technical team.",
+    "I see. To assist you properly, could you clarify whether this is about a payment, a withdrawal, an account setting, or something else?",
   ]);
 }
 
