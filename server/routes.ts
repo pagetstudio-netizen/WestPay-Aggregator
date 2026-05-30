@@ -3025,7 +3025,7 @@ export async function registerRoutes(
             currency,
             payerCountry: countryCode,
             customerName: payerName || undefined,
-            customerPhone: msisdn || undefined,
+            customerPhone: msisdn ? ("+" + msisdn.replace(/^\+/, "")) : undefined,
             description: `Paiement WestPay - ${merchantSlug}`,
             webhookUrl,
             externalReference: reference,
