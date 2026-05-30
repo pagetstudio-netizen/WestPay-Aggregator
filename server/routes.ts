@@ -5443,6 +5443,41 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== AI KEYS (OpenAI / Groq / Gemini) ====================
+
+  app.get("/api/admin/ai-keys", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const [openai, groq, gemini] = await Promise.all([
+        storage.getSetting("ai_key_openai"),
+        storage.getSetting("ai_key_groq"),
+        storage.getSetting("ai_key_gemini"),
+      ]);
+      const mask = (k: string | null) => k && k.length > 8 ? k.slice(0, 6) + "..." + k.slice(-4) : null;
+      res.json({
+        openai: mask(openai),
+        groq: mask(groq),
+        gemini: mask(gemini),
+        openaiConfigured: !!(openai && openai.length > 5) || !!(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.length > 10),
+        groqConfigured: !!(groq && groq.length > 5) || !!(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY.length > 10),
+        geminiConfigured: !!(gemini && gemini.length > 5) || !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.length > 10),
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/ai-keys", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { openai, groq, gemini } = req.body;
+      if (openai !== undefined) await storage.setSetting("ai_key_openai", openai);
+      if (groq !== undefined) await storage.setSetting("ai_key_groq", groq);
+      if (gemini !== undefined) await storage.setSetting("ai_key_gemini", gemini);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.post("/api/admin/support-contacts", authMiddleware("admin"), async (req, res) => {
     try {
       const { telegram1, telegram2, telegram3, telegram4 } = req.body;

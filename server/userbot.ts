@@ -190,7 +190,46 @@ async function getStatsText(merchantId: number, lang: "fr" | "en"): Promise<stri
   return `Your account statistics:\n\nTotal transactions: ${stats.transactionCount}\nTotal volume: ${formatAmount(stats.totalVolume)}`;
 }
 
-// ─── OpenAI-powered response ──────────────────────────────────────────────────
+// ─── AI Provider key resolver (env var > DB) ─────────────────────────────────
+async function getAIKey(provider: "openai" | "groq" | "gemini"): Promise<string | null> {
+  const envMap: Record<string, string | undefined> = {
+    openai: process.env.OPENAI_API_KEY,
+    groq: process.env.GROQ_API_KEY,
+    gemini: process.env.GEMINI_API_KEY,
+  };
+  const dbKeyMap: Record<string, string> = {
+    openai: "ai_key_openai",
+    groq: "ai_key_groq",
+    gemini: "ai_key_gemini",
+  };
+  const envKey = envMap[provider];
+  if (envKey && envKey.length > 10) return envKey;
+  const dbKey = await storage.getSetting(dbKeyMap[provider]).catch(() => null);
+  return dbKey && dbKey.length > 5 ? dbKey : null;
+}
+
+// ─── Shared system prompt ─────────────────────────────────────────────────────
+function buildSystemPrompt(merchantContext: string): string {
+  return `You are a professional customer support agent named "WestPay Assistant" for WestPay, a Mobile Money payment aggregator platform serving West Africa (Togo, Benin, Burkina Faso, Côte d'Ivoire, Mali, Senegal, and more).
+
+STRICT RULES:
+- Always respond in English only, regardless of the language the merchant uses.
+- Be friendly, warm, concise, and professional. Max 3-4 sentences unless a detailed explanation is needed.
+- NEVER use markdown formatting (no **, no *, no #, no backticks). Plain text only.
+- You have access to the merchant's real-time account data below. Use it for accurate, specific answers.
+- If asked about balance, withdrawals, or transactions, always refer to the actual data provided.
+- API integration: get API key from dashboard > "API & SDK" tab, use POST /api/payment/initiate, configure webhook, docs at /api-docs.
+- Payment delays: Mobile Money payments confirm in seconds to a few minutes. Withdrawals process within 24-48 business hours.
+- For issues or transaction problems: ask for the transaction reference (format OP-XXXX or TR-XXXX).
+- WestPay supports: MTN, Orange, Moov, Wave, TMoney, Flooz and crypto via OxaPay.
+- Support contacts on Telegram: @Atfchalvt, @geeorbotpay, @pankeyrobotpay, @astapay
+- Do not invent information. If unsure, say you will escalate to the technical team.
+- Sound human and natural, not robotic.
+
+${merchantContext}`;
+}
+
+// ─── Merchant context builder ─────────────────────────────────────────────────
 async function buildMerchantContext(merchantId: number): Promise<string> {
   try {
     const [countries, withdrawals, transactions, stats] = await Promise.all([
@@ -220,56 +259,121 @@ async function buildMerchantContext(merchantId: number): Promise<string> {
   }
 }
 
-async function askOpenAI(userMessage: string, merchantContext: string): Promise<string | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
+// ─── OpenAI provider ──────────────────────────────────────────────────────────
+async function askOpenAI(userMessage: string, systemPrompt: string): Promise<string | null> {
+  const apiKey = await getAIKey("openai");
   if (!apiKey) return null;
-
-  const systemPrompt = `You are a professional customer support agent for WestPay, a Mobile Money payment aggregator platform serving West Africa (Togo, Benin, Burkina Faso, Côte d'Ivoire, Mali, Senegal, and more).
-
-RULES:
-- Always respond in English only, regardless of the language the merchant uses.
-- Be friendly, concise, and professional. Max 3-4 sentences unless a detailed explanation is needed.
-- Never use markdown formatting (no **, no *, no #). Plain text only.
-- You have access to the merchant's real-time account data below — use it to give accurate, specific answers.
-- If asked about balance, withdrawals, or transactions, refer to the actual data provided.
-- For API integration questions, explain: get API key from dashboard > API & SDK tab, use POST /api/payment/initiate, configure webhook for confirmations, docs at /api-docs.
-- For delays: Mobile Money payments confirm in a few minutes, withdrawals process within 24-48 business hours.
-- For issues or errors: ask for the transaction reference (format OP-XXXX or TR-XXXX).
-- WestPay supports: MTN, Orange, Moov, Wave, TMoney, Flooz and crypto via OxaPay.
-- Do not invent information. If unsure, say you'll escalate to the technical team.
-
-${merchantContext}`;
 
   try {
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-      },
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userMessage },
         ],
-        max_tokens: 300,
+        max_tokens: 350,
         temperature: 0.7,
       }),
     });
-
     if (!res.ok) {
-      const err = await res.text();
-      console.error("[USERBOT] OpenAI error:", res.status, err);
+      console.error("[USERBOT] OpenAI error:", res.status, await res.text());
       return null;
     }
-
     const data = await res.json() as any;
     return data.choices?.[0]?.message?.content?.trim() || null;
   } catch (err: any) {
     console.error("[USERBOT] OpenAI fetch failed:", err.message);
     return null;
   }
+}
+
+// ─── Groq provider (OpenAI-compatible API, llama-3.1-8b-instant) ──────────────
+async function askGroq(userMessage: string, systemPrompt: string): Promise<string | null> {
+  const apiKey = await getAIKey("groq");
+  if (!apiKey) return null;
+
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: "llama-3.1-8b-instant",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+        max_tokens: 350,
+        temperature: 0.7,
+      }),
+    });
+    if (!res.ok) {
+      console.error("[USERBOT] Groq error:", res.status, await res.text());
+      return null;
+    }
+    const data = await res.json() as any;
+    return data.choices?.[0]?.message?.content?.trim() || null;
+  } catch (err: any) {
+    console.error("[USERBOT] Groq fetch failed:", err.message);
+    return null;
+  }
+}
+
+// ─── Gemini provider (Google Generative Language API) ────────────────────────
+async function askGemini(userMessage: string, systemPrompt: string): Promise<string | null> {
+  const apiKey = await getAIKey("gemini");
+  if (!apiKey) return null;
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents: [{ role: "user", parts: [{ text: userMessage }] }],
+          generationConfig: { maxOutputTokens: 350, temperature: 0.7 },
+        }),
+      }
+    );
+    if (!res.ok) {
+      console.error("[USERBOT] Gemini error:", res.status, await res.text());
+      return null;
+    }
+    const data = await res.json() as any;
+    return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
+  } catch (err: any) {
+    console.error("[USERBOT] Gemini fetch failed:", err.message);
+    return null;
+  }
+}
+
+// ─── AI Orchestrator: tries OpenAI → Groq → Gemini, stops at first success ───
+async function askAI(userMessage: string, merchantContext: string): Promise<string | null> {
+  const systemPrompt = buildSystemPrompt(merchantContext);
+  const providers: Array<{ name: string; fn: () => Promise<string | null> }> = [
+    { name: "OpenAI", fn: () => askOpenAI(userMessage, systemPrompt) },
+    { name: "Groq",   fn: () => askGroq(userMessage, systemPrompt) },
+    { name: "Gemini", fn: () => askGemini(userMessage, systemPrompt) },
+  ];
+
+  for (const provider of providers) {
+    try {
+      const result = await provider.fn();
+      if (result) {
+        console.log(`[USERBOT] ${provider.name} responded successfully`);
+        return result;
+      }
+      console.log(`[USERBOT] ${provider.name} returned empty, trying next...`);
+    } catch (err: any) {
+      console.error(`[USERBOT] ${provider.name} threw an error, trying next:`, err.message);
+    }
+  }
+  console.log("[USERBOT] All AI providers failed, falling back to keyword responses");
+  return null;
 }
 
 // ─── Pick random item from array ─────────────────────────────────────────────
@@ -583,21 +687,19 @@ async function handleMessage(event: any): Promise<void> {
     await new Promise(resolve => setTimeout(resolve, Math.min(delayMs, 2000)));
   }
 
-  // ── Try OpenAI first, fallback to keyword-based ───────────────────────────
+  // ── Try AI providers (OpenAI → Groq → Gemini), fallback to keyword-based ──
   let response: string | null = null;
 
-  if (process.env.OPENAI_API_KEY) {
-    try {
-      const merchantContext = await buildMerchantContext(merchantId);
-      response = await askOpenAI(text, merchantContext);
-      if (response) console.log("[USERBOT] OpenAI response generated");
-    } catch (err: any) {
-      console.error("[USERBOT] OpenAI failed, using fallback:", err.message);
-    }
+  try {
+    const merchantContext = await buildMerchantContext(merchantId);
+    response = await askAI(text, merchantContext);
+  } catch (err: any) {
+    console.error("[USERBOT] AI orchestrator failed:", err.message);
   }
 
   if (!response) {
-    response = await buildNaturalResponse(text, merchantId, "en");
+    const lang = detectLanguage(text);
+    response = await buildNaturalResponse(text, merchantId, lang);
   }
 
   if (!response) return;

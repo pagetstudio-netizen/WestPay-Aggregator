@@ -4368,6 +4368,8 @@ function SettingsPanel() {
 
       <AdminAccountsCard token={token} currentUserId={(user as any)?.id} />
 
+      <AIKeysCard token={token} />
+
       <SupportContactsCard token={token} />
 
       <Card>
@@ -4382,6 +4384,169 @@ function SettingsPanel() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function AIKeysCard({ token }: { token: string | null }) {
+  const { toast } = useToast();
+  const { data: status, refetch } = useQuery<{
+    openai: string | null; groq: string | null; gemini: string | null;
+    openaiConfigured: boolean; groqConfigured: boolean; geminiConfigured: boolean;
+  }>({
+    queryKey: ["/api/admin/ai-keys"],
+    staleTime: 0,
+    queryFn: async () => {
+      const res = await fetch("/api/admin/ai-keys", { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error("Erreur");
+      return res.json();
+    },
+    enabled: !!token,
+  });
+
+  const [openai, setOpenai] = useState("");
+  const [groq, setGroq] = useState("");
+  const [gemini, setGemini] = useState("");
+  const [showOpenai, setShowOpenai] = useState(false);
+  const [showGroq, setShowGroq] = useState(false);
+  const [showGemini, setShowGemini] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSaving(true);
+    try {
+      const body: Record<string, string> = {};
+      if (openai.trim()) body.openai = openai.trim();
+      if (groq.trim()) body.groq = groq.trim();
+      if (gemini.trim()) body.gemini = gemini.trim();
+      const res = await fetch("/api/admin/ai-keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      await refetch();
+      setOpenai(""); setGroq(""); setGemini("");
+      toast({ title: "Clés IA enregistrées", description: "Le bot utilisera ces clés en priorité." });
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const StatusBadge = ({ configured }: { configured: boolean }) => (
+    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${configured ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+      {configured ? "Configurée" : "Non configurée"}
+    </span>
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <span className="text-lg">🤖</span>
+          Clés API — Intelligence Artificielle (Bot Support)
+        </CardTitle>
+        <p className="text-xs text-muted-foreground mt-1">
+          Le bot essaie les providers dans l'ordre : OpenAI → Groq → Gemini. Si l'un échoue, il passe automatiquement au suivant.
+        </p>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSave} className="space-y-4">
+          <div className="space-y-4">
+            {/* OpenAI */}
+            <div className="border rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm">🟢 OpenAI</span>
+                  <span className="text-xs text-muted-foreground">gpt-4o-mini</span>
+                </div>
+                <StatusBadge configured={status?.openaiConfigured ?? false} />
+              </div>
+              {status?.openai && <p className="text-xs text-muted-foreground font-mono">Actuelle : {status.openai}</p>}
+              <div className="relative">
+                <Input
+                  type={showOpenai ? "text" : "password"}
+                  value={openai}
+                  onChange={(e) => setOpenai(e.target.value)}
+                  placeholder="sk-proj-... (laisser vide pour ne pas changer)"
+                  className="pr-10 text-sm"
+                  data-testid="input-ai-openai"
+                />
+                <button type="button" onClick={() => setShowOpenai(!showOpenai)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  {showOpenai ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground">Obtenir une clé : <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">platform.openai.com/api-keys</a></p>
+            </div>
+
+            {/* Groq */}
+            <div className="border rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm">🟡 Groq</span>
+                  <span className="text-xs text-muted-foreground">llama-3.1-8b-instant — Gratuit</span>
+                </div>
+                <StatusBadge configured={status?.groqConfigured ?? false} />
+              </div>
+              {status?.groq && <p className="text-xs text-muted-foreground font-mono">Actuelle : {status.groq}</p>}
+              <div className="relative">
+                <Input
+                  type={showGroq ? "text" : "password"}
+                  value={groq}
+                  onChange={(e) => setGroq(e.target.value)}
+                  placeholder="gsk_... (laisser vide pour ne pas changer)"
+                  className="pr-10 text-sm"
+                  data-testid="input-ai-groq"
+                />
+                <button type="button" onClick={() => setShowGroq(!showGroq)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  {showGroq ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground">Obtenir une clé gratuite : <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">console.groq.com/keys</a></p>
+            </div>
+
+            {/* Gemini */}
+            <div className="border rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm">🔵 Gemini</span>
+                  <span className="text-xs text-muted-foreground">gemini-1.5-flash — Gratuit</span>
+                </div>
+                <StatusBadge configured={status?.geminiConfigured ?? false} />
+              </div>
+              {status?.gemini && <p className="text-xs text-muted-foreground font-mono">Actuelle : {status.gemini}</p>}
+              <div className="relative">
+                <Input
+                  type={showGemini ? "text" : "password"}
+                  value={gemini}
+                  onChange={(e) => setGemini(e.target.value)}
+                  placeholder="AIza... (laisser vide pour ne pas changer)"
+                  className="pr-10 text-sm"
+                  data-testid="input-ai-gemini"
+                />
+                <button type="button" onClick={() => setShowGemini(!showGemini)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  {showGemini ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground">Obtenir une clé gratuite : <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">aistudio.google.com/app/apikey</a></p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 pt-1">
+            <Button type="submit" disabled={isSaving || (!openai.trim() && !groq.trim() && !gemini.trim())} data-testid="button-save-ai-keys">
+              {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              Enregistrer les clés
+            </Button>
+            <p className="text-xs text-muted-foreground">Seuls les champs remplis seront mis à jour.</p>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
   );
 }
 
