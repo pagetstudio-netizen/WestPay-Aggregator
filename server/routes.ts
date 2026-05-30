@@ -3780,7 +3780,7 @@ export async function registerRoutes(
                     omnipayTxId: null,
                     operator: pending.paymentMethod || null,
                     omnipayReference: pending.omnipayReference,
-                    errorMessage: `Paiement ${spStatus} par SendavaPay`,
+                    errorMessage: `Paiement ${spStatus}`,
                     providerFee: 0,
                   }).catch(() => {});
                 }
@@ -4144,7 +4144,7 @@ export async function registerRoutes(
       res.status(upstream.status).json(data);
     } catch (err: any) {
       console.error("[SENDAVAPAY PROXY] /services erreur:", err.message);
-      res.status(502).json({ success: false, message: "Erreur proxy SendavaPay services" });
+      res.status(502).json({ success: false, message: "Erreur service opérateurs" });
     }
   });
 
@@ -4165,7 +4165,7 @@ export async function registerRoutes(
       res.status(upstream.status).json(data);
     } catch (err: any) {
       console.error("[SENDAVAPAY PROXY] /pay erreur:", err.message);
-      res.status(502).json({ success: false, message: "Erreur proxy SendavaPay pay" });
+      res.status(502).json({ success: false, message: "Erreur initiation paiement" });
     }
   });
 
@@ -4186,7 +4186,7 @@ export async function registerRoutes(
       res.status(upstream.status).json(data);
     } catch (err: any) {
       console.error("[SENDAVAPAY PROXY] /verify erreur:", err.message);
-      res.status(502).json({ success: false, message: "Erreur proxy SendavaPay verify" });
+      res.status(502).json({ success: false, message: "Erreur vérification OTP" });
     }
   });
 
@@ -4215,20 +4215,50 @@ export async function registerRoutes(
         return res.status(400).json({ message: "reference manquante" });
       }
 
+      const statusLower = (payload.status || "").toLowerCase();
+      const eventLower = (payload.event || "").toLowerCase();
+      const isSuccess = statusLower === "completed" || eventLower === "payment.completed";
+      const isFailure = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(statusLower);
+
       const pending = await storage.getPendingPaymentByOmnipayReference(reference);
       if (!pending) {
-        console.warn(`[SENDAVAPAY CALLBACK] Paiement non trouve: ${reference}`);
-        return res.status(200).json({ received: true });
+        // Pas un paiement entrant — vérifier si c'est une notification de retrait
+        const withdrawal = await storage.getWithdrawalByOmnipayRef(reference);
+        if (!withdrawal) {
+          console.warn(`[SENDAVAPAY CALLBACK] Référence introuvable (ni paiement ni retrait): ${reference}`);
+          return res.status(200).json({ received: true });
+        }
+
+        // Notification de retrait
+        if (withdrawal.status === "approved" || withdrawal.status === "failed") {
+          return res.json({ status: "already_processed" });
+        }
+
+        const wdMerchant = await storage.getMerchantById(withdrawal.merchantId);
+
+        if (isSuccess) {
+          const wdFees = withdrawal.fees || 0;
+          await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Retrait confirmé automatiquement`, reference, wdFees, wdFees);
+          notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: "auto" }).catch(() => {});
+          notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
+          console.log(`[SENDAVAPAY CALLBACK] Retrait #${withdrawal.id} approuvé — ref=${reference}`);
+          return res.json({ status: "withdrawal_confirmed" });
+        } else if (isFailure) {
+          await storage.updateWithdrawalStatus(withdrawal.id, "failed", `Retrait refusé (${payload.status || "échec"})`, reference);
+          const wdMc = await storage.findMerchantCountryBySimAndCountry(withdrawal.merchantId, withdrawal.country);
+          if (wdMc) await storage.incrementMerchantCountryBalance(wdMc.id, withdrawal.amount);
+          notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed", mode: "auto" }).catch(() => {});
+          notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed" }).catch(() => {});
+          console.log(`[SENDAVAPAY CALLBACK] Retrait #${withdrawal.id} échoué — ref=${reference} status=${payload.status}`);
+          return res.json({ status: "withdrawal_failed" });
+        }
+
+        return res.json({ status: "pending" });
       }
 
       if (pending.status === "omnipay_confirmed" || pending.status === "omnipay_failed") {
         return res.json({ status: "already_processed" });
       }
-
-      const statusLower = (payload.status || "").toLowerCase();
-      const eventLower = (payload.event || "").toLowerCase();
-      const isSuccess = statusLower === "completed" || eventLower === "payment.completed";
-      const isFailure = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(statusLower);
 
       if (isSuccess) {
         const merchant = await storage.getMerchantById(pending.merchantId);
@@ -4296,7 +4326,7 @@ export async function registerRoutes(
             provider: "westpay",
             omnipayTxId: null,
             omnipayReference: pending.omnipayReference || reference,
-            errorMessage: `Paiement ${payload.status || "refusé"} par SendavaPay`,
+            errorMessage: `Paiement ${payload.status || "refusé"}`,
             providerFee: 0,
           }).catch(() => {});
         }
@@ -5646,18 +5676,18 @@ export async function registerRoutes(
           if (spInitOk) {
             const spRef = result.data?.reference || reference;
             const spFee = result.data?.fee != null ? Math.round(result.data.fee || withdrawalFee) : withdrawalFee;
-            await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement SendavaPay - Ref: ${spRef}`, spRef, spFee, spFee);
+            await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - Ref: ${spRef}`, spRef, spFee, spFee);
             console.log(`[WITHDRAWAL SENDAVAPAY] Initie (statut: ${result.data?.status}) - ref=${spRef}`);
             return res.json({ ...w, status: "pending", omnipayRef: spRef, fees: spFee, netAmount, autoProcessed: true, gateway: "sendavapay" });
           } else {
-            const errMsg = result.message || result.data?.message || (result as any).error || "Echec du transfert SendavaPay";
+            const errMsg = result.message || result.data?.message || (result as any).error || "Échec du virement";
             console.warn(`[WITHDRAWAL SENDAVAPAY] Echec: ${errMsg}`);
             await storage.updateWithdrawalStatus(w.id, "failed", `Retrait non abouti: ${errMsg}`, reference);
             notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
             notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
             await storage.incrementMerchantCountryBalance(mc.id, amount);
             return res.status(400).json({
-              message: `Retrait refusé par SendavaPay : ${errMsg}. Votre solde a été restitué.`,
+              message: `Retrait refusé : ${errMsg}. Votre solde a été restitué.`,
               providerMessage: errMsg,
               provider: "sendavapay",
             });
@@ -5666,7 +5696,7 @@ export async function registerRoutes(
           const errDetail = spErr?.cause?.message || spErr?.message || "unknown";
           const isTimeout = errDetail.includes("abort") || errDetail.includes("timeout") || errDetail.includes("UND_ERR");
           const techMsg = isTimeout
-            ? "Délai d'attente dépassé (SendavaPay inaccessible)"
+            ? "Délai d'attente dépassé (service inaccessible)"
             : `Erreur technique : ${errDetail}`;
           console.error(`[WITHDRAWAL SENDAVAPAY] Erreur catch — retrait #${w.id} | ${techMsg}`);
           await storage.updateWithdrawalStatus(w.id, "failed", techMsg, reference);
