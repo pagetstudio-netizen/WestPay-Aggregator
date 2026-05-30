@@ -146,6 +146,7 @@ export interface IStorage {
 
   createWithdrawal(data: InsertWithdrawal): Promise<Withdrawal>;
   getWithdrawals(merchantId?: number): Promise<(Withdrawal & { merchantName: string; merchantWebsite?: string | null })[]>;
+  getPendingWithdrawals(): Promise<(Withdrawal & { merchantName: string })[]>;
   getWithdrawalById(id: number): Promise<Withdrawal | undefined>;
   getWithdrawalByOmnipayRef(ref: string): Promise<Withdrawal | undefined>;
   updateWithdrawalStatus(id: number, status: string, adminNote?: string, omnipayRef?: string, fees?: number, providerPayoutFee?: number): Promise<void>;
@@ -977,6 +978,35 @@ export class DatabaseStorage implements IStorage {
       .from(withdrawals)
       .leftJoin(merchants, eq(withdrawals.merchantId, merchants.id))
       .where(merchantId ? eq(withdrawals.merchantId, merchantId) : sql`1=1`)
+      .orderBy(desc(withdrawals.createdAt));
+    return rows.map(r => ({ ...r, merchantName: r.merchantName || "" }));
+  }
+
+  async getPendingWithdrawals(): Promise<(Withdrawal & { merchantName: string })[]> {
+    const rows = await db
+      .select({
+        id: withdrawals.id,
+        merchantId: withdrawals.merchantId,
+        merchantCountryId: withdrawals.merchantCountryId,
+        country: withdrawals.country,
+        amount: withdrawals.amount,
+        phone: withdrawals.phone,
+        recipientName: withdrawals.recipientName,
+        operator: withdrawals.operator,
+        status: withdrawals.status,
+        withdrawalMode: withdrawals.withdrawalMode,
+        adminNote: withdrawals.adminNote,
+        omnipayRef: withdrawals.omnipayRef,
+        fees: withdrawals.fees,
+        providerPayoutFee: withdrawals.providerPayoutFee,
+        gateway: withdrawals.gateway,
+        createdAt: withdrawals.createdAt,
+        processedAt: withdrawals.processedAt,
+        merchantName: merchants.name,
+      })
+      .from(withdrawals)
+      .leftJoin(merchants, eq(withdrawals.merchantId, merchants.id))
+      .where(eq(withdrawals.status, "pending"))
       .orderBy(desc(withdrawals.createdAt));
     return rows.map(r => ({ ...r, merchantName: r.merchantName || "" }));
   }

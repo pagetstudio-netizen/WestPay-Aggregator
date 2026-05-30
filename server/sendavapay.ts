@@ -286,6 +286,31 @@ export async function getTransactions(apiKey: string): Promise<SendavaTransactio
   return sendavaRequest<SendavaTransactionsResponse>("/transactions", "GET", apiKey);
 }
 
+export interface SendavaWithdrawalStatusResponse {
+  success: boolean;
+  data?: {
+    reference: string;
+    externalReference?: string;
+    status: string;
+    amount: string;
+    fee: string;
+    currency: string;
+    phoneNumber?: string;
+    operator?: string;
+    createdAt: string;
+    completedAt?: string;
+  };
+  error?: string;
+  message?: string;
+}
+
+/**
+ * Récupère le statut d'un retrait par sa référence SendavaPay.
+ */
+export async function getWithdrawalStatus(apiKey: string, reference: string): Promise<SendavaWithdrawalStatusResponse> {
+  return sendavaRequest<SendavaWithdrawalStatusResponse>(`/withdrawal-status/${encodeURIComponent(reference)}`, "GET", apiKey);
+}
+
 /**
  * Configure l'URL webhook globale pour la clé SDK.
  * Retourne webhookSecret (à stocker en variable d'environnement — affiché une seule fois).

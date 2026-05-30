@@ -4208,8 +4208,9 @@ export async function registerRoutes(
       }
 
       const payload = req.body as SendavaWebhookPayload;
-      const reference = payload.reference;
-      console.log(`[SENDAVAPAY CALLBACK] Recu: event=${payload.event} ref=${reference} status=${payload.status}`);
+      // SendavaPay can send reference OR externalReference depending on event type
+      const reference = payload.reference || payload.externalReference;
+      console.log(`[SENDAVAPAY CALLBACK] Recu: event=${payload.event} ref=${payload.reference} extRef=${payload.externalReference} status=${payload.status}`);
 
       if (!reference) {
         return res.status(400).json({ message: "reference manquante" });
@@ -4217,15 +4218,29 @@ export async function registerRoutes(
 
       const statusLower = (payload.status || "").toLowerCase();
       const eventLower = (payload.event || "").toLowerCase();
-      const isSuccess = statusLower === "completed" || eventLower === "payment.completed";
+      // Handle both pay-in and payout/withdrawal event types + "success" status
+      const isSuccess =
+        statusLower === "completed" ||
+        statusLower === "success" ||
+        eventLower === "payment.completed" ||
+        eventLower === "payout.completed" ||
+        eventLower === "withdrawal.completed" ||
+        eventLower === "transfer.completed";
       const isFailure = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(statusLower);
 
       const pending = await storage.getPendingPaymentByOmnipayReference(reference);
       if (!pending) {
         // Pas un paiement entrant — vérifier si c'est une notification de retrait
-        const withdrawal = await storage.getWithdrawalByOmnipayRef(reference);
+        // Try with SendavaPay's reference first, then our externalReference as fallback
+        let withdrawal = await storage.getWithdrawalByOmnipayRef(reference);
+        if (!withdrawal && payload.reference && payload.externalReference) {
+          withdrawal = await storage.getWithdrawalByOmnipayRef(payload.externalReference);
+        }
+        if (!withdrawal && payload.reference) {
+          withdrawal = await storage.getWithdrawalByOmnipayRef(payload.reference);
+        }
         if (!withdrawal) {
-          console.warn(`[SENDAVAPAY CALLBACK] Référence introuvable (ni paiement ni retrait): ${reference}`);
+          console.warn(`[SENDAVAPAY CALLBACK] Référence introuvable (ni paiement ni retrait): ref=${payload.reference} extRef=${payload.externalReference}`);
           return res.status(200).json({ received: true });
         }
 

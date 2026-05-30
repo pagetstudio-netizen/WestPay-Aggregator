@@ -5,8 +5,8 @@
  */
 
 import { storage } from "./storage";
-import { getPaymentStatus as sendavaGetStatus } from "./sendavapay";
-import { notifyMerchantPayment, notifyAdminPayment } from "./telegram-bot";
+import { getPaymentStatus as sendavaGetStatus, getWithdrawalStatus as sendavaGetWithdrawalStatus } from "./sendavapay";
+import { notifyMerchantPayment, notifyAdminPayment, notifyAdminWithdrawal, notifyMerchantWithdrawal } from "./telegram-bot";
 
 const COLLECTION_FEE_RATE = 0.055;
 const EXTRA_FEE_COUNTRIES = new Set(["Congo Brazzaville", "Congo RDC"]);
@@ -78,7 +78,63 @@ async function creditConfirmedPayment(pending: any, txRef: string): Promise<bool
   return true;
 }
 
+async function reconcileStaleWithdrawals(): Promise<void> {
+  try {
+    const apiKey = await getSendavaKey();
+    if (!apiKey) return;
+
+    const now = Date.now();
+    const TEN_MIN = 10 * 60 * 1000;
+    const SIX_HOURS = 6 * 60 * 60 * 1000;
+
+    // Fetch all pending withdrawals via gateway sendavapay
+    const staleWithdrawals = await storage.getPendingWithdrawals?.() || [];
+    const sendavaStale = staleWithdrawals.filter((w: any) => {
+      if (w.status !== "pending") return false;
+      if (w.gateway !== "sendavapay") return false;
+      if (!w.omnipayRef) return false;
+      const age = now - new Date(w.createdAt).getTime();
+      return age >= TEN_MIN && age < SIX_HOURS;
+    });
+
+    if (sendavaStale.length === 0) return;
+    console.log(`[RECONCILIATION-WD] ${sendavaStale.length} retrait(s) SendavaPay bloqué(s) >10min — vérification...`);
+
+    for (const wd of sendavaStale) {
+      try {
+        const result = await sendavaGetWithdrawalStatus(apiKey, wd.omnipayRef);
+        const status = (result.data?.status || "").toLowerCase();
+        const merchant = await storage.getMerchantById(wd.merchantId);
+
+        if (["completed", "success", "approved", "paid"].includes(status)) {
+          const fees = wd.fees || 0;
+          await storage.updateWithdrawalStatus(wd.id, "approved", `Retrait confirmé (réconciliation)`, wd.omnipayRef, fees, fees);
+          notifyAdminWithdrawal({ id: wd.id, merchantName: merchant?.name || `#${wd.merchantId}`, country: wd.country, amount: wd.amount, fees, phone: wd.phone, operator: wd.operator, status: "approved", mode: "auto" }).catch(() => {});
+          notifyMerchantWithdrawal(wd.merchantId, { id: wd.id, country: wd.country, amount: wd.amount, fees, phone: wd.phone, operator: wd.operator, status: "approved" }).catch(() => {});
+          console.log(`[RECONCILIATION-WD] Retrait #${wd.id} approuvé — ref=${wd.omnipayRef}`);
+        } else if (["failed", "failure", "cancelled", "canceled", "rejected"].includes(status)) {
+          await storage.updateWithdrawalStatus(wd.id, "failed", `Retrait refusé (réconciliation: ${status})`, wd.omnipayRef);
+          const mc = await storage.findMerchantCountryBySimAndCountry(wd.merchantId, wd.country);
+          if (mc) await storage.incrementMerchantCountryBalance(mc.id, wd.amount);
+          notifyAdminWithdrawal({ id: wd.id, merchantName: merchant?.name || `#${wd.merchantId}`, country: wd.country, amount: wd.amount, fees: 0, phone: wd.phone, operator: wd.operator, status: "failed", mode: "auto" }).catch(() => {});
+          notifyMerchantWithdrawal(wd.merchantId, { id: wd.id, country: wd.country, amount: wd.amount, fees: 0, phone: wd.phone, operator: wd.operator, status: "failed" }).catch(() => {});
+          console.log(`[RECONCILIATION-WD] Retrait #${wd.id} échoué — ref=${wd.omnipayRef} status=${status}`);
+        } else {
+          console.log(`[RECONCILIATION-WD] Retrait #${wd.id} en cours — ref=${wd.omnipayRef} status=${status || "inconnu"}`);
+        }
+      } catch (err: any) {
+        console.error(`[RECONCILIATION-WD] Erreur retrait #${wd.id}:`, err.message);
+      }
+    }
+  } catch (err: any) {
+    console.error("[RECONCILIATION-WD] Erreur globale:", err.message);
+  }
+}
+
 export async function runReconciliation(): Promise<void> {
+  // Run withdrawal reconciliation in parallel
+  reconcileStaleWithdrawals().catch(() => {});
+
   try {
     const allPending = await storage.getPendingPayments();
     const now = Date.now();
