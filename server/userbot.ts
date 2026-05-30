@@ -636,7 +636,7 @@ async function handleMessage(event: any): Promise<void> {
 
     const merchant = await storage.getMerchantById(merchantId);
     await client.sendMessage(chat, {
-      message: `Group successfully linked to account ${merchant?.name || "merchant"}. I'm here to answer your questions.`,
+      message: `切都好`,
       replyTo: message.id,
     });
     console.log(`[USERBOT] Group ${chatId} linked to merchant #${merchantId} (${merchant?.name})`);
