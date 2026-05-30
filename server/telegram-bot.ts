@@ -1410,7 +1410,9 @@ export async function startPolling(): Promise<void> {
   if (!bot) return;
   try {
     await bot.telegram.deleteWebhook({ drop_pending_updates: false });
-    bot.launch({ dropPendingUpdates: false });
+    bot.launch({ dropPendingUpdates: false }).catch((err: any) => {
+      console.warn("[TELEGRAM] Polling interrompu (conflit prod/dev — ignoré):", err.message);
+    });
     console.log("[TELEGRAM] Bot demarre en mode polling (developpement)");
     process.once("SIGINT", () => bot?.stop("SIGINT"));
     process.once("SIGTERM", () => bot?.stop("SIGTERM"));

@@ -124,6 +124,10 @@ app.use((req, res, next) => {
   const { initOtpBot } = await import("./telegram-otp-bot");
   await initOtpBot();
 
+  // Réconciliation automatique des paiements bloqués
+  const { startReconciliationJob } = await import("./reconciliation");
+  startReconciliationJob();
+
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
