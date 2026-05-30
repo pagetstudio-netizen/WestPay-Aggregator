@@ -547,10 +547,16 @@ export async function registerRoutes(
   }
 
   function getClientIp(req: Request): string {
+    // Check X-Forwarded-For first — only flag as spoofed if injected via header
+    const forwarded = req.headers["x-forwarded-for"];
+    if (forwarded) {
+      const firstIp = (Array.isArray(forwarded) ? forwarded[0] : forwarded).split(",")[0].trim().replace(/^::ffff:/, "");
+      if (isReservedIp(firstIp)) return `SPOOFED:${firstIp}`;
+      return firstIp;
+    }
+    // Direct connection — use socket IP as-is (never flag as spoofed)
     const raw = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
-    // Si l'IP est dans une plage réservée (jamais légitime depuis Internet), c'est du spoofing
-    if (isReservedIp(raw)) return `SPOOFED:${raw}`;
-    return raw;
+    return raw || "unknown";
   }
 
   // ── Validation email — rejette les payloads d'injection ───────────────────────
