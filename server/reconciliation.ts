@@ -113,6 +113,26 @@ export async function runReconciliation(): Promise<void> {
             );
           } else if (["failed", "failure", "cancelled", "canceled", "rejected"].includes(status)) {
             await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+            // Créer une transaction échouée pour qu'elle apparaisse dans l'historique
+            const failTxId = `SP-${pending.omnipayReference}`;
+            const existing = await storage.getTransactionByTxId(failTxId);
+            if (!existing) {
+              storage.createTransaction({
+                merchantId: pending.merchantId,
+                country: pending.country,
+                txId: failTxId,
+                amount: pending.amount,
+                payerNumber: pending.payerPhone || null,
+                payerName: pending.payerName || null,
+                status: "failed",
+                provider: "westpay",
+                omnipayTxId: null,
+                operator: pending.paymentMethod || null,
+                omnipayReference: pending.omnipayReference || null,
+                errorMessage: `Paiement ${status} (réconciliation)`,
+                providerFee: 0,
+              }).catch(() => {});
+            }
             console.log(`[RECONCILIATION] SendavaPay ECHEC — ref=${pending.omnipayReference} status=${status}`);
           } else {
             console.log(`[RECONCILIATION] SendavaPay EN COURS — ref=${pending.omnipayReference} status=${status || "inconnu"}`);

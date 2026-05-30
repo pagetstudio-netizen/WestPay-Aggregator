@@ -1978,23 +1978,27 @@ export async function registerRoutes(
         createdAt: t.createdAt,
       }));
 
-      const pendingItems = pendingPays.map(p => ({
-        id: `pp-${p.id}`,
-        rowId: p.id,
-        type: "pending" as const,
-        txId: p.txId || `PP-${p.id}`,
-        amount: p.amount,
-        status: p.status,
-        country: p.country,
-        merchantId: p.merchantId,
-        merchantName: merchantMap.get(p.merchantId) || `Marchand #${p.merchantId}`,
-        payerNumber: p.payerPhone,
-        operator: p.paymentMethod,
-        provider: (p as any).gateway || null,
-        omnipayReference: p.omnipayReference,
-        errorMessage: (p as any).errorMessage || null,
-        createdAt: p.createdAt,
-      }));
+      // Seuls les paiements vraiment EN COURS (omnipay_pending/submitted) sont affichés ici.
+      // Les confirmés et échoués apparaissent déjà via la table transactions → pas de doublon.
+      const pendingItems = pendingPays
+        .filter(p => ["omnipay_pending", "submitted", "pending"].includes(p.status))
+        .map(p => ({
+          id: `pp-${p.id}`,
+          rowId: p.id,
+          type: "pending" as const,
+          txId: p.txId || `PP-${p.id}`,
+          amount: p.amount,
+          status: p.status,
+          country: p.country,
+          merchantId: p.merchantId,
+          merchantName: merchantMap.get(p.merchantId) || `Marchand #${p.merchantId}`,
+          payerNumber: p.payerPhone,
+          operator: p.paymentMethod,
+          provider: (p as any).gateway || null,
+          omnipayReference: p.omnipayReference,
+          errorMessage: (p as any).errorMessage || null,
+          createdAt: p.createdAt,
+        }));
 
       let all = [...payments, ...withdrawalItems, ...transferItems, ...pendingItems];
 
@@ -3691,6 +3695,25 @@ export async function registerRoutes(
 
                 if (isFailure) {
                   await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+                  const mbFailRef = pending.omnipayReference || `FAIL-MB-${pending.id}`;
+                  const mbExistingFail = await storage.getTransactionByTxId(mbFailRef);
+                  if (!mbExistingFail) {
+                    storage.createTransaction({
+                      merchantId: pending.merchantId,
+                      country: pending.country,
+                      txId: mbFailRef,
+                      amount: pending.amount,
+                      payerNumber: pending.payerPhone || null,
+                      payerName: pending.payerName || null,
+                      status: "failed",
+                      provider: "westpay",
+                      omnipayTxId: null,
+                      operator: pending.paymentMethod || null,
+                      omnipayReference: pending.omnipayReference,
+                      errorMessage: `Paiement ${s} par Mbiyo`,
+                      providerFee: 0,
+                    }).catch(() => {});
+                  }
                   return res.json({ status: "failed", paymentId: pending.id });
                 }
 
@@ -3742,6 +3765,25 @@ export async function registerRoutes(
 
               if (spFailed) {
                 await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+                const failTxId = `SP-${pending.omnipayReference}`;
+                const existingFail = await storage.getTransactionByTxId(failTxId);
+                if (!existingFail) {
+                  storage.createTransaction({
+                    merchantId: pending.merchantId,
+                    country: pending.country,
+                    txId: failTxId,
+                    amount: pending.amount,
+                    payerNumber: pending.payerPhone || null,
+                    payerName: pending.payerName || null,
+                    status: "failed",
+                    provider: "westpay",
+                    omnipayTxId: null,
+                    operator: pending.paymentMethod || null,
+                    omnipayReference: pending.omnipayReference,
+                    errorMessage: `Paiement ${spStatus} par SendavaPay`,
+                    providerFee: 0,
+                  }).catch(() => {});
+                }
                 return res.json({ status: "failed", paymentId: pending.id });
               }
 
@@ -4240,6 +4282,24 @@ export async function registerRoutes(
 
       } else if (isFailure) {
         await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+        const failTxId = `SP-${reference}`;
+        const existingFailTx = await storage.getTransactionByTxId(failTxId);
+        if (!existingFailTx) {
+          storage.createTransaction({
+            merchantId: pending.merchantId,
+            country: pending.country,
+            txId: failTxId,
+            amount: pending.amount,
+            payerNumber: payload.customerPhone || pending.payerPhone || null,
+            payerName: pending.payerName || null,
+            status: "failed",
+            provider: "westpay",
+            omnipayTxId: null,
+            omnipayReference: pending.omnipayReference || reference,
+            errorMessage: `Paiement ${payload.status || "refusé"} par SendavaPay`,
+            providerFee: 0,
+          }).catch(() => {});
+        }
         console.log(`[SENDAVAPAY CALLBACK] Paiement echoue: ref=${reference} status=${payload.status}`);
         return res.json({ status: "failed" });
 
