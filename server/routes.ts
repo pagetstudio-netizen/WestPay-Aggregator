@@ -5565,7 +5565,7 @@ export async function registerRoutes(
           return res.status(500).json({ message: "Service de retrait non configure. Contactez l'administrateur." });
         }
         try {
-          const msisdnFull = prependDialCode(phone, mc.country);
+          const msisdnFull = "+" + prependDialCode(phone, mc.country);
           const countryCode = SENDAVAPAY_COUNTRY_CODES[mc.country] || "";
           const currency = SENDAVAPAY_CURRENCY_MAP[countryCode] || "XOF";
           const sendavaOperator = toSendavaOperator(operator || "", countryCode);
