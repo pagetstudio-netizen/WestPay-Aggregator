@@ -1621,7 +1621,11 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
       setAmount(""); setPhone(""); setSelectedOperator(""); setRecipientName("");
       toast({ title: "Demande soumise", description: "Votre demande de reversement est en cours de traitement." });
     },
-    onError: () => toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" }),
+    onError: (err: any) => toast({
+      title: "Retrait non abouti",
+      description: err?.message || "Une erreur est survenue. Votre solde a été restitué.",
+      variant: "destructive",
+    }),
   });
 
   const handleSubmit = (e: { preventDefault: () => void }) => {

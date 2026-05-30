@@ -5578,24 +5578,34 @@ export async function registerRoutes(
             console.log(`[WITHDRAWAL SENDAVAPAY] Initie (statut: ${result.data?.status}) - ref=${spRef}`);
             return res.json({ ...w, status: "pending", omnipayRef: spRef, fees: spFee, netAmount, autoProcessed: true, gateway: "sendavapay" });
           } else {
-            const errMsg = result.message || result.data?.message || "Echec du transfert SendavaPay";
+            const errMsg = result.message || result.data?.message || (result as any).error || "Echec du transfert SendavaPay";
             console.warn(`[WITHDRAWAL SENDAVAPAY] Echec: ${errMsg}`);
             await storage.updateWithdrawalStatus(w.id, "failed", `Retrait non abouti: ${errMsg}`, reference);
             notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
             notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
             await storage.incrementMerchantCountryBalance(mc.id, amount);
-            return res.status(400).json({ message: "Retrait non abouti. Votre solde a été restitué." });
+            return res.status(400).json({
+              message: `Retrait refusé par SendavaPay : ${errMsg}. Votre solde a été restitué.`,
+              providerMessage: errMsg,
+              provider: "sendavapay",
+            });
           }
         } catch (spErr: any) {
           const errDetail = spErr?.cause?.message || spErr?.message || "unknown";
           const isTimeout = errDetail.includes("abort") || errDetail.includes("timeout") || errDetail.includes("UND_ERR");
-          const techMsg = isTimeout ? "Timeout connexion SendavaPay" : `Erreur technique: ${errDetail}`;
+          const techMsg = isTimeout
+            ? "Délai d'attente dépassé (SendavaPay inaccessible)"
+            : `Erreur technique : ${errDetail}`;
           console.error(`[WITHDRAWAL SENDAVAPAY] Erreur catch — retrait #${w.id} | ${techMsg}`);
           await storage.updateWithdrawalStatus(w.id, "failed", techMsg, reference);
           notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
           notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
           await storage.incrementMerchantCountryBalance(mc.id, amount);
-          return res.status(500).json({ message: "Retrait non abouti. Votre solde a été restitué." });
+          return res.status(500).json({
+            message: `${techMsg}. Votre solde a été restitué.`,
+            providerMessage: techMsg,
+            provider: "sendavapay",
+          });
         }
       } else {
         const apiKeyToUse = await getOmnipayPayoutApiKey();
