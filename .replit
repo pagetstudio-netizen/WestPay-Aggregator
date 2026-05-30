@@ -56,6 +56,7 @@ TELEGRAM_OTP_BOT_TOKEN = "8904995228:AAGyiD7ENwGtKG1gfNJkvThKBWbQaw0xWf4"
 SENDAVAPAY_API_KEY = "sdk_ohxH8aNP7ZGeHwcsRb2W7CKUZTRHBPZT"
 SENDAVAPAY_WEBHOOK_SECRET = "whsec_8e09e29347a425b1e5e44a3d23a5570e6711a49de896166f"
 CUSTOM_DATABASE_URL = "postgresql://postgres.bauubqsgtuoxxsufqklp:cotedivoire228@aws-1-us-west-2.pooler.supabase.com:5432/postgres"
+OPENAI_API_KEY = "W3FfiUn46LWll5H8"
 
 [postMerge]
 path = "scripts/post-merge.sh"

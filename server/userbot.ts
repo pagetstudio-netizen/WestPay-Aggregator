@@ -1,8 +1,8 @@
 /**
  * WestPay Userbot — Customer Service Agent (Junjie)
  * Connects a real Telegram account (MTProto via GramJS) to merchant groups.
- * Behaves like a real person: reads messages, responds naturally in the same language.
- * No markdown formatting, no commands list, no robotic behaviour.
+ * Powered by OpenAI GPT-4o-mini for intelligent, contextual responses.
+ * Always responds in English regardless of the merchant's language.
  */
 
 import { TelegramClient } from "telegram";
@@ -188,6 +188,88 @@ async function getStatsText(merchantId: number, lang: "fr" | "en"): Promise<stri
     return `Statistiques de votre compte :\n\nNombre de transactions : ${stats.transactionCount}\nVolume total : ${formatAmount(stats.totalVolume)}`;
   }
   return `Your account statistics:\n\nTotal transactions: ${stats.transactionCount}\nTotal volume: ${formatAmount(stats.totalVolume)}`;
+}
+
+// ─── OpenAI-powered response ──────────────────────────────────────────────────
+async function buildMerchantContext(merchantId: number): Promise<string> {
+  try {
+    const [countries, withdrawals, transactions, stats] = await Promise.all([
+      storage.getMerchantCountries(merchantId).catch(() => []),
+      storage.getWithdrawals(merchantId).catch(() => []),
+      storage.getTransactions(merchantId).catch(() => []),
+      storage.getMerchantStats(merchantId).catch(() => ({ transactionCount: 0, totalVolume: 0 })),
+    ]);
+
+    const active = (countries as any[]).filter((mc: any) => mc.active);
+    const balanceLines = active.map((mc: any) =>
+      `${mc.country}: ${mc.balance.toLocaleString("fr-FR")} FCFA`
+    ).join(", ") || "No active countries";
+
+    const pending = (withdrawals as any[]).filter((w: any) => w.status === "pending");
+    const lastTx = (transactions as any[]).slice(0, 3).map((t: any) =>
+      `${t.amount} FCFA (${t.status}) on ${new Date(t.createdAt).toLocaleDateString()}`
+    ).join("; ") || "none";
+
+    return `Merchant context:
+- Balances: ${balanceLines}
+- Pending withdrawals: ${pending.length}
+- Total transactions: ${(stats as any).transactionCount}, Total volume: ${(stats as any).totalVolume?.toLocaleString()} FCFA
+- Recent transactions: ${lastTx}`;
+  } catch {
+    return "Merchant context: unavailable";
+  }
+}
+
+async function askOpenAI(userMessage: string, merchantContext: string): Promise<string | null> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+
+  const systemPrompt = `You are a professional customer support agent for WestPay, a Mobile Money payment aggregator platform serving West Africa (Togo, Benin, Burkina Faso, Côte d'Ivoire, Mali, Senegal, and more).
+
+RULES:
+- Always respond in English only, regardless of the language the merchant uses.
+- Be friendly, concise, and professional. Max 3-4 sentences unless a detailed explanation is needed.
+- Never use markdown formatting (no **, no *, no #). Plain text only.
+- You have access to the merchant's real-time account data below — use it to give accurate, specific answers.
+- If asked about balance, withdrawals, or transactions, refer to the actual data provided.
+- For API integration questions, explain: get API key from dashboard > API & SDK tab, use POST /api/payment/initiate, configure webhook for confirmations, docs at /api-docs.
+- For delays: Mobile Money payments confirm in a few minutes, withdrawals process within 24-48 business hours.
+- For issues or errors: ask for the transaction reference (format OP-XXXX or TR-XXXX).
+- WestPay supports: MTN, Orange, Moov, Wave, TMoney, Flooz and crypto via OxaPay.
+- Do not invent information. If unsure, say you'll escalate to the technical team.
+
+${merchantContext}`;
+
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+        max_tokens: 300,
+        temperature: 0.7,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.error("[USERBOT] OpenAI error:", res.status, err);
+      return null;
+    }
+
+    const data = await res.json() as any;
+    return data.choices?.[0]?.message?.content?.trim() || null;
+  } catch (err: any) {
+    console.error("[USERBOT] OpenAI fetch failed:", err.message);
+    return null;
+  }
 }
 
 // ─── Natural conversation response builder ────────────────────────────────────
@@ -394,21 +476,35 @@ async function handleMessage(event: any): Promise<void> {
   const senderIsAdmin = await isGroupAdmin(chatId, sender.id).catch(() => false);
   if (senderIsAdmin) return;
 
-  // ── Build natural response ────────────────────────────────────────────────
+  // ── Build response ────────────────────────────────────────────────────────
   const merchant = await storage.getMerchantById(merchantId);
   if (!merchant) return;
 
-  const lang: "fr" | "en" = "en"; // always respond in English regardless of merchant's language
-  const response = await buildNaturalResponse(text, merchantId, lang);
-  if (!response) return;
-
-  // ── Apply configured response delay ──────────────────────────────────────
+  // ── Apply delay + typing indicator before generating (feels human) ────────
   const delayMs = await getResponseDelayMs();
   if (delayMs > 0) {
-    // Show typing indicator while waiting
     await sendTyping(chat);
-    await new Promise(resolve => setTimeout(resolve, delayMs));
+    await new Promise(resolve => setTimeout(resolve, Math.min(delayMs, 2000)));
   }
+
+  // ── Try OpenAI first, fallback to keyword-based ───────────────────────────
+  let response: string | null = null;
+
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      const merchantContext = await buildMerchantContext(merchantId);
+      response = await askOpenAI(text, merchantContext);
+      if (response) console.log("[USERBOT] OpenAI response generated");
+    } catch (err: any) {
+      console.error("[USERBOT] OpenAI failed, using fallback:", err.message);
+    }
+  }
+
+  if (!response) {
+    response = await buildNaturalResponse(text, merchantId, "en");
+  }
+
+  if (!response) return;
 
   // Send plain text — NO parseMode to avoid markdown interpretation
   await client.sendMessage(chat, {
