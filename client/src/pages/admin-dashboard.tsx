@@ -7484,6 +7484,7 @@ export default function AdminDashboard() {
         { title: "Paramètres", icon: Settings, tab: "settings" },
         { title: "SDK API", icon: BookOpen, tab: "sdk" },
         { title: "Notifications", icon: Mail, tab: "notifications" },
+        { title: "Support Bot", icon: MessageSquare, tab: "userbot" },
       ],
     },
   ];
@@ -7609,6 +7610,7 @@ export default function AdminDashboard() {
             {activeTab === "settings" && <SettingsPanel />}
             {activeTab === "sdk" && <SdkPanel />}
             {activeTab === "notifications" && <NotificationsPanel />}
+            {activeTab === "userbot" && <UserbotPanel />}
           </main>
         </div>
       </div>
