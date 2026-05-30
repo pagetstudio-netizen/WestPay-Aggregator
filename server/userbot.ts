@@ -398,7 +398,7 @@ async function handleMessage(event: any): Promise<void> {
   const merchant = await storage.getMerchantById(merchantId);
   if (!merchant) return;
 
-  const lang = detectLanguage(text);
+  const lang: "fr" | "en" = "en"; // always respond in English regardless of merchant's language
   const response = await buildNaturalResponse(text, merchantId, lang);
   if (!response) return;
 
