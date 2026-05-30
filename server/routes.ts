@@ -4397,7 +4397,7 @@ export async function registerRoutes(
         webhookSecret: dbWebhookSecret ? "configured" : "",
         configured: !!activeApiKey,
         envOverride,
-        callbackUrl: `${process.env.APP_URL || "https://west-pay-aggregator--kouadioblanchar.replit.app"}/api/sendavapay/callback`,
+        callbackUrl: `${process.env.APP_URL || "https://west-pay-aggregator-1--beryowone.replit.app"}/api/sendavapay/callback`,
       });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -4442,7 +4442,7 @@ export async function registerRoutes(
     try {
       const apiKey = await getSendavaApiKey();
       if (!apiKey) return res.status(400).json({ message: "Service de paiement non configure." });
-      const result = await sendavaConfigureWebhook(apiKey, `${process.env.APP_URL || "https://west-pay-aggregator--kouadioblanchar.replit.app"}/api/sendavapay/callback`);
+      const result = await sendavaConfigureWebhook(apiKey, `${process.env.APP_URL || "https://west-pay-aggregator-1--beryowone.replit.app"}/api/sendavapay/callback`);
       if (result.success && result.data?.webhookSecret) {
         await storage.setSetting("sendavapay_webhook_secret", result.data.webhookSecret);
       }

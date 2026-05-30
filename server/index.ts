@@ -109,7 +109,7 @@ app.use((req, res, next) => {
         webhookSecret = randomBytes(24).toString("hex");
         await storage.setSetting("telegram_webhook_secret", webhookSecret);
       }
-      const webhookUrl = `${process.env.APP_URL || "https://west-pay-aggregator--kouadioblanchar.replit.app"}/api/telegram/webhook/${webhookSecret}`;
+      const webhookUrl = `${process.env.APP_URL || "https://west-pay-aggregator-1--beryowone.replit.app"}/api/telegram/webhook/${webhookSecret}`;
       setupWebhook(app, webhookSecret);
       await registerWebhookUrl(webhookUrl);
     } else {
