@@ -2068,355 +2068,242 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
     zoneGroups.get(zone)!.push(c);
   });
 
+  // Swap handler — inverse De et À
+  const handleSwap = () => {
+    if (!fromCountryId || !toCountryId) return;
+    const prevFrom = fromCountryId;
+    const prevTo = toCountryId;
+    setFromCountryId(prevTo);
+    setToCountryId(prevFrom);
+  };
+
+  const fromMCDisplay = eligibleCountries.find(c => String(c.id) === fromCountryId);
+  const toMCDisplay = (fromMCDisplay
+    ? eligibleCountries.filter(c =>
+        String(c.id) !== fromCountryId &&
+        wtcMap.get(c.country)?.currencyZone === (wtcMap.get(fromMCDisplay.country)?.currencyZone || "")
+      )
+    : []).find(c => String(c.id) === toCountryId)
+    || toCountries.find(c => String(c.id) === toCountryId);
+
   return (
-    <div className="-m-4 md:-m-6 min-h-full" style={{ background: "#f2f3f5" }}>
+    <div className="min-h-full" style={{ background: "#fff" }}>
+      <div className="px-4 pt-6 pb-8 space-y-5 max-w-lg mx-auto">
 
-      {/* ── Hero header — gradient banner ── */}
-      <div className="px-5 pt-6 pb-5 relative overflow-hidden"
-        style={{ background: "linear-gradient(135deg,#512da8 0%,#7e57c2 60%,#9575cd 100%)" }}>
-        {/* Decorative circles */}
-        <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }} />
-        <div className="absolute top-8 -right-3 w-16 h-16 rounded-full" style={{ background: "rgba(255,255,255,0.06)" }} />
-        <div className="flex items-center gap-3 mb-5 relative z-10">
-          <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0"
-            style={{ background: "rgba(255,255,255,0.18)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.25)" }}>
-            <ArrowRightLeft className="w-5 h-5 text-white" />
+        {/* ── Montant ── */}
+        <div>
+          <p className="text-sm font-semibold mb-2" style={{ color: "#1a1a1a" }}>Montant</p>
+          <div className="w-full rounded-xl overflow-hidden" style={{ border: "1.5px solid #d1d5db" }}>
+            <input
+              type="number"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="Entrez le montant"
+              min="1"
+              className="w-full px-4 py-5 text-lg outline-none bg-white"
+              style={{ color: parsedAmt > 0 ? "#1a1a1a" : "#9ca3af", fontWeight: parsedAmt > 0 ? 600 : 400 }}
+              data-testid="input-virement-amount"
+            />
           </div>
-          <div>
-            <h2 className="text-base font-bold text-white leading-tight">{t("walletTransfersTitle")}</h2>
-            <p className="text-xs mt-0.5 text-white/70">Transférez entre wallets de la même zone monétaire</p>
+          {fromMCObj && parsedAmt > 0 && (
+            <p className="text-xs mt-1.5 pl-1" style={{ color: insufficientBalance ? "#e53e3e" : "#888" }}>
+              Solde : <strong>{fromMCObj.balance.toLocaleString("fr-FR")} {fromZone}</strong>
+              {insufficientBalance && " — insuffisant"}
+            </p>
+          )}
+        </div>
+
+        {/* ── De ── */}
+        <div>
+          <p className="text-sm font-semibold mb-2" style={{ color: "#1a1a1a" }}>De</p>
+          <div className="relative w-full rounded-xl overflow-hidden" style={{ border: "1.5px solid #d1d5db", background: "#fff" }}>
+            <div className="absolute left-0 top-0 bottom-0 flex items-center px-3 pointer-events-none" style={{ background: "transparent" }}>
+              <span className="text-xl">{fromMCDisplay ? (ZONE_FLAGS[fromMCDisplay.country] || "🌍") : ""}</span>
+            </div>
+            <select
+              value={fromCountryId}
+              onChange={(e) => { setFromCountryId(e.target.value); setToCountryId(""); }}
+              className="w-full appearance-none bg-transparent py-4 pr-10 outline-none text-sm font-semibold cursor-pointer"
+              style={{ paddingLeft: fromMCDisplay ? "3rem" : "1rem", color: fromCountryId ? "#1a1a1a" : "#9ca3af" }}
+              data-testid="select-from-country"
+            >
+              <option value="">Sélectionner un pays</option>
+              {eligibleCountries.map(c => (
+                <option key={c.id} value={String(c.id)}>
+                  {c.country}
+                </option>
+              ))}
+            </select>
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </div>
           </div>
         </div>
-        {/* Stat pills */}
-        <div className="grid grid-cols-2 gap-3 relative z-10">
-          <div className="rounded-2xl p-3.5" style={{ background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.2)", backdropFilter: "blur(8px)" }}>
-            <p className="text-xs font-semibold mb-1 text-white/70">Total transféré</p>
-            <p className="text-xl font-bold text-white">{totalTransferred.toLocaleString("fr-FR")}<span className="text-xs ml-1 font-semibold text-white/60">F</span></p>
-          </div>
-          <div className="rounded-2xl p-3.5" style={{ background: pendingCount > 0 ? "rgba(251,140,0,0.25)" : "rgba(255,255,255,0.15)", border: `1px solid ${pendingCount > 0 ? "rgba(251,140,0,0.5)" : "rgba(255,255,255,0.2)"}`, backdropFilter: "blur(8px)" }}>
-            <p className="text-xs font-semibold mb-1 text-white/70">En attente</p>
-            <p className="text-xl font-bold" style={{ color: pendingCount > 0 ? "#ffe082" : "#fff" }}>{pendingCount}</p>
+
+        {/* ── Swap button ── */}
+        <div className="flex justify-center -my-1">
+          <button
+            type="button"
+            onClick={handleSwap}
+            className="w-14 h-14 rounded-full flex items-center justify-center shadow-md transition-transform active:scale-95"
+            style={{ background: "#4caf7d", border: "none", flexShrink: 0 }}
+            data-testid="button-swap-countries"
+            title="Inverser les pays"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="3" x2="12" y2="21" />
+              <polyline points="7 8 12 3 17 8" />
+              <polyline points="7 16 12 21 17 16" />
+            </svg>
+          </button>
+        </div>
+
+        {/* ── À ── */}
+        <div>
+          <p className="text-sm font-semibold mb-2" style={{ color: "#1a1a1a" }}>À</p>
+          <div className="relative w-full rounded-xl overflow-hidden" style={{ border: "1.5px solid #d1d5db", background: "#f3f4f6" }}>
+            <div className="absolute left-0 top-0 bottom-0 flex items-center px-3 pointer-events-none">
+              <span className="text-xl">{toMCDisplay ? (ZONE_FLAGS[toMCDisplay.country] || "🌍") : ""}</span>
+            </div>
+            <select
+              value={toCountryId}
+              onChange={(e) => setToCountryId(e.target.value)}
+              disabled={!fromCountryId}
+              className="w-full appearance-none bg-transparent py-4 pr-10 outline-none text-sm font-semibold cursor-pointer disabled:cursor-not-allowed"
+              style={{ paddingLeft: toMCDisplay ? "3rem" : "1rem", color: toCountryId ? "#1a1a1a" : "#9ca3af" }}
+              data-testid="select-to-country"
+            >
+              <option value="">{!fromCountryId ? "Sélectionnez d'abord un pays source" : toCountries.length === 0 ? `Aucun pays dans la même zone` : "Sélectionner un pays"}</option>
+              {toCountries.map(c => (
+                <option key={c.id} value={String(c.id)}>
+                  {c.country}
+                </option>
+              ))}
+            </select>
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div className="p-4 space-y-4">
-
-        {/* ── Zone info pills ── */}
-        {wtcList.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {Array.from(zoneGroups.entries()).map(([zone, countries]) => {
-              const zc = ZONE_COLORS[zone] || { bg: "#f5f5f5", text: "#555", pill: "#888" };
-              return (
-                <div key={zone} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold"
-                  style={{ background: zc.bg, color: zc.text }}>
-                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: zc.pill }} />
-                  Zone {zone} · {countries.map(c => ZONE_FLAGS[c.country] || "🌍").join(" ")} {countries.map(c => c.country).join(", ")}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* ── Warning if not enough countries ── */}
-        {eligibleCountries.length < 2 && (
-          <div className="rounded-2xl p-4 flex items-start gap-3" style={{ background: "#fffbea", border: "1.5px solid #fef3c7" }}>
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "#d97706" }} />
-            <p className="text-xs leading-relaxed" style={{ color: "#92400e" }}>{t("transferWarning")}</p>
-          </div>
-        )}
-
-        {/* ── Transfer form ── */}
-        <form onSubmit={handleSubmit}>
-
-          {/* Montant */}
-          <div className="bg-white rounded-2xl overflow-hidden shadow-sm mb-4" style={{ border: "1.5px solid #e8ecf0" }}>
-            <div className="px-5 py-4 flex items-center gap-2.5" style={{ borderBottom: "1px solid #f5f5f5" }}>
-              <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "linear-gradient(135deg,#7e57c2,#512da8)" }}>
-                <DollarSign className="w-4 h-4 text-white" />
-              </div>
-              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Montant à transférer</span>
+        {/* ── Fee recap (affiché discrètement si rempli) ── */}
+        {fromCountryId && toCountryId && parsedAmt > 0 && (
+          <div className="rounded-xl px-4 py-3 space-y-1.5" style={{ background: insufficientBalance ? "#fff5f5" : "#f0faf5", border: `1px solid ${insufficientBalance ? "#fca5a5" : "#bbf7d0"}` }}>
+            <div className="flex justify-between text-xs">
+              <span style={{ color: "#555" }}>Montant</span>
+              <span style={{ color: "#1a1a1a", fontWeight: 600 }}>{parsedAmt.toLocaleString("fr-FR")} {fromZone || "FCFA"}</span>
             </div>
-            <div className="px-5 py-5">
-              <div className="rounded-2xl overflow-hidden" style={{ border: `2px solid ${parsedAmt > 0 ? "#7e57c2" : "#e2e8f0"}`, background: "#fafbff", transition: "border-color 0.2s" }}>
-                <div className="flex items-center">
-                  <div className="px-4 py-4 shrink-0 flex items-center justify-center" style={{ background: "linear-gradient(135deg,#7e57c2,#512da8)", minWidth: 64 }}>
-                    <span className="text-xs font-black text-white">{fromZone || "FCFA"}</span>
-                  </div>
-                  <input
-                    type="number"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    placeholder="0"
-                    min="1"
-                    className="flex-1 px-4 py-4 text-2xl font-black outline-none bg-transparent"
-                    style={{ color: parsedAmt > 0 ? "#512da8" : "#1a1a1a" }}
-                    data-testid="input-virement-amount"
-                  />
-                </div>
-              </div>
-              {fromMCObj && amount && parsedAmt > 0 && (
-                <div className="mt-2.5 flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: insufficientBalance ? "#fff5f5" : "#f0f4ff", border: `1px solid ${insufficientBalance ? "#feb2b2" : "#e0e7ff"}` }}>
-                  <Wallet className="w-3.5 h-3.5 shrink-0" style={{ color: insufficientBalance ? "#c53030" : "#7e57c2" }} />
-                  <p className="text-xs" style={{ color: insufficientBalance ? "#c53030" : "#555" }}>
-                    Solde disponible : <strong>{fromMCObj.balance.toLocaleString("fr-FR")} {fromZone}</strong>
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* From / Arrow / To */}
-          <div className="relative mb-4">
-
-            {/* From */}
-            <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-              <div className="px-4 py-3 flex items-center gap-2.5 relative overflow-hidden"
-                style={{ background: "linear-gradient(135deg,#512da8 0%,#7e57c2 100%)", borderBottom: "none" }}>
-                <div className="absolute -top-3 -right-3 w-12 h-12 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }} />
-                <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: "rgba(255,255,255,0.2)" }}>
-                  <span className="text-xs font-black text-white">DE</span>
-                </div>
-                <span className="text-xs font-bold uppercase tracking-wider text-white">Wallet source</span>
-              </div>
-              <div className="px-4 py-4">
-                {eligibleCountries.length === 0 ? (
-                  <p className="text-sm text-center py-2" style={{ color: "#bbb" }}>Aucun pays éligible</p>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    {eligibleCountries.map((c) => {
-                      const zone = wtcMap.get(c.country)?.currencyZone || "";
-                      const selected = String(c.id) === fromCountryId;
-                      return (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => { setFromCountryId(String(c.id)); setToCountryId(""); }}
-                          className="flex items-center gap-2.5 px-3 py-3 rounded-xl transition-all text-left active:scale-95"
-                          style={{
-                            background: selected
-                              ? "linear-gradient(135deg,#512da8 0%,#7e57c2 100%)"
-                              : "#f8f9fc",
-                            border: `1.5px solid ${selected ? "#7e57c2" : "#e8ecf0"}`,
-                            boxShadow: selected ? "0 4px 14px rgba(81,45,168,0.3)" : "none",
-                          }}
-                          data-testid={`select-from-${c.id}`}
-                        >
-                          <span className="text-xl leading-none shrink-0">{ZONE_FLAGS[c.country] || "🌍"}</span>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-bold truncate leading-tight" style={{ color: selected ? "#fff" : "#1a1a1a" }}>{c.country}</p>
-                            <p className="text-xs leading-tight mt-0.5 font-semibold" style={{ color: selected ? "rgba(255,255,255,0.75)" : "#7e57c2" }}>
-                              {c.balance.toLocaleString("fr-FR")} {zone}
-                            </p>
-                          </div>
-                          {selected && <CheckCircle2 className="w-4 h-4 shrink-0 text-white" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Arrow swap button */}
-            <div className="flex justify-center -my-2 relative z-10">
-              <div className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-lg"
-                style={{ background: "linear-gradient(135deg,#7e57c2 0%,#512da8 100%)", border: "3px solid #f2f3f5" }}>
-                <ArrowRightLeft className="w-5 h-5 text-white" />
-              </div>
-            </div>
-
-            {/* To */}
-            <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-              <div className="px-4 py-3 flex items-center justify-between gap-2 relative overflow-hidden"
-                style={{ background: "linear-gradient(135deg,#00963f 0%,#00b050 100%)", borderBottom: "none" }}>
-                <div className="absolute -top-3 -right-3 w-12 h-12 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }} />
-                <div className="flex items-center gap-2.5">
-                  <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: "rgba(255,255,255,0.2)" }}>
-                    <span className="text-xs font-black text-white">À</span>
-                  </div>
-                  <span className="text-xs font-bold uppercase tracking-wider text-white">Wallet destination</span>
-                </div>
-                {fromZone && <span className="text-xs text-white/70 font-semibold">Zone {fromZone}</span>}
-              </div>
-              <div className="px-4 py-4">
-                {!fromCountryId ? (
-                  <div className="py-4 text-center">
-                    <p className="text-sm" style={{ color: "#ccc" }}>Sélectionnez d'abord un pays source</p>
-                  </div>
-                ) : toCountries.length === 0 ? (
-                  <div className="py-4 text-center rounded-xl" style={{ background: "#fffbea" }}>
-                    <p className="text-sm font-medium" style={{ color: "#d97706" }}>Aucun autre wallet dans la zone {fromZone}</p>
-                    <p className="text-xs mt-1" style={{ color: "#aaa" }}>Activez d'autres pays de la même zone</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    {toCountries.map((c) => {
-                      const zone = wtcMap.get(c.country)?.currencyZone || "";
-                      const selected = String(c.id) === toCountryId;
-                      return (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => setToCountryId(String(c.id))}
-                          className="flex items-center gap-2.5 px-3 py-3 rounded-xl transition-all text-left active:scale-95"
-                          style={{
-                            background: selected
-                              ? "linear-gradient(135deg,#00963f 0%,#00b050 100%)"
-                              : "#f8f9fc",
-                            border: `1.5px solid ${selected ? "#00b050" : "#e8ecf0"}`,
-                            boxShadow: selected ? "0 4px 14px rgba(0,176,80,0.3)" : "none",
-                          }}
-                          data-testid={`select-to-${c.id}`}
-                        >
-                          <span className="text-xl leading-none shrink-0">{ZONE_FLAGS[c.country] || "🌍"}</span>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-bold truncate leading-tight" style={{ color: selected ? "#fff" : "#1a1a1a" }}>{c.country}</p>
-                            <p className="text-xs leading-tight mt-0.5 font-semibold" style={{ color: selected ? "rgba(255,255,255,0.75)" : "#00b050" }}>
-                              {c.balance.toLocaleString("fr-FR")} {zone}
-                            </p>
-                          </div>
-                          {selected && <CheckCircle2 className="w-4 h-4 shrink-0 text-white" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Fee recap */}
-          {fromCountryId && toCountryId && parsedAmt > 0 && (
-            <div className="rounded-2xl p-4 mb-4 space-y-2"
-              style={{ background: insufficientBalance ? "#fff5f5" : "#f0faf5", border: `1.5px solid ${insufficientBalance ? "#feb2b2" : "#c3e6cb"}` }}>
-              <div className="flex justify-between text-sm">
-                <span style={{ color: "#555" }}>Montant</span>
-                <span style={{ color: "#1a1a1a", fontWeight: 600 }}>{parsedAmt.toLocaleString("fr-FR")} {fromZone || "FCFA"}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span style={{ color: "#555" }}>Frais de virement</span>
-                {feeExempt ? (
-                  <span style={{ color: "#2e7d32", fontWeight: 600 }}>✦ Sans frais</span>
-                ) : (
-                  <span style={{ color: estimatedFee > 0 ? "#e53e3e" : "#555", fontWeight: 600 }}>
+            <div className="flex justify-between text-xs">
+              <span style={{ color: "#555" }}>Frais</span>
+              {feeExempt
+                ? <span style={{ color: "#2e7d32", fontWeight: 600 }}>Sans frais</span>
+                : <span style={{ color: estimatedFee > 0 ? "#e53e3e" : "#555", fontWeight: 600 }}>
                     {estimatedFee > 0 ? `−${estimatedFee.toLocaleString("fr-FR")} ${fromZone || "FCFA"}` : "0"}
                   </span>
-                )}
-              </div>
-              <div className="flex justify-between text-sm pt-2" style={{ borderTop: `1px solid ${insufficientBalance ? "#feb2b2" : "#c3e6cb"}` }}>
-                <span style={{ fontWeight: 700, color: insufficientBalance ? "#c53030" : "#155724" }}>Total débité</span>
-                <span style={{ fontWeight: 700, color: insufficientBalance ? "#c53030" : "#155724" }}>{totalNeeded.toLocaleString("fr-FR")} {fromZone || "FCFA"}</span>
-              </div>
-              {insufficientBalance && fromMCObj && (
-                <p className="text-xs pt-1" style={{ color: "#c53030" }}>
-                  Solde insuffisant — disponible : {fromMCObj.balance.toLocaleString("fr-FR")} {fromZone}
-                </p>
-              )}
+              }
             </div>
-          )}
+            <div className="flex justify-between text-xs pt-1.5" style={{ borderTop: `1px solid ${insufficientBalance ? "#fca5a5" : "#bbf7d0"}` }}>
+              <span style={{ fontWeight: 700, color: insufficientBalance ? "#c53030" : "#155724" }}>Total débité</span>
+              <span style={{ fontWeight: 700, color: insufficientBalance ? "#c53030" : "#155724" }}>{totalNeeded.toLocaleString("fr-FR")} {fromZone || "FCFA"}</span>
+            </div>
+          </div>
+        )}
 
-          {/* Submit */}
-          <button
-            type="submit"
-            disabled={isDisabled}
-            className="w-full rounded-2xl py-4.5 text-sm font-bold flex items-center justify-center gap-2.5 transition-all shadow-lg active:scale-98"
-            style={{
-              background: isDisabled
-                ? "#e5e7eb"
-                : insufficientBalance
-                ? "linear-gradient(135deg,#e53935,#b71c1c)"
-                : "linear-gradient(135deg,#512da8 0%,#7e57c2 50%,#9575cd 100%)",
-              color: isDisabled ? "#9ca3af" : "#fff",
-              border: "none",
-              paddingTop: 14,
-              paddingBottom: 14,
-              boxShadow: isDisabled ? "none" : "0 4px 20px rgba(81,45,168,0.35)",
-            }}
-            data-testid="button-submit-virement"
-          >
-            {createMutation.isPending
-              ? <Loader2 className="w-5 h-5 animate-spin" />
-              : insufficientBalance
-              ? <AlertCircle className="w-5 h-5" />
-              : <Send className="w-5 h-5" />}
-            {createMutation.isPending ? t("processingLabel") : insufficientBalance ? t("insufficientFunds") : t("sendMoney")}
-          </button>
-        </form>
+        {/* ── Note ── */}
+        <p className="text-sm font-bold leading-relaxed" style={{ color: "#1a1a1a" }}>
+          笔记 : Les échanges entre wallet sont possibles entre les pays avec les même zones monétaire et les demandes sont traitées par 我们的支持团队
+        </p>
+
+        {/* ── Submit ── */}
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={isDisabled}
+          className="w-full rounded-full py-4 text-sm font-bold tracking-widest flex items-center justify-center gap-2.5 transition-all uppercase"
+          style={{
+            background: isDisabled ? "#9ca3af" : "#6b7280",
+            color: "#fff",
+            border: "none",
+            letterSpacing: "0.08em",
+          }}
+          data-testid="button-submit-virement"
+        >
+          {createMutation.isPending
+            ? <Loader2 className="w-5 h-5 animate-spin" />
+            : <Send className="w-5 h-5" />}
+          {createMutation.isPending ? t("processingLabel") : "Envoyer l'argent"}
+        </button>
 
         {/* ── History ── */}
-        <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0" }}>
-          <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: "1px solid #f5f5f5" }}>
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#f3e5f5" }}>
-                <BarChart3 className="w-4 h-4" style={{ color: "#7e57c2" }} />
+        {(walletTransfers as WalletTransfer[]).length > 0 && (
+          <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: "1.5px solid #e8ecf0", marginTop: 8 }}>
+            <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: "1px solid #f5f5f5" }}>
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#f3e5f5" }}>
+                  <BarChart3 className="w-4 h-4" style={{ color: "#7e57c2" }} />
+                </div>
+                <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>{t("transferHistory")}</span>
               </div>
-              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>{t("transferHistory")}</span>
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "#f3e5f5", color: "#7e57c2" }}>
+                {(walletTransfers as WalletTransfer[]).length}
+              </span>
             </div>
-            <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "#f3e5f5", color: "#7e57c2" }}>
-              {(walletTransfers as WalletTransfer[]).length}
-            </span>
-          </div>
-
-          {wtLoading ? (
-            <div className="p-4 space-y-3">
-              {[1,2,3].map(i => <Skeleton key={i} className="h-16 w-full rounded-xl" />)}
-            </div>
-          ) : (walletTransfers as WalletTransfer[]).length === 0 ? (
-            <div className="p-10 text-center">
-              <div className="w-12 h-12 rounded-2xl mx-auto mb-3 flex items-center justify-center" style={{ background: "#f5f5f5" }}>
-                <ArrowRightLeft className="w-6 h-6" style={{ color: "#ccc" }} />
+            {wtLoading ? (
+              <div className="p-4 space-y-3">
+                {[1,2,3].map(i => <Skeleton key={i} className="h-16 w-full rounded-xl" />)}
               </div>
-              <p className="text-sm font-medium mb-1" style={{ color: "#888" }}>{t("noTransfers")}</p>
-              <p className="text-xs" style={{ color: "#bbb" }}>Vos virements inter-wallets apparaîtront ici</p>
-            </div>
-          ) : (
-            <div className="divide-y" style={{ borderColor: "#f5f5f5" }}>
-              {(walletTransfers as WalletTransfer[]).map((wt) => {
-                const statusConf = wt.status === "approved"
-                  ? { bg: "#e8f5e9", color: "#2e7d32", label: t("approved") }
-                  : wt.status === "rejected"
-                  ? { bg: "#fce4ec", color: "#ad1457", label: t("rejected") }
-                  : { bg: "#fff8e1", color: "#e65100", label: t("pendingLabel") };
-                return (
-                  <div key={wt.id} className="px-5 py-4" data-testid={`virement-row-${wt.id}`}>
-                    <div className="flex items-center gap-3">
-                      <div className="shrink-0 flex items-center gap-1 text-lg">
-                        <span>{ZONE_FLAGS[wt.fromCountry] || "🌍"}</span>
-                        <ArrowRightLeft className="w-3.5 h-3.5 mx-0.5" style={{ color: "#7e57c2" }} />
-                        <span>{ZONE_FLAGS[wt.toCountry] || "🌍"}</span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2 mb-0.5">
-                          <p className="text-sm font-bold" style={{ color: "#1a1a1a" }}>
-                            {wt.fromCountry} → {wt.toCountry}
-                          </p>
-                          <span className="text-xs px-2 py-0.5 rounded-full font-semibold shrink-0"
-                            style={{ background: statusConf.bg, color: statusConf.color }}>
-                            {statusConf.label}
-                          </span>
+            ) : (
+              <div className="divide-y" style={{ borderColor: "#f5f5f5" }}>
+                {(walletTransfers as WalletTransfer[]).map((wt) => {
+                  const statusConf = wt.status === "approved"
+                    ? { bg: "#e8f5e9", color: "#2e7d32", label: t("approved") }
+                    : wt.status === "rejected"
+                    ? { bg: "#fce4ec", color: "#ad1457", label: t("rejected") }
+                    : { bg: "#fff8e1", color: "#e65100", label: t("pendingLabel") };
+                  return (
+                    <div key={wt.id} className="px-5 py-4" data-testid={`virement-row-${wt.id}`}>
+                      <div className="flex items-center gap-3">
+                        <div className="shrink-0 flex items-center gap-1 text-lg">
+                          <span>{ZONE_FLAGS[wt.fromCountry] || "🌍"}</span>
+                          <ArrowRightLeft className="w-3.5 h-3.5 mx-0.5" style={{ color: "#7e57c2" }} />
+                          <span>{ZONE_FLAGS[wt.toCountry] || "🌍"}</span>
                         </div>
-                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs" style={{ color: "#888" }}>
-                          <span className="font-semibold" style={{ color: "#555" }}>{wt.amount.toLocaleString("fr-FR")} {wt.currency}</span>
-                          <span style={{ color: wt.fee === 0 ? "#00b050" : "#888" }}>
-                            {wt.fee === 0 ? t("noFeesLabel") : `${t("fees")} : ${wt.fee.toLocaleString("fr-FR")} ${wt.currency}`}
-                          </span>
-                          <span>{new Date(wt.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2 mb-0.5">
+                            <p className="text-sm font-bold" style={{ color: "#1a1a1a" }}>
+                              {wt.fromCountry} → {wt.toCountry}
+                            </p>
+                            <span className="text-xs px-2 py-0.5 rounded-full font-semibold shrink-0"
+                              style={{ background: statusConf.bg, color: statusConf.color }}>
+                              {statusConf.label}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs" style={{ color: "#888" }}>
+                            <span className="font-semibold" style={{ color: "#555" }}>{wt.amount.toLocaleString("fr-FR")} {wt.currency}</span>
+                            <span style={{ color: wt.fee === 0 ? "#00b050" : "#888" }}>
+                              {wt.fee === 0 ? t("noFeesLabel") : `${t("fees")} : ${wt.fee.toLocaleString("fr-FR")} ${wt.currency}`}
+                            </span>
+                            <span>{new Date(wt.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</span>
+                          </div>
+                          {wt.adminNote && (
+                            <p className="text-xs mt-1.5 px-2.5 py-1.5 rounded-lg italic"
+                              style={{ background: "#fffbea", color: "#78350f", border: "1px solid #fef3c7" }}>
+                              💬 {wt.adminNote}
+                            </p>
+                          )}
                         </div>
-                        {wt.adminNote && (
-                          <p className="text-xs mt-1.5 px-2.5 py-1.5 rounded-lg italic"
-                            style={{ background: "#fffbea", color: "#78350f", border: "1px solid #fef3c7" }}>
-                            💬 {wt.adminNote}
-                          </p>
-                        )}
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
