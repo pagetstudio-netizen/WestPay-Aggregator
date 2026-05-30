@@ -4388,8 +4388,7 @@ function SettingsPanel() {
 function SupportContactsCard({ token }: { token: string | null }) {
   const { toast } = useToast();
   const { data: contacts, refetch } = useQuery<{
-    telegram1: string; telegram2: string;
-    whatsapp1: string; whatsapp2: string; hours: string; hours2: string;
+    telegram1: string; telegram2: string; telegram3: string; telegram4: string;
   }>({
     queryKey: ["/api/public/support-contacts"],
     staleTime: 0,
@@ -4397,20 +4396,16 @@ function SupportContactsCard({ token }: { token: string | null }) {
 
   const [tg1, setTg1] = useState("");
   const [tg2, setTg2] = useState("");
-  const [wa1, setWa1] = useState("");
-  const [wa2, setWa2] = useState("");
-  const [hours, setHours] = useState("");
-  const [hours2, setHours2] = useState("");
+  const [tg3, setTg3] = useState("");
+  const [tg4, setTg4] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (contacts) {
       setTg1(contacts.telegram1 || "");
       setTg2(contacts.telegram2 || "");
-      setWa1(contacts.whatsapp1 || "");
-      setWa2(contacts.whatsapp2 || "");
-      setHours(contacts.hours || "");
-      setHours2(contacts.hours2 || "");
+      setTg3(contacts.telegram3 || "");
+      setTg4(contacts.telegram4 || "");
     }
   }, [contacts]);
 
@@ -4421,7 +4416,7 @@ function SupportContactsCard({ token }: { token: string | null }) {
       const res = await fetch("/api/admin/support-contacts", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ telegram1: tg1, telegram2: tg2, whatsapp1: wa1, whatsapp2: wa2, hours, hours2 }),
+        body: JSON.stringify({ telegram1: tg1, telegram2: tg2, telegram3: tg3, telegram4: tg4 }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
       queryClient.invalidateQueries({ queryKey: ["/api/public/support-contacts"] });
@@ -4439,41 +4434,27 @@ function SupportContactsCard({ token }: { token: string | null }) {
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
           <MessageSquare className="w-4 h-4 text-blue-500" />
-          Contacts Support (affichés sur le dashboard marchand)
+          Contacts Support Telegram (affichés sur le dashboard marchand)
         </CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSave} className="space-y-4">
-          <div className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Telegram 1 (handle)</Label>
-                <Input value={tg1} onChange={(e) => setTg1(e.target.value)} placeholder="@Albertrobotpay" data-testid="input-support-tg1" />
-              </div>
-              <div className="space-y-2">
-                <Label>Horaires Telegram 1</Label>
-                <Input value={hours} onChange={(e) => setHours(e.target.value)} placeholder="9h GMT à 12h" data-testid="input-support-hours" />
-              </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>Telegram 1</Label>
+              <Input value={tg1} onChange={(e) => setTg1(e.target.value)} placeholder="@Atfchalvt" data-testid="input-support-tg1" />
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Telegram 2 (handle)</Label>
-                <Input value={tg2} onChange={(e) => setTg2(e.target.value)} placeholder="@Atfchalvt" data-testid="input-support-tg2" />
-              </div>
-              <div className="space-y-2">
-                <Label>Horaires Telegram 2</Label>
-                <Input value={hours2} onChange={(e) => setHours2(e.target.value)} placeholder="15h à 20h" data-testid="input-support-hours2" />
-              </div>
+            <div className="space-y-2">
+              <Label>Telegram 2</Label>
+              <Input value={tg2} onChange={(e) => setTg2(e.target.value)} placeholder="@geeorbotpay" data-testid="input-support-tg2" />
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>WhatsApp 1</Label>
-                <Input value={wa1} onChange={(e) => setWa1(e.target.value)} placeholder="+1 (226) 484-5698" data-testid="input-support-wa1" />
-              </div>
-              <div className="space-y-2">
-                <Label>WhatsApp 2</Label>
-                <Input value={wa2} onChange={(e) => setWa2(e.target.value)} placeholder="+1 (226) 484-568" data-testid="input-support-wa2" />
-              </div>
+            <div className="space-y-2">
+              <Label>Telegram 3</Label>
+              <Input value={tg3} onChange={(e) => setTg3(e.target.value)} placeholder="@pankeyrobotpay" data-testid="input-support-tg3" />
+            </div>
+            <div className="space-y-2">
+              <Label>Telegram 4</Label>
+              <Input value={tg4} onChange={(e) => setTg4(e.target.value)} placeholder="@astapay" data-testid="input-support-tg4" />
             </div>
           </div>
           <Button type="submit" disabled={isSaving} data-testid="button-save-support-contacts">

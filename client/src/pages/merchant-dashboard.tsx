@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
+import { SiTelegram } from "react-icons/si";
 import {
   Wallet, ArrowRightLeft, Key, Settings, LogOut, Loader2, Download,
   Copy, Globe, DollarSign, Hash, TrendingUp, Search, RefreshCw, BookOpen, Lock, ExternalLink,
@@ -2323,8 +2324,7 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
   const [isChanging, setIsChanging] = useState(false);
 
   const { data: contacts } = useQuery<{
-    telegram1: string; telegram2: string;
-    whatsapp1: string; whatsapp2: string; hours: string; hours2: string;
+    telegram1: string; telegram2: string; telegram3: string; telegram4: string;
   }>({
     queryKey: ["/api/public/support-contacts"],
     staleTime: 5 * 60 * 1000,
@@ -2589,68 +2589,33 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
             </div>
             {contacts ? (
               <div className="divide-y p-0" style={{ borderColor: "#f8f9fa" }}>
-                {contacts.telegram1 && (
-                  <a href={`https://t.me/${contacts.telegram1.replace("@","")}`} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-4 px-5 py-4 transition-all hover:bg-gray-50"
-                    data-testid="link-support-telegram1">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#e3f2fd" }}>
-                      <MessageCircle className="w-5 h-5" style={{ color: "#039be5" }} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold mb-0.5" style={{ color: "#888" }}>Telegram</p>
-                      <p className="text-sm font-bold truncate" style={{ color: "#039be5" }}>{contacts.telegram1}</p>
-                      {contacts.hours && <p className="text-xs mt-0.5" style={{ color: "#aaa" }}>{contacts.hours}</p>}
-                    </div>
-                    <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "#ccc" }} />
-                  </a>
-                )}
-                {contacts.telegram2 && (
-                  <a href={`https://t.me/${contacts.telegram2.replace("@","")}`} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-4 px-5 py-4 transition-all hover:bg-gray-50"
-                    data-testid="link-support-telegram2">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#e3f2fd" }}>
-                      <MessageCircle className="w-5 h-5" style={{ color: "#039be5" }} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold mb-0.5" style={{ color: "#888" }}>Telegram (2)</p>
-                      <p className="text-sm font-bold truncate" style={{ color: "#039be5" }}>{contacts.telegram2}</p>
-                      {contacts.hours2 && <p className="text-xs mt-0.5" style={{ color: "#aaa" }}>{contacts.hours2}</p>}
-                    </div>
-                    <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "#ccc" }} />
-                  </a>
-                )}
-                {contacts.whatsapp1 && (
-                  <a href={`https://wa.me/${contacts.whatsapp1.replace(/\D/g,"")}`} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-4 px-5 py-4 transition-all hover:bg-gray-50"
-                    data-testid="link-support-whatsapp1">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#e8f5e9" }}>
-                      <Phone className="w-5 h-5" style={{ color: "#25d366" }} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold mb-0.5" style={{ color: "#888" }}>WhatsApp</p>
-                      <p className="text-sm font-bold truncate" style={{ color: "#25d366" }}>{contacts.whatsapp1}</p>
-                    </div>
-                    <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "#ccc" }} />
-                  </a>
-                )}
-                {contacts.whatsapp2 && (
-                  <a href={`https://wa.me/${contacts.whatsapp2.replace(/\D/g,"")}`} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-4 px-5 py-4 transition-all hover:bg-gray-50"
-                    data-testid="link-support-whatsapp2">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#e8f5e9" }}>
-                      <Phone className="w-5 h-5" style={{ color: "#25d366" }} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold mb-0.5" style={{ color: "#888" }}>WhatsApp (2)</p>
-                      <p className="text-sm font-bold truncate" style={{ color: "#25d366" }}>{contacts.whatsapp2}</p>
-                    </div>
-                    <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "#ccc" }} />
-                  </a>
-                )}
+                {[
+                  { key: "telegram1", label: "Telegram" },
+                  { key: "telegram2", label: "Telegram" },
+                  { key: "telegram3", label: "Telegram" },
+                  { key: "telegram4", label: "Telegram" },
+                ].map(({ key, label }, idx) => {
+                  const handle = (contacts as any)[key];
+                  if (!handle) return null;
+                  return (
+                    <a key={key} href={`https://t.me/${handle.replace("@","")}`} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-4 px-5 py-4 transition-all hover:bg-gray-50"
+                      data-testid={`link-support-${key}`}>
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#e3f0ff" }}>
+                        <SiTelegram style={{ color: "#2CA5E0", width: 20, height: 20 }} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold mb-0.5" style={{ color: "#888" }}>{label}</p>
+                        <p className="text-sm font-bold truncate" style={{ color: "#2CA5E0" }}>{handle}</p>
+                      </div>
+                      <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "#ccc" }} />
+                    </a>
+                  );
+                })}
               </div>
             ) : (
               <div className="p-8 text-center">
-                <MessageCircle className="w-8 h-8 mx-auto mb-2" style={{ color: "#ddd" }} />
+                <SiTelegram style={{ color: "#ddd", width: 32, height: 32, margin: "0 auto 8px" }} />
                 <p className="text-sm" style={{ color: "#aaa" }}>Aucun contact configuré</p>
               </div>
             )}
@@ -3362,8 +3327,7 @@ function MerchantLoadingSkeleton() {
 
 function SupportBanner() {
   const { data: contacts } = useQuery<{
-    telegram1: string; telegram2: string;
-    whatsapp1: string; whatsapp2: string; hours: string; hours2: string;
+    telegram1: string; telegram2: string; telegram3: string; telegram4: string;
   }>({
     queryKey: ["/api/public/support-contacts"],
     staleTime: 5 * 60 * 1000,
@@ -3371,34 +3335,27 @@ function SupportBanner() {
 
   if (!contacts) return null;
 
+  const handles = [contacts.telegram1, contacts.telegram2, contacts.telegram3, contacts.telegram4].filter(Boolean);
+
   return (
     <div className="border rounded-xl p-3 text-sm bg-primary/5 border-primary/20" data-testid="banner-support">
       <div className="flex items-start gap-2.5">
         <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-          <MessageCircle className="w-3.5 h-3.5 text-primary" />
+          <SiTelegram style={{ color: "#2CA5E0", width: 14, height: 14 }} />
         </div>
         <div className="min-w-0">
           <p className="font-semibold text-foreground text-xs mb-1.5">Support client disponible</p>
-          <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span className="flex items-center gap-1 flex-wrap">
-              <MessageCircle className="w-3 h-3 text-primary shrink-0" />
+              <SiTelegram style={{ color: "#2CA5E0", width: 12, height: 12, flexShrink: 0 }} />
               <span>Telegram :</span>
-              <a href={`https://t.me/${contacts.telegram1.replace("@","")}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">{contacts.telegram1}</a>
-              {contacts.hours && <span className="opacity-70">({contacts.hours})</span>}
-              {contacts.telegram2 && <>
-                <span className="opacity-50">·</span>
-                <a href={`https://t.me/${contacts.telegram2.replace("@","")}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">{contacts.telegram2}</a>
-                {contacts.hours2 && <span className="opacity-70">({contacts.hours2})</span>}
-              </>}
-            </span>
-            <span className="flex items-center gap-1 flex-wrap">
-              <Phone className="w-3 h-3 text-primary shrink-0" />
-              <span>WhatsApp :</span>
-              <a href={`https://wa.me/${contacts.whatsapp1.replace(/\D/g,"")}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">{contacts.whatsapp1}</a>
-              {contacts.whatsapp2 && <>
-                <span className="opacity-50">·</span>
-                <a href={`https://wa.me/${contacts.whatsapp2.replace(/\D/g,"")}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">{contacts.whatsapp2}</a>
-              </>}
+              {handles.map((h, i) => (
+                <span key={h} className="flex items-center gap-1">
+                  {i > 0 && <span className="opacity-50">·</span>}
+                  <a href={`https://t.me/${h.replace("@","")}`} target="_blank" rel="noopener noreferrer"
+                    className="text-primary hover:underline font-medium">{h}</a>
+                </span>
+              ))}
             </span>
           </div>
         </div>

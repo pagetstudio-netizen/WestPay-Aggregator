@@ -5193,21 +5193,17 @@ export async function registerRoutes(
 
   app.get("/api/public/support-contacts", async (_req, res) => {
     try {
-      const [tg1, tg2, wa1, wa2, hours1, hours2] = await Promise.all([
+      const [tg1, tg2, tg3, tg4] = await Promise.all([
         storage.getSetting("support_telegram_1"),
         storage.getSetting("support_telegram_2"),
-        storage.getSetting("support_whatsapp_1"),
-        storage.getSetting("support_whatsapp_2"),
-        storage.getSetting("support_hours"),
-        storage.getSetting("support_hours_2"),
+        storage.getSetting("support_telegram_3"),
+        storage.getSetting("support_telegram_4"),
       ]);
       res.json({
-        telegram1: tg1 || "@Albertrobotpay",
-        telegram2: tg2 || "@Atfchalvt",
-        whatsapp1: wa1 || "+1 (226) 484-5698",
-        whatsapp2: wa2 || "+1 (226) 484-568",
-        hours: hours1 || "9h GMT à 12h",
-        hours2: hours2 || "15h à 20h",
+        telegram1: tg1 || "@Atfchalvt",
+        telegram2: tg2 || "@geeorbotpay",
+        telegram3: tg3 || "@pankeyrobotpay",
+        telegram4: tg4 || "@astapay",
       });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -5449,13 +5445,11 @@ export async function registerRoutes(
 
   app.post("/api/admin/support-contacts", authMiddleware("admin"), async (req, res) => {
     try {
-      const { telegram1, telegram2, whatsapp1, whatsapp2, hours, hours2 } = req.body;
+      const { telegram1, telegram2, telegram3, telegram4 } = req.body;
       if (telegram1 !== undefined) await storage.setSetting("support_telegram_1", telegram1);
       if (telegram2 !== undefined) await storage.setSetting("support_telegram_2", telegram2);
-      if (whatsapp1 !== undefined) await storage.setSetting("support_whatsapp_1", whatsapp1);
-      if (whatsapp2 !== undefined) await storage.setSetting("support_whatsapp_2", whatsapp2);
-      if (hours !== undefined) await storage.setSetting("support_hours", hours);
-      if (hours2 !== undefined) await storage.setSetting("support_hours_2", hours2);
+      if (telegram3 !== undefined) await storage.setSetting("support_telegram_3", telegram3);
+      if (telegram4 !== undefined) await storage.setSetting("support_telegram_4", telegram4);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
