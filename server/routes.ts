@@ -3741,6 +3741,7 @@ export async function registerRoutes(
                 const merchant = await storage.getMerchantById(pending.merchantId);
                 if (mc) {
                   const credit = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount, pending.country);
+                  const westpayFee = pending.amount - credit;
                   await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
                   const txRef = `SP-${pending.omnipayReference}`;
                   const existingTx = await storage.getTransactionByTxId(txRef);
@@ -3759,9 +3760,9 @@ export async function registerRoutes(
                       operator: pending.paymentMethod || null,
                       omnipayReference: pending.omnipayReference,
                       errorMessage: null,
-                      providerFee: 0,
+                      providerFee: westpayFee,
                     });
-                    console.log(`[POLL SENDAVAPAY] Paiement credite via polling — ref=${pending.omnipayReference} montant=${pending.amount} credit=${credit}`);
+                    console.log(`[POLL SENDAVAPAY] Paiement credite via polling — ref=${pending.omnipayReference} montant=${pending.amount} frais=${westpayFee} credit=${credit}`);
                     notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "westpay" }).catch(() => {});
                     notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "westpay", status: "confirmed" }).catch(() => {});
                   }
@@ -4297,6 +4298,7 @@ export async function registerRoutes(
         const existingTx = await storage.getTransactionByTxId(txId);
         if (!existingTx) {
           const credit = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount, pending.country);
+          const westpayFee = pending.amount - credit;
           await storage.createTransaction({
             merchantId: pending.merchantId,
             country: pending.country,
@@ -4308,10 +4310,10 @@ export async function registerRoutes(
             provider: "westpay",
             omnipayTxId: null,
             omnipayReference: pending.omnipayReference || reference,
-            providerFee: 0,
+            providerFee: westpayFee,
           });
           await storage.incrementMerchantCountryBalance(mc.id, credit);
-          console.log(`[SENDAVAPAY CALLBACK] Paiement confirme: ${txId} - Brut: ${pending.amount} - Net marchand: ${credit}`);
+          console.log(`[SENDAVAPAY CALLBACK] Paiement confirme: ${txId} - Brut: ${pending.amount} - Frais WestPay: ${westpayFee} - Net marchand: ${credit}`);
 
           sendWebhookNotification(pending.merchantId, {
             event: "payment.confirmed",

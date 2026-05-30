@@ -489,7 +489,7 @@ function AnalysePanel({ token }: { token: string | null }) {
 function TransactionDetailDrawer({ tx, onClose }: { tx: any; onClose: () => void }) {
   const { toast, t: _t } = { toast: useToast().toast, t: useLanguage().t };
   const isTransfer = tx.amount < 0 || tx.txId?.startsWith("TR-");
-  const fee = tx.providerFee != null ? tx.providerFee : Math.round(Math.abs(tx.amount) * 0.03);
+  const fee = (tx.providerFee != null && tx.providerFee > 0) ? tx.providerFee : Math.round(Math.abs(tx.amount) * 0.055);
   const net = Math.abs(tx.amount) - fee;
 
   const statusCfg = tx.status === "confirmed"
@@ -588,7 +588,7 @@ function TransactionDetailDrawer({ tx, onClose }: { tx: any; onClose: () => void
               <p className="text-sm font-bold text-gray-800">{Math.abs(tx.amount).toLocaleString("fr-FR")} F</p>
             </div>
             <div style={{ borderLeft: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0" }}>
-              <p className="text-xs text-gray-400 mb-1">Frais (3%)</p>
+              <p className="text-xs text-gray-400 mb-1">Frais WestPay</p>
               <p className="text-sm font-bold" style={{ color: "#f59e0b" }}>{fee.toLocaleString("fr-FR")} F</p>
             </div>
             <div>

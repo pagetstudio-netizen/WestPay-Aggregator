@@ -1526,16 +1526,36 @@ export async function notifyMerchantPayment(merchantId: number, data: {
       return { success, total, amount };
     })();
 
+    const feeRate = merchant?.feeExempt ? 0 : 0.055;
+    const grossAmount = data.amount;
+    const westpayFee = Math.round(grossAmount * feeRate);
+    const netCredited = grossAmount - westpayFee;
+
+    const feeLinesFr = feeRate > 0 ? [
+      `💳 *Brut reçu :* ${formatAmount(grossAmount)}`,
+      `📉 *Frais WestPay (5,5%) :* -${formatAmount(westpayFee)}`,
+      `✅ *Net crédité :* ${formatAmount(netCredited)}`,
+    ] : [
+      `💳 *Montant crédité :* ${formatAmount(grossAmount)} *(sans frais)*`,
+    ];
+    const feeLinesEn = feeRate > 0 ? [
+      `💳 *Gross received:* ${formatAmount(grossAmount)}`,
+      `📉 *WestPay fee (5.5%):* -${formatAmount(westpayFee)}`,
+      `✅ *Net credited:* ${formatAmount(netCredited)}`,
+    ] : [
+      `💳 *Amount credited:* ${formatAmount(grossAmount)} *(no fee)*`,
+    ];
+    const feeLines = lang === "fr" ? feeLinesFr : feeLinesEn;
+
     const msg = [
       t.header(countryLabel(data.country)),
       ``,
       t.newPayment,
       ``,
-      `${t.amount} ${formatAmount(data.amount)}`,
-      `${t.payer} ${data.payerNumber || "N/A"}`,
-      `${t.country} ${countryLabel(data.country)}`,
+      ...feeLines,
+      `📞 *Payeur :* ${data.payerNumber || "N/A"}`,
+      `🌍 *Pays :* ${countryLabel(data.country)}`,
       `🔖 *TX :* \`${data.txId}\``,
-      `${t.via} ${data.provider === "omnipay" ? t.mobileMoney : "SMS"}`,
       ``,
       t.balanceHeader,
       ``,
