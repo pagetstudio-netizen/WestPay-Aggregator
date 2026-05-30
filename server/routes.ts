@@ -7074,5 +7074,50 @@ export async function registerRoutes(
     res.json({ status: "success", message: "WestPay SDK opérationnel", merchant: merchant.name, timestamp: new Date().toISOString() });
   });
 
+  // ─── Userbot (Customer Service Account) ──────────────────────────────────────
+
+  app.get("/api/admin/userbot/status", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const { getUserbotStatus } = await import("./userbot");
+      const status = await getUserbotStatus();
+      res.json(status);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/userbot/start-auth", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { startUbotAuth } = await import("./userbot");
+      const phone = (req.body.phone as string) || process.env.USERBOT_PHONE || "+15843334306";
+      const result = await startUbotAuth(phone);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post("/api/admin/userbot/complete-auth", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { completeUbotAuth } = await import("./userbot");
+      const { code, password } = req.body as { code: string; password?: string };
+      if (!code) return res.status(400).json({ success: false, message: "Code is required" });
+      const result = await completeUbotAuth(code, password);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post("/api/admin/userbot/disconnect", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const { disconnectUserbot } = await import("./userbot");
+      await disconnectUserbot();
+      res.json({ success: true, message: "Userbot disconnected" });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   return httpServer;
 }

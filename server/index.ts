@@ -128,6 +128,10 @@ app.use((req, res, next) => {
   const { startReconciliationJob } = await import("./reconciliation");
   startReconciliationJob();
 
+  // Userbot — customer service agent (real Telegram account)
+  const { initUserbot } = await import("./userbot");
+  await initUserbot();
+
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";

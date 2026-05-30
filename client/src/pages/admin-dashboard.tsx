@@ -36,7 +36,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
 
-type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "sendavapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications";
+type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "sendavapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot";
 
 function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: { staleTime?: number; refetchOnWindowFocus?: boolean }) {
   const { token, logout } = useAuth();
@@ -6104,6 +6104,246 @@ function NotificationsPanel() {
       {activeNotifTab === "email" && <EmailNotifyPanel merchants={allMerchants} />}
       {activeNotifTab === "telegram" && <TelegramBroadcastPanel merchants={allMerchants} />}
       {activeNotifTab === "otpbot" && <OtpBotPanel />}
+    </div>
+  );
+}
+
+function UserbotPanel() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const [step, setStep] = useState<"idle" | "sending" | "code" | "password" | "connecting">("idle");
+  const [phone, setPhone] = useState("+15843334306");
+  const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
+
+  const { data: status, refetch: refetchStatus } = useQuery({
+    queryKey: ["/api/admin/userbot/status"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/userbot/status", { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error("Failed");
+      return res.json() as Promise<{ connected: boolean; phone: string; linkedGroups: number; pendingAuth: boolean }>;
+    },
+    refetchInterval: 5000,
+  });
+
+  async function adminPost(endpoint: string, body: object) {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    return res.json();
+  }
+
+  async function handleStartAuth() {
+    setStep("sending");
+    const result = await adminPost("/api/admin/userbot/start-auth", { phone });
+    if (result.success) {
+      toast({ title: "Code sent!", description: result.message });
+      setStep("code");
+    } else {
+      toast({ title: "Error", description: result.message, variant: "destructive" });
+      setStep("idle");
+    }
+  }
+
+  async function handleSubmitCode() {
+    setStep("connecting");
+    const result = await adminPost("/api/admin/userbot/complete-auth", { code });
+    if (result.message === "2FA_REQUIRED") {
+      toast({ title: "2FA required", description: "Enter your Telegram 2-step verification password." });
+      setStep("password");
+    } else if (result.success) {
+      toast({ title: "✅ Connected!", description: result.message });
+      setStep("idle");
+      setCode("");
+      refetchStatus();
+    } else {
+      toast({ title: "Error", description: result.message, variant: "destructive" });
+      setStep("code");
+    }
+  }
+
+  async function handleSubmitPassword() {
+    setStep("connecting");
+    const result = await adminPost("/api/admin/userbot/complete-auth", { code, password });
+    if (result.success) {
+      toast({ title: "✅ Connected!", description: result.message });
+      setStep("idle");
+      setCode(""); setPassword("");
+      refetchStatus();
+    } else {
+      toast({ title: "Error", description: result.message, variant: "destructive" });
+      setStep("password");
+    }
+  }
+
+  async function handleDisconnect() {
+    await adminPost("/api/admin/userbot/disconnect", {});
+    toast({ title: "Disconnected", description: "Userbot has been disconnected." });
+    refetchStatus();
+  }
+
+  const isConnected = status?.connected;
+
+  return (
+    <div className="max-w-xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center shadow-sm">
+          <MessageSquare className="w-5 h-5 text-white" />
+        </div>
+        <div>
+          <h2 className="text-lg font-bold text-foreground">Customer Service Userbot</h2>
+          <p className="text-sm text-muted-foreground">Real Telegram account that auto-responds to merchants in English</p>
+        </div>
+      </div>
+
+      {/* Status card */}
+      <div className="rounded-xl border bg-card p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium text-foreground">Connection Status</span>
+          <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${isConnected ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-muted text-muted-foreground"}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? "bg-green-500 animate-pulse" : "bg-muted-foreground"}`} />
+            {isConnected ? "Connected" : "Disconnected"}
+          </span>
+        </div>
+
+        {status && (
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="rounded-lg bg-muted/50 p-3">
+              <p className="text-muted-foreground text-xs mb-1">Phone Number</p>
+              <p className="font-mono font-medium">{status.phone}</p>
+            </div>
+            <div className="rounded-lg bg-muted/50 p-3">
+              <p className="text-muted-foreground text-xs mb-1">Linked Groups</p>
+              <p className="font-bold text-lg">{status.linkedGroups}</p>
+            </div>
+          </div>
+        )}
+
+        {isConnected && (
+          <button
+            type="button"
+            onClick={handleDisconnect}
+            className="w-full py-2 rounded-lg border border-red-300 text-red-600 text-sm font-medium hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+            data-testid="button-userbot-disconnect"
+          >
+            Disconnect Userbot
+          </button>
+        )}
+      </div>
+
+      {/* Connect flow */}
+      {!isConnected && (
+        <div className="rounded-xl border bg-card p-5 space-y-4">
+          <h3 className="font-semibold text-foreground text-sm">Connect Telegram Account</h3>
+
+          {(step === "idle" || step === "sending") && (
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1.5 block">Phone Number</label>
+                <input
+                  type="text"
+                  value={phone}
+                  onChange={e => setPhone(e.target.value)}
+                  placeholder="+15843334306"
+                  className="w-full px-3 py-2 rounded-lg border bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
+                  data-testid="input-userbot-phone"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleStartAuth}
+                disabled={step === "sending"}
+                className="w-full py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
+                data-testid="button-userbot-sendcode"
+              >
+                {step === "sending" ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending code...</> : "Send Verification Code"}
+              </button>
+            </div>
+          )}
+
+          {step === "code" && (
+            <div className="space-y-3">
+              <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-3 text-sm text-blue-700 dark:text-blue-300">
+                📱 A verification code has been sent to <strong>{phone}</strong>. Enter it below.
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1.5 block">Verification Code</label>
+                <input
+                  type="text"
+                  value={code}
+                  onChange={e => setCode(e.target.value)}
+                  placeholder="12345"
+                  maxLength={10}
+                  className="w-full px-3 py-2 rounded-lg border bg-background text-sm font-mono text-center tracking-widest text-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                  data-testid="input-userbot-code"
+                  onKeyDown={e => e.key === "Enter" && handleSubmitCode()}
+                />
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setStep("idle")} className="flex-1 py-2 rounded-lg border text-sm font-medium hover:bg-muted transition-colors">Back</button>
+                <button
+                  type="button"
+                  onClick={handleSubmitCode}
+                  disabled={step === "connecting" || !code}
+                  className="flex-1 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
+                  data-testid="button-userbot-submitcode"
+                >
+                  {step === "connecting" ? <><Loader2 className="w-4 h-4 animate-spin" /> Connecting...</> : "Verify & Connect"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === "password" && (
+            <div className="space-y-3">
+              <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 text-sm text-amber-700 dark:text-amber-300">
+                🔐 Two-step verification is enabled. Enter your Telegram password.
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1.5 block">2FA Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="Your Telegram password"
+                  className="w-full px-3 py-2 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  data-testid="input-userbot-password"
+                  onKeyDown={e => e.key === "Enter" && handleSubmitPassword()}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleSubmitPassword}
+                disabled={step === "connecting" || !password}
+                className="w-full py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
+                data-testid="button-userbot-submitpassword"
+              >
+                {step === "connecting" ? <><Loader2 className="w-4 h-4 animate-spin" /> Connecting...</> : "Confirm Password"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* How to use */}
+      <div className="rounded-xl border bg-card p-5 space-y-3">
+        <h3 className="font-semibold text-foreground text-sm">How It Works</h3>
+        <ol className="space-y-2 text-sm text-muted-foreground list-none">
+          <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">1</span>Connect the Telegram account above</li>
+          <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">2</span>Add this account to a merchant's Telegram group</li>
+          <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">3</span>Generate an activation code from the merchant's profile</li>
+          <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">4</span>Send <code className="bg-muted px-1 rounded font-mono">/setmarchand CODE</code> in the group</li>
+          <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">5</span>The account now auto-responds to merchants in English 🎉</li>
+        </ol>
+        <div className="rounded-lg bg-muted/50 p-3 text-xs font-mono space-y-1">
+          <p className="text-muted-foreground font-sans text-xs font-semibold mb-1">Available merchant keywords:</p>
+          <p><span className="text-primary">balance</span> · <span className="text-primary">withdrawal</span> · <span className="text-primary">transaction</span></p>
+          <p><span className="text-primary">api</span> · <span className="text-primary">stats</span> · <span className="text-primary">help</span></p>
+        </div>
+      </div>
     </div>
   );
 }
