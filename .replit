@@ -49,6 +49,13 @@ NODE_ENV = "development"
 XOF_PER_USD = "600"
 APP_URL = "https://west-pay-aggregator--kouadioblanchar.replit.app"
 CUSTOM_DATABASE_URL = "postgresql://postgres.bauubqsgtuoxxsufqklp:cotedivoire228@aws-1-us-west-2.pooler.supabase.com:5432/postgres"
+TELEGRAM_API_HASH = "5fbf4783ed072583afe4161f7b38ac7c"
+TELEGRAM_API_ID = "36887606"
+TELEGRAM_BOT_TOKEN = "8275119458:AAEBoT5CLb8dAURo29yysQ5CA3wCSXMGeSE"
+TELEGRAM_OTP_BOT_TOKEN = "8904995228:AAGyiD7ENwGtKG1gfNJkvThKBWbQaw0xWf4"
+SENDAVAPAY_API_KEY = "sdk_rM5VvftsiCh6uYLi38VbobfNePpoIOlV"
+SENDAVAPAY_WEBHOOK_SECRET = "whsec_8c04a38749f18e2a385b563f20643463d9120107da7ea9d8"
+TELEGRAM_ADMIN_GROUP_ID = "-1003802528942"
 
 [postMerge]
 path = "scripts/post-merge.sh"
