@@ -7125,5 +7125,27 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/userbot/delay", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const { getResponseDelaySetting } = await import("./userbot");
+      const value = await getResponseDelaySetting();
+      res.json({ value });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/userbot/delay", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { value } = req.body;
+      if (typeof value !== "string") return res.status(400).json({ message: "value required" });
+      const { setResponseDelay } = await import("./userbot");
+      await setResponseDelay(value);
+      res.json({ success: true, value });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   return httpServer;
 }

@@ -1,8 +1,8 @@
 /**
- * WestPay Userbot — Customer Service Agent
+ * WestPay Userbot — Customer Service Agent (Junjie)
  * Connects a real Telegram account (MTProto via GramJS) to merchant groups.
- * Responds in English only to non-admin members.
- * Supports /setmarchand CODE to link a group to a merchant.
+ * Behaves like a real person: reads messages, responds naturally in the same language.
+ * No markdown formatting, no commands list, no robotic behaviour.
  */
 
 import { TelegramClient } from "telegram";
@@ -18,7 +18,7 @@ const PHONE_NUMBER = process.env.USERBOT_PHONE || "+15843334306";
 let client: TelegramClient | null = null;
 let isConnected = false;
 
-// ─── In-memory auth state (one active auth session at a time) ────────────────
+// ─── In-memory auth state ─────────────────────────────────────────────────────
 interface AuthState {
   phone: string;
   phoneCodeHash: string;
@@ -28,15 +28,36 @@ let pendingAuth: AuthState | null = null;
 
 // ─── Session persistence ──────────────────────────────────────────────────────
 async function loadSession(): Promise<string> {
+  try { return (await storage.getSetting("userbot_session")) || ""; } catch { return ""; }
+}
+async function persistSession(sessionStr: string): Promise<void> {
+  await storage.setSetting("userbot_session", sessionStr);
+}
+
+// ─── Response delay ───────────────────────────────────────────────────────────
+async function getResponseDelayMs(): Promise<number> {
   try {
-    return (await storage.getSetting("userbot_session")) || "";
+    const raw = await storage.getSetting("userbot_response_delay");
+    if (!raw || raw === "auto") {
+      // Automatic: random between 3 and 8 seconds — feels human
+      return Math.floor(Math.random() * 5000) + 3000;
+    }
+    const n = parseInt(raw, 10);
+    if (isNaN(n) || n <= 0) return 0;
+    // Unit: raw ends with "s" → seconds, "m" → minutes
+    if (raw.endsWith("m")) return n * 60 * 1000;
+    return n * 1000; // default: seconds
   } catch {
-    return "";
+    return 3000;
   }
 }
 
-async function persistSession(sessionStr: string): Promise<void> {
-  await storage.setSetting("userbot_session", sessionStr);
+export async function setResponseDelay(value: string): Promise<void> {
+  await storage.setSetting("userbot_response_delay", value);
+}
+
+export async function getResponseDelaySetting(): Promise<string> {
+  return (await storage.getSetting("userbot_response_delay").catch(() => null)) || "auto";
 }
 
 // ─── Group → Merchant mapping ─────────────────────────────────────────────────
@@ -45,23 +66,20 @@ async function getGroupMap(): Promise<Record<string, number>> {
   if (!raw) return {};
   try { return JSON.parse(raw); } catch { return {}; }
 }
-
 async function setGroupMap(map: Record<string, number>): Promise<void> {
   await storage.setSetting("userbot_group_map", JSON.stringify(map));
 }
-
 async function linkGroupToMerchant(chatId: string, merchantId: number): Promise<void> {
   const map = await getGroupMap();
   map[chatId] = merchantId;
   await setGroupMap(map);
 }
-
 async function getMerchantIdForGroup(chatId: string): Promise<number | null> {
   const map = await getGroupMap();
   return map[chatId] ?? null;
 }
 
-// ─── Activation code helpers (reuse existing system) ─────────────────────────
+// ─── Activation code helpers ──────────────────────────────────────────────────
 async function resolveActivationCode(code: string): Promise<{ merchantId: number; valid: boolean }> {
   const ac = await storage.getTelegramActivationCode(code).catch(() => null);
   if (!ac || ac.used || new Date() > new Date(ac.expiresAt)) {
@@ -75,179 +93,202 @@ async function isGroupAdmin(chatId: string, userId: bigInt.BigInteger): Promise<
   if (!client) return false;
   try {
     const entity = await client.getEntity(chatId);
-    const participants = await client.getParticipants(entity, {
-      filter: new Api.ChannelParticipantsAdmins(),
-    });
+    const participants = await client.getParticipants(entity, { filter: new Api.ChannelParticipantsAdmins() });
     return participants.some(p => p.id.toString() === userId.toString());
   } catch {
     try {
-      const member = await client.invoke(
-        new Api.channels.GetParticipant({
-          channel: await client.getEntity(chatId),
-          participant: userId,
-        })
-      );
+      const member = await client.invoke(new Api.channels.GetParticipant({
+        channel: await client.getEntity(chatId),
+        participant: userId,
+      }));
       const p = (member as any).participant;
       return p?.className === "ChannelParticipantAdmin" || p?.className === "ChannelParticipantCreator";
-    } catch {
-      return false;
-    }
+    } catch { return false; }
   }
 }
 
-// ─── English response builder ─────────────────────────────────────────────────
-function formatAmount(n: number): string {
-  return n.toLocaleString("en-US") + " FCFA";
+// ─── Language detection (simple) ─────────────────────────────────────────────
+function detectLanguage(text: string): "fr" | "en" | "other" {
+  const lower = text.toLowerCase();
+  const frWords = /\b(bonjour|salut|bonsoir|merci|s'il vous|svp|oui|non|comment|pourquoi|quand|combien|avoir|votre|notre|avec|pour|dans|sur|mon|ma|mes|les|des|une|que|qui|est|pas|mais|plus|très|bien|aussi|si|je|tu|il|elle|nous|vous|ils)\b/;
+  const enWords = /\b(hello|hi|hey|thanks|thank you|yes|no|how|why|when|how much|your|our|with|for|in|on|my|the|a|an|is|not|but|more|very|well|also|if|i|you|he|she|we|they|please|good|morning|afternoon|evening)\b/;
+  if (frWords.test(lower)) return "fr";
+  if (enWords.test(lower)) return "en";
+  return "other";
 }
 
-function buildHelpMessage(): string {
-  return (
-    `👋 *WestPay Support — Available Commands*\n\n` +
-    `💰 *balance* — View your balance by country\n` +
-    `📋 *transactions* — Last 5 transactions\n` +
-    `⏳ *withdrawals* — Pending withdrawal requests\n` +
-    `🔑 *api* — Your API keys and integration info\n` +
-    `📊 *stats* — Your global statistics\n\n` +
-    `You can also type keywords like:\n` +
-    `"balance", "withdrawal", "payment", "api key", "help"\n\n` +
-    `_For urgent issues, contact the WestPay admin team._`
-  );
-}
-
-async function buildBalanceMessage(merchantId: number, merchantName: string): Promise<string> {
-  const countries = await storage.getMerchantCountries(merchantId);
-  const active = countries.filter(mc => mc.active);
-  if (active.length === 0) {
-    return `ℹ️ *${merchantName}* — No active countries configured yet.`;
-  }
-  const lines: string[] = [`💰 *Balance — ${merchantName}*\n`];
-  for (const mc of active) {
-    const flag = countryFlag(mc.country);
-    lines.push(`${flag} *${mc.country}*\n   Account: \`${formatAmount(mc.balance)}\``);
-  }
-  return lines.join("\n");
-}
-
-async function buildWithdrawalMessage(merchantId: number): Promise<string> {
-  const all = await storage.getWithdrawals(merchantId);
-  const pending = all.filter(w => w.status === "pending");
-  if (pending.length === 0) {
-    return `✅ *No pending withdrawals.*\n\nAll your withdrawal requests have been processed.`;
-  }
-  const lines: string[] = [`⏳ *Pending Withdrawals (${pending.length})*\n`];
-  for (const w of pending.slice(0, 5)) {
-    const flag = countryFlag(w.country);
-    const date = new Date(w.createdAt).toLocaleDateString("en-US");
-    lines.push(`${flag} ${formatAmount(w.amount)} → \`${w.phone}\` (${w.operator || "—"}) — ${date}`);
-  }
-  if (pending.length > 5) lines.push(`\n_...and ${pending.length - 5} more._`);
-  return lines.join("\n");
-}
-
-async function buildTransactionMessage(merchantId: number): Promise<string> {
-  const txs = await storage.getTransactions(merchantId);
-  const last5 = txs.slice(0, 5);
-  if (last5.length === 0) {
-    return `ℹ️ *No transactions found yet.*\n\nTransactions will appear here as payments come in.`;
-  }
-  const lines: string[] = [`📋 *Last ${last5.length} Transactions*\n`];
-  for (const t of last5) {
-    const icon = t.status === "confirmed" ? "✅" : t.status === "failed" ? "❌" : "⏳";
-    const flag = countryFlag(t.country);
-    const date = new Date(t.createdAt).toLocaleDateString("en-US");
-    lines.push(`${icon} ${flag} ${formatAmount(t.amount)} — ${date}\n   ID: \`${t.txId}\``);
-  }
-  return lines.join("\n");
-}
-
-async function buildApiMessage(merchantId: number, merchantName: string): Promise<string> {
-  const countries = await storage.getMerchantCountries(merchantId);
-  const active = countries.filter(mc => mc.active);
-  const lines: string[] = [`🔑 *API Keys — ${merchantName}*\n`];
-  if (active.length === 0) {
-    return `ℹ️ No countries configured. Contact the admin to enable countries for your account.`;
-  }
-  for (const mc of active) {
-    const flag = countryFlag(mc.country);
-    lines.push(`${flag} *${mc.country}*\n   \`${mc.apiKey}\``);
-  }
-  lines.push(`\n📖 Full API docs: https://westpay.cloud/api-docs`);
-  return lines.join("\n");
-}
-
-async function buildStatsMessage(merchantId: number, merchantName: string): Promise<string> {
-  const stats = await storage.getMerchantStats(merchantId);
-  return (
-    `📊 *Statistics — ${merchantName}*\n\n` +
-    `💳 Total Transactions: *${stats.transactionCount}*\n` +
-    `💰 Total Volume: *${formatAmount(stats.totalVolume)}*`
-  );
-}
-
+// ─── Country flag helper ──────────────────────────────────────────────────────
 function countryFlag(country: string): string {
   const flags: Record<string, string> = {
-    "Togo": "🇹🇬",
-    "Benin": "🇧🇯",
-    "Burkina Faso": "🇧🇫",
-    "Cameroun": "🇨🇲",
-    "Cote d'Ivoire": "🇨🇮",
-    "Mali": "🇲🇱",
-    "Senegal": "🇸🇳",
-    "Guinee": "🇬🇳",
-    "Congo Brazzaville": "🇨🇬",
-    "Congo RDC": "🇨🇩",
+    "Togo": "🇹🇬", "Benin": "🇧🇯", "Burkina Faso": "🇧🇫",
+    "Cameroun": "🇨🇲", "Cote d'Ivoire": "🇨🇮", "Ivory Coast": "🇨🇮",
+    "Mali": "🇲🇱", "Senegal": "🇸🇳", "Guinee": "🇬🇳",
+    "Congo Brazzaville": "🇨🇬", "Congo RDC": "🇨🇩",
   };
   return flags[country] || "🌍";
 }
 
-async function buildResponse(message: string, merchantId: number, merchantName: string): Promise<string | null> {
-  const msg = message.toLowerCase().trim();
+function formatAmount(n: number): string {
+  return n.toLocaleString("fr-FR") + " FCFA";
+}
 
-  // Commands
-  if (msg === "/balance" || msg === "/solde") {
-    return buildBalanceMessage(merchantId, merchantName);
+// ─── Natural data fetchers (plain text, no markdown) ─────────────────────────
+async function getBalanceText(merchantId: number, lang: "fr" | "en" | "other"): Promise<string> {
+  const countries = await storage.getMerchantCountries(merchantId);
+  const active = countries.filter(mc => mc.active);
+  if (active.length === 0) {
+    return lang === "fr"
+      ? "Aucun pays actif pour le moment sur votre compte."
+      : "No active countries on your account yet.";
   }
-  if (msg === "/withdrawals" || msg === "/retrait" || msg === "/retraits") {
-    return buildWithdrawalMessage(merchantId);
+  const lines = active.map(mc => `${countryFlag(mc.country)} ${mc.country} : ${formatAmount(mc.balance)}`);
+  const intro = lang === "fr" ? "Voici vos soldes disponibles :" : "Here are your available balances:";
+  return intro + "\n\n" + lines.join("\n");
+}
+
+async function getWithdrawalsText(merchantId: number, lang: "fr" | "en" | "other"): Promise<string> {
+  const all = await storage.getWithdrawals(merchantId);
+  const pending = all.filter(w => w.status === "pending");
+  if (pending.length === 0) {
+    return lang === "fr"
+      ? "Vous n'avez aucun retrait en attente. Tout a bien été traité."
+      : "No pending withdrawals. Everything has been processed.";
   }
-  if (msg === "/transactions" || msg === "/tx") {
-    return buildTransactionMessage(merchantId);
+  const intro = lang === "fr"
+    ? `Vous avez ${pending.length} retrait${pending.length > 1 ? "s" : ""} en attente :`
+    : `You have ${pending.length} pending withdrawal${pending.length > 1 ? "s" : ""}:`;
+  const lines = pending.slice(0, 5).map(w => {
+    const date = new Date(w.createdAt).toLocaleDateString("fr-FR");
+    return `${countryFlag(w.country)} ${formatAmount(w.amount)} vers ${w.phone} (${w.operator || "—"}) — ${date}`;
+  });
+  if (pending.length > 5) {
+    lines.push(lang === "fr" ? `...et ${pending.length - 5} autre(s).` : `...and ${pending.length - 5} more.`);
   }
-  if (msg === "/api" || msg === "/keys" || msg === "/apikey") {
-    return buildApiMessage(merchantId, merchantName);
+  return intro + "\n\n" + lines.join("\n");
+}
+
+async function getTransactionsText(merchantId: number, lang: "fr" | "en" | "other"): Promise<string> {
+  const txs = await storage.getTransactions(merchantId);
+  const last5 = txs.slice(0, 5);
+  if (last5.length === 0) {
+    return lang === "fr"
+      ? "Aucune transaction pour l'instant."
+      : "No transactions yet.";
   }
-  if (msg === "/stats" || msg === "/statistics") {
-    return buildStatsMessage(merchantId, merchantName);
+  const intro = lang === "fr" ? "Vos dernières transactions :" : "Your recent transactions:";
+  const lines = last5.map(t => {
+    const status = t.status === "confirmed" ? "✓" : t.status === "failed" ? "✗" : "…";
+    const date = new Date(t.createdAt).toLocaleDateString("fr-FR");
+    return `${status} ${countryFlag(t.country)} ${formatAmount(t.amount)} — ${date}`;
+  });
+  return intro + "\n\n" + lines.join("\n");
+}
+
+async function getStatsText(merchantId: number, lang: "fr" | "en" | "other"): Promise<string> {
+  const stats = await storage.getMerchantStats(merchantId);
+  if (lang === "fr") {
+    return `Statistiques de votre compte :\n\nNombre de transactions : ${stats.transactionCount}\nVolume total : ${formatAmount(stats.totalVolume)}`;
   }
-  if (msg === "/help" || msg === "/start" || msg === "/aide") {
-    return buildHelpMessage();
+  return `Your account statistics:\n\nTotal transactions: ${stats.transactionCount}\nTotal volume: ${formatAmount(stats.totalVolume)}`;
+}
+
+// ─── Natural conversation response builder ────────────────────────────────────
+async function buildNaturalResponse(text: string, merchantId: number, lang: "fr" | "en" | "other"): Promise<string | null> {
+  const lower = text.toLowerCase().trim();
+
+  // --- Greetings --- simple, human, no commands list
+  if (/^(bonjour|salut|bonsoir|coucou|hello|hi|hey|good morning|good afternoon|good evening|good day|yo)\b/.test(lower)) {
+    if (lang === "fr") {
+      const options = ["Bonjour !", "Salut !", "Bonsoir !", "Bonjour, comment puis-je vous aider ?", "Bonjour ! Je vous écoute."];
+      return options[Math.floor(Math.random() * options.length)];
+    }
+    const options = ["Hello!", "Hi there!", "Good day!", "Hello, how can I help you?"];
+    return options[Math.floor(Math.random() * options.length)];
   }
 
-  // Keyword matching
-  if (/\b(balance|solde|account|how much|my balance|check balance|available)\b/.test(msg)) {
-    return buildBalanceMessage(merchantId, merchantName);
-  }
-  if (/\b(withdrawal|withdraw|retrait|pending|en attente|reversement|payout|not received|not arrived)\b/.test(msg)) {
-    return buildWithdrawalMessage(merchantId);
-  }
-  if (/\b(transaction|payment|deposit|paiement|encaissement|history|receipt|last|recent)\b/.test(msg)) {
-    return buildTransactionMessage(merchantId);
-  }
-  if (/\b(api|key|apikey|api key|integration|sdk|developer|webhook|code|clé)\b/.test(msg)) {
-    return buildApiMessage(merchantId, merchantName);
-  }
-  if (/\b(stat|stats|statistic|volume|total|performance)\b/.test(msg)) {
-    return buildStatsMessage(merchantId, merchantName);
-  }
-  if (/\b(help|support|aide|command|commands|what can|how to|menu)\b/.test(msg)) {
-    return buildHelpMessage();
-  }
-  if (/^(hello|hi|hey|good morning|good afternoon|good evening|good day|bonjour|salut|bonsoir)\b/.test(msg)) {
-    return `Hello! 👋 Welcome to *WestPay Support*.\n\nHow can I help you today?\nType *help* or */help* to see available commands.`;
+  // --- Thanks ---
+  if (/\b(merci|thanks|thank you|thank u|thx)\b/.test(lower)) {
+    if (lang === "fr") return "De rien, je reste disponible si besoin.";
+    return "You're welcome, feel free to ask anytime.";
   }
 
-  // No keyword matched — don't respond
+  // --- Balance / Solde ---
+  if (/\b(balance|solde|account|how much|available|disponible|combien|argent)\b/.test(lower)) {
+    return getBalanceText(merchantId, lang);
+  }
+
+  // --- Withdrawals / Retraits ---
+  if (/\b(withdrawal|withdraw|retrait|retraits|pending|en attente|reversement|payout|not received|not arrived|reçu|reçus)\b/.test(lower)) {
+    return getWithdrawalsText(merchantId, lang);
+  }
+
+  // --- Transactions ---
+  if (/\b(transaction|payment|deposit|paiement|encaissement|history|historique|receipt|last|récent|recent|dernière)\b/.test(lower)) {
+    return getTransactionsText(merchantId, lang);
+  }
+
+  // --- Stats ---
+  if (/\b(stat|stats|statistic|volume|total|performance|chiffre)\b/.test(lower)) {
+    return getStatsText(merchantId, lang);
+  }
+
+  // --- OK / Acknowledged ---
+  if (/^(ok|okay|d'accord|d accord|entendu|compris|vu|seen|noted|roger|alright|parfait|super|nickel)[\s!.]*$/.test(lower)) {
+    if (lang === "fr") return "Parfait.";
+    return "Got it.";
+  }
+
+  // --- Problem / Issue ---
+  if (/\b(problème|probleme|problem|issue|bug|erreur|error|fail|failed|pas fonctionné|ne fonctionne pas|doesn't work|not working)\b/.test(lower)) {
+    if (lang === "fr") {
+      return "Je vois. Pouvez-vous me donner plus de détails sur le problème ? Je vais vérifier ça pour vous.";
+    }
+    return "I see. Could you give me more details about the issue? I'll look into it for you.";
+  }
+
+  // --- Payment not received ---
+  if (/\b(pas reçu|non reçu|not received|pas arrivé|n'est pas arrivé|haven't received|didn't receive)\b/.test(lower)) {
+    if (lang === "fr") {
+      return "Je comprends. Pouvez-vous me donner la référence de la transaction ou le numéro de téléphone concerné ? Je vais vérifier de notre côté.";
+    }
+    return "I understand. Could you share the transaction reference or the phone number involved? I'll check on our end.";
+  }
+
+  // --- Default: acknowledge and offer help, in detected language ---
+  // Only respond if the message is long enough to warrant a reply (avoid reacting to noise)
+  if (text.length < 4) return null;
+
+  // For unknown messages, give a natural acknowledgement
+  if (lang === "fr") {
+    const options = [
+      "Je prends note, je reviens vers vous rapidement.",
+      "Bien reçu. Laissez-moi vérifier ça.",
+      "Compris. Je vais regarder ça pour vous.",
+    ];
+    return options[Math.floor(Math.random() * options.length)];
+  }
+  if (lang === "en") {
+    const options = [
+      "Got it, I'll look into that for you.",
+      "Understood. Let me check on that.",
+      "Sure, I'll get back to you shortly.",
+    ];
+    return options[Math.floor(Math.random() * options.length)];
+  }
+
+  // Other language — don't respond to avoid confusion
   return null;
+}
+
+// ─── Simulate typing action ───────────────────────────────────────────────────
+async function sendTyping(chat: any): Promise<void> {
+  if (!client) return;
+  try {
+    await client.invoke(new Api.messages.SetTyping({
+      peer: chat,
+      action: new Api.SendMessageTypingAction(),
+    }));
+  } catch { /* ignore */ }
 }
 
 // ─── Event handler ────────────────────────────────────────────────────────────
@@ -256,7 +297,7 @@ async function handleMessage(event: any): Promise<void> {
 
   const message = event.message;
   if (!message || !message.text) return;
-  if (message.out) return; // Ignore own messages
+  if (message.out) return;
 
   const chat = await message.getChat();
   if (!chat) return;
@@ -268,7 +309,7 @@ async function handleMessage(event: any): Promise<void> {
   const chatId = chat.id.toString();
   const text: string = message.text || "";
 
-  // Handle /setmarchand CODE
+  // ── Handle /setmarchand CODE ──────────────────────────────────────────────
   const setMerchantMatch = text.match(/^\/setmarchand\s+([A-Z0-9]+)/i);
   if (setMerchantMatch) {
     const code = setMerchantMatch[1].trim().toUpperCase();
@@ -276,8 +317,7 @@ async function handleMessage(event: any): Promise<void> {
 
     if (!valid) {
       await client.sendMessage(chat, {
-        message: "❌ *Invalid or expired code.*\n\nPlease generate a new activation code from the WestPay dashboard and try again.",
-        parseMode: "markdown",
+        message: "Code invalide ou expiré. Veuillez générer un nouveau code depuis le tableau de bord.",
         replyTo: message.id,
       });
       return;
@@ -287,41 +327,44 @@ async function handleMessage(event: any): Promise<void> {
     await storage.markTelegramActivationCodeUsed(code);
 
     const merchant = await storage.getMerchantById(merchantId);
+    // Simple, human confirmation — no commands list
     await client.sendMessage(chat, {
-      message:
-        `✅ *Group successfully linked!*\n\n` +
-        `🏪 Merchant: *${merchant?.name}*\n` +
-        `📧 Email: ${merchant?.email}\n\n` +
-        `I'm your WestPay support assistant. I'll answer questions from your team members here.\n\n` +
-        buildHelpMessage(),
-      parseMode: "markdown",
+      message: `Groupe lié avec succès au compte ${merchant?.name || "marchand"}. Je suis disponible pour répondre à vos questions.`,
       replyTo: message.id,
     });
     console.log(`[USERBOT] Group ${chatId} linked to merchant #${merchantId} (${merchant?.name})`);
     return;
   }
 
-  // Find merchant for this group
+  // ── Find merchant for this group ──────────────────────────────────────────
   const merchantId = await getMerchantIdForGroup(chatId);
   if (!merchantId) return;
 
-  // Check if sender is a group admin — if so, skip
+  // ── Skip group admins ─────────────────────────────────────────────────────
   const sender = await message.getSender();
   if (!sender) return;
-
   const senderIsAdmin = await isGroupAdmin(chatId, sender.id).catch(() => false);
   if (senderIsAdmin) return;
 
-  // Build a response based on message content
+  // ── Build natural response ────────────────────────────────────────────────
   const merchant = await storage.getMerchantById(merchantId);
   if (!merchant) return;
 
-  const response = await buildResponse(text, merchantId, merchant.name);
+  const lang = detectLanguage(text);
+  const response = await buildNaturalResponse(text, merchantId, lang);
   if (!response) return;
 
+  // ── Apply configured response delay ──────────────────────────────────────
+  const delayMs = await getResponseDelayMs();
+  if (delayMs > 0) {
+    // Show typing indicator while waiting
+    await sendTyping(chat);
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+
+  // Send plain text — NO parseMode to avoid markdown interpretation
   await client.sendMessage(chat, {
     message: response,
-    parseMode: "markdown",
     replyTo: message.id,
   }).catch(err => {
     console.error("[USERBOT] Failed to send response:", err.message);
@@ -335,13 +378,16 @@ export async function getUserbotStatus(): Promise<{
   phone: string;
   linkedGroups: number;
   pendingAuth: boolean;
+  responseDelay: string;
 }> {
   const groupMap = await getGroupMap().catch(() => ({}));
+  const responseDelay = await getResponseDelaySetting();
   return {
     connected: isConnected,
     phone: PHONE_NUMBER,
     linkedGroups: Object.keys(groupMap).length,
     pendingAuth: pendingAuth !== null,
+    responseDelay,
   };
 }
 
@@ -350,38 +396,23 @@ export async function startUbotAuth(phone: string): Promise<{ success: boolean; 
   if (!API_ID || !API_HASH) {
     return { success: false, message: "TELEGRAM_API_ID or TELEGRAM_API_HASH not configured." };
   }
-
   try {
-    // Stop previous client if any
     if (client && isConnected) {
       await client.disconnect().catch(() => {});
       isConnected = false;
     }
-
     const session = new StringSession("");
-    const tempClient = new TelegramClient(session, API_ID, API_HASH, {
-      connectionRetries: 3,
-      useWSS: false,
-    });
+    const tempClient = new TelegramClient(session, API_ID, API_HASH, { connectionRetries: 3, useWSS: false });
     await tempClient.connect();
-
-    const result = await tempClient.invoke(
-      new Api.auth.SendCode({
-        phoneNumber: phone,
-        apiId: API_ID,
-        apiHash: API_HASH,
-        settings: new Api.CodeSettings({}),
-      })
-    );
-
-    pendingAuth = {
-      phone,
-      phoneCodeHash: result.phoneCodeHash,
-      client: tempClient,
-    };
-
+    const result = await tempClient.invoke(new Api.auth.SendCode({
+      phoneNumber: phone,
+      apiId: API_ID,
+      apiHash: API_HASH,
+      settings: new Api.CodeSettings({}),
+    }));
+    pendingAuth = { phone, phoneCodeHash: result.phoneCodeHash, client: tempClient };
     console.log(`[USERBOT] SMS code sent to ${phone}`);
-    return { success: true, message: `Verification code sent to ${phone}. Enter it to complete setup.` };
+    return { success: true, message: `Verification code sent to ${phone}.` };
   } catch (err: any) {
     console.error("[USERBOT] startUbotAuth error:", err.message);
     return { success: false, message: err.message || "Failed to send verification code." };
@@ -393,45 +424,27 @@ export async function completeUbotAuth(code: string, password?: string): Promise
   if (!pendingAuth) {
     return { success: false, message: "No pending auth session. Please start authentication first." };
   }
-
   const { phone, phoneCodeHash, client: tempClient } = pendingAuth;
-
   try {
     try {
-      await tempClient.invoke(
-        new Api.auth.SignIn({
-          phoneNumber: phone,
-          phoneCodeHash,
-          phoneCode: code.replace(/\s/g, ""),
-        })
-      );
+      await tempClient.invoke(new Api.auth.SignIn({ phoneNumber: phone, phoneCodeHash, phoneCode: code.replace(/\s/g, "") }));
     } catch (err: any) {
       if (err.errorMessage === "SESSION_PASSWORD_NEEDED") {
-        if (!password) {
-          return { success: false, message: "2FA_REQUIRED" };
-        }
+        if (!password) return { success: false, message: "2FA_REQUIRED" };
         const passInfo = await tempClient.invoke(new Api.account.GetPassword());
         const { computeCheck } = await import("telegram/Password");
         const passwordCheck = await computeCheck(passInfo as any, password);
         await tempClient.invoke(new Api.auth.CheckPassword({ password: passwordCheck }));
-      } else {
-        throw err;
-      }
+      } else { throw err; }
     }
-
     const sessionStr = tempClient.session.save() as unknown as string;
     await persistSession(sessionStr);
-
-    // Replace global client with authenticated one
     client = tempClient;
     pendingAuth = null;
-
-    // Register message handler
     client.addEventHandler(handleMessage, new NewMessage({}));
     isConnected = true;
-
     console.log("[USERBOT] Authentication successful — userbot is now running");
-    return { success: true, message: "Userbot connected successfully! It will now respond in merchant groups." };
+    return { success: true, message: "Userbot connected successfully!" };
   } catch (err: any) {
     console.error("[USERBOT] completeUbotAuth error:", err.message);
     return { success: false, message: err.message || "Invalid code. Please try again." };
@@ -440,10 +453,7 @@ export async function completeUbotAuth(code: string, password?: string): Promise
 
 /** Disconnect the userbot */
 export async function disconnectUserbot(): Promise<void> {
-  if (client) {
-    await client.disconnect().catch(() => {});
-    client = null;
-  }
+  if (client) { await client.disconnect().catch(() => {}); client = null; }
   pendingAuth = null;
   isConnected = false;
   console.log("[USERBOT] Disconnected");
@@ -455,39 +465,25 @@ export async function initUserbot(): Promise<void> {
     console.log("[USERBOT] TELEGRAM_API_ID or TELEGRAM_API_HASH not set — skipped");
     return;
   }
-
   const sessionStr = await loadSession();
   if (!sessionStr) {
     console.log("[USERBOT] No stored session — connect via admin dashboard");
     return;
   }
-
   try {
     const session = new StringSession(sessionStr);
-    const c = new TelegramClient(session, API_ID, API_HASH, {
-      connectionRetries: 3,
-      useWSS: false,
-    });
-
+    const c = new TelegramClient(session, API_ID, API_HASH, { connectionRetries: 3, useWSS: false });
     await c.connect();
-
-    // Verify still authenticated
     const me = await c.getMe();
     console.log(`[USERBOT] Reconnected as ${(me as any).firstName} ${(me as any).lastName || ""} (@${(me as any).username || "no username"})`);
-
     client = c;
     isConnected = true;
-
-    // Save refreshed session
     const refreshed = c.session.save() as unknown as string;
     await persistSession(refreshed);
-
-    // Register message handler
     client.addEventHandler(handleMessage, new NewMessage({}));
     console.log("[USERBOT] Listening for messages in merchant groups");
   } catch (err: any) {
     console.error("[USERBOT] Failed to reconnect with stored session:", err.message);
-    // Clear bad session
     await persistSession("").catch(() => {});
   }
 }

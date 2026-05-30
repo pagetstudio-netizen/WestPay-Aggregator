@@ -6108,6 +6108,19 @@ function NotificationsPanel() {
   );
 }
 
+const DELAY_OPTIONS = [
+  { value: "auto", label: "Automatique (3-8 secondes, aléatoire)" },
+  { value: "5", label: "5 secondes" },
+  { value: "10", label: "10 secondes" },
+  { value: "20", label: "20 secondes" },
+  { value: "30", label: "30 secondes" },
+  { value: "45", label: "45 secondes" },
+  { value: "1m", label: "1 minute" },
+  { value: "2m", label: "2 minutes" },
+  { value: "5m", label: "5 minutes" },
+  { value: "0", label: "Immédiat (sans délai)" },
+];
+
 function UserbotPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
@@ -6115,16 +6128,22 @@ function UserbotPanel() {
   const [phone, setPhone] = useState("+15843334306");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
+  const [delayValue, setDelayValue] = useState("auto");
+  const [savingDelay, setSavingDelay] = useState(false);
+  const [delayInit, setDelayInit] = useState(false);
 
   const { data: status, refetch: refetchStatus } = useQuery({
     queryKey: ["/api/admin/userbot/status"],
     queryFn: async () => {
       const res = await fetch("/api/admin/userbot/status", { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) throw new Error("Failed");
-      return res.json() as Promise<{ connected: boolean; phone: string; linkedGroups: number; pendingAuth: boolean }>;
+      return res.json() as Promise<{ connected: boolean; phone: string; linkedGroups: number; pendingAuth: boolean; responseDelay: string }>;
     },
     refetchInterval: 5000,
   });
+
+  const serverDelay = status?.responseDelay || "auto";
+  if (!delayInit && status) { setDelayValue(serverDelay); setDelayInit(true); }
 
   async function adminPost(endpoint: string, body: object) {
     const res = await fetch(endpoint, {
@@ -6139,10 +6158,10 @@ function UserbotPanel() {
     setStep("sending");
     const result = await adminPost("/api/admin/userbot/start-auth", { phone });
     if (result.success) {
-      toast({ title: "Code sent!", description: result.message });
+      toast({ title: "Code envoyé !", description: result.message });
       setStep("code");
     } else {
-      toast({ title: "Error", description: result.message, variant: "destructive" });
+      toast({ title: "Erreur", description: result.message, variant: "destructive" });
       setStep("idle");
     }
   }
@@ -6151,15 +6170,13 @@ function UserbotPanel() {
     setStep("connecting");
     const result = await adminPost("/api/admin/userbot/complete-auth", { code });
     if (result.message === "2FA_REQUIRED") {
-      toast({ title: "2FA required", description: "Enter your Telegram 2-step verification password." });
+      toast({ title: "2FA requis", description: "Entrez votre mot de passe Telegram." });
       setStep("password");
     } else if (result.success) {
-      toast({ title: "✅ Connected!", description: result.message });
-      setStep("idle");
-      setCode("");
-      refetchStatus();
+      toast({ title: "Connecté !", description: result.message });
+      setStep("idle"); setCode(""); refetchStatus();
     } else {
-      toast({ title: "Error", description: result.message, variant: "destructive" });
+      toast({ title: "Erreur", description: result.message, variant: "destructive" });
       setStep("code");
     }
   }
@@ -6168,180 +6185,184 @@ function UserbotPanel() {
     setStep("connecting");
     const result = await adminPost("/api/admin/userbot/complete-auth", { code, password });
     if (result.success) {
-      toast({ title: "✅ Connected!", description: result.message });
-      setStep("idle");
-      setCode(""); setPassword("");
-      refetchStatus();
+      toast({ title: "Connecté !", description: result.message });
+      setStep("idle"); setCode(""); setPassword(""); refetchStatus();
     } else {
-      toast({ title: "Error", description: result.message, variant: "destructive" });
+      toast({ title: "Erreur", description: result.message, variant: "destructive" });
       setStep("password");
     }
   }
 
   async function handleDisconnect() {
     await adminPost("/api/admin/userbot/disconnect", {});
-    toast({ title: "Disconnected", description: "Userbot has been disconnected." });
+    toast({ title: "Déconnecté", description: "Le compte support a été déconnecté." });
     refetchStatus();
+  }
+
+  async function handleSaveDelay() {
+    setSavingDelay(true);
+    try {
+      const result = await adminPost("/api/admin/userbot/delay", { value: delayValue });
+      if (result.success) {
+        toast({ title: "Délai enregistré", description: DELAY_OPTIONS.find(o => o.value === delayValue)?.label });
+      } else {
+        toast({ title: "Erreur", description: result.message, variant: "destructive" });
+      }
+    } finally {
+      setSavingDelay(false);
+    }
   }
 
   const isConnected = status?.connected;
 
   return (
     <div className="max-w-xl mx-auto space-y-6">
-      {/* Header */}
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center shadow-sm">
           <MessageSquare className="w-5 h-5 text-white" />
         </div>
         <div>
-          <h2 className="text-lg font-bold text-foreground">Customer Service Userbot</h2>
-          <p className="text-sm text-muted-foreground">Real Telegram account that auto-responds to merchants in English</p>
+          <h2 className="text-lg font-bold text-foreground">Compte Support Client</h2>
+          <p className="text-sm text-muted-foreground">Compte Telegram réel qui répond naturellement dans les groupes marchands</p>
         </div>
       </div>
 
       {/* Status card */}
       <div className="rounded-xl border bg-card p-5 space-y-4">
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium text-foreground">Connection Status</span>
+          <span className="text-sm font-medium text-foreground">Statut de connexion</span>
           <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${isConnected ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-muted text-muted-foreground"}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? "bg-green-500 animate-pulse" : "bg-muted-foreground"}`} />
-            {isConnected ? "Connected" : "Disconnected"}
+            {isConnected ? "Connecté" : "Déconnecté"}
           </span>
         </div>
-
         {status && (
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div className="rounded-lg bg-muted/50 p-3">
-              <p className="text-muted-foreground text-xs mb-1">Phone Number</p>
+              <p className="text-muted-foreground text-xs mb-1">Numéro de téléphone</p>
               <p className="font-mono font-medium">{status.phone}</p>
             </div>
             <div className="rounded-lg bg-muted/50 p-3">
-              <p className="text-muted-foreground text-xs mb-1">Linked Groups</p>
+              <p className="text-muted-foreground text-xs mb-1">Groupes liés</p>
               <p className="font-bold text-lg">{status.linkedGroups}</p>
             </div>
           </div>
         )}
-
         {isConnected && (
-          <button
-            type="button"
-            onClick={handleDisconnect}
+          <button type="button" onClick={handleDisconnect}
             className="w-full py-2 rounded-lg border border-red-300 text-red-600 text-sm font-medium hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-            data-testid="button-userbot-disconnect"
-          >
-            Disconnect Userbot
+            data-testid="button-userbot-disconnect">
+            Déconnecter le compte support
           </button>
         )}
+      </div>
+
+      {/* Response delay config */}
+      <div className="rounded-xl border bg-card p-5 space-y-4">
+        <div>
+          <h3 className="font-semibold text-foreground text-sm mb-0.5">Délai de réponse</h3>
+          <p className="text-xs text-muted-foreground">Configurez combien de temps le compte support attend avant de répondre.</p>
+        </div>
+        <div className="space-y-3">
+          <div className="relative">
+            <select value={delayValue} onChange={e => setDelayValue(e.target.value)}
+              className="w-full appearance-none px-3 py-2.5 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary pr-8"
+              data-testid="select-userbot-delay">
+              {DELAY_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+            </div>
+          </div>
+          <button type="button" onClick={handleSaveDelay} disabled={savingDelay}
+            className="w-full py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
+            data-testid="button-save-delay">
+            {savingDelay ? <><Loader2 className="w-4 h-4 animate-spin" /> Enregistrement...</> : "Enregistrer le délai"}
+          </button>
+        </div>
+        <div className="rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground">
+          En mode automatique, le compte attend entre 3 et 8 secondes de façon aléatoire et affiche l'indicateur de frappe pour paraître naturel.
+        </div>
       </div>
 
       {/* Connect flow */}
       {!isConnected && (
         <div className="rounded-xl border bg-card p-5 space-y-4">
-          <h3 className="font-semibold text-foreground text-sm">Connect Telegram Account</h3>
-
+          <h3 className="font-semibold text-foreground text-sm">Connecter le compte Telegram</h3>
           {(step === "idle" || step === "sending") && (
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-muted-foreground mb-1.5 block">Phone Number</label>
-                <input
-                  type="text"
-                  value={phone}
-                  onChange={e => setPhone(e.target.value)}
-                  placeholder="+15843334306"
+                <label className="text-xs text-muted-foreground mb-1.5 block">Numéro de téléphone</label>
+                <input type="text" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+15843334306"
                   className="w-full px-3 py-2 rounded-lg border bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
-                  data-testid="input-userbot-phone"
-                />
+                  data-testid="input-userbot-phone" />
               </div>
-              <button
-                type="button"
-                onClick={handleStartAuth}
-                disabled={step === "sending"}
+              <button type="button" onClick={handleStartAuth} disabled={step === "sending"}
                 className="w-full py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
-                data-testid="button-userbot-sendcode"
-              >
-                {step === "sending" ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending code...</> : "Send Verification Code"}
+                data-testid="button-userbot-sendcode">
+                {step === "sending" ? <><Loader2 className="w-4 h-4 animate-spin" /> Envoi du code...</> : "Envoyer le code de vérification"}
               </button>
             </div>
           )}
-
           {step === "code" && (
             <div className="space-y-3">
               <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-3 text-sm text-blue-700 dark:text-blue-300">
-                📱 A verification code has been sent to <strong>{phone}</strong>. Enter it below.
+                Un code de vérification a été envoyé à <strong>{phone}</strong>.
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1.5 block">Verification Code</label>
-                <input
-                  type="text"
-                  value={code}
-                  onChange={e => setCode(e.target.value)}
-                  placeholder="12345"
-                  maxLength={10}
+                <label className="text-xs text-muted-foreground mb-1.5 block">Code de vérification</label>
+                <input type="text" value={code} onChange={e => setCode(e.target.value)} placeholder="12345" maxLength={10}
                   className="w-full px-3 py-2 rounded-lg border bg-background text-sm font-mono text-center tracking-widest text-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                  data-testid="input-userbot-code"
-                  onKeyDown={e => e.key === "Enter" && handleSubmitCode()}
-                />
+                  data-testid="input-userbot-code" onKeyDown={e => e.key === "Enter" && handleSubmitCode()} />
               </div>
               <div className="flex gap-2">
-                <button type="button" onClick={() => setStep("idle")} className="flex-1 py-2 rounded-lg border text-sm font-medium hover:bg-muted transition-colors">Back</button>
-                <button
-                  type="button"
-                  onClick={handleSubmitCode}
-                  disabled={step === "connecting" || !code}
+                <button type="button" onClick={() => setStep("idle")} className="flex-1 py-2 rounded-lg border text-sm font-medium hover:bg-muted transition-colors">Retour</button>
+                <button type="button" onClick={handleSubmitCode} disabled={step === "connecting" || !code}
                   className="flex-1 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
-                  data-testid="button-userbot-submitcode"
-                >
-                  {step === "connecting" ? <><Loader2 className="w-4 h-4 animate-spin" /> Connecting...</> : "Verify & Connect"}
+                  data-testid="button-userbot-submitcode">
+                  {step === "connecting" ? <><Loader2 className="w-4 h-4 animate-spin" /> Connexion...</> : "Vérifier et connecter"}
                 </button>
               </div>
             </div>
           )}
-
           {step === "password" && (
             <div className="space-y-3">
               <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 text-sm text-amber-700 dark:text-amber-300">
-                🔐 Two-step verification is enabled. Enter your Telegram password.
+                La vérification en deux étapes est activée. Entrez votre mot de passe Telegram.
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1.5 block">2FA Password</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder="Your Telegram password"
+                <label className="text-xs text-muted-foreground mb-1.5 block">Mot de passe 2FA</label>
+                <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Votre mot de passe Telegram"
                   className="w-full px-3 py-2 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                  data-testid="input-userbot-password"
-                  onKeyDown={e => e.key === "Enter" && handleSubmitPassword()}
-                />
+                  data-testid="input-userbot-password" onKeyDown={e => e.key === "Enter" && handleSubmitPassword()} />
               </div>
-              <button
-                type="button"
-                onClick={handleSubmitPassword}
-                disabled={step === "connecting" || !password}
+              <button type="button" onClick={handleSubmitPassword} disabled={step === "connecting" || !password}
                 className="w-full py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
-                data-testid="button-userbot-submitpassword"
-              >
-                {step === "connecting" ? <><Loader2 className="w-4 h-4 animate-spin" /> Connecting...</> : "Confirm Password"}
+                data-testid="button-userbot-submitpassword">
+                {step === "connecting" ? <><Loader2 className="w-4 h-4 animate-spin" /> Connexion...</> : "Confirmer le mot de passe"}
               </button>
             </div>
           )}
         </div>
       )}
 
-      {/* How to use */}
+      {/* How it works */}
       <div className="rounded-xl border bg-card p-5 space-y-3">
-        <h3 className="font-semibold text-foreground text-sm">How It Works</h3>
+        <h3 className="font-semibold text-foreground text-sm">Comment ça fonctionne</h3>
         <ol className="space-y-2 text-sm text-muted-foreground list-none">
-          <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">1</span>Connect the Telegram account above</li>
-          <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">2</span>Add this account to a merchant's Telegram group</li>
-          <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">3</span>Generate an activation code from the merchant's profile</li>
-          <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">4</span>Send <code className="bg-muted px-1 rounded font-mono">/setmarchand CODE</code> in the group</li>
-          <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">5</span>The account now auto-responds to merchants in English 🎉</li>
+          <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">1</span>Connecter le compte Telegram ci-dessus</li>
+          <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">2</span>Ajouter ce compte dans le groupe Telegram du marchand</li>
+          <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">3</span>Générer un code d'activation depuis le profil du marchand</li>
+          <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">4</span>Envoyer <code className="bg-muted px-1 rounded font-mono">/setmarchand CODE</code> dans le groupe</li>
+          <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">5</span>Le compte répond naturellement dans la langue du message</li>
         </ol>
-        <div className="rounded-lg bg-muted/50 p-3 text-xs font-mono space-y-1">
-          <p className="text-muted-foreground font-sans text-xs font-semibold mb-1">Available merchant keywords:</p>
-          <p><span className="text-primary">balance</span> · <span className="text-primary">withdrawal</span> · <span className="text-primary">transaction</span></p>
-          <p><span className="text-primary">api</span> · <span className="text-primary">stats</span> · <span className="text-primary">help</span></p>
+        <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground space-y-1">
+          <p className="font-semibold text-foreground mb-1">Comportement :</p>
+          <p>Répond naturellement en français ou en anglais selon la langue du message.</p>
+          <p>Aucune liste de commandes, aucun texte en gras avec des astérisques.</p>
+          <p>Affiche l'indicateur de frappe avant de répondre.</p>
         </div>
       </div>
     </div>
