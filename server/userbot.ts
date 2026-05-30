@@ -107,14 +107,12 @@ async function isGroupAdmin(chatId: string, userId: bigInt.BigInteger): Promise<
   }
 }
 
-// ─── Language detection (simple) ─────────────────────────────────────────────
-function detectLanguage(text: string): "fr" | "en" | "other" {
+// ─── Language detection ───────────────────────────────────────────────────────
+function detectLanguage(text: string): "fr" | "en" {
   const lower = text.toLowerCase();
-  const frWords = /\b(bonjour|salut|bonsoir|merci|s'il vous|svp|oui|non|comment|pourquoi|quand|combien|avoir|votre|notre|avec|pour|dans|sur|mon|ma|mes|les|des|une|que|qui|est|pas|mais|plus|très|bien|aussi|si|je|tu|il|elle|nous|vous|ils)\b/;
-  const enWords = /\b(hello|hi|hey|thanks|thank you|yes|no|how|why|when|how much|your|our|with|for|in|on|my|the|a|an|is|not|but|more|very|well|also|if|i|you|he|she|we|they|please|good|morning|afternoon|evening)\b/;
+  const frWords = /\b(bonjour|salut|bonsoir|bonne nuit|coucou|merci|s'il vous|svp|stp|oui|non|comment|pourquoi|quand|combien|avoir|votre|notre|avec|pour|dans|sur|mon|ma|mes|les|des|une|que|qui|est|pas|mais|plus|très|bien|aussi|si|je|tu|il|elle|nous|vous|ils|faire|veux|veux|vouloir|intégrer|integrer|utiliser|marche|fonctionne|aide|aidez|besoin|problème|probleme|retrait|solde|paiement|encaissement|compte|boite|reçu|reçus|envoyé|arrivé|délai|attente|frais|commission|tarif|accès|acceder|tableau|bord|connexion|connecter|mot de passe|clé|api|webhook|lien|lier|activer|désactiver|supprimer|créer|modifier|voir|afficher)\b/;
   if (frWords.test(lower)) return "fr";
-  if (enWords.test(lower)) return "en";
-  return "other";
+  return "en";
 }
 
 // ─── Country flag helper ──────────────────────────────────────────────────────
@@ -133,7 +131,7 @@ function formatAmount(n: number): string {
 }
 
 // ─── Natural data fetchers (plain text, no markdown) ─────────────────────────
-async function getBalanceText(merchantId: number, lang: "fr" | "en" | "other"): Promise<string> {
+async function getBalanceText(merchantId: number, lang: "fr" | "en"): Promise<string> {
   const countries = await storage.getMerchantCountries(merchantId);
   const active = countries.filter(mc => mc.active);
   if (active.length === 0) {
@@ -146,7 +144,7 @@ async function getBalanceText(merchantId: number, lang: "fr" | "en" | "other"): 
   return intro + "\n\n" + lines.join("\n");
 }
 
-async function getWithdrawalsText(merchantId: number, lang: "fr" | "en" | "other"): Promise<string> {
+async function getWithdrawalsText(merchantId: number, lang: "fr" | "en"): Promise<string> {
   const all = await storage.getWithdrawals(merchantId);
   const pending = all.filter(w => w.status === "pending");
   if (pending.length === 0) {
@@ -167,7 +165,7 @@ async function getWithdrawalsText(merchantId: number, lang: "fr" | "en" | "other
   return intro + "\n\n" + lines.join("\n");
 }
 
-async function getTransactionsText(merchantId: number, lang: "fr" | "en" | "other"): Promise<string> {
+async function getTransactionsText(merchantId: number, lang: "fr" | "en"): Promise<string> {
   const txs = await storage.getTransactions(merchantId);
   const last5 = txs.slice(0, 5);
   if (last5.length === 0) {
@@ -184,7 +182,7 @@ async function getTransactionsText(merchantId: number, lang: "fr" | "en" | "othe
   return intro + "\n\n" + lines.join("\n");
 }
 
-async function getStatsText(merchantId: number, lang: "fr" | "en" | "other"): Promise<string> {
+async function getStatsText(merchantId: number, lang: "fr" | "en"): Promise<string> {
   const stats = await storage.getMerchantStats(merchantId);
   if (lang === "fr") {
     return `Statistiques de votre compte :\n\nNombre de transactions : ${stats.transactionCount}\nVolume total : ${formatAmount(stats.totalVolume)}`;
@@ -193,91 +191,141 @@ async function getStatsText(merchantId: number, lang: "fr" | "en" | "other"): Pr
 }
 
 // ─── Natural conversation response builder ────────────────────────────────────
-async function buildNaturalResponse(text: string, merchantId: number, lang: "fr" | "en" | "other"): Promise<string | null> {
+async function buildNaturalResponse(text: string, merchantId: number, lang: "fr" | "en"): Promise<string | null> {
   const lower = text.toLowerCase().trim();
+  const isFr = lang === "fr";
 
-  // --- Greetings --- simple, human, no commands list
-  if (/^(bonjour|salut|bonsoir|coucou|hello|hi|hey|good morning|good afternoon|good evening|good day|yo)\b/.test(lower)) {
-    if (lang === "fr") {
-      const options = ["Bonjour !", "Salut !", "Bonsoir !", "Bonjour, comment puis-je vous aider ?", "Bonjour ! Je vous écoute."];
-      return options[Math.floor(Math.random() * options.length)];
-    }
-    const options = ["Hello!", "Hi there!", "Good day!", "Hello, how can I help you?"];
-    return options[Math.floor(Math.random() * options.length)];
+  // --- Too short to respond ---
+  if (text.trim().length < 2) return null;
+
+  // ── Greetings ────────────────────────────────────────────────────────────────
+  if (/^(bonjour|salut|bonsoir|bonne nuit|coucou|hello|hi|hey|good morning|good afternoon|good evening|good day|yo|hola|ola)\b/.test(lower)) {
+    const hour = new Date().getHours();
+    const timeGreet = isFr
+      ? (hour < 12 ? "Bonjour" : hour < 18 ? "Bonne après-midi" : "Bonsoir")
+      : (hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening");
+    return isFr
+      ? `${timeGreet} ! Comment puis-je vous aider aujourd'hui ?`
+      : `${timeGreet}! How can I help you today?`;
   }
 
-  // --- Thanks ---
-  if (/\b(merci|thanks|thank you|thank u|thx)\b/.test(lower)) {
-    if (lang === "fr") return "De rien, je reste disponible si besoin.";
-    return "You're welcome, feel free to ask anytime.";
+  // ── "Comment tu vas / ça va / how are you" ───────────────────────────────────
+  if (/\b(comment (tu|vous) (vas|allez)|ça va|ca va|comment (ça|ca) va|how are you|how r u|how do you do|you good|tu vas bien|vous allez bien)\b/.test(lower)) {
+    return isFr
+      ? "Je vais très bien, merci ! Je suis là pour vous aider. Qu'est-ce que je peux faire pour vous ?"
+      : "I'm doing great, thanks for asking! I'm here to help. What can I do for you?";
   }
 
-  // --- Balance / Solde ---
-  if (/\b(balance|solde|account|how much|available|disponible|combien|argent)\b/.test(lower)) {
+  // ── Thanks ───────────────────────────────────────────────────────────────────
+  if (/\b(merci|merci beaucoup|grand merci|thanks|thank you|thank u|thx|ty)\b/.test(lower)) {
+    return isFr
+      ? "Avec plaisir ! N'hésitez pas si vous avez d'autres questions."
+      : "You're welcome! Don't hesitate to reach out if you need anything else.";
+  }
+
+  // ── OK / Acknowledged ────────────────────────────────────────────────────────
+  if (/^(ok|okay|d'accord|d accord|entendu|compris|vu|seen|noted|roger|alright|parfait|super|nickel|👍|✅)[\s!.]*$/.test(lower)) {
+    return isFr ? "Parfait, je reste disponible si besoin." : "Perfect, I'm here if you need anything.";
+  }
+
+  // ── API Integration ──────────────────────────────────────────────────────────
+  if (/\b(intégr|integr|api|sdk|webhook|clé api|api key|documentation|doc|developer|développeur|comment (utiliser|connecter|implémenter|implement)|comment (utiliser|connecter)|integrate|integration)\b/.test(lower)) {
+    return isFr
+      ? `Pour intégrer l'API WestPay sur votre site ou application, voici les étapes :\n\n1. Récupérez votre clé API dans votre tableau de bord (onglet "API & SDK")\n2. Consultez la documentation complète sur /api-docs\n3. Endpoint de paiement : POST /api/payment/initiate\n4. Configurez votre webhook pour recevoir les confirmations de paiement\n\nVous pouvez aussi tester l'API directement depuis le tableau de bord. Avez-vous besoin d'aide sur un point précis ?`
+      : `To integrate the WestPay API into your website or app:\n\n1. Get your API key from your dashboard (tab "API & SDK")\n2. Full documentation available at /api-docs\n3. Payment endpoint: POST /api/payment/initiate\n4. Set up your webhook to receive payment confirmations\n\nYou can also test the API directly from the dashboard. Do you need help with a specific part?`;
+  }
+
+  // ── Balance / Solde ──────────────────────────────────────────────────────────
+  if (/\b(balance|solde|combien (j'ai|il y a|reste)|how much|available|disponible|argent|fonds|funds|voir (mon|le) solde)\b/.test(lower)) {
     return getBalanceText(merchantId, lang);
   }
 
-  // --- Withdrawals / Retraits ---
-  if (/\b(withdrawal|withdraw|retrait|retraits|pending|en attente|reversement|payout|not received|not arrived|reçu|reçus)\b/.test(lower)) {
+  // ── Withdrawals / Retraits ───────────────────────────────────────────────────
+  if (/\b(retrait|retraits|withdrawal|withdraw|payout|virement|reversement|virer|en attente|pending|débloquer|pas (encore )?reçu|non reçu|not received)\b/.test(lower)
+    || /\b(faire (un )?retrait|demande de retrait|quand (est-ce que|est ce que|je vais|je recevrai|j'aurai)|when will i (get|receive))\b/.test(lower)) {
     return getWithdrawalsText(merchantId, lang);
   }
 
-  // --- Transactions ---
-  if (/\b(transaction|payment|deposit|paiement|encaissement|history|historique|receipt|last|récent|recent|dernière)\b/.test(lower)) {
+  // ── Transactions / Historique ────────────────────────────────────────────────
+  if (/\b(transaction|paiement|encaissement|payment|deposit|historique|history|receipt|reçu|récent|recent|dernière|last|voir (mes|les) (paiements|transactions))\b/.test(lower)) {
     return getTransactionsText(merchantId, lang);
   }
 
-  // --- Stats ---
-  if (/\b(stat|stats|statistic|volume|total|performance|chiffre)\b/.test(lower)) {
+  // ── Stats ────────────────────────────────────────────────────────────────────
+  if (/\b(stat|stats|statistique|statistic|volume|total|performance|chiffre|rapport|report|résumé|summary)\b/.test(lower)) {
     return getStatsText(merchantId, lang);
   }
 
-  // --- OK / Acknowledged ---
-  if (/^(ok|okay|d'accord|d accord|entendu|compris|vu|seen|noted|roger|alright|parfait|super|nickel)[\s!.]*$/.test(lower)) {
-    if (lang === "fr") return "Parfait.";
-    return "Got it.";
+  // ── Délai / Timing ───────────────────────────────────────────────────────────
+  if (/\b(délai|delai|combien de temps|quand|when|how long|durée|duration|processing time|temps de traitement)\b/.test(lower)) {
+    return isFr
+      ? "Les paiements Mobile Money sont généralement confirmés en quelques minutes après validation du client. Les retraits sont traités sous 24 à 48h ouvrées. Si un paiement dépasse ce délai, contactez-nous avec la référence de transaction."
+      : "Mobile Money payments are typically confirmed within a few minutes after customer validation. Withdrawals are processed within 24–48 business hours. If a payment exceeds this delay, please contact us with the transaction reference.";
   }
 
-  // --- Problem / Issue ---
-  if (/\b(problème|probleme|problem|issue|bug|erreur|error|fail|failed|pas fonctionné|ne fonctionne pas|doesn't work|not working)\b/.test(lower)) {
-    if (lang === "fr") {
-      return "Je vois. Pouvez-vous me donner plus de détails sur le problème ? Je vais vérifier ça pour vous.";
-    }
-    return "I see. Could you give me more details about the issue? I'll look into it for you.";
+  // ── Frais / Commission ───────────────────────────────────────────────────────
+  if (/\b(frais|commission|tarif|fee|fees|taux|rate|combien (ça coûte|vous prenez|vous déduisez)|how much (do you charge|is the fee))\b/.test(lower)) {
+    return isFr
+      ? "Nos frais sont définis par votre contrat marchand. Vous pouvez consulter votre taux de commission dans votre tableau de bord, onglet \"Paramètres\". Pour toute renégociation, contactez notre équipe commerciale."
+      : "Your fees are defined by your merchant contract. You can view your commission rate in your dashboard under \"Settings\". To renegotiate, please contact our sales team.";
   }
 
-  // --- Payment not received ---
-  if (/\b(pas reçu|non reçu|not received|pas arrivé|n'est pas arrivé|haven't received|didn't receive)\b/.test(lower)) {
-    if (lang === "fr") {
-      return "Je comprends. Pouvez-vous me donner la référence de la transaction ou le numéro de téléphone concerné ? Je vais vérifier de notre côté.";
-    }
-    return "I understand. Could you share the transaction reference or the phone number involved? I'll check on our end.";
+  // ── Mot de passe / Connexion ─────────────────────────────────────────────────
+  if (/\b(mot de passe|password|mdp|connexion|connecter|login|se connecter|oublié|forgot|réinitialiser|reset|accès|access)\b/.test(lower)) {
+    return isFr
+      ? "Pour réinitialiser votre mot de passe, cliquez sur \"Mot de passe oublié\" sur la page de connexion. Si vous n'avez pas accès à votre email, contactez l'administrateur de la plateforme."
+      : "To reset your password, click \"Forgot password\" on the login page. If you don't have access to your email, please contact the platform administrator.";
   }
 
-  // --- Default: acknowledge and offer help, in detected language ---
-  // Only respond if the message is long enough to warrant a reply (avoid reacting to noise)
-  if (text.length < 4) return null;
-
-  // For unknown messages, give a natural acknowledgement
-  if (lang === "fr") {
-    const options = [
-      "Je prends note, je reviens vers vous rapidement.",
-      "Bien reçu. Laissez-moi vérifier ça.",
-      "Compris. Je vais regarder ça pour vous.",
-    ];
-    return options[Math.floor(Math.random() * options.length)];
-  }
-  if (lang === "en") {
-    const options = [
-      "Got it, I'll look into that for you.",
-      "Understood. Let me check on that.",
-      "Sure, I'll get back to you shortly.",
-    ];
-    return options[Math.floor(Math.random() * options.length)];
+  // ── Opérateurs / Pays ────────────────────────────────────────────────────────
+  if (/\b(opérateur|operator|pays|country|countries|mtn|orange|moov|wave|tmoney|flooz|airtel|mpesa|mobile money|activer|désactiver|ajouter un pays)\b/.test(lower)) {
+    return isFr
+      ? "WestPay supporte les opérateurs Mobile Money dans plusieurs pays d'Afrique de l'Ouest : MTN, Orange, Moov, Wave, TMoney, Flooz, et d'autres. L'activation des pays et opérateurs se fait depuis votre tableau de bord, section \"Pays & Opérateurs\"."
+      : "WestPay supports Mobile Money operators across several West African countries: MTN, Orange, Moov, Wave, TMoney, Flooz, and more. Country and operator activation is managed from your dashboard under \"Countries & Operators\".";
   }
 
-  // Other language — don't respond to avoid confusion
-  return null;
+  // ── Problème / Erreur ────────────────────────────────────────────────────────
+  if (/\b(problème|probleme|problem|issue|bug|erreur|error|fail|failed|ne (fonctionne|marche) pas|doesn't work|not working|bloqué|blocked)\b/.test(lower)) {
+    return isFr
+      ? "Je suis désolé d'apprendre ça. Pouvez-vous me préciser le problème et partager la référence de transaction si disponible ? Je vais escalader ça à l'équipe technique immédiatement."
+      : "I'm sorry to hear that. Could you describe the issue and share the transaction reference if available? I'll escalate this to our technical team right away.";
+  }
+
+  // ── Paiement non reçu ────────────────────────────────────────────────────────
+  if (/\b(pas (encore )?reçu|non reçu|not received|not arrived|haven't received|didn't receive|n'est pas arrivé|pas arrivé)\b/.test(lower)) {
+    return isFr
+      ? "Je comprends. Veuillez me communiquer la référence de la transaction (format OP-XXXX ou TR-XXXX) et le numéro de téléphone concerné. Je vais vérifier le statut de votre côté immédiatement."
+      : "I understand. Please share the transaction reference (format OP-XXXX or TR-XXXX) and the phone number involved. I'll check the status on our end right away.";
+  }
+
+  // ── Contact / Support ────────────────────────────────────────────────────────
+  if (/\b(contacter|contact|support|aide|help|assistance|besoin d'aide|need help|parler à quelqu'un|speak to someone|équipe|team)\b/.test(lower)) {
+    return isFr
+      ? "Notre équipe support est disponible pour vous aider. Pour les urgences techniques, mentionnez votre identifiant marchand et la référence de transaction. Vous pouvez aussi envoyer un email à support@westpay.cloud."
+      : "Our support team is here to help. For technical urgencies, please mention your merchant ID and the transaction reference. You can also email support@westpay.cloud.";
+  }
+
+  // ── Crypto ───────────────────────────────────────────────────────────────────
+  if (/\b(crypto|bitcoin|btc|eth|usdt|tron|bnb|ethereum|cryptomonnaie|cryptocurrency|oxapay)\b/.test(lower)) {
+    return isFr
+      ? "WestPay supporte également les paiements crypto via OxaPay (USDT, BTC, ETH, TRX, BNB et d'autres). L'activation se fait depuis votre tableau de bord, onglet \"Crypto\". Consultez la documentation crypto sur /crypto-docs pour l'intégration."
+      : "WestPay also supports crypto payments via OxaPay (USDT, BTC, ETH, TRX, BNB and more). Activation is done from your dashboard under the \"Crypto\" tab. See /crypto-docs for integration details.";
+  }
+
+  // ── Aide générale / What can you do ──────────────────────────────────────────
+  if (/\b(que (peux-tu|pouvez-vous|peut-on)|what can you|que fais-tu|what do you do|aide-moi|aidez-moi|help me|je ne sais pas|i don't know|comment ça marche|how does this work)\b/.test(lower)) {
+    return isFr
+      ? `Je suis votre assistant WestPay. Voici ce que je peux faire pour vous :\n\n• Consulter votre solde\n• Voir vos retraits en attente\n• Afficher vos dernières transactions\n• Répondre à vos questions sur l'intégration API\n• Expliquer les délais et frais\n• Vous orienter en cas de problème\n\nDites-moi simplement ce dont vous avez besoin !`
+      : `I'm your WestPay assistant. Here's what I can help you with:\n\n• Check your balance\n• View pending withdrawals\n• Show recent transactions\n• Answer API integration questions\n• Explain processing times and fees\n• Guide you through any issue\n\nJust tell me what you need!`;
+  }
+
+  // ── Fallback intelligent ─────────────────────────────────────────────────────
+  // Only reply if the message is substantial enough
+  if (text.trim().length < 5) return null;
+
+  return isFr
+    ? "Je suis là pour vous aider. Pourriez-vous préciser votre demande ? Par exemple : consulter votre solde, voir vos retraits, une question sur l'API, ou signaler un problème."
+    : "I'm here to help. Could you clarify your request? For example: check your balance, view withdrawals, API question, or report an issue.";
 }
 
 // ─── Simulate typing action ───────────────────────────────────────────────────
