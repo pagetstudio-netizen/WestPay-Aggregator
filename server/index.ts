@@ -161,7 +161,8 @@ app.use((req, res, next) => {
         setupWebhook(app, webhookSecret);
         await registerWebhookUrl(webhookUrl);
       } else {
-        await telegramBot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
+        // En dev : NE PAS supprimer le webhook — cela couperait la production.
+        // On tente le polling ; si un webhook de prod est actif, la 409 est ignorée silencieusement.
         startPolling();
         console.log("[TELEGRAM] Mode developpement — polling actif (envoi + reception)");
       }
