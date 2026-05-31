@@ -9,7 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   Shield, Lock, Loader2, BookOpen, Code, Server, Key,
   ArrowRight, CheckCircle, AlertTriangle, Globe, Zap, Copy, Check,
-  Send, ArrowDownCircle, Bell, Menu, X, ShieldCheck, FileText, Hash, Download,
+  Send, ArrowDownCircle, Bell, Menu, X, ShieldCheck, FileText, Hash,
   Eye, EyeOff
 } from "lucide-react";
 import Captcha, { generateCaptchaCode } from "@/components/Captcha";
@@ -444,16 +444,6 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
               L'API REST permet d'integrer les paiements, les retraits automatiques, la consultation des soldes et les
               notifications en temps reel dans n'importe quelle application web ou mobile.
             </p>
-            <a
-              href="/WestPay_API_Documentation_v2.pdf"
-              download="WestPay_API_Documentation_v2.pdf"
-              className="flex items-center justify-center gap-3 w-full py-4 px-6 rounded-xl text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-md"
-              data-testid="button-download-docs"
-            >
-              <Download className="w-5 h-5 shrink-0" />
-              Télécharger la documentation en PDF
-            </a>
-
             <div className="grid gap-3 sm:grid-cols-2">
               <Card><CardContent className="p-3 space-y-2">
                 <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">URL de base</p>
