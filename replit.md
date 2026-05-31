@@ -120,8 +120,8 @@ admins, merchants, merchant_countries, transactions, sms_logs, numbers, settings
 
 ## Déploiement Plesk
 - **Build** : `npm run build` → génère `dist/index.cjs` (serveur) + `dist/public/` (frontend)
-- **Startup File Plesk** : `dist/index.cjs`
-- **Commande de démarrage** : `node dist/index.cjs`
+- **Dossier racine Plesk** : `dist/` (Plesk pointe sur ce dossier)
+- **Startup File Plesk** : `index.cjs` (relatif au dossier `dist/`)
 - **Workflow Replit (dev)** : `npm run dev` → `NODE_ENV=development node --import tsx/esm server/index.ts`
 - Le bot Telegram utilise le **webhook** en production (Plesk) et tente le **polling** en dev (Replit) sans supprimer le webhook de prod
 
