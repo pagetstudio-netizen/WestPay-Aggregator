@@ -5567,6 +5567,73 @@ export async function registerRoutes(
     }
   });
 
+  // ── Test a specific AI provider ───────────────────────────────────────────
+  app.post("/api/admin/ai-keys/test", authMiddleware("admin"), async (req, res) => {
+    const { provider } = req.body;
+    if (!["openai", "groq", "gemini"].includes(provider)) {
+      return res.status(400).json({ success: false, message: "Provider invalide" });
+    }
+    const getKey = async (p: string) => {
+      const envMap: Record<string, string | undefined> = {
+        openai: process.env.OPENAI_API_KEY,
+        groq: process.env.GROQ_API_KEY,
+        gemini: process.env.GEMINI_API_KEY,
+      };
+      const dbKeyMap: Record<string, string> = {
+        openai: "ai_key_openai",
+        groq: "ai_key_groq",
+        gemini: "ai_key_gemini",
+      };
+      const envKey = envMap[p];
+      if (envKey && envKey.length > 10) return envKey;
+      const dbKey = await storage.getSetting(dbKeyMap[p]).catch(() => null);
+      return dbKey && dbKey.length > 5 ? dbKey : null;
+    };
+    try {
+      const apiKey = await getKey(provider);
+      if (!apiKey) return res.json({ success: false, message: "Aucune clé configurée pour ce provider", source: null });
+      const envSources: Record<string, string | undefined> = {
+        openai: process.env.OPENAI_API_KEY,
+        groq: process.env.GROQ_API_KEY,
+        gemini: process.env.GEMINI_API_KEY,
+      };
+      const source = (envSources[provider] && envSources[provider]!.length > 10) ? "env" : "db";
+      if (provider === "openai") {
+        const r = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({ model: "gpt-4o-mini", max_tokens: 5, messages: [{ role: "user", content: "Hi" }] }),
+        });
+        if (!r.ok) { const t = await r.text(); return res.json({ success: false, message: `OpenAI: ${r.status} — ${t.slice(0, 120)}`, source }); }
+        const d = await r.json() as any;
+        return res.json({ success: true, message: `OpenAI OK — modèle: ${d.model || "gpt-4o-mini"}`, source });
+      }
+      if (provider === "groq") {
+        const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({ model: "llama-3.1-8b-instant", max_tokens: 5, messages: [{ role: "user", content: "Hi" }] }),
+        });
+        if (!r.ok) { const t = await r.text(); return res.json({ success: false, message: `Groq: ${r.status} — ${t.slice(0, 120)}`, source }); }
+        return res.json({ success: true, message: "Groq OK — llama-3.1-8b-instant", source });
+      }
+      if (provider === "gemini") {
+        const r = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Hi" }] }], generationConfig: { maxOutputTokens: 5 } }),
+          }
+        );
+        if (!r.ok) { const t = await r.text(); return res.json({ success: false, message: `Gemini: ${r.status} — ${t.slice(0, 120)}`, source }); }
+        return res.json({ success: true, message: "Gemini OK — gemini-1.5-flash", source });
+      }
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
   app.post("/api/admin/support-contacts", authMiddleware("admin"), async (req, res) => {
     try {
       const { telegram1, telegram2, telegram3, telegram4 } = req.body;

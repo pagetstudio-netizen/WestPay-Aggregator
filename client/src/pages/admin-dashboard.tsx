@@ -4604,6 +4604,7 @@ function AIKeysCard({ token }: { token: string | null }) {
   const { data: status, refetch } = useQuery<{
     openai: string | null; groq: string | null; gemini: string | null;
     openaiConfigured: boolean; groqConfigured: boolean; geminiConfigured: boolean;
+    openaiFromEnv: boolean; groqFromEnv: boolean; geminiFromEnv: boolean;
   }>({
     queryKey: ["/api/admin/ai-keys"],
     staleTime: 0,
@@ -4622,15 +4623,21 @@ function AIKeysCard({ token }: { token: string | null }) {
   const [showGroq, setShowGroq] = useState(false);
   const [showGemini, setShowGemini] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [testResults, setTestResults] = useState<Record<string, { success: boolean; message: string; source?: string | null } | null>>({});
+  const [testingProvider, setTestingProvider] = useState<string | null>(null);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
     try {
       const body: Record<string, string> = {};
-      if (openai.trim()) body.openai = openai.trim();
-      if (groq.trim()) body.groq = groq.trim();
-      if (gemini.trim()) body.gemini = gemini.trim();
+      if (openai !== "") body.openai = openai.trim();
+      if (groq !== "") body.groq = groq.trim();
+      if (gemini !== "") body.gemini = gemini.trim();
+      if (Object.keys(body).length === 0) {
+        toast({ title: "Rien à enregistrer", description: "Remplissez au moins un champ.", variant: "destructive" });
+        return;
+      }
       const res = await fetch("/api/admin/ai-keys", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -4647,11 +4654,88 @@ function AIKeysCard({ token }: { token: string | null }) {
     }
   };
 
-  const StatusBadge = ({ configured }: { configured: boolean }) => (
-    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${configured ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
-      {configured ? "Configurée" : "Non configurée"}
-    </span>
-  );
+  const handleDeleteKey = async (provider: "openai" | "groq" | "gemini") => {
+    try {
+      const res = await fetch("/api/admin/ai-keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ [provider]: "" }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      await refetch();
+      toast({ title: "Clé supprimée", description: `La clé ${provider} a été effacée de la base.` });
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const handleTest = async (provider: "openai" | "groq" | "gemini") => {
+    setTestingProvider(provider);
+    setTestResults(prev => ({ ...prev, [provider]: null }));
+    try {
+      const res = await fetch("/api/admin/ai-keys/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ provider }),
+      });
+      const data = await res.json();
+      setTestResults(prev => ({ ...prev, [provider]: data }));
+    } catch (err: any) {
+      setTestResults(prev => ({ ...prev, [provider]: { success: false, message: err.message } }));
+    } finally {
+      setTestingProvider(null);
+    }
+  };
+
+  const PROVIDERS = [
+    {
+      id: "openai" as const,
+      label: "🟢 OpenAI",
+      model: "gpt-4o-mini",
+      placeholder: "sk-proj-...",
+      link: "https://platform.openai.com/api-keys",
+      linkLabel: "platform.openai.com/api-keys",
+      value: openai,
+      setValue: setOpenai,
+      show: showOpenai,
+      setShow: setShowOpenai,
+      configured: status?.openaiConfigured ?? false,
+      currentKey: status?.openai ?? null,
+      envVar: "OPENAI_API_KEY",
+    },
+    {
+      id: "groq" as const,
+      label: "🟡 Groq",
+      model: "llama-3.1-8b-instant · Gratuit",
+      placeholder: "gsk_...",
+      link: "https://console.groq.com/keys",
+      linkLabel: "console.groq.com/keys",
+      value: groq,
+      setValue: setGroq,
+      show: showGroq,
+      setShow: setShowGroq,
+      configured: status?.groqConfigured ?? false,
+      currentKey: status?.groq ?? null,
+      envVar: "GROQ_API_KEY",
+    },
+    {
+      id: "gemini" as const,
+      label: "🔵 Gemini",
+      model: "gemini-1.5-flash · Gratuit",
+      placeholder: "AIza...",
+      link: "https://aistudio.google.com/app/apikey",
+      linkLabel: "aistudio.google.com/app/apikey",
+      value: gemini,
+      setValue: setGemini,
+      show: showGemini,
+      setShow: setShowGemini,
+      configured: status?.geminiConfigured ?? false,
+      currentKey: status?.gemini ?? null,
+      envVar: "GEMINI_API_KEY",
+    },
+  ];
+
+  const testResult = (id: string) => testResults[id];
 
   return (
     <Card>
@@ -4661,100 +4745,107 @@ function AIKeysCard({ token }: { token: string | null }) {
           Clés API — Intelligence Artificielle (Bot Support)
         </CardTitle>
         <p className="text-xs text-muted-foreground mt-1">
-          Le bot essaie les providers dans l'ordre : OpenAI → Groq → Gemini. Si l'un échoue, il passe automatiquement au suivant.
+          Le bot essaie les providers dans l'ordre : OpenAI → Groq → Gemini. Priorité : variable d'environnement &gt; clé DB.
         </p>
       </CardHeader>
       <CardContent>
+        <div className="mb-4 p-3 rounded-lg bg-blue-50 border border-blue-100 text-xs text-blue-800 space-y-1">
+          <p className="font-semibold">Variables d'environnement prises en charge</p>
+          <p>Vous pouvez configurer les clés directement dans les secrets Replit (ou sur votre serveur) :</p>
+          <div className="font-mono space-y-0.5 mt-1">
+            <p>OPENAI_API_KEY=sk-proj-...</p>
+            <p>GROQ_API_KEY=gsk_...</p>
+            <p>GEMINI_API_KEY=AIza...</p>
+          </div>
+          <p className="text-blue-600">Si une variable d'environnement est définie, elle est utilisée en priorité sur la clé enregistrée ici.</p>
+        </div>
+
         <form onSubmit={handleSave} className="space-y-4">
           <div className="space-y-4">
-            {/* OpenAI */}
-            <div className="border rounded-lg p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-sm">🟢 OpenAI</span>
-                  <span className="text-xs text-muted-foreground">gpt-4o-mini</span>
-                </div>
-                <StatusBadge configured={status?.openaiConfigured ?? false} />
-              </div>
-              {status?.openai && <p className="text-xs text-muted-foreground font-mono">Actuelle : {status.openai}</p>}
-              <div className="relative">
-                <Input
-                  type={showOpenai ? "text" : "password"}
-                  value={openai}
-                  onChange={(e) => setOpenai(e.target.value)}
-                  placeholder="sk-proj-... (laisser vide pour ne pas changer)"
-                  className="pr-10 text-sm"
-                  data-testid="input-ai-openai"
-                />
-                <button type="button" onClick={() => setShowOpenai(!showOpenai)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                  {showOpenai ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              <p className="text-xs text-muted-foreground">Obtenir une clé : <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">platform.openai.com/api-keys</a></p>
-            </div>
+            {PROVIDERS.map((p) => {
+              const result = testResult(p.id);
+              const isTesting = testingProvider === p.id;
+              return (
+                <div key={p.id} className="border rounded-lg p-3 space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-sm">{p.label}</span>
+                      <span className="text-xs text-muted-foreground">{p.model}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${p.configured ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                        {p.configured ? "Configurée" : "Non configurée"}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={!p.configured || isTesting}
+                        onClick={() => handleTest(p.id)}
+                        className="h-6 text-xs px-2"
+                        data-testid={`button-test-${p.id}`}
+                      >
+                        {isTesting ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Zap className="w-3 h-3 mr-1" />}
+                        Tester
+                      </Button>
+                    </div>
+                  </div>
 
-            {/* Groq */}
-            <div className="border rounded-lg p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-sm">🟡 Groq</span>
-                  <span className="text-xs text-muted-foreground">llama-3.1-8b-instant — Gratuit</span>
-                </div>
-                <StatusBadge configured={status?.groqConfigured ?? false} />
-              </div>
-              {status?.groq && <p className="text-xs text-muted-foreground font-mono">Actuelle : {status.groq}</p>}
-              <div className="relative">
-                <Input
-                  type={showGroq ? "text" : "password"}
-                  value={groq}
-                  onChange={(e) => setGroq(e.target.value)}
-                  placeholder="gsk_... (laisser vide pour ne pas changer)"
-                  className="pr-10 text-sm"
-                  data-testid="input-ai-groq"
-                />
-                <button type="button" onClick={() => setShowGroq(!showGroq)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                  {showGroq ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              <p className="text-xs text-muted-foreground">Obtenir une clé gratuite : <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">console.groq.com/keys</a></p>
-            </div>
+                  {result && (
+                    <div className={`flex items-start gap-2 p-2 rounded text-xs ${result.success ? "bg-green-50 text-green-700 border border-green-100" : "bg-red-50 text-red-700 border border-red-100"}`}>
+                      {result.success ? <CheckCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /> : <XCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />}
+                      <span>{result.message}{result.source ? ` (source: ${result.source === "env" ? "variable d'environnement" : "base de données"})` : ""}</span>
+                    </div>
+                  )}
 
-            {/* Gemini */}
-            <div className="border rounded-lg p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-sm">🔵 Gemini</span>
-                  <span className="text-xs text-muted-foreground">gemini-1.5-flash — Gratuit</span>
+                  {p.currentKey && (
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs text-muted-foreground font-mono flex-1">Clé actuelle : {p.currentKey}</p>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteKey(p.id)}
+                        className="text-xs text-red-400 hover:text-red-600 transition-colors"
+                        title="Supprimer cette clé de la base"
+                        data-testid={`button-delete-${p.id}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="relative">
+                    <Input
+                      type={p.show ? "text" : "password"}
+                      value={p.value}
+                      onChange={(e) => p.setValue(e.target.value)}
+                      placeholder={`${p.placeholder} (nouvelle clé)`}
+                      className="pr-10 text-sm"
+                      data-testid={`input-ai-${p.id}`}
+                    />
+                    <button type="button" onClick={() => p.setShow(!p.show)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                      {p.show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Obtenir une clé : <a href={p.link} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{p.linkLabel}</a>
+                    {" · "}Env secret : <code className="bg-muted px-1 rounded">{p.envVar}</code>
+                  </p>
                 </div>
-                <StatusBadge configured={status?.geminiConfigured ?? false} />
-              </div>
-              {status?.gemini && <p className="text-xs text-muted-foreground font-mono">Actuelle : {status.gemini}</p>}
-              <div className="relative">
-                <Input
-                  type={showGemini ? "text" : "password"}
-                  value={gemini}
-                  onChange={(e) => setGemini(e.target.value)}
-                  placeholder="AIza... (laisser vide pour ne pas changer)"
-                  className="pr-10 text-sm"
-                  data-testid="input-ai-gemini"
-                />
-                <button type="button" onClick={() => setShowGemini(!showGemini)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                  {showGemini ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              <p className="text-xs text-muted-foreground">Obtenir une clé gratuite : <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">aistudio.google.com/app/apikey</a></p>
-            </div>
+              );
+            })}
           </div>
 
           <div className="flex items-center gap-3 pt-1">
-            <Button type="submit" disabled={isSaving || (!openai.trim() && !groq.trim() && !gemini.trim())} data-testid="button-save-ai-keys">
+            <Button
+              type="submit"
+              disabled={isSaving || (!openai && !groq && !gemini)}
+              data-testid="button-save-ai-keys"
+            >
               {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               Enregistrer les clés
             </Button>
-            <p className="text-xs text-muted-foreground">Seuls les champs remplis seront mis à jour.</p>
+            <p className="text-xs text-muted-foreground">Remplissez un ou plusieurs champs puis cliquez Enregistrer.</p>
           </div>
         </form>
       </CardContent>
