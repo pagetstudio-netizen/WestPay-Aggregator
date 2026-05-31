@@ -149,7 +149,11 @@ app.use((req, res, next) => {
 
     const telegramBot = initTelegramBot();
     if (telegramBot) {
-      if (process.env.NODE_ENV === "production") {
+      // Mode production : NODE_ENV=production OU APP_URL défini sans REPLIT_DEV_DOMAIN (= Plesk/serveur dédié)
+      const isProductionEnv = process.env.NODE_ENV === "production" ||
+        (!process.env.REPLIT_DEV_DOMAIN && !!process.env.APP_URL);
+
+      if (isProductionEnv) {
         let webhookSecret = await storage.getSetting("telegram_webhook_secret");
         if (!webhookSecret) {
           const { randomBytes } = await import("crypto");
@@ -159,9 +163,10 @@ app.use((req, res, next) => {
         const appUrl = process.env.APP_URL || "https://westpay.cfd";
         const webhookUrl = `${appUrl}/api/telegram/webhook/${webhookSecret}`;
         setupWebhook(app, webhookSecret);
+        console.log(`[TELEGRAM] Mode production (webhook) — URL : ${webhookUrl}`);
         await registerWebhookUrl(webhookUrl);
       } else {
-        // En dev : NE PAS supprimer le webhook — cela couperait la production.
+        // En dev Replit : NE PAS supprimer le webhook — cela couperait la production.
         // On tente le polling ; si un webhook de prod est actif, la 409 est ignorée silencieusement.
         startPolling();
         console.log("[TELEGRAM] Mode developpement — polling actif (envoi + reception)");

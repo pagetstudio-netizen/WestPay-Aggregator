@@ -167,7 +167,9 @@ const MERCHANT_AIDE_MSG = (name: string) =>
 
 // ─── Security helpers ─────────────────────────────────────────────────────────
 async function getAdminGroupId(): Promise<string | undefined> {
-  return storage.getSetting("telegram_group_id");
+  // Priorité : DB → env var TELEGRAM_ADMIN_GROUP_ID
+  const fromDb = await storage.getSetting("telegram_group_id");
+  return fromDb || process.env.TELEGRAM_ADMIN_GROUP_ID || undefined;
 }
 
 async function isAdminGroup(chatId: string): Promise<boolean> {
