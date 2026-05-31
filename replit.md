@@ -118,6 +118,13 @@ admins, merchants, merchant_countries, transactions, sms_logs, numbers, settings
 - Payment URL format: https://westpay.cfd/pay/crypto/{trackId}
 - Merchant API contract: POST /api/merchant/crypto/invoice { amount, currency, description?, orderId?, returnUrl? }
 
+## Déploiement Plesk
+- **Build** : `npm run build` → génère `dist/index.cjs` (serveur) + `dist/public/` (frontend)
+- **Startup File Plesk** : `dist/index.cjs`
+- **Commande de démarrage** : `node dist/index.cjs`
+- **Workflow Replit (dev)** : `npm run dev` → `NODE_ENV=development node --import tsx/esm server/index.ts`
+- Le bot Telegram utilise le **webhook** en production (Plesk) et tente le **polling** en dev (Replit) sans supprimer le webhook de prod
+
 ## OmniPay Payment Flow
 1. Customer enters phone number and name on payment page
 2. WestPay calls OmniPay API to send USSD push to customer
