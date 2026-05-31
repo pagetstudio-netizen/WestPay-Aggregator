@@ -153,6 +153,14 @@ async function registerKnownGroup(chatId: string): Promise<void> {
   }
 }
 
+async function removeKnownGroup(chatId: string): Promise<void> {
+  const groups = await getKnownGroups();
+  const filtered = groups.filter(id => id !== chatId);
+  if (filtered.length !== groups.length) {
+    await storage.setSetting("telegram_known_groups", JSON.stringify(filtered));
+  }
+}
+
 // ─── Merchant group helper ───────────────────────────────────────────────────
 async function getMerchantForGroup(chatId: string) {
   return storage.getMerchantByTelegramChatId(chatId);
@@ -939,7 +947,8 @@ export function initTelegramBot(): Telegraf | null {
           `/stats — Statistiques globales\n` +
           `/solde — Soldes détaillés de tous les marchands\n\n` +
           `📢 *Diffusion*\n` +
-          `/broadcast MESSAGE — Envoyer un message dans tous les groupes\n\n` +
+          `/broadcast — Envoyer un message dans les groupes\n` +
+          `/groupes — Lister tous les groupes où le bot est présent\n\n` +
           `🔐 *Utilitaires*\n` +
           `/status — Vérifier l'état du bot et du webhook\n` +
           `/connexionid — Rappel des URLs et identifiants admin\n` +
@@ -974,18 +983,80 @@ export function initTelegramBot(): Telegraf | null {
     }
   });
 
+  // ─── /groupes (groupe admin uniquement) — liste et nettoyage des groupes connus ──
+  bot.command("groupes", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
+    if (!isGroup || !await isAdminGroup(chatId)) return;
+
+    try {
+      const groups = await getKnownGroups();
+      const merchants = await storage.getMerchants();
+      const merchantMap = new Map(merchants.filter(m => m.telegramChatId).map(m => [m.telegramChatId as string, m.name]));
+
+      if (groups.length === 0) {
+        await ctx.reply(
+          "📭 *Aucun groupe enregistré*\n\n" +
+          "Les groupes sont automatiquement enregistrés :\n" +
+          "• Quand le bot est ajouté à un groupe\n" +
+          "• Quand un message est reçu d'un groupe inconnu\n\n" +
+          "💡 Pour forcer l'enregistrement d'un groupe, envoyez n'importe quel message depuis ce groupe.",
+          { parse_mode: "Markdown" }
+        );
+        return;
+      }
+
+      const adminGroupId = await getAdminGroupId();
+      const lines = groups.map((gid, i) => {
+        const name = merchantMap.get(gid) ? `🏪 ${merchantMap.get(gid)}` : gid === adminGroupId ? "👑 Groupe Admin" : "👥 Non lié";
+        return `${i + 1}. \`${gid}\` — ${name}`;
+      });
+
+      const chunkSize = 30;
+      for (let i = 0; i < lines.length; i += chunkSize) {
+        const chunk = lines.slice(i, i + chunkSize);
+        const header = i === 0
+          ? `👥 *Groupes connus (${groups.length})*\n\n`
+          : `👥 *Suite (${i + 1}–${Math.min(i + chunkSize, lines.length)})*\n\n`;
+        await ctx.reply(header + chunk.join("\n"), { parse_mode: "Markdown" });
+      }
+
+      const linkedCount = groups.filter(gid => merchantMap.has(gid)).length;
+      const unlinkedCount = groups.length - linkedCount - (groups.includes(adminGroupId || "") ? 1 : 0);
+      await ctx.reply(
+        `📊 *Résumé*\n\n` +
+        `📦 Total : *${groups.length}* groupe(s)\n` +
+        `🏪 Liés à un marchand : *${linkedCount}*\n` +
+        `👥 Non liés (diffusion possible) : *${unlinkedCount}*\n\n` +
+        `💡 Le broadcast _"Tous les groupes"_ envoie dans les ${groups.length} groupe(s) listés ci-dessus.`,
+        { parse_mode: "Markdown" }
+      );
+    } catch (err: any) {
+      await ctx.reply(`❌ Erreur : ${err.message}`);
+    }
+  });
+
   // ─── Bot ajouté à un groupe (API moderne : my_chat_member) ──────────────────
   bot.on("my_chat_member", async (ctx) => {
     const update = ctx.update.my_chat_member;
     if (!update) return;
     const newStatus = update.new_chat_member?.status;
-    if (newStatus !== "member" && newStatus !== "administrator") return;
 
     const chat = update.chat;
     if (chat.type !== "group" && chat.type !== "supergroup") return;
 
     const chatId = String(chat.id);
     const groupTitle = (chat as any).title || "ce groupe";
+
+    // ── Bot expulsé ou ayant quitté → retirer de la liste ────────────────────
+    if (newStatus === "kicked" || newStatus === "left") {
+      await removeKnownGroup(chatId);
+      await alertAdminGroup(`ℹ️ *Bot retiré du groupe*\n\n👥 Groupe : *${groupTitle}*\n🆔 Chat ID : \`${chatId}\``).catch(() => {});
+      return;
+    }
+
+    // ── Bot ajouté ou promu admin → enregistrer ───────────────────────────────
+    if (newStatus !== "member" && newStatus !== "administrator") return;
 
     await registerKnownGroup(chatId);
 
@@ -1340,6 +1411,11 @@ export function initTelegramBot(): Telegraf | null {
   bot.on("message", async (ctx) => {
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
     const chatId = String(ctx.chat.id);
+
+    // ── Auto-enregistrement : tout groupe qui envoie un message est mémorisé ──
+    if (isGroup) {
+      registerKnownGroup(chatId).catch(() => {});
+    }
 
     if (isGroup) {
       const merchant = await getMerchantForGroup(chatId);
