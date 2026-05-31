@@ -3140,23 +3140,26 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
 
   // ─── LIST VIEW ───────────────────────────────────────────────────────────────
   return (
-    <div className="-m-4 md:-m-6 min-h-full" style={{ background: "#f0f2f5" }}>
+    <div className="-m-4 md:-m-6 min-h-full" style={{ background: "#ffffff" }}>
 
       {/* ── Add button ── */}
       <div className="flex justify-center pt-5 pb-4 px-4">
         <button
           onClick={openCreate}
           data-testid="button-create-payment-link"
-          className="flex items-center gap-2 px-8 py-2.5 rounded-full text-white font-bold text-base transition-all active:scale-95"
-          style={{ background: "#3d7cf5", boxShadow: "0 2px 10px rgba(61,124,245,0.35)" }}
+          className="flex items-center gap-2.5 pr-6 py-2.5 rounded-xl text-white font-bold text-base transition-all active:scale-95"
+          style={{ background: "#3d7cf5", boxShadow: "0 2px 10px rgba(61,124,245,0.35)", paddingLeft: "6px" }}
         >
-          <Plus className="w-5 h-5" strokeWidth={3} />
+          <span className="flex items-center justify-center w-8 h-8 rounded-lg"
+            style={{ background: "rgba(255,255,255,0.25)", border: "1.5px solid rgba(255,255,255,0.5)" }}>
+            <Plus className="w-5 h-5 text-white" strokeWidth={3} />
+          </span>
           Ajouter
         </button>
       </div>
 
       {/* ── Divider ── */}
-      <div style={{ height: "1px", background: "#dde0e6", margin: "0 0 4px" }} />
+      <div style={{ height: "1px", background: "#e5e7eb", margin: "0 0 4px" }} />
 
       {/* ── Content ── */}
       <div className="px-3 pt-3 pb-8 space-y-3">
@@ -3174,7 +3177,6 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
               src="/worker-gear.jpeg"
               alt="No links"
               className="w-72 max-w-full object-contain"
-              style={{ filter: "drop-shadow(0 4px 16px rgba(0,0,0,0.10))" }}
             />
           </div>
         ) : (
