@@ -3,3 +3,5 @@ node_modules
 server/public
 vite.config.ts.*
 *.tar.gz
+uploads/broadcast
+uploads/operator-logos
