@@ -37,6 +37,7 @@ export interface IStorage {
   getAdminById(id: number): Promise<Admin | undefined>;
   createAdmin(admin: InsertAdmin): Promise<Admin>;
   updateAdminPassword(id: number, passwordHash: string): Promise<void>;
+  updateAdminTotp(id: number, totpSecret: string | null, totpEnabled: boolean): Promise<void>;
 
   getMerchants(): Promise<Merchant[]>;
   getMerchantById(id: number): Promise<Merchant | undefined>;
@@ -266,6 +267,10 @@ export class DatabaseStorage implements IStorage {
 
   async updateAdminPassword(id: number, passwordHash: string): Promise<void> {
     await db.update(admins).set({ passwordHash }).where(eq(admins.id, id));
+  }
+
+  async updateAdminTotp(id: number, totpSecret: string | null, totpEnabled: boolean): Promise<void> {
+    await db.update(admins).set({ totpSecret, totpEnabled }).where(eq(admins.id, id));
   }
 
   async getMerchants(): Promise<Merchant[]> {

@@ -8,6 +8,8 @@ export const admins = pgTable("admins", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   apiKey: text("api_key").notNull(),
+  totpSecret: text("totp_secret"),
+  totpEnabled: boolean("totp_enabled").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

@@ -6,6 +6,8 @@ import fs from "fs";
 import { storage } from "./storage";
 import { db } from "./db";
 import { pool } from "./db";
+import { generateSecret as totpGenerateSecret, generateURI as totpGenerateURI, verifySync as totpVerifySync } from "otplib";
+import QRCode from "qrcode";
 import { admins, merchantCountries } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
@@ -719,7 +721,13 @@ export async function registerRoutes(
         storage.upsertDevice({ userId: admin.id, userRole: "admin", deviceId: fp, browser, os, country: geo.country, city: geo.city, ipAddress: clientIp, isTrusted: true }).catch(() => {});
       }
 
-      // 6. 2FA via Telegram OTP
+      // 6a. TOTP 2FA via Google Authenticator (per-admin, takes priority)
+      if (admin.totpEnabled && admin.totpSecret) {
+        const tempToken = jwt.sign({ email, purpose: "totp_verify", adminId: admin.id }, JWT_SECRET, { expiresIn: "6m" });
+        return res.json({ requires_totp: true, tempToken });
+      }
+
+      // 6b. 2FA via Telegram OTP (platform-wide fallback)
       if (secSettings.twoFa) {
         const code = String(Math.floor(100000 + Math.random() * 900000));
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
@@ -757,6 +765,87 @@ export async function registerRoutes(
       const clientIp = (req.ip || "").replace(/^::ffff:/, "");
       await storage.createLoginLog({ userId: admin.id, role: "admin", ip: clientIp, device: req.headers["user-agent"] || "", success: true });
       res.json({ token, user: { id: admin.id, email: admin.email } });
+    } catch (err: any) {
+      res.status(500).json({ message: "Erreur interne" });
+    }
+  });
+
+  // ── TOTP verify at login (Google Authenticator) ───────────────────────────
+  app.post("/api/auth/admin/verify-totp", async (req, res) => {
+    try {
+      const { tempToken, code } = req.body;
+      if (!tempToken || !code) return res.status(400).json({ message: "Données manquantes" });
+      let payload: any;
+      try { payload = jwt.verify(tempToken, JWT_SECRET); } catch { return res.status(401).json({ message: "Session expirée" }); }
+      if (payload.purpose !== "totp_verify") return res.status(401).json({ message: "Token invalide" });
+      const admin = await storage.getAdminByEmail(payload.email);
+      if (!admin || !admin.totpSecret || !admin.totpEnabled) return res.status(401).json({ message: "TOTP non configuré" });
+      const totpResult = totpVerifySync({ token: String(code).trim(), secret: admin.totpSecret, strategy: "totp" });
+      if (!totpResult?.valid) return res.status(401).json({ message: "Code invalide ou expiré" });
+      const jwtToken = signToken({ id: admin.id, role: "admin", email: admin.email });
+      const clientIp = (req.ip || "").replace(/^::ffff:/, "");
+      await storage.createLoginLog({ userId: admin.id, role: "admin", ip: clientIp, device: req.headers["user-agent"] || "", success: true });
+      notifyAdminLogin({ email: admin.email, ip: clientIp, device: req.headers["user-agent"] || "", success: true }).catch(() => {});
+      res.json({ token: jwtToken, user: { id: admin.id, email: admin.email } });
+    } catch (err: any) {
+      res.status(500).json({ message: "Erreur interne" });
+    }
+  });
+
+  // ── TOTP setup: generate secret + QR code (authenticated) ────────────────
+  app.post("/api/admin/2fa/setup", authMiddleware("admin"), async (req, res) => {
+    try {
+      const adminUser = (req as any).user;
+      const admin = await storage.getAdminById(adminUser.id);
+      if (!admin) return res.status(404).json({ message: "Compte introuvable" });
+      const secret = totpGenerateSecret();
+      const otpauth = totpGenerateURI({ label: admin.email, issuer: "WestPay Admin", secret, strategy: "totp" });
+      const qrCodeDataUrl = await QRCode.toDataURL(otpauth);
+      res.json({ secret, qrCode: qrCodeDataUrl, otpauth });
+    } catch (err: any) {
+      res.status(500).json({ message: "Erreur interne" });
+    }
+  });
+
+  // ── TOTP enable: verify first code and save secret ───────────────────────
+  app.post("/api/admin/2fa/enable", authMiddleware("admin"), async (req, res) => {
+    try {
+      const adminUser = (req as any).user;
+      const { secret, code } = req.body;
+      if (!secret || !code) return res.status(400).json({ message: "Données manquantes" });
+      const totpResult = totpVerifySync({ token: String(code).trim(), secret, strategy: "totp" });
+      if (!totpResult?.valid) return res.status(400).json({ message: "Code invalide — vérifiez votre application d'authentification" });
+      await storage.updateAdminTotp(adminUser.id, secret, true);
+      res.json({ success: true, message: "Google Authenticator 2FA activé" });
+    } catch (err: any) {
+      res.status(500).json({ message: "Erreur interne" });
+    }
+  });
+
+  // ── TOTP disable: verify current code before disabling ───────────────────
+  app.post("/api/admin/2fa/disable", authMiddleware("admin"), async (req, res) => {
+    try {
+      const adminUser = (req as any).user;
+      const { code } = req.body;
+      if (!code) return res.status(400).json({ message: "Code requis" });
+      const admin = await storage.getAdminById(adminUser.id);
+      if (!admin || !admin.totpSecret || !admin.totpEnabled) return res.status(400).json({ message: "TOTP non activé" });
+      const totpResult = totpVerifySync({ token: String(code).trim(), secret: admin.totpSecret, strategy: "totp" });
+      if (!totpResult?.valid) return res.status(400).json({ message: "Code invalide" });
+      await storage.updateAdminTotp(adminUser.id, null, false);
+      res.json({ success: true, message: "Google Authenticator 2FA désactivé" });
+    } catch (err: any) {
+      res.status(500).json({ message: "Erreur interne" });
+    }
+  });
+
+  // ── TOTP status: get current admin TOTP status ───────────────────────────
+  app.get("/api/admin/2fa/status", authMiddleware("admin"), async (req, res) => {
+    try {
+      const adminUser = (req as any).user;
+      const admin = await storage.getAdminById(adminUser.id);
+      if (!admin) return res.status(404).json({ message: "Compte introuvable" });
+      res.json({ totpEnabled: admin.totpEnabled ?? false });
     } catch (err: any) {
       res.status(500).json({ message: "Erreur interne" });
     }

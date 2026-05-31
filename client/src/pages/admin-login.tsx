@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
-import { Eye, EyeOff, Loader2, Shield, KeyRound, Lock, CheckCircle2, Zap, Globe } from "lucide-react";
+import { Eye, EyeOff, Loader2, Shield, KeyRound, Lock, CheckCircle2, Zap, Globe, Smartphone } from "lucide-react";
 
 async function buildDeviceFingerprint(): Promise<string> {
   try {
@@ -110,6 +110,11 @@ export default function AdminLogin() {
   const [otpToken, setOtpToken] = useState("");
   const [otpLoading, setOtpLoading] = useState(false);
 
+  const [totpStep, setTotpStep] = useState(false);
+  const [totpCode, setTotpCode] = useState("");
+  const [totpToken, setTotpToken] = useState("");
+  const [totpLoading, setTotpLoading] = useState(false);
+
   const { login } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -150,6 +155,11 @@ export default function AdminLogin() {
         }
         return;
       }
+      if (data.requires_totp) {
+        setTotpToken(data.tempToken);
+        setTotpStep(true);
+        return;
+      }
       if (data.requires2fa) {
         setOtpToken(data.tempToken);
         setOtpStep(true);
@@ -187,6 +197,29 @@ export default function AdminLogin() {
       setOtpLoading(false);
     }
   }, [otpToken, otpCode, login, setLocation, toast]);
+
+  const handleVerifyTotp = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (totpCode.length !== 6) return;
+    setTotpLoading(true);
+    try {
+      const res = await fetch("/api/auth/admin/verify-totp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tempToken: totpToken, code: totpCode.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Code invalide");
+      login(data.token, { id: data.user.id, email: data.user.email, role: "admin" });
+      toast({ title: "Authentification réussie" });
+      setTimeout(() => setLocation("/admin-access-958425546648484886646634808526522886433/dashboard"), 300);
+    } catch (err: any) {
+      toast({ title: "Erreur TOTP", description: err.message, variant: "destructive" });
+      setTotpCode("");
+    } finally {
+      setTotpLoading(false);
+    }
+  }, [totpToken, totpCode, login, setLocation, toast]);
 
   if (ipStatus === "checking") {
     return (
@@ -291,7 +324,61 @@ export default function AdminLogin() {
             <span className="text-xl font-black text-slate-900">WestPay</span>
           </div>
 
-          {!otpStep ? (
+          {totpStep ? (
+            <>
+              <div className="mb-8">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4 mx-auto"
+                  style={{ background: "linear-gradient(135deg,#7c3aed,#4c1d95)" }}>
+                  <Smartphone className="w-7 h-7 text-white" />
+                </div>
+                <h1 className="text-2xl font-black text-slate-900 text-center mb-1">Google Authenticator</h1>
+                <p className="text-slate-500 text-sm text-center">Entrez le code à 6 chiffres de votre application</p>
+              </div>
+
+              <form onSubmit={handleVerifyTotp} className="space-y-5">
+                <div className="flex items-center gap-3 p-3.5 rounded-xl bg-violet-50 border border-violet-100">
+                  <Shield className="w-5 h-5 text-violet-600 flex-shrink-0" />
+                  <p className="text-sm font-medium text-violet-800">Code temporaire valable 30 secondes</p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-sm font-semibold text-slate-700 text-center">Code d'authentification</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    className="al-otp"
+                    value={totpCode}
+                    onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="000000"
+                    autoFocus
+                    data-testid="input-totp-code"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={totpLoading || totpCode.length !== 6}
+                  className="al-btn"
+                  data-testid="button-verify-totp"
+                >
+                  {totpLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
+                  {totpLoading ? "Vérification..." : "Confirmer le code"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setTotpStep(false); setTotpCode(""); setTotpToken(""); }}
+                  className="w-full text-sm text-slate-400 hover:text-slate-600 transition-colors font-medium py-1"
+                  style={{ background: "none", border: "none", cursor: "pointer" }}
+                  data-testid="button-back-from-totp"
+                >
+                  ← Retour à la connexion
+                </button>
+              </form>
+            </>
+          ) : !otpStep ? (
             <>
               <div className="mb-8">
                 <h1 className="text-2xl font-black text-slate-900 mb-1">Administration</h1>

@@ -31,7 +31,7 @@ import {
   RefreshCw, Lock, BookOpen, FileText, Webhook, Zap, ToggleLeft, ToggleRight, Link2,
   Link, BarChart3, TrendingUp, Eye, ToggleLeft as Toggle, ExternalLink, Filter,
   Check, ChevronsUpDown, ArrowUpRight, Edit3, Wallet, AlertTriangle, RotateCcw, Bitcoin,
-  Monitor, EyeOff, KeyRound, Mail, GripVertical, ImagePlus, X, Upload
+  Monitor, EyeOff, KeyRound, Mail, GripVertical, ImagePlus, X, Upload, Smartphone
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
@@ -4368,6 +4368,8 @@ function SettingsPanel() {
 
       <AdminAccountsCard token={token} currentUserId={(user as any)?.id} />
 
+      <TotpCard token={token} />
+
       <AIKeysCard token={token} />
 
       <SupportContactsCard token={token} />
@@ -4384,6 +4386,216 @@ function SettingsPanel() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function TotpCard({ token }: { token: string | null }) {
+  const { toast } = useToast();
+  const [phase, setPhase] = useState<"idle" | "setup" | "disable">("idle");
+  const [qrCode, setQrCode] = useState<string>("");
+  const [secret, setSecret] = useState<string>("");
+  const [verifyCode, setVerifyCode] = useState<string>("");
+  const [disableCode, setDisableCode] = useState<string>("");
+  const [isLoading, setIsLoading] = useState(false);
+
+  const { data: totpStatus, refetch: refetchStatus } = useQuery<{ totpEnabled: boolean }>({
+    queryKey: ["/api/admin/2fa/status"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/2fa/status", { headers: { Authorization: `Bearer ${token}` } });
+      return res.json();
+    },
+  });
+
+  const handleStartSetup = async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch("/api/admin/2fa/setup", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Erreur");
+      setQrCode(data.qrCode);
+      setSecret(data.secret);
+      setVerifyCode("");
+      setPhase("setup");
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleEnable = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (verifyCode.length !== 6) return;
+    setIsLoading(true);
+    try {
+      const res = await fetch("/api/admin/2fa/enable", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ secret, code: verifyCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Erreur");
+      toast({ title: "Google Authenticator activé", description: "Le 2FA TOTP est maintenant actif sur votre compte." });
+      setPhase("idle");
+      setQrCode(""); setSecret(""); setVerifyCode("");
+      refetchStatus();
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+      setVerifyCode("");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDisable = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (disableCode.length !== 6) return;
+    setIsLoading(true);
+    try {
+      const res = await fetch("/api/admin/2fa/disable", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ code: disableCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Erreur");
+      toast({ title: "Google Authenticator désactivé" });
+      setPhase("idle");
+      setDisableCode("");
+      refetchStatus();
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+      setDisableCode("");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const totpEnabled = totpStatus?.totpEnabled ?? false;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Smartphone className="w-4 h-4 text-violet-500" />
+          Google Authenticator (TOTP 2FA)
+          {totpEnabled && <Badge className="ml-2 bg-green-500 text-white text-xs">Activé</Badge>}
+          {!totpEnabled && <Badge variant="outline" className="ml-2 text-xs text-muted-foreground">Désactivé</Badge>}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {phase === "idle" && (
+          <>
+            <p className="text-sm text-muted-foreground">
+              {totpEnabled
+                ? "Google Authenticator est actif. À chaque connexion, un code TOTP vous sera demandé."
+                : "Activez Google Authenticator pour sécuriser votre compte avec un code rotatif toutes les 30 secondes."}
+            </p>
+            <div className="flex gap-2">
+              {!totpEnabled && (
+                <Button
+                  onClick={handleStartSetup}
+                  disabled={isLoading}
+                  className="bg-violet-600 hover:bg-violet-700 text-white"
+                  data-testid="button-totp-setup"
+                >
+                  {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Smartphone className="w-4 h-4 mr-2" />}
+                  Configurer Google Authenticator
+                </Button>
+              )}
+              {totpEnabled && (
+                <Button
+                  variant="outline"
+                  onClick={() => { setPhase("disable"); setDisableCode(""); }}
+                  className="border-red-200 text-red-600 hover:bg-red-50"
+                  data-testid="button-totp-disable-start"
+                >
+                  Désactiver le 2FA TOTP
+                </Button>
+              )}
+            </div>
+          </>
+        )}
+
+        {phase === "setup" && (
+          <div className="space-y-4">
+            <div className="text-sm text-muted-foreground space-y-1">
+              <p>1️⃣ Installez <strong>Google Authenticator</strong> ou <strong>Authy</strong> sur votre téléphone</p>
+              <p>2️⃣ Scannez le QR code ci-dessous</p>
+              <p>3️⃣ Entrez le code à 6 chiffres pour confirmer</p>
+            </div>
+            {qrCode && (
+              <div className="flex flex-col items-center gap-3 p-4 bg-white border rounded-xl">
+                <img src={qrCode} alt="QR Code TOTP" className="w-48 h-48" data-testid="img-totp-qr" />
+                <div className="text-center">
+                  <p className="text-xs text-muted-foreground mb-1">Ou entrez ce code manuellement :</p>
+                  <code className="text-xs font-mono bg-muted px-2 py-1 rounded break-all select-all">{secret}</code>
+                </div>
+              </div>
+            )}
+            <form onSubmit={handleEnable} className="space-y-3">
+              <div className="space-y-1.5">
+                <Label>Code de vérification (6 chiffres)</Label>
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={verifyCode}
+                  onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="000000"
+                  className="text-center text-lg font-mono tracking-widest"
+                  data-testid="input-totp-verify"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button type="submit" disabled={isLoading || verifyCode.length !== 6} className="bg-violet-600 hover:bg-violet-700 text-white" data-testid="button-totp-confirm">
+                  {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                  Activer le 2FA
+                </Button>
+                <Button type="button" variant="ghost" onClick={() => { setPhase("idle"); setQrCode(""); setSecret(""); }} data-testid="button-totp-cancel">
+                  Annuler
+                </Button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {phase === "disable" && (
+          <form onSubmit={handleDisable} className="space-y-4">
+            <div className="flex items-center gap-3 p-3.5 rounded-xl bg-red-50 border border-red-100">
+              <Shield className="w-5 h-5 text-red-500 flex-shrink-0" />
+              <p className="text-sm text-red-700">Entrez votre code Google Authenticator pour désactiver le 2FA</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Code TOTP actuel</Label>
+              <Input
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                value={disableCode}
+                onChange={(e) => setDisableCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="000000"
+                className="text-center text-lg font-mono tracking-widest"
+                autoFocus
+                data-testid="input-totp-disable-code"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button type="submit" variant="destructive" disabled={isLoading || disableCode.length !== 6} data-testid="button-totp-disable-confirm">
+                {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                Confirmer la désactivation
+              </Button>
+              <Button type="button" variant="ghost" onClick={() => { setPhase("idle"); setDisableCode(""); }} data-testid="button-totp-disable-cancel">
+                Annuler
+              </Button>
+            </div>
+          </form>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
