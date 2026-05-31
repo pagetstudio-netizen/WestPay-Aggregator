@@ -204,12 +204,22 @@ const WESTPAY_KNOWLEDGE: Array<{ category: string; title: string; content: strin
   {
     category: "withdrawals",
     title: "How withdrawals work",
-    content: "Merchants request withdrawals from their dashboard under the 'Withdrawals' tab. The request is reviewed and processed by the WestPay technical team within 24-48 business hours. Withdrawals are sent directly to the merchant's mobile money account.",
+    content: "Merchants request withdrawals of their WestPay balance from the 'Withdrawals' tab in the dashboard. The request is reviewed and processed by the WestPay technical team within 24-48 business hours. Withdrawals are sent directly to the merchant's mobile money account. The fee for merchant withdrawals (payout) is 4.5%.",
   },
   {
     category: "withdrawals",
     title: "Withdrawal processing time",
-    content: "Standard withdrawals are processed within 24-48 business hours from the time of the request. During weekends or holidays, processing may take slightly longer. For urgent withdrawals, contact @Atfchalvt on Telegram with your withdrawal reference.",
+    content: "Standard merchant balance withdrawals are processed within 24-48 business hours from the time of the request. During weekends or holidays, processing may take slightly longer. For urgent withdrawals, contact @Atfchalvt on Telegram with your withdrawal reference. Note: this is different from customer payouts (transfers), which are processed instantly.",
+  },
+  {
+    category: "withdrawals",
+    title: "Payout (customer transfer) processing time",
+    content: "WestPay payouts to customers (Transfers tab) are processed automatically and instantly. If a payout remains pending for more than 2 hours, the merchant should contact WestPay Support with the transaction reference, amount, country and recipient number. Never promise a specific resolution time.",
+  },
+  {
+    category: "withdrawals",
+    title: "Interwallet transfers between merchants",
+    content: "WestPay supports interwallet transfers between merchant wallets. Important rules: (1) Interwallet transfers are manually processed by the WestPay team. (2) Transfers are only available between wallets in the same country. (3) Transfers are only available within the same currency zone. (4) Cross-currency transfers are not supported. (5) Cross-country transfers are not supported unless officially approved by WestPay. (6) The fee is 3%. To request an interwallet transfer, contact @Atfchalvt or @geeorbotpay on Telegram.",
   },
   {
     category: "withdrawals",
@@ -393,7 +403,22 @@ const WESTPAY_KNOWLEDGE: Array<{ category: string; title: string; content: strin
   {
     category: "fees",
     title: "WestPay fees and commissions",
-    content: "I don't have enough information to confirm the exact fee structure for your account — fees vary per merchant contract. Please refer to your signed agreement or contact the WestPay commercial team via @Atfchalvt for your specific fee schedule.",
+    content: "WestPay official platform fees: Payin (Incoming Payments): 5.5%. Payout (Withdrawals to merchants): 4.5%. Interwallet Transfers (between merchant wallets): 3%. These fees are automatically applied to each transaction. If asked about fees, always provide these exact rates.",
+  },
+  {
+    category: "fees",
+    title: "Payin fee",
+    content: "The WestPay fee for incoming payments (payin) is 5.5%. This is automatically deducted when a payment is confirmed and credited to the merchant balance.",
+  },
+  {
+    category: "fees",
+    title: "Payout fee",
+    content: "The WestPay fee for merchant balance withdrawals (payout) is 4.5%. This is deducted from the withdrawal amount when processed.",
+  },
+  {
+    category: "fees",
+    title: "Interwallet transfer fee",
+    content: "The WestPay fee for interwallet transfers between merchant wallets is 3%.",
   },
   {
     category: "fees",

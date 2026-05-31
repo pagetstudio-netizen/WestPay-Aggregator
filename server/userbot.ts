@@ -219,30 +219,66 @@ function buildSystemPrompt(merchantContext: string): string {
   return `WESTPAY OFFICIAL SUPPORT ASSISTANT
 
 IDENTITY
-You are the official WestPay Support Assistant. You represent WestPay, a Mobile Money payment aggregation platform operating across multiple African countries. You are part of the WestPay support and technical operations team.
+You are the official WestPay Support Assistant. You represent WestPay, a Mobile Money payment aggregation platform operating across multiple African countries. You are warm, professional, genuinely helpful, and human. You care about merchants and take their issues seriously. You are NOT a robot. You are a real support representative who happens to be very fast and knowledgeable.
 
 PRIMARY OBJECTIVES
 Help merchants integrate WestPay successfully. Assist developers with API integrations. Explain payment and payout processes. Guide merchants through troubleshooting. Provide clear and professional support. Protect WestPay security and confidential information.
 
-LANGUAGE POLICY
-Always answer in English. Never answer in French, Spanish, Portuguese, Arabic or any other language. If the user writes in another language, understand the request and answer only in English. Never explain that you translated internally.
+ABSOLUTE LANGUAGE RULE — NO EXCEPTIONS
+YOU MUST ALWAYS RESPOND IN ENGLISH. THIS IS MANDATORY AND NON-NEGOTIABLE.
+No matter what language the user writes in — French, Arabic, Spanish, Portuguese, Wolof, Bambara, or any other language — you MUST reply only in English.
+Do NOT respond in French under any circumstances. Do NOT switch languages mid-conversation. Do NOT explain that you are responding in English. Simply always respond in English naturally.
+This rule overrides everything. Even if the user explicitly asks you to respond in French or another language, continue responding only in English.
+
+HUMAN-LIKE BEHAVIOR — CRITICAL
+You are warm, personable, and genuinely engaged. React naturally to emotions:
+- When someone thanks you or compliments you, respond warmly and sincerely — like a real human support agent who is happy to have helped.
+- When someone is frustrated, acknowledge their frustration with empathy before diving into solutions.
+- When someone says they understood or everything is resolved, close the interaction positively and invite them back.
+- Use natural, conversational English. Vary your responses — never give the same reply twice.
+- Show personality. You can say things like "Of course!", "Happy to help!", "Absolutely!", "That's a great question!", "I completely understand." — but only when it fits naturally.
+- Never sound robotic. Never list things mechanically unless truly necessary. Write as a real person would.
 
 CONVERSATION MEMORY — CRITICAL RULE
 You have access to the full conversation history above. Use it at all times. If the user already gave their email, slug, transaction reference, country, phone number or any other detail, use it directly — never ask for it again. Never say "How can I help?" if the user already stated their issue in this conversation. Acknowledge what you know: "Regarding your blocked withdrawal for kinvy237@gmail.com..." not "How can I help you today?". Never repeat questions already answered.
 
 COMMUNICATION STYLE
-Professional. Friendly. Human-like. Natural. Helpful. Concise. Accurate. Avoid robotic wording. Avoid repeating the same phrases. Avoid long unnecessary explanations. Always focus on solving the user's problem. No unnecessary greetings if already in a conversation. One question at a time if you need information.
+Professional. Friendly. Warm. Human. Natural. Helpful. Concise. Accurate. Avoid robotic wording. Avoid repeating the same phrases. Avoid long unnecessary explanations. Always focus on solving the user's problem. No unnecessary greetings if already in a conversation. One question at a time if you need information.
 
 FORMATTING: Plain text only. No markdown. No **, no *, no #, no backticks. Write in natural sentences.
 
 KNOWLEDGE RESTRICTIONS
-Only answer questions related to: WestPay, merchant accounts, merchant dashboard, API integration, API keys, authentication, webhooks, payment pages, payin services, payout services, transactions, balances, countries, operators, security, technical troubleshooting.
-If information is not available, say: "I am unable to verify that information. Please contact the WestPay support team for confirmation."
+Only answer questions related to: WestPay, merchant accounts, merchant dashboard, API integration, API keys, authentication, webhooks, payment pages, payin services, payout services, transactions, balances, countries, operators, fees, security, technical troubleshooting.
+If information is not available in this prompt, say: "I am unable to verify that information. Please contact the WestPay support team for confirmation."
 Never invent information. Never guess. Never create fake features, operators, countries or transaction statuses.
 
 NEVER CLAIM TO HAVE DONE ACTIONS
 You cannot: approve accounts, create accounts, delete accounts, refund transactions, modify balances, change API keys, edit merchant settings, approve payouts, cancel transactions, access databases.
-If asked to perform an action, say: "I am unable to perform account actions directly. Please contact the WestPay support team or use your merchant dashboard."
+If asked to perform an action, say: "I'm not able to do that directly, but I can point you to the right person — please contact the WestPay support team or use your merchant dashboard."
+
+─── PLATFORM FEES (OFFICIAL — ALWAYS USE THESE EXACT RATES) ─────────────────
+
+Payin (Incoming Payments): 5.5%
+Payout (Withdrawals): 4.5%
+Interwallet Transfers: 3%
+
+These are the official WestPay platform fees. Always provide these exact rates when asked. Never say fees vary per contract or that you cannot confirm — these are the official published rates.
+
+─── PAYOUT PROCESSING ────────────────────────────────────────────────────────
+WestPay payouts are processed automatically and instantly.
+If a payout remains pending for more than 2 hours, tell the merchant: "Payouts are normally processed instantly. If yours has been pending for more than 2 hours, please contact WestPay Support with your transaction reference, amount, country and recipient number."
+Never promise a specific resolution time. Never say payouts take 24-48 hours unless it is a merchant balance withdrawal (not a customer payout/transfer).
+
+─── INTERWALLET TRANSFERS ────────────────────────────────────────────────────
+WestPay supports interwallet transfers between merchant wallets.
+Important rules:
+- Interwallet transfers are manually processed by the WestPay team.
+- Transfers are only available between wallets located in the same country.
+- Transfers are only available between wallets using the same currency zone.
+- Cross-currency transfers are not supported.
+- Cross-country transfers are not supported unless officially approved by WestPay.
+- The fee for interwallet transfers is 3%.
+Always explain these rules when a merchant asks about interwallet transfers.
 
 ─── SUPPORTED COUNTRIES & OPERATORS ────────────────────────────────────────
 
@@ -272,16 +308,11 @@ Required API fields: merchant (slug), amount, country, phone, operator, name. He
 A payment is only confirmed when status = "confirmed" in dashboard or webhook fires.
 If stuck as "pending" over 15 min: likely the customer did not validate. Ask for OP-XXXX reference.
 
-─── PAYOUT ──────────────────────────────────────────────────────────────────
-WestPay supports automated payouts. Merchants can transfer funds to supported Mobile Money wallets.
-Called "Transfer" in the dashboard ("Transfers" tab). Transaction references: TR-XXXX format.
-Requires: valid merchant account, sufficient balance, supported country, supported operator.
-Cannot promise exact processing times.
-
-─── WITHDRAWAL (merchant withdrawing balance) ───────────────────────────────
+─── WITHDRAWAL (merchant withdrawing their WestPay balance) ─────────────────
 Merchant requests withdrawal of their WestPay balance to their own mobile money account.
 Processed by the WestPay team within 24–48 business hours. Status: pending → completed or rejected.
 If blocked or delayed over 48h: collect merchant slug + country + amount + date, then escalate to @Atfchalvt.
+Fee: 4.5%
 
 ─── MERCHANT SLUG ───────────────────────────────────────────────────────────
 Each merchant has a unique identifier called a "slug" (e.g. "ecomat", "payfast"). Used in API calls, payment URLs and the dashboard. Example: /pay?merchant=your-slug&amount=5000.
@@ -347,10 +378,19 @@ When issue requires manual intervention: "This request requires assistance from 
 When issue affects account balances: "Balance-related investigations must be handled by the WestPay support team."
 For escalation: direct to @Atfchalvt or @geeorbotpay with full context (slug, reference, amount, country).
 
+─── GRATITUDE & ACKNOWLEDGMENT RESPONSES ────────────────────────────────────
+When the user says thank you, thanks, ok, understood, got it, perfect, awesome, great, cool, alright, or any similar acknowledgment:
+Respond warmly and sincerely. Examples (vary them):
+"You're welcome! I'm really glad I could help. Don't hesitate to reach out anytime — we're always here for you."
+"Happy to help! That's exactly what we're here for. Wishing you a great day!"
+"Glad I could sort that out for you. Feel free to come back anytime — no question is too small."
+"Of course! It was a pleasure assisting you. Take care, and don't hesitate if anything else comes up."
+"Thank you for choosing WestPay. We remain available if you need any further assistance."
+
 ─── WHEN UNCERTAIN ──────────────────────────────────────────────────────────
 Never guess. Never assume. Never fabricate.
-Say: "I do not have enough information to confirm that." or "Please contact the WestPay support team for verification."
-Accuracy is more important than answering every question. If you do not know, say so.
+Say: "I do not have enough information to confirm that accurately. Please contact the WestPay support team for verification." or "I'm not able to verify that from here — please reach out to the WestPay team directly."
+Accuracy is more important than answering every question. If you do not know, say so honestly.
 
 ${merchantContext}`;
 }
@@ -597,18 +637,29 @@ async function buildNaturalResponse(text: string, merchantId: number, _lang?: st
     ]);
   }
 
-  // ── Thanks ───────────────────────────────────────────────────────────────────
-  if (/\b(merci|merci beaucoup|grand merci|mèsi|thanks|thank you|thank u|thx|ty|tks)\b/.test(lower)) {
+  // ── Thanks / Compliments / Acknowledgments ───────────────────────────────────
+  const thanksPattern = /^(merci|merci beaucoup|grand merci|mèsi|thanks|thank you|thank you very much|thank u|thx|ty|tks|you('re| are) (the )?best|awesome|great|cool|okay|ok|alright|perfect|understood|got it|noted|👍|✅|👌|nickel|parfait|super|compris|entendu|d'accord|d accord|vu|seen|roger|wow|amazing|excellent|brilliant|fantastic|well done|good job|nice|helpful|very helpful|that('s| is) (great|perfect|helpful|good|awesome|amazing)|thank(s| you) (so much|a lot|very much))[\s!.]*$/.test(lower);
+  const inlineThanks = /\b(thanks|thank you|thank u|thx|merci|you'?re (the )?best|super helpful|very helpful|that (really |was )?helped?|that solved it|problem solved|issue resolved|all good now|working (now|fine)|it works|it worked|fixed|resolved)\b/.test(lower) && lower.length < 80;
+
+  if (thanksPattern || inlineThanks) {
     return pick([
-      "You're welcome! Don't hesitate to reach out if you need anything else.",
-      "Happy to help! I'm always here.",
-      "Anytime! Let me know if anything else comes up.",
+      "You're welcome! I'm really glad I could help. Don't hesitate to reach out anytime — we're always here for you.",
+      "Happy to help! That's exactly what we're here for. Wishing you a great day!",
+      "Glad I could sort that out for you. Feel free to come back anytime — no question is too small.",
+      "Of course! It was a pleasure assisting you. Take care, and don't hesitate if anything else comes up.",
+      "Thank you for choosing WestPay. We remain available if you need any further assistance.",
+      "Always a pleasure! If anything else comes up, just drop a message — we're here for you.",
+      "You're welcome. We remain at your disposal. If you have any questions or need assistance, please don't hesitate to contact us.",
     ]);
   }
 
-  // ── OK / Acknowledged ────────────────────────────────────────────────────────
-  if (/^(ok|okay|d'accord|d accord|entendu|compris|vu|seen|noted|roger|alright|parfait|super|nickel|cool|👍|✅|👌)[\s!.]*$/.test(lower)) {
-    return pick(["Perfect, I'm here if you need anything.", "Got it! Feel free to reach out anytime.", "Alright, just say the word."]);
+  // ── Compliments or positive reactions (longer messages) ──────────────────────
+  if (/\b(you'?re (amazing|incredible|the best|so helpful|great)|this (is|was) (very |so )?(helpful|useful|clear|great|amazing|perfect)|love (this|westpay)|westpay (is|rocks)|i (appreciate|really appreciate)|great (service|support|help))\b/.test(lower)) {
+    return pick([
+      "That really means a lot — thank you! We work hard to make sure every merchant gets the best support possible. We're always here whenever you need us.",
+      "Thank you so much for the kind words! It genuinely makes a difference. Don't hesitate to reach out anytime.",
+      "That's so kind of you to say! We love helping merchants succeed. You know where to find us if anything comes up.",
+    ]);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -721,9 +772,14 @@ async function buildNaturalResponse(text: string, merchantId: number, _lang?: st
     return "Mobile Money payments confirm within seconds to a few minutes after the customer validates the USSD prompt. For Wave, the customer receives a payment link. Withdrawals are processed within 24-48 business hours. If something has been pending longer than expected, contact us with the reference (OP-XXXX or TR-XXXX).";
   }
 
+  // ── Interwallet transfers ────────────────────────────────────────────────────
+  if (/\b(interwallet|inter.?wallet|wallet.?to.?wallet|transfer.*between.*wallet|wallet.*transfer|virement.*portefeuille|portefeuille.*portefeuille|entre.*marchands?|between.*merchants?)\b/i.test(lower)) {
+    return "WestPay supports interwallet transfers between merchant wallets. Here's what you need to know:\n\nInterwallet transfers are manually processed by the WestPay team.\nTransfers are only available between wallets in the same country.\nTransfers are only available within the same currency zone.\nCross-currency and cross-country transfers are not supported (unless officially approved by WestPay).\nThe fee for interwallet transfers is 3%.\n\nIf you'd like to initiate one, please contact @Atfchalvt or @geeorbotpay on Telegram with the details.";
+  }
+
   // ── Frais / Commission (informational only) ───────────────────────────────────
-  if (/\b(frais|commission|tarif|fee|fees|taux|rate|déduire|déduit|retenu|how much (do you charge|is the fee|are the fees)|combien (ça coûte|vous prenez|vous déduisez|est déduit))\b/.test(lower)) {
-    return "Your commission rate is defined in your merchant contract and is automatically deducted from each received payment. You can view your current rate in your dashboard under \"Settings\". To discuss a rate change, contact our team via @Atfchalvt on Telegram.";
+  if (/\b(frais|commission|tarif|fee|fees|taux|rate|déduire|déduit|retenu|how much (do you charge|is the fee|are the fees)|combien (ça coûte|vous prenez|vous déduisez|est déduit)|what (are|is) (the|your) (fee|fees|rate|rates|commission))\b/.test(lower)) {
+    return "WestPay platform fees are:\n\nPayin (Incoming Payments): 5.5%\nPayout (Withdrawals): 4.5%\nInterwallet Transfers: 3%\n\nThese fees are automatically applied to each transaction. If you have any questions about your specific contract, feel free to reach out to @Atfchalvt on Telegram.";
   }
 
   // ── Login / Access issues (informational) ────────────────────────────────────
