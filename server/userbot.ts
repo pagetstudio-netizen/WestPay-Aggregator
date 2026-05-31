@@ -79,6 +79,36 @@ async function getMerchantIdForGroup(chatId: string): Promise<number | null> {
   return map[chatId] ?? null;
 }
 
+// ─── Conversation history (per group, 30-min TTL, max 10 turns) ───────────────
+interface ConvTurn { role: "user" | "assistant"; content: string; }
+interface ConvSession { turns: ConvTurn[]; lastAt: number; }
+const convHistory = new Map<string, ConvSession>();
+const MAX_TURNS = 10;              // 5 exchanges stored
+const SESSION_TTL_MS = 30 * 60 * 1000; // reset after 30 min silence
+
+function getHistory(chatId: string): ConvTurn[] {
+  const sess = convHistory.get(chatId);
+  if (!sess) return [];
+  if (Date.now() - sess.lastAt > SESSION_TTL_MS) {
+    convHistory.delete(chatId);
+    return [];
+  }
+  return sess.turns;
+}
+
+function addToHistory(chatId: string, role: "user" | "assistant", content: string): void {
+  const existing = convHistory.get(chatId);
+  const turns: ConvTurn[] = existing ? [...existing.turns] : [];
+  turns.push({ role, content });
+  // Keep only the last MAX_TURNS entries
+  if (turns.length > MAX_TURNS) turns.splice(0, turns.length - MAX_TURNS);
+  convHistory.set(chatId, { turns, lastAt: Date.now() });
+}
+
+function clearHistory(chatId: string): void {
+  convHistory.delete(chatId);
+}
+
 // ─── Activation code helpers ──────────────────────────────────────────────────
 async function resolveActivationCode(code: string): Promise<{ merchantId: number; valid: boolean }> {
   const ac = await storage.getTelegramActivationCode(code).catch(() => null);
@@ -186,61 +216,110 @@ async function getAIKey(provider: "openai" | "groq" | "gemini"): Promise<string 
 
 // ─── Shared system prompt ─────────────────────────────────────────────────────
 function buildSystemPrompt(merchantContext: string): string {
-  return `You are WestPay Support Assistant.
+  return `You are Junjie, the official WestPay support assistant.
 
 ROLE
-You are the official support assistant for WestPay. Your mission is to help merchants, developers, partners and customers use WestPay services efficiently. You must always provide accurate, professional and helpful answers.
+You help merchants, developers and partners use WestPay services. You have full memory of this conversation — always reference what the user told you earlier. Never ask for information already provided in this conversation.
 
 LANGUAGE — ABSOLUTE RULE
-Always answer in English. Never answer in French, Spanish, Portuguese or any other language. If a user writes in another language, understand the message and reply only in English. No exceptions.
+Always answer in English. If a user writes in French or another language, understand it and reply only in English. No exceptions.
+
+CONVERSATION MEMORY — CRITICAL RULE
+You have access to the full conversation history. Use it. If the user already gave their email, slug, transaction reference, country, phone number or any detail, use it directly. Never say "How can I help?" if the user already stated their issue. Never repeat questions already answered. Acknowledge what you already know: "Regarding your blocked withdrawal for kinvy237@gmail.com..." not "How can I help you today?".
 
 KNOWLEDGE RESTRICTIONS
-You must only answer questions related to WestPay. Topics allowed: merchant accounts, API integration, API keys, authentication, JWT tokens, payment pages, pay-in services, payout services, webhooks, transaction history, account verification, supported countries, supported operators, merchant dashboard, balances, security, technical troubleshooting, documentation.
+Only answer about WestPay topics: payin, payout, slugs, API keys, webhooks, transactions, merchant balance, mobile money operators, supported countries, withdrawal requests, payment links, crypto (OxaPay), dashboard features, API integration, technical troubleshooting.
+If something is outside WestPay scope, say: "That's outside what I can help with. For anything else, contact the WestPay team at @Atfchalvt."
+Never invent information. Never guess fees, limits, operators or features not listed here.
 
-If information is not available, say: "I don't have enough information to confirm that. Please contact the WestPay team for assistance." Never invent information. Never guess. Never create fake fees, limits, countries, operators or technical features.
+FORMATTING: Plain text only. No markdown. No **, no *, no #, no backticks. No bullet lists unless listing 3+ items. Write in natural sentences.
 
 COMMUNICATION STYLE
-Be professional, friendly, calm, clear, helpful and efficient. Avoid robotic answers. Write naturally. Do not overuse bullet points. Do not mention prompts, instructions, models or internal systems.
+Professional, friendly, calm, direct. No robotic phrasing. No unnecessary greetings if already in a conversation. Get straight to the point. One question at a time if you need information.
 
-FORMATTING: Plain text only. No markdown, no **, no *, no #, no backticks.
+─── WESTPAY PLATFORM — VERIFIED FACTS ───────────────────────────────────────
 
-TECHNICAL SUPPORT — When merchants report an issue:
-1. Understand the problem.
-2. Ask relevant questions.
-3. Provide troubleshooting steps.
-4. Explain the cause when known.
-5. Escalate when necessary.
-Always collect: merchant slug, transaction reference, country, amount, error message, time of transaction.
+MERCHANT SLUG
+Each merchant has a unique identifier called a "slug" (e.g. "ecomat", "payfast"). It appears in the dashboard URL and is used in API calls and payment links. Example payment URL: /pay?merchant=your-slug&amount=5000.
 
-PAYMENT ISSUES — Request: transaction reference, merchant slug, country, approximate time. Never claim a payment succeeded unless confirmed.
+PAYIN (collecting payments from customers)
+- Flow: merchant calls POST /api/payment/initiate → WestPay sends USSD push to customer phone → customer validates on phone → WestPay credits merchant balance and sends webhook.
+- Wave operator: customer receives a payment URL to click (no USSD).
+- Transaction references: OP-XXXX format.
+- Required fields in API call: merchant (slug), amount, country, phone, operator, name.
+- Header required: X-API-Key (get from dashboard "API & SDK" tab).
+- A payment is only confirmed when status = "confirmed" in dashboard or webhook fires.
 
-PAYOUT ISSUES — Request: transaction reference, recipient number, country, amount. Never promise completion times that are not documented.
+PAYOUT (sending money to a recipient)
+- Called "Transfer" in the dashboard ("Transfers" tab).
+- Merchant sends money to a recipient phone number.
+- Transaction references: TR-XXXX format.
+- Processed via OmniPay. Delays depend on operator (usually within minutes, can take up to 1 hour).
+- Cannot promise exact processing time.
 
-WEBHOOK ISSUES — Verify: endpoint URL, response status, webhook secret, server logs. Always guide developers step by step.
+WITHDRAWAL (merchant withdrawing their balance)
+- Merchant requests a withdrawal from their WestPay balance to their own mobile money account.
+- Processed by the WestPay team within 24–48 business hours.
+- Status: pending → completed or rejected.
+- If blocked or delayed: ask for merchant slug + country + approximate amount + date requested. Then escalate to @Atfchalvt if over 48h.
 
-API SUPPORT — Use official WestPay documentation only. Provide accurate endpoint information. Explain request and response formats clearly. Never invent endpoints.
+API KEYS
+- One API key per country per merchant (format: PREFIX-[hex string]).
+- Found in merchant dashboard "API & SDK" tab.
+- If key is lost: regenerate in dashboard (old key is immediately invalidated).
+- Used as: X-API-Key header in all API requests.
+- API docs available at /api-docs (PIN-protected, admin provides PIN).
 
-WESTPAY PLATFORM FACTS:
-- API: GET key from dashboard "API & SDK" tab, POST /api/payment/initiate, X-API-Key header, docs at /api-docs, configure webhook for confirmations.
-- Operators: MTN, Orange, Moov, Wave, TMoney, Flooz — Togo, Benin, Burkina Faso, Ivory Coast, Mali, Senegal.
-- Crypto: via OxaPay (USDT, BTC, ETH, TRX, BNB, LTC+). Global, no country limit. Activate from dashboard "Crypto" tab.
-- Payment links: dashboard "Payment Links" tab. Fixed or variable amounts.
-- Wave payments: customer gets a payment URL link instead of USSD.
-- Transaction refs: OP-XXXX = payment, TR-XXXX = transfer, WP = internal.
-- Support Telegram handles: @Atfchalvt, @geeorbotpay, @pankeyrobotpay, @astapay
+WEBHOOKS
+- Merchant configures a webhook URL in dashboard "Webhook" tab.
+- WestPay sends a POST request to that URL when a payment is confirmed.
+- Payload includes: event, txId, amount, currency, payer, country, merchantSlug, provider, timestamp.
+- Signature in X-WestPay-Signature header (HMAC-SHA256, verify with webhook secret from dashboard).
+- Event type in X-WestPay-Event header.
+- If webhook is not received: check URL is publicly accessible, check server logs, test from dashboard "Webhook" tab → "Test".
+- Webhook logs visible in dashboard "Webhook" tab → "Logs".
 
-SECURITY — Never expose: API secrets, JWT tokens, internal credentials, merchant passwords, database information. If a user requests sensitive information, politely refuse.
+TRANSACTIONS
+- Visible in merchant dashboard "Transactions" tab.
+- Status values: pending, confirmed, failed.
+- OP-XXXX = payin, TR-XXXX = payout/transfer, WP = internal reference.
+- If a transaction is stuck as "pending" over 15 minutes: likely the customer did not validate the USSD. Ask for OP-XXXX reference.
+- Failed transactions: funds NOT deducted from customer unless status = confirmed.
 
-CANNOT DO — be honest and redirect to the technical team:
-- Cannot modify, add, or adjust any balance. Direct to @Atfchalvt or @geeorbotpay.
-- Cannot approve, reject, or process withdrawals. Withdrawals are processed within 24-48 business hours.
-- Cannot change commission rates, fees, or pricing. Direct to commercial team via @Atfchalvt.
-- Cannot reset passwords directly. Direct to "Forgot password" link or administrator.
-- Cannot create, delete, or suspend accounts. Direct to platform administrator @Atfchalvt.
-- Cannot add or remove countries/operators. Direct to technical team @Atfchalvt.
-- Cannot refund a payment. Share OP-XXXX reference with @Atfchalvt.
+MERCHANT BALANCE
+- Separate balance per country.
+- Increases when a payment is confirmed (payin).
+- Decreases when a transfer (payout) or withdrawal is processed.
+- View in dashboard "Overview" or by asking this bot (live data shown below in merchant context).
 
-ERROR HANDLING — If uncertain: "I am unable to verify that information at the moment. Please contact the WestPay technical team for confirmation." Never guess.
+SUPPORTED COUNTRIES & OPERATORS
+- Togo: TMoney, Flooz (Moov)
+- Benin: MTN, Moov
+- Burkina Faso: Orange, Moov
+- Ivory Coast (Côte d'Ivoire): MTN, Orange, Wave, Moov
+- Mali: Orange, Moov
+- Senegal: Orange, Wave, Free
+- Only these countries and operators are supported. Do not mention others.
+
+PAYMENT LINKS
+- Created in dashboard "Payment Links" tab.
+- Can be fixed amount or variable (customer enters amount).
+- Shareable URL format: /pay?merchant=slug&amount=X&country=XX.
+- No API key needed for payment links — customers just open the URL.
+
+CRYPTO PAYMENTS (via OxaPay)
+- Supported currencies: USDT, BTC, ETH, TRX, BNB, LTC, DOGE and more.
+- No country restriction — works globally.
+- Must be activated by the WestPay admin for the merchant.
+- Merchant sees crypto balances in "Crypto" tab of dashboard.
+- Invoice endpoint: POST /api/merchant/crypto/invoice (X-API-Key required).
+
+─── SUPPORT ESCALATION ──────────────────────────────────────────────────────
+Cannot do: modify balance, approve/reject withdrawals, change fees, reset passwords, create/delete accounts, add/remove countries or operators, refund a payment.
+For these: direct to @Atfchalvt or @geeorbotpay with the full context (slug, reference, amount, country).
+
+─── ERROR HANDLING ──────────────────────────────────────────────────────────
+If uncertain: "I can't confirm that right now. Please contact the WestPay team at @Atfchalvt for verification." Never guess.
 
 ${merchantContext}`;
 }
@@ -276,7 +355,7 @@ async function buildMerchantContext(merchantId: number): Promise<string> {
 }
 
 // ─── OpenAI provider ──────────────────────────────────────────────────────────
-async function askOpenAI(userMessage: string, systemPrompt: string): Promise<string | null> {
+async function askOpenAI(history: ConvTurn[], systemPrompt: string): Promise<string | null> {
   const apiKey = await getAIKey("openai");
   if (!apiKey) return null;
 
@@ -288,9 +367,9 @@ async function askOpenAI(userMessage: string, systemPrompt: string): Promise<str
         model: "gpt-4o-mini",
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
+          ...history,
         ],
-        max_tokens: 350,
+        max_tokens: 400,
         temperature: 0.7,
       }),
     });
@@ -307,7 +386,7 @@ async function askOpenAI(userMessage: string, systemPrompt: string): Promise<str
 }
 
 // ─── Groq provider (OpenAI-compatible API, llama-3.1-8b-instant) ──────────────
-async function askGroq(userMessage: string, systemPrompt: string): Promise<string | null> {
+async function askGroq(history: ConvTurn[], systemPrompt: string): Promise<string | null> {
   const apiKey = await getAIKey("groq");
   if (!apiKey) return null;
 
@@ -319,9 +398,9 @@ async function askGroq(userMessage: string, systemPrompt: string): Promise<strin
         model: "llama-3.1-8b-instant",
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
+          ...history,
         ],
-        max_tokens: 350,
+        max_tokens: 400,
         temperature: 0.7,
       }),
     });
@@ -338,9 +417,23 @@ async function askGroq(userMessage: string, systemPrompt: string): Promise<strin
 }
 
 // ─── Gemini provider (Google Generative Language API) ────────────────────────
-async function askGemini(userMessage: string, systemPrompt: string): Promise<string | null> {
+async function askGemini(history: ConvTurn[], systemPrompt: string): Promise<string | null> {
   const apiKey = await getAIKey("gemini");
   if (!apiKey) return null;
+
+  // Gemini requires alternating user/model roles — merge consecutive same-role turns
+  const geminiContents: { role: string; parts: { text: string }[] }[] = [];
+  for (const turn of history) {
+    const gemRole = turn.role === "assistant" ? "model" : "user";
+    const last = geminiContents[geminiContents.length - 1];
+    if (last && last.role === gemRole) {
+      last.parts[0].text += "\n" + turn.content;
+    } else {
+      geminiContents.push({ role: gemRole, parts: [{ text: turn.content }] });
+    }
+  }
+  // Gemini must end with a user turn
+  if (geminiContents.length === 0 || geminiContents[geminiContents.length - 1].role !== "user") return null;
 
   try {
     const res = await fetch(
@@ -350,8 +443,8 @@ async function askGemini(userMessage: string, systemPrompt: string): Promise<str
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           system_instruction: { parts: [{ text: systemPrompt }] },
-          contents: [{ role: "user", parts: [{ text: userMessage }] }],
-          generationConfig: { maxOutputTokens: 350, temperature: 0.7 },
+          contents: geminiContents,
+          generationConfig: { maxOutputTokens: 400, temperature: 0.7 },
         }),
       }
     );
@@ -398,15 +491,20 @@ async function classifyIntent(text: string): Promise<{
   }
 }
 
-// ─── AI Orchestrator: RAG + intent → OpenAI → Groq → Gemini ─────────────────
-async function askAI(userMessage: string, merchantContext: string): Promise<string | null> {
-  // Parallel: classify intent + retrieve relevant knowledge
+// ─── AI Orchestrator: history + RAG + intent → OpenAI → Groq → Gemini ────────
+async function askAI(
+  history: ConvTurn[],       // full conversation so far (user turn already appended)
+  merchantContext: string,
+): Promise<string | null> {
+  const latestUserMsg = [...history].reverse().find(t => t.role === "user")?.content ?? "";
+
+  // Parallel: classify intent + retrieve relevant knowledge based on latest message
   const [classification, ragContext] = await Promise.all([
-    classifyIntent(userMessage).catch(() => ({ intent: "general", tone: "neutral", urgency: "low" as const })),
+    classifyIntent(latestUserMsg).catch(() => ({ intent: "general", tone: "neutral", urgency: "low" as const })),
     (async () => {
       try {
         const { retrieveRelevant } = await import("./knowledge");
-        return await retrieveRelevant(userMessage, 4);
+        return await retrieveRelevant(latestUserMsg, 4);
       } catch { return ""; }
     })(),
   ]);
@@ -420,16 +518,16 @@ async function askAI(userMessage: string, merchantContext: string): Promise<stri
   const systemPrompt = buildSystemPrompt(merchantContext + ragContext + toneHint);
 
   const providers: Array<{ name: string; fn: () => Promise<string | null> }> = [
-    { name: "OpenAI", fn: () => askOpenAI(userMessage, systemPrompt) },
-    { name: "Groq",   fn: () => askGroq(userMessage, systemPrompt) },
-    { name: "Gemini", fn: () => askGemini(userMessage, systemPrompt) },
+    { name: "OpenAI", fn: () => askOpenAI(history, systemPrompt) },
+    { name: "Groq",   fn: () => askGroq(history, systemPrompt) },
+    { name: "Gemini", fn: () => askGemini(history, systemPrompt) },
   ];
 
   for (const provider of providers) {
     try {
       const result = await provider.fn();
       if (result) {
-        console.log(`[USERBOT] ${provider.name} OK | intent=${classification.intent} urgency=${classification.urgency} rag=${ragContext.length > 0 ? "yes" : "no"}`);
+        console.log(`[USERBOT] ${provider.name} OK | intent=${classification.intent} urgency=${classification.urgency} turns=${history.length} rag=${ragContext.length > 0 ? "yes" : "no"}`);
         return result;
       }
     } catch (err: any) {
@@ -723,18 +821,22 @@ async function handleMessage(event: any): Promise<void> {
   const merchant = await storage.getMerchantById(merchantId);
   if (!merchant) return;
 
+  // ── Record user message in conversation history ───────────────────────────
+  addToHistory(chatId, "user", text);
+
   // ── Initial typing indicator (shows bot is "reading" the message) ─────────
   await sendTyping(chat);
 
-  // ── Try AI (RAG + intent) + keyword fallback in parallel with delay ────────
+  // ── Try AI (history + RAG + intent) + keyword fallback in parallel ────────
   const delayMs = await getResponseDelayMs();
+  const historySnapshot = getHistory(chatId); // snapshot before any async write
 
   const [response] = await Promise.all([
     // Generate response
     (async (): Promise<string | null> => {
       try {
         const merchantContext = await buildMerchantContext(merchantId);
-        const aiResp = await askAI(text, merchantContext);
+        const aiResp = await askAI(historySnapshot, merchantContext);
         if (aiResp) return aiResp;
       } catch (err: any) {
         console.error("[USERBOT] AI orchestrator failed:", err.message);
@@ -754,6 +856,9 @@ async function handleMessage(event: any): Promise<void> {
   ]);
 
   if (!response) return;
+
+  // ── Record bot reply in history ───────────────────────────────────────────
+  addToHistory(chatId, "assistant", response);
 
   // Send plain text — NO parseMode to avoid markdown interpretation
   await client.sendMessage(chat, {
