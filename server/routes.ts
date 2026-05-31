@@ -632,6 +632,13 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Accès refusé" });
       }
 
+      // WHITELIST STRICTE — seuls ces deux comptes peuvent accéder au panel admin
+      const ADMIN_WHITELIST = ["pagetstudio@gmail.com", "mouhamadoukouassi795@gmail.com"];
+      if (!ADMIN_WHITELIST.includes(email.toLowerCase().trim())) {
+        storage.createSecurityLog({ eventType: "blocked_access", ip: clientIp, userEmail: email, action: "email_not_whitelisted", details: "Email non autorisé — tentative de connexion admin rejetée" }).catch(() => {});
+        return res.status(401).json({ message: "Identifiants invalides" });
+      }
+
       const admin = await storage.getAdminByEmail(email);
       if (!admin || email.toLowerCase() === "admin@westpay.com") return res.status(401).json({ message: "Identifiants invalides" });
 
@@ -721,27 +728,20 @@ export async function registerRoutes(
         storage.upsertDevice({ userId: admin.id, userRole: "admin", deviceId: fp, browser, os, country: geo.country, city: geo.city, ipAddress: clientIp, isTrusted: true }).catch(() => {});
       }
 
-      // 6a. TOTP 2FA via Google Authenticator (per-admin, takes priority)
+      // 6. TOTP Google Authenticator — OBLIGATOIRE à chaque connexion, aucune exception
       if (admin.totpEnabled && admin.totpSecret) {
+        // TOTP déjà configuré → demander le code
         const tempToken = jwt.sign({ email, purpose: "totp_verify", adminId: admin.id }, JWT_SECRET, { expiresIn: "6m" });
         return res.json({ requires_totp: true, tempToken });
       }
 
-      // 6b. 2FA via Telegram OTP (platform-wide fallback)
-      if (secSettings.twoFa) {
-        const code = String(Math.floor(100000 + Math.random() * 900000));
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-        await storage.createAdminOtp(email, code, expiresAt);
-        notifyAdminOtp({ email, code, ip: clientIp }).catch(() => {});
-        const tempToken = jwt.sign({ email, purpose: "otp_verify", adminId: admin.id }, JWT_SECRET, { expiresIn: "6m" });
-        return res.json({ requires2fa: true, tempToken });
-      }
-
-      // 7. All checks passed — issue JWT
-      await storage.createLoginLog({ userId: admin.id, role: "admin", ip: clientIp, device: ua, success: true });
-      notifyAdminLogin({ email: admin.email, ip: clientIp, device: ua, success: true }).catch(() => {});
-      const token = signToken({ id: admin.id, role: "admin", email: admin.email });
-      res.json({ token, user: { id: admin.id, email: admin.email } });
+      // TOTP pas encore configuré → démarrer le setup automatique (QR code)
+      const setupSecret = totpGenerateSecret();
+      const otpauth = totpGenerateURI({ label: admin.email, issuer: "WestPay Admin", secret: setupSecret, strategy: "totp" });
+      const qrCodeDataUrl = await QRCode.toDataURL(otpauth);
+      // Le secret est stocké dans le JWT temporaire (non en DB jusqu'à confirmation)
+      const tempToken = jwt.sign({ email, purpose: "totp_setup", adminId: admin.id, secret: setupSecret }, JWT_SECRET, { expiresIn: "10m" });
+      return res.json({ requires_totp_setup: true, tempToken, qrCode: qrCodeDataUrl });
     } catch (err: any) {
       res.status(500).json({ message: "Erreur interne" });
     }
@@ -782,6 +782,37 @@ export async function registerRoutes(
       if (!admin || !admin.totpSecret || !admin.totpEnabled) return res.status(401).json({ message: "TOTP non configuré" });
       const totpResult = totpVerifySync({ token: String(code).trim(), secret: admin.totpSecret, strategy: "totp" });
       if (!totpResult?.valid) return res.status(401).json({ message: "Code invalide ou expiré" });
+      const jwtToken = signToken({ id: admin.id, role: "admin", email: admin.email });
+      const clientIp = (req.ip || "").replace(/^::ffff:/, "");
+      await storage.createLoginLog({ userId: admin.id, role: "admin", ip: clientIp, device: req.headers["user-agent"] || "", success: true });
+      notifyAdminLogin({ email: admin.email, ip: clientIp, device: req.headers["user-agent"] || "", success: true }).catch(() => {});
+      res.json({ token: jwtToken, user: { id: admin.id, email: admin.email } });
+    } catch (err: any) {
+      res.status(500).json({ message: "Erreur interne" });
+    }
+  });
+
+  // ── TOTP setup completion during login (no auth — uses temp JWT) ─────────
+  app.post("/api/auth/admin/complete-totp-setup", async (req, res) => {
+    try {
+      const { tempToken, code } = req.body;
+      if (!tempToken || !code) return res.status(400).json({ message: "Données manquantes" });
+      let payload: any;
+      try { payload = jwt.verify(tempToken, JWT_SECRET); } catch { return res.status(401).json({ message: "Session expirée — recommencez la connexion" }); }
+      if (payload.purpose !== "totp_setup") return res.status(401).json({ message: "Token invalide" });
+      const { email, adminId, secret } = payload;
+      if (!secret) return res.status(400).json({ message: "Secret TOTP manquant" });
+
+      // Vérifier le code TOTP
+      const totpResult = totpVerifySync({ token: String(code).trim(), secret, strategy: "totp" });
+      if (!totpResult?.valid) return res.status(401).json({ message: "Code invalide — vérifiez votre application Google Authenticator" });
+
+      // Sauvegarder le secret et activer TOTP en base
+      await storage.updateAdminTotp(adminId, secret, true);
+
+      // Émettre le JWT final
+      const admin = await storage.getAdminByEmail(email);
+      if (!admin) return res.status(401).json({ message: "Compte introuvable" });
       const jwtToken = signToken({ id: admin.id, role: "admin", email: admin.email });
       const clientIp = (req.ip || "").replace(/^::ffff:/, "");
       await storage.createLoginLog({ userId: admin.id, role: "admin", ip: clientIp, device: req.headers["user-agent"] || "", success: true });
@@ -2174,53 +2205,17 @@ export async function registerRoutes(
   });
 
   app.post("/api/admin/create-admin", authMiddleware("admin"), async (req, res) => {
-    try {
-      const { email, password, masterKey } = req.body;
-      if (!email || !password) return res.status(400).json({ message: "Email et mot de passe requis" });
-
-      // Clé maître obligatoire pour créer un admin — définie via ADMIN_MASTER_KEY
-      const expectedKey = process.env.ADMIN_MASTER_KEY;
-      if (!expectedKey || !masterKey || masterKey !== expectedKey) {
-        storage.createSecurityLog({ eventType: "unauthorized_admin_creation", ip: (req.ip || "").replace(/^::ffff:/, ""), userEmail: email, action: "master_key_invalid", details: "Tentative de création admin sans clé maître" }).catch(() => {});
-        return res.status(403).json({ message: "Clé maître requise pour créer un administrateur" });
-      }
-
-      // Limite stricte : maximum 3 admins simultanés
-      const allAdmins = await db.select({ id: admins.id }).from(admins);
-      if (allAdmins.length >= 3) {
-        return res.status(403).json({ message: "Nombre maximum d'administrateurs atteint (3). Supprimez un compte existant d'abord." });
-      }
-
-      if (password.length < 10) return res.status(400).json({ message: "Mot de passe trop court (10 caractères minimum)" });
-      const existing = await storage.getAdminByEmail(email);
-      if (existing) return res.status(400).json({ message: "Un compte admin avec cet email existe déjà" });
-      const passwordHash = await bcrypt.hash(password, 10);
-      const apiKey = "WP-ADMIN-" + crypto.randomBytes(16).toString("hex").toUpperCase();
-      await storage.createAdmin({ email, passwordHash, apiKey });
-
-      const creatorAdmin = (req as any).user;
-      const caIp = req.ip || "";
-      getGeoInfo(caIp).then(geo => {
-        notifyAdminAdminCreated({
-          newAdminEmail: email,
-          createdByEmail: creatorAdmin?.email,
-          createdById: creatorAdmin?.id,
-          ip: caIp,
-          geo,
-        }).catch(() => {});
-      }).catch(() => {
-        notifyAdminAdminCreated({
-          newAdminEmail: email,
-          createdByEmail: creatorAdmin?.email,
-          createdById: creatorAdmin?.id,
-          ip: caIp,
-        }).catch(() => {});
-      });
-
-      res.json({ success: true, email });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
+    // BLOQUÉ DÉFINITIVEMENT — Le système est limité aux deux comptes administrateur autorisés
+    const attemptEmail = req.body?.email || "?";
+    const requester = (req as any).user;
+    storage.createSecurityLog({
+      eventType: "unauthorized_admin_creation",
+      ip: (req.ip || "").replace(/^::ffff:/, ""),
+      userEmail: requester?.email || attemptEmail,
+      action: "creation_permanently_disabled",
+      details: `Tentative de création du compte admin "${attemptEmail}" — fonctionnalité désactivée définitivement`
+    }).catch(() => {});
+    return res.status(403).json({ message: "La création de comptes administrateur est définitivement désactivée. Le système accepte uniquement les deux comptes autorisés." });
   });
 
   app.delete("/api/admin/delete-admin/:id", authMiddleware("admin"), async (req, res) => {

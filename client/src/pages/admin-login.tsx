@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
-import { Eye, EyeOff, Loader2, Shield, KeyRound, Lock, CheckCircle2, Zap, Globe, Smartphone } from "lucide-react";
+import { Eye, EyeOff, Loader2, Shield, KeyRound, Lock, CheckCircle2, Zap, Globe, Smartphone, QrCode, AlertTriangle } from "lucide-react";
 
 async function buildDeviceFingerprint(): Promise<string> {
   try {
@@ -105,15 +105,25 @@ export default function AdminLogin() {
   const [isLoading, setIsLoading] = useState(false);
   const [ipStatus, setIpStatus] = useState<"checking" | "allowed" | "denied">("checking");
 
+  // Telegram OTP (fallback, kept for compat)
   const [otpStep, setOtpStep] = useState(false);
   const [otpCode, setOtpCode] = useState("");
   const [otpToken, setOtpToken] = useState("");
   const [otpLoading, setOtpLoading] = useState(false);
 
+  // TOTP verify (already configured)
   const [totpStep, setTotpStep] = useState(false);
   const [totpCode, setTotpCode] = useState("");
   const [totpToken, setTotpToken] = useState("");
   const [totpLoading, setTotpLoading] = useState(false);
+
+  // TOTP setup (first-time: scan QR + enter code)
+  const [totpSetupStep, setTotpSetupStep] = useState(false);
+  const [setupQrCode, setSetupQrCode] = useState("");
+  const [setupToken, setSetupToken] = useState("");
+  const [setupCode, setSetupCode] = useState("");
+  const [setupLoading, setSetupLoading] = useState(false);
+  const [setupCodeStep, setSetupCodeStep] = useState(false);
 
   const { login } = useAuth();
   const [, setLocation] = useLocation();
@@ -155,11 +165,21 @@ export default function AdminLogin() {
         }
         return;
       }
+      // TOTP déjà configuré → saisir le code
       if (data.requires_totp) {
         setTotpToken(data.tempToken);
         setTotpStep(true);
         return;
       }
+      // TOTP pas encore configuré → afficher le QR code de setup
+      if (data.requires_totp_setup) {
+        setSetupToken(data.tempToken);
+        setSetupQrCode(data.qrCode);
+        setTotpSetupStep(true);
+        setSetupCodeStep(false);
+        return;
+      }
+      // Telegram OTP fallback
       if (data.requires2fa) {
         setOtpToken(data.tempToken);
         setOtpStep(true);
@@ -220,6 +240,35 @@ export default function AdminLogin() {
       setTotpLoading(false);
     }
   }, [totpToken, totpCode, login, setLocation, toast]);
+
+  const handleCompleteTotpSetup = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (setupCode.length !== 6) return;
+    setSetupLoading(true);
+    try {
+      const res = await fetch("/api/auth/admin/complete-totp-setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tempToken: setupToken, code: setupCode.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Code invalide");
+      login(data.token, { id: data.user.id, email: data.user.email, role: "admin" });
+      toast({ title: "Google Authenticator activé !", description: "Votre compte est maintenant protégé par 2FA." });
+      setTimeout(() => setLocation("/admin-access-958425546648484886646634808526522886433/dashboard"), 300);
+    } catch (err: any) {
+      toast({ title: "Erreur de configuration", description: err.message, variant: "destructive" });
+      setSetupCode("");
+    } finally {
+      setSetupLoading(false);
+    }
+  }, [setupToken, setupCode, login, setLocation, toast]);
+
+  const resetAll = () => {
+    setOtpStep(false); setOtpCode(""); setOtpToken("");
+    setTotpStep(false); setTotpCode(""); setTotpToken("");
+    setTotpSetupStep(false); setSetupQrCode(""); setSetupToken(""); setSetupCode(""); setSetupCodeStep(false);
+  };
 
   if (ipStatus === "checking") {
     return (
@@ -315,7 +364,7 @@ export default function AdminLogin() {
 
       {/* Right form panel */}
       <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-10 bg-white">
-        <div className="w-full max-w-[400px]">
+        <div className="w-full max-w-[420px]">
           {/* Mobile logo */}
           <div className="flex lg:hidden items-center justify-center gap-3 mb-8">
             <div className="w-10 h-10 rounded-xl overflow-hidden shadow">
@@ -324,7 +373,139 @@ export default function AdminLogin() {
             <span className="text-xl font-black text-slate-900">WestPay</span>
           </div>
 
-          {totpStep ? (
+          {/* ── TOTP SETUP SCREEN (first-time configuration) ── */}
+          {totpSetupStep ? (
+            <>
+              {!setupCodeStep ? (
+                /* Step 1: Show QR code */
+                <>
+                  <div className="mb-6">
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4 mx-auto"
+                      style={{ background: "linear-gradient(135deg,#7c3aed,#4c1d95)" }}>
+                      <QrCode className="w-7 h-7 text-white" />
+                    </div>
+                    <h1 className="text-2xl font-black text-slate-900 text-center mb-1">Configuration 2FA requise</h1>
+                    <p className="text-slate-500 text-sm text-center">Votre compte n'a pas encore Google Authenticator activé.</p>
+                  </div>
+
+                  <div className="flex items-start gap-3 p-3.5 rounded-xl bg-amber-50 border border-amber-200 mb-5">
+                    <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <p className="text-sm font-medium text-amber-800">
+                      Scannez ce QR code avec <strong>Google Authenticator</strong> sur votre téléphone pour activer la double authentification.
+                    </p>
+                  </div>
+
+                  {setupQrCode && (
+                    <div className="flex justify-center mb-5">
+                      <div className="p-3 rounded-2xl border-2 border-violet-200 bg-white shadow-md">
+                        <img src={setupQrCode} alt="QR Code Google Authenticator" className="w-48 h-48" data-testid="img-totp-qr" />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-3 mb-5">
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-6 h-6 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <span className="text-xs font-bold text-violet-700">1</span>
+                      </div>
+                      <p className="text-sm text-slate-600">Ouvrez <strong>Google Authenticator</strong> sur votre téléphone</p>
+                    </div>
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-6 h-6 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <span className="text-xs font-bold text-violet-700">2</span>
+                      </div>
+                      <p className="text-sm text-slate-600">Appuyez sur <strong>+</strong> puis <strong>"Scanner un QR code"</strong></p>
+                    </div>
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-6 h-6 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <span className="text-xs font-bold text-violet-700">3</span>
+                      </div>
+                      <p className="text-sm text-slate-600">Scannez le QR code ci-dessus</p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setSetupCodeStep(true)}
+                    className="al-btn"
+                    style={{ background: "linear-gradient(135deg,#7c3aed,#4c1d95)", boxShadow: "0 4px 14px rgba(124,58,237,0.3)" }}
+                    data-testid="button-totp-setup-next"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    J'ai scanné le QR code — Continuer
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={resetAll}
+                    className="w-full text-sm text-slate-400 hover:text-slate-600 transition-colors font-medium py-2 mt-2"
+                    style={{ background: "none", border: "none", cursor: "pointer" }}
+                    data-testid="button-back-from-setup"
+                  >
+                    ← Retour à la connexion
+                  </button>
+                </>
+              ) : (
+                /* Step 2: Enter TOTP code to confirm */
+                <>
+                  <div className="mb-6">
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4 mx-auto"
+                      style={{ background: "linear-gradient(135deg,#7c3aed,#4c1d95)" }}>
+                      <Smartphone className="w-7 h-7 text-white" />
+                    </div>
+                    <h1 className="text-2xl font-black text-slate-900 text-center mb-1">Confirmer le code</h1>
+                    <p className="text-slate-500 text-sm text-center">Entrez le code à 6 chiffres affiché dans Google Authenticator pour valider la configuration.</p>
+                  </div>
+
+                  <form onSubmit={handleCompleteTotpSetup} className="space-y-5">
+                    <div className="flex items-center gap-3 p-3.5 rounded-xl bg-violet-50 border border-violet-100">
+                      <Shield className="w-5 h-5 text-violet-600 flex-shrink-0" />
+                      <p className="text-sm font-medium text-violet-800">Code valable 30 secondes — renouvelé automatiquement</p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-sm font-semibold text-slate-700 text-center">Code Google Authenticator</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={6}
+                        className="al-otp"
+                        value={setupCode}
+                        onChange={(e) => setSetupCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                        placeholder="000000"
+                        autoFocus
+                        data-testid="input-totp-setup-code"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={setupLoading || setupCode.length !== 6}
+                      className="al-btn"
+                      style={{ background: "linear-gradient(135deg,#7c3aed,#4c1d95)", boxShadow: "0 4px 14px rgba(124,58,237,0.3)" }}
+                      data-testid="button-complete-totp-setup"
+                    >
+                      {setupLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                      {setupLoading ? "Activation en cours..." : "Activer Google Authenticator"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setSetupCodeStep(false)}
+                      className="w-full text-sm text-slate-400 hover:text-slate-600 transition-colors font-medium py-1"
+                      style={{ background: "none", border: "none", cursor: "pointer" }}
+                      data-testid="button-back-to-qr"
+                    >
+                      ← Retour au QR code
+                    </button>
+                  </form>
+                </>
+              )}
+            </>
+
+          ) : totpStep ? (
+            /* ── TOTP VERIFY SCREEN (code already configured) ── */
             <>
               <div className="mb-8">
                 <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4 mx-auto"
@@ -369,7 +550,7 @@ export default function AdminLogin() {
 
                 <button
                   type="button"
-                  onClick={() => { setTotpStep(false); setTotpCode(""); setTotpToken(""); }}
+                  onClick={resetAll}
                   className="w-full text-sm text-slate-400 hover:text-slate-600 transition-colors font-medium py-1"
                   style={{ background: "none", border: "none", cursor: "pointer" }}
                   data-testid="button-back-from-totp"
@@ -378,7 +559,9 @@ export default function AdminLogin() {
                 </button>
               </form>
             </>
+
           ) : !otpStep ? (
+            /* ── MAIN LOGIN FORM ── */
             <>
               <div className="mb-8">
                 <h1 className="text-2xl font-black text-slate-900 mb-1">Administration</h1>
@@ -449,7 +632,9 @@ export default function AdminLogin() {
                 </button>
               </form>
             </>
+
           ) : (
+            /* ── TELEGRAM OTP SCREEN (fallback) ── */
             <>
               <div className="mb-8">
                 <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4 mx-auto"
@@ -494,7 +679,7 @@ export default function AdminLogin() {
 
                 <button
                   type="button"
-                  onClick={() => { setOtpStep(false); setOtpCode(""); setOtpToken(""); }}
+                  onClick={resetAll}
                   className="w-full text-sm text-slate-400 hover:text-slate-600 transition-colors font-medium py-1"
                   style={{ background: "none", border: "none", cursor: "pointer" }}
                   data-testid="button-back-to-login"
