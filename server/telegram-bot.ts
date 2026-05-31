@@ -2700,6 +2700,41 @@ function scheduleDailyReport(): void {
   console.log(`[TELEGRAM] Rapport journalier programme (dans ~${h < 0 ? 24 + h : h}h)`);
 }
 
+export async function getBotWebhookInfo(): Promise<{
+  hasToken: boolean;
+  running: boolean;
+  username: string | null;
+  webhookUrl: string | null;
+  webhookPendingCount: number;
+  webhookLastError: string | null;
+  hasAdminGroup: boolean;
+}> {
+  const tokenEnv = process.env.TELEGRAM_BOT_TOKEN;
+  const tokenDb = await storage.getSetting("telegram_bot_token").catch(() => null);
+  const hasToken = !!(tokenEnv || tokenDb);
+  const groupId = await storage.getSetting("telegram_group_id").catch(() => null);
+  if (!bot) {
+    return { hasToken, running: false, username: null, webhookUrl: null, webhookPendingCount: 0, webhookLastError: null, hasAdminGroup: !!groupId };
+  }
+  try {
+    const [me, webhookInfo] = await Promise.all([
+      bot.telegram.getMe(),
+      bot.telegram.getWebhookInfo(),
+    ]);
+    return {
+      hasToken,
+      running: true,
+      username: me.username || null,
+      webhookUrl: webhookInfo.url || null,
+      webhookPendingCount: webhookInfo.pending_update_count || 0,
+      webhookLastError: (webhookInfo as any).last_error_message || null,
+      hasAdminGroup: !!groupId,
+    };
+  } catch (err: any) {
+    return { hasToken, running: false, username: null, webhookUrl: null, webhookPendingCount: 0, webhookLastError: err.message, hasAdminGroup: !!groupId };
+  }
+}
+
 export function getBot(): Telegraf | null {
   return bot;
 }

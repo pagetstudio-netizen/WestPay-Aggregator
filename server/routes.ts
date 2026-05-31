@@ -1533,6 +1533,58 @@ export async function registerRoutes(
     }
   });
 
+  // ── Bot status (webhook info + token presence) ─────────────────────────────
+  app.get("/api/admin/telegram/bot-status", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const { getBotWebhookInfo } = await import("./telegram-bot");
+      const info = await getBotWebhookInfo();
+      res.json(info);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Force re-register webhook (réveiller le bot) ───────────────────────────
+  app.post("/api/admin/telegram/refresh-webhook", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { registerWebhookUrl, getBot } = await import("./telegram-bot");
+      if (!getBot()) return res.status(400).json({ message: "Bot non initialisé — vérifiez TELEGRAM_BOT_TOKEN" });
+      const appUrl = process.env.APP_URL || "https://westpay.cfd";
+      let webhookSecret = await storage.getSetting("telegram_webhook_secret");
+      if (!webhookSecret) {
+        const { randomBytes } = await import("crypto");
+        webhookSecret = randomBytes(24).toString("hex");
+        await storage.setSetting("telegram_webhook_secret", webhookSecret);
+      }
+      const webhookUrl = `${appUrl}/api/telegram/webhook/${webhookSecret}`;
+      await registerWebhookUrl(webhookUrl);
+      const { getBotWebhookInfo } = await import("./telegram-bot");
+      const info = await getBotWebhookInfo();
+      res.json({ success: true, webhookUrl, ...info });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Test message to admin group ────────────────────────────────────────────
+  app.post("/api/admin/telegram/test-bot", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { notifyAdminGroup, getBot } = await import("./telegram-bot");
+      if (!getBot()) return res.status(400).json({ message: "Bot non initialisé — vérifiez TELEGRAM_BOT_TOKEN" });
+      const groupId = await storage.getSetting("telegram_group_id");
+      if (!groupId) return res.status(400).json({ message: "Groupe admin non configuré — définissez d'abord le Chat ID" });
+      await notifyAdminGroup(
+        `🤖 *Test bot WestPay*\n\n` +
+        `✅ Le bot fonctionne correctement.\n` +
+        `🕐 ${new Date().toLocaleString("fr-FR", { timeZone: "Africa/Lagos" })}\n` +
+        `🌐 Environnement : ${process.env.NODE_ENV || "development"}`
+      );
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.post("/api/admin/telegram/settings", authMiddleware("admin"), async (req, res) => {
     try {
       const { groupId } = req.body;

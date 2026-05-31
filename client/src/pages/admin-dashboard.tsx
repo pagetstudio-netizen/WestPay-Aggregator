@@ -31,7 +31,8 @@ import {
   RefreshCw, Lock, BookOpen, FileText, Webhook, Zap, ToggleLeft, ToggleRight, Link2,
   Link, BarChart3, TrendingUp, Eye, ToggleLeft as Toggle, ExternalLink, Filter,
   Check, ChevronsUpDown, ArrowUpRight, Edit3, Wallet, AlertTriangle, RotateCcw, Bitcoin,
-  Monitor, EyeOff, KeyRound, Mail, GripVertical, ImagePlus, X, Upload, Smartphone
+  Monitor, EyeOff, KeyRound, Mail, GripVertical, ImagePlus, X, Upload, Smartphone,
+  Bot, Send
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
@@ -6510,8 +6511,265 @@ function OtpBotPanel() {
   );
 }
 
+function TelegramBotPanel() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+
+  const [groupId, setGroupId] = useState("");
+  const [savingGroup, setSavingGroup] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [testing, setTesting] = useState(false);
+
+  const { data: botStatus, refetch: refetchStatus, isLoading: statusLoading } = useQuery({
+    queryKey: ["/api/admin/telegram/bot-status"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/telegram/bot-status", { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error("Failed");
+      return res.json() as Promise<{
+        hasToken: boolean; running: boolean; username: string | null;
+        webhookUrl: string | null; webhookPendingCount: number;
+        webhookLastError: string | null; hasAdminGroup: boolean;
+      }>;
+    },
+    refetchInterval: 30000,
+  });
+
+  const { data: tgSettings } = useQuery({
+    queryKey: ["/api/admin/telegram/settings"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/telegram/settings", { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error("Failed");
+      return res.json() as Promise<{ groupId: string | null; knownGroupsCount: number }>;
+    },
+  });
+
+  useEffect(() => {
+    if (tgSettings?.groupId) setGroupId(tgSettings.groupId);
+  }, [tgSettings]);
+
+  const saveGroupId = async () => {
+    if (!groupId.trim()) return;
+    setSavingGroup(true);
+    try {
+      const res = await fetch("/api/admin/telegram/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ groupId: groupId.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      toast({ title: "✅ Chat ID admin enregistré" });
+      refetchStatus();
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setSavingGroup(false);
+    }
+  };
+
+  const refreshWebhook = async () => {
+    setRefreshing(true);
+    try {
+      const res = await fetch("/api/admin/telegram/refresh-webhook", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      toast({ title: "✅ Webhook réenregistré", description: data.webhookUrl });
+      refetchStatus();
+    } catch (err: any) {
+      toast({ title: "Erreur webhook", description: err.message, variant: "destructive" });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const testBot = async () => {
+    setTesting(true);
+    try {
+      const res = await fetch("/api/admin/telegram/test-bot", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      toast({ title: "✅ Message test envoyé", description: "Vérifiez votre groupe Telegram admin" });
+    } catch (err: any) {
+      toast({ title: "Erreur test", description: err.message, variant: "destructive" });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const statusColor = botStatus?.running
+    ? botStatus.webhookLastError ? "text-amber-500" : "text-green-500"
+    : "text-red-500";
+  const statusText = botStatus?.running
+    ? botStatus.webhookLastError ? "Actif (erreurs webhook)" : "Actif ✓"
+    : "Inactif";
+
+  return (
+    <div className="space-y-4">
+      {/* Status card */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center justify-between gap-2">
+            <span className="flex items-center gap-2">
+              <Bot className="w-4 h-4 text-blue-500" />
+              Statut du bot principal
+            </span>
+            <button type="button" onClick={() => refetchStatus()} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+              <RefreshCw className={`w-3 h-3 ${statusLoading ? "animate-spin" : ""}`} />
+              Actualiser
+            </button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {statusLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" />Chargement…</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-lg border bg-muted/30 p-3">
+                  <p className="text-xs text-muted-foreground mb-1">Token bot</p>
+                  <p className={`font-semibold ${botStatus?.hasToken ? "text-green-600 dark:text-green-400" : "text-red-500"}`}>
+                    {botStatus?.hasToken ? "✓ Configuré" : "✗ Manquant"}
+                  </p>
+                </div>
+                <div className="rounded-lg border bg-muted/30 p-3">
+                  <p className="text-xs text-muted-foreground mb-1">État bot</p>
+                  <p className={`font-semibold ${statusColor}`}>{statusLoading ? "…" : statusText}</p>
+                </div>
+                {botStatus?.username && (
+                  <div className="rounded-lg border bg-muted/30 p-3">
+                    <p className="text-xs text-muted-foreground mb-1">Nom du bot</p>
+                    <p className="font-semibold text-foreground">@{botStatus.username}</p>
+                  </div>
+                )}
+                <div className="rounded-lg border bg-muted/30 p-3">
+                  <p className="text-xs text-muted-foreground mb-1">Groupe admin</p>
+                  <p className={`font-semibold ${botStatus?.hasAdminGroup ? "text-green-600 dark:text-green-400" : "text-amber-500"}`}>
+                    {botStatus?.hasAdminGroup ? "✓ Configuré" : "⚠ Non défini"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Webhook info */}
+              <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5 text-sm">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Webhook Telegram</p>
+                <p className="font-mono text-xs break-all text-foreground">
+                  {botStatus?.webhookUrl || <span className="text-muted-foreground italic">(aucun webhook actif)</span>}
+                </p>
+                {botStatus?.webhookPendingCount !== undefined && botStatus.webhookPendingCount > 0 && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">⚠ {botStatus.webhookPendingCount} mise(s) à jour en attente</p>
+                )}
+                {botStatus?.webhookLastError && (
+                  <p className="text-xs text-red-500 font-medium">❌ Dernière erreur : {botStatus.webhookLastError}</p>
+                )}
+              </div>
+
+              {/* Token missing warning */}
+              {!botStatus?.hasToken && (
+                <div className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/20 p-3 text-sm text-red-700 dark:text-red-400">
+                  <p className="font-semibold mb-1">⚠ Token manquant</p>
+                  <p className="text-xs">Définissez <code className="bg-red-100 dark:bg-red-900/40 px-1 rounded">TELEGRAM_BOT_TOKEN</code> dans les variables d'environnement Plesk, puis redémarrez l'application.</p>
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Group ID config */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Hash className="w-4 h-4 text-violet-500" />
+            Chat ID du groupe admin
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            ID numérique du groupe Telegram où le bot envoie les alertes admin (transactions, logins, etc.). Pour l'obtenir : ajoutez le bot dans le groupe, puis envoyez la commande <code className="bg-muted px-1 rounded text-xs">/setgroup API_KEY_ADMIN</code>.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              value={groupId}
+              onChange={e => setGroupId(e.target.value)}
+              placeholder="-1001234567890"
+              className="font-mono text-sm flex-1"
+              data-testid="input-admin-group-id"
+            />
+            <Button onClick={saveGroupId} disabled={savingGroup || !groupId.trim()} size="sm" data-testid="button-save-group-id">
+              {savingGroup ? <Loader2 className="w-4 h-4 animate-spin" /> : "Enregistrer"}
+            </Button>
+          </div>
+          {tgSettings?.knownGroupsCount !== undefined && (
+            <p className="text-xs text-muted-foreground">{tgSettings.knownGroupsCount} groupe(s) connu(s) du bot au total</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Actions */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Zap className="w-4 h-4 text-amber-500" />
+            Actions & Diagnostic
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={refreshWebhook}
+              disabled={refreshing}
+              className="flex items-center gap-3 p-4 rounded-xl border-2 border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20 hover:border-blue-400 dark:hover:border-blue-600 transition-all text-left"
+              data-testid="button-refresh-webhook"
+            >
+              <div className="w-9 h-9 rounded-lg bg-blue-500 flex items-center justify-center shrink-0">
+                {refreshing ? <Loader2 className="w-4 h-4 text-white animate-spin" /> : <RefreshCw className="w-4 h-4 text-white" />}
+              </div>
+              <div>
+                <p className="font-semibold text-sm text-blue-700 dark:text-blue-300">Réveiller le bot</p>
+                <p className="text-xs text-blue-600/70 dark:text-blue-400/70">Forcer le réenregistrement du webhook Telegram</p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={testBot}
+              disabled={testing || !botStatus?.running || !botStatus?.hasAdminGroup}
+              className="flex items-center gap-3 p-4 rounded-xl border-2 border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20 hover:border-green-400 dark:hover:border-green-600 transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed"
+              data-testid="button-test-bot"
+            >
+              <div className="w-9 h-9 rounded-lg bg-green-500 flex items-center justify-center shrink-0">
+                {testing ? <Loader2 className="w-4 h-4 text-white animate-spin" /> : <Send className="w-4 h-4 text-white" />}
+              </div>
+              <div>
+                <p className="font-semibold text-sm text-green-700 dark:text-green-300">Message test</p>
+                <p className="text-xs text-green-600/70 dark:text-green-400/70">Envoyer un message test au groupe admin</p>
+              </div>
+            </button>
+          </div>
+
+          <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground space-y-1">
+            <p className="font-semibold text-foreground">📋 Checklist dépannage :</p>
+            <p>1. <code className="bg-muted px-1 rounded">TELEGRAM_BOT_TOKEN</code> défini dans les variables Plesk</p>
+            <p>2. <code className="bg-muted px-1 rounded">APP_URL=https://westpay.cfd</code> défini dans les variables Plesk</p>
+            <p>3. Chat ID groupe admin configuré ci-dessus</p>
+            <p>4. Cliquez "Réveiller le bot" après chaque déploiement ou redémarrage</p>
+            <p>5. Vérifiez que le bot est bien <strong>membre administrateur</strong> du groupe Telegram</p>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function NotificationsPanel() {
-  const [activeNotifTab, setActiveNotifTab] = useState<"email" | "telegram" | "otpbot">("email");
+  const [activeNotifTab, setActiveNotifTab] = useState<"email" | "telegram" | "botconfig" | "otpbot">("botconfig");
   const { data: merchants = [] } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
   const allMerchants = merchants as Merchant[];
 
@@ -6524,7 +6782,7 @@ function NotificationsPanel() {
         </div>
         <div>
           <h2 className="text-lg font-bold text-foreground">Notifications & Diffusion</h2>
-          <p className="text-sm text-muted-foreground">Envoyez des messages à vos marchands par email ou Telegram</p>
+          <p className="text-sm text-muted-foreground">Configurez et utilisez le bot Telegram pour vos notifications</p>
         </div>
       </div>
 
@@ -6532,33 +6790,43 @@ function NotificationsPanel() {
       <div className="flex gap-1 p-1 rounded-xl bg-muted border">
         <button
           type="button"
-          onClick={() => setActiveNotifTab("email")}
-          className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${activeNotifTab === "email" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-          data-testid="button-notif-tab-email"
+          onClick={() => setActiveNotifTab("botconfig")}
+          className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-medium transition-all ${activeNotifTab === "botconfig" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          data-testid="button-notif-tab-botconfig"
         >
-          <Mail className="w-4 h-4" />
-          Email
+          <Bot className="w-3.5 h-3.5 text-blue-500" />
+          Bot
         </button>
         <button
           type="button"
           onClick={() => setActiveNotifTab("telegram")}
-          className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${activeNotifTab === "telegram" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-medium transition-all ${activeNotifTab === "telegram" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
           data-testid="button-notif-tab-telegram"
         >
-          <MessageSquare className="w-4 h-4 text-blue-500" />
+          <MessageSquare className="w-3.5 h-3.5 text-blue-500" />
           Broadcast
         </button>
         <button
           type="button"
+          onClick={() => setActiveNotifTab("email")}
+          className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-medium transition-all ${activeNotifTab === "email" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          data-testid="button-notif-tab-email"
+        >
+          <Mail className="w-3.5 h-3.5" />
+          Email
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveNotifTab("otpbot")}
-          className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${activeNotifTab === "otpbot" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-medium transition-all ${activeNotifTab === "otpbot" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
           data-testid="button-notif-tab-otpbot"
         >
-          <KeyRound className="w-4 h-4 text-amber-500" />
+          <KeyRound className="w-3.5 h-3.5 text-amber-500" />
           OTP Bot
         </button>
       </div>
 
+      {activeNotifTab === "botconfig" && <TelegramBotPanel />}
       {activeNotifTab === "email" && <EmailNotifyPanel merchants={allMerchants} />}
       {activeNotifTab === "telegram" && <TelegramBroadcastPanel merchants={allMerchants} />}
       {activeNotifTab === "otpbot" && <OtpBotPanel />}
