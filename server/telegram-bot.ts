@@ -1469,17 +1469,11 @@ export async function registerWebhookUrl(webhookUrl: string): Promise<void> {
 export async function startPolling(): Promise<void> {
   if (!bot) return;
   try {
-    // Supprimer le webhook actif avant de démarrer le polling.
-    // Un webhook résiduel (ex: ancienne config Plesk) entraîne un 409 Conflict
-    // qui empêche silencieusement le bot de recevoir les mises à jour.
-    const webhookInfo = await bot.telegram.getWebhookInfo();
-    if (webhookInfo.url) {
-      console.log(`[TELEGRAM] Webhook actif détecté (${webhookInfo.url.slice(-30)}) — suppression avant polling...`);
-      await bot.telegram.deleteWebhook({ drop_pending_updates: false });
-      console.log("[TELEGRAM] Webhook supprimé — démarrage du polling");
-    }
+    // Ne PAS appeler deleteWebhook() ici — si un webhook de production (Plesk) est actif,
+    // le supprimer couperait la réception des commandes en production.
+    // bot.launch() échouera avec une 409 si un webhook est actif, ce qui est ignoré ci-dessous.
     bot.launch({ dropPendingUpdates: false }).catch((err: any) => {
-      console.warn("[TELEGRAM] Polling interrompu:", err.message);
+      console.warn("[TELEGRAM] Polling interrompu (conflit prod/dev — ignoré):", err.message);
     });
     console.log("[TELEGRAM] Bot demarre en mode polling (developpement)");
     process.once("SIGINT", () => bot?.stop("SIGINT"));
