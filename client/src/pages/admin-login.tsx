@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
-import { Eye, EyeOff, Loader2, Shield, KeyRound, Lock, CheckCircle2, Zap, Globe, Smartphone, QrCode, AlertTriangle } from "lucide-react";
+import { Eye, EyeOff, Loader2, Shield, KeyRound, Lock, CheckCircle2, Zap, Globe, Smartphone, QrCode, AlertTriangle, Copy, Check } from "lucide-react";
 
 async function buildDeviceFingerprint(): Promise<string> {
   try {
@@ -120,10 +120,12 @@ export default function AdminLogin() {
   // TOTP setup (first-time: scan QR + enter code)
   const [totpSetupStep, setTotpSetupStep] = useState(false);
   const [setupQrCode, setSetupQrCode] = useState("");
+  const [setupSecret, setSetupSecret] = useState("");
   const [setupToken, setSetupToken] = useState("");
   const [setupCode, setSetupCode] = useState("");
   const [setupLoading, setSetupLoading] = useState(false);
   const [setupCodeStep, setSetupCodeStep] = useState(false);
+  const [secretCopied, setSecretCopied] = useState(false);
 
   const { login } = useAuth();
   const [, setLocation] = useLocation();
@@ -175,6 +177,7 @@ export default function AdminLogin() {
       if (data.requires_totp_setup) {
         setSetupToken(data.tempToken);
         setSetupQrCode(data.qrCode);
+        setSetupSecret(data.secret || "");
         setTotpSetupStep(true);
         setSetupCodeStep(false);
         return;
@@ -267,7 +270,15 @@ export default function AdminLogin() {
   const resetAll = () => {
     setOtpStep(false); setOtpCode(""); setOtpToken("");
     setTotpStep(false); setTotpCode(""); setTotpToken("");
-    setTotpSetupStep(false); setSetupQrCode(""); setSetupToken(""); setSetupCode(""); setSetupCodeStep(false);
+    setTotpSetupStep(false); setSetupQrCode(""); setSetupSecret(""); setSetupToken(""); setSetupCode(""); setSetupCodeStep(false); setSecretCopied(false);
+  };
+
+  const copySecret = () => {
+    if (!setupSecret) return;
+    navigator.clipboard.writeText(setupSecret).then(() => {
+      setSecretCopied(true);
+      setTimeout(() => setSecretCopied(false), 2000);
+    });
   };
 
   if (ipStatus === "checking") {
@@ -396,10 +407,34 @@ export default function AdminLogin() {
                   </div>
 
                   {setupQrCode && (
-                    <div className="flex justify-center mb-5">
+                    <div className="flex justify-center mb-4">
                       <div className="p-3 rounded-2xl border-2 border-violet-200 bg-white shadow-md">
                         <img src={setupQrCode} alt="QR Code Google Authenticator" className="w-48 h-48" data-testid="img-totp-qr" />
                       </div>
+                    </div>
+                  )}
+
+                  {/* Secret code for manual entry */}
+                  {setupSecret && (
+                    <div className="mb-4 rounded-xl border border-violet-200 bg-violet-50 p-3.5">
+                      <p className="text-xs font-semibold text-violet-700 mb-2">
+                        📱 Vous ne pouvez pas scanner ? Entrez ce code manuellement dans Google Authenticator :
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 text-center font-mono text-sm font-bold text-violet-900 bg-white rounded-lg px-3 py-2 border border-violet-200 tracking-widest select-all break-all" data-testid="text-totp-secret">
+                          {setupSecret.replace(/(.{4})/g, "$1 ").trim()}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={copySecret}
+                          className="flex-shrink-0 w-9 h-9 rounded-lg bg-violet-100 hover:bg-violet-200 flex items-center justify-center transition-colors"
+                          title="Copier le code"
+                          data-testid="button-copy-secret"
+                        >
+                          {secretCopied ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4 text-violet-600" />}
+                        </button>
+                      </div>
+                      <p className="text-xs text-violet-500 mt-1.5">Dans Google Auth : + → Clé de configuration → collez ce code</p>
                     </div>
                   )}
 
@@ -414,13 +449,13 @@ export default function AdminLogin() {
                       <div className="w-6 h-6 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0 mt-0.5">
                         <span className="text-xs font-bold text-violet-700">2</span>
                       </div>
-                      <p className="text-sm text-slate-600">Appuyez sur <strong>+</strong> puis <strong>"Scanner un QR code"</strong></p>
+                      <p className="text-sm text-slate-600">Appuyez sur <strong>+</strong> puis <strong>"Scanner un QR code"</strong> <em>(ou "Clé de configuration" pour le code manuel)</em></p>
                     </div>
                     <div className="flex items-start gap-2.5">
                       <div className="w-6 h-6 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0 mt-0.5">
                         <span className="text-xs font-bold text-violet-700">3</span>
                       </div>
-                      <p className="text-sm text-slate-600">Scannez le QR code ci-dessus</p>
+                      <p className="text-sm text-slate-600">Scannez le QR code ci-dessus <em>ou</em> entrez le code manuellement</p>
                     </div>
                   </div>
 

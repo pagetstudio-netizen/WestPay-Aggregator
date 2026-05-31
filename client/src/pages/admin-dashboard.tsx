@@ -5885,7 +5885,7 @@ function TelegramBroadcastPanel({ merchants }: { merchants: Merchant[] }) {
   const { token } = useAuth();
   const { toast } = useToast();
 
-  const [mode, setMode] = useState<"all" | "specific">("all");
+  const [mode, setMode] = useState<"all" | "all_groups" | "specific">("all");
   const [message, setMessage] = useState("");
   const [imageMode, setImageMode] = useState<"url" | "file">("url");
   const [imageUrl, setImageUrl] = useState("");
@@ -6019,22 +6019,31 @@ function TelegramBroadcastPanel({ merchants }: { merchants: Merchant[] }) {
             {/* Recipient mode */}
             <div>
               <Label className="text-sm font-semibold mb-2 block">Destinataires</Label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <button type="button" onClick={() => setMode("all")}
-                  className={`flex items-center gap-2 px-4 py-3 rounded-xl border-2 transition-all text-sm font-medium text-left ${mode === "all" ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400" : "border-border text-muted-foreground hover:border-muted-foreground"}`}
+                  className={`flex items-center gap-2 px-3 py-3 rounded-xl border-2 transition-all text-sm font-medium text-left ${mode === "all" ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400" : "border-border text-muted-foreground hover:border-muted-foreground"}`}
                   data-testid="button-tg-mode-all">
                   <Users className="w-4 h-4 shrink-0" />
                   <div>
-                    <p className="font-semibold leading-tight">Tous les marchands</p>
+                    <p className="font-semibold leading-tight">Marchands liés</p>
                     <p className="text-xs opacity-70 leading-tight">{activeTgMerchants.length} avec Telegram</p>
                   </div>
                 </button>
+                <button type="button" onClick={() => setMode("all_groups")}
+                  className={`flex items-center gap-2 px-3 py-3 rounded-xl border-2 transition-all text-sm font-medium text-left ${mode === "all_groups" ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400" : "border-border text-muted-foreground hover:border-muted-foreground"}`}
+                  data-testid="button-tg-mode-all-groups">
+                  <Globe className="w-4 h-4 shrink-0" />
+                  <div>
+                    <p className="font-semibold leading-tight">Tous les groupes</p>
+                    <p className="text-xs opacity-70 leading-tight">Où le bot est présent</p>
+                  </div>
+                </button>
                 <button type="button" onClick={() => setMode("specific")}
-                  className={`flex items-center gap-2 px-4 py-3 rounded-xl border-2 transition-all text-sm font-medium text-left ${mode === "specific" ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400" : "border-border text-muted-foreground hover:border-muted-foreground"}`}
+                  className={`flex items-center gap-2 px-3 py-3 rounded-xl border-2 transition-all text-sm font-medium text-left ${mode === "specific" ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400" : "border-border text-muted-foreground hover:border-muted-foreground"}`}
                   data-testid="button-tg-mode-specific">
                   <MessageSquare className="w-4 h-4 shrink-0" />
                   <div>
-                    <p className="font-semibold leading-tight">Marchands spécifiques</p>
+                    <p className="font-semibold leading-tight">Marchands spécif.</p>
                     <p className="text-xs opacity-70 leading-tight">Sélection manuelle</p>
                   </div>
                 </button>

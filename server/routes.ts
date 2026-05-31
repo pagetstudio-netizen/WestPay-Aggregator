@@ -741,7 +741,7 @@ export async function registerRoutes(
       const qrCodeDataUrl = await QRCode.toDataURL(otpauth);
       // Le secret est stocké dans le JWT temporaire (non en DB jusqu'à confirmation)
       const tempToken = jwt.sign({ email, purpose: "totp_setup", adminId: admin.id, secret: setupSecret }, JWT_SECRET, { expiresIn: "10m" });
-      return res.json({ requires_totp_setup: true, tempToken, qrCode: qrCodeDataUrl });
+      return res.json({ requires_totp_setup: true, tempToken, qrCode: qrCodeDataUrl, secret: setupSecret });
     } catch (err: any) {
       res.status(500).json({ message: "Erreur interne" });
     }
@@ -1618,7 +1618,11 @@ export async function registerRoutes(
       }
 
       let targetChatIds: string[] | undefined;
-      if (target === "specific" && Array.isArray(merchantIds) && merchantIds.length > 0) {
+      let useAllKnownGroups = false;
+
+      if (target === "all_groups") {
+        useAllKnownGroups = true;
+      } else if (target === "specific" && Array.isArray(merchantIds) && merchantIds.length > 0) {
         const merchants = await storage.getMerchants();
         targetChatIds = merchants
           .filter((m: any) => merchantIds.includes(m.id) && m.telegramChatId)
@@ -1630,6 +1634,7 @@ export async function registerRoutes(
         imageUrl: imageUrl?.trim() || undefined,
         buttons: validatedButtons.length > 0 ? validatedButtons : undefined,
         targetChatIds,
+        useAllKnownGroups,
       });
 
       res.json({
