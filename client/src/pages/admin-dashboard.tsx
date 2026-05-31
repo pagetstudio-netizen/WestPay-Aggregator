@@ -6835,9 +6835,10 @@ function NotificationsPanel() {
 }
 
 const DELAY_OPTIONS = [
-  { value: "auto", label: "Automatique (3-8 secondes, aléatoire)" },
+  { value: "auto", label: "Par défaut (30 secondes)" },
   { value: "5", label: "5 secondes" },
   { value: "10", label: "10 secondes" },
+  { value: "15", label: "15 secondes" },
   { value: "20", label: "20 secondes" },
   { value: "30", label: "30 secondes" },
   { value: "45", label: "45 secondes" },
@@ -7009,7 +7010,7 @@ function UserbotPanel() {
           </button>
         </div>
         <div className="rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground">
-          En mode automatique, le compte attend entre 3 et 8 secondes de façon aléatoire et affiche l'indicateur de frappe pour paraître naturel.
+          Par défaut, le compte attend 30 secondes avant de répondre et affiche l'indicateur de frappe ("en train d'écrire...") en continu pendant tout ce délai pour paraître naturel. Vous pouvez ajuster ce délai ci-dessus.
         </div>
       </div>
 

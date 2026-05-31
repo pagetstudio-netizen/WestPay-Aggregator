@@ -39,16 +39,16 @@ async function getResponseDelayMs(): Promise<number> {
   try {
     const raw = await storage.getSetting("userbot_response_delay");
     if (!raw || raw === "auto") {
-      // Automatic: random between 3 and 8 seconds — feels human
-      return Math.floor(Math.random() * 5000) + 3000;
+      // Default: 30 seconds (configurable via admin panel)
+      return 30000;
     }
     const n = parseInt(raw, 10);
     if (isNaN(n) || n <= 0) return 0;
-    // Unit: raw ends with "s" → seconds, "m" → minutes
+    // Unit: raw ends with "m" → minutes, otherwise seconds
     if (raw.endsWith("m")) return n * 60 * 1000;
-    return n * 1000; // default: seconds
+    return n * 1000;
   } catch {
-    return 3000;
+    return 30000;
   }
 }
 
@@ -386,6 +386,20 @@ Respond warmly and sincerely. Examples (vary them):
 "Glad I could sort that out for you. Feel free to come back anytime — no question is too small."
 "Of course! It was a pleasure assisting you. Take care, and don't hesitate if anything else comes up."
 "Thank you for choosing WestPay. We remain available if you need any further assistance."
+
+─── OUT OF SCOPE — STRICT RULE ──────────────────────────────────────────────
+You are exclusively a WestPay support assistant. You can ONLY assist with topics directly related to:
+WestPay platform, merchant accounts, API integrations, payments (payin), payouts, withdrawals, interwallet transfers, transactions, balances, webhooks, payment links, crypto payments (OxaPay), dashboard features, API keys, operators, supported countries, fees, security, account management and technical troubleshooting on WestPay.
+
+If a user asks about ANYTHING unrelated to WestPay — including but not limited to: general knowledge, news, weather, cooking, sports, politics, other payment platforms, coding unrelated to WestPay integration, jokes, personal questions, geography, history, or any other topic — you MUST politely decline.
+
+Reply with something like:
+"I'm only able to assist with WestPay-related topics — things like payments, payouts, API integrations, merchant accounts, and platform operations. For anything outside of that, I'd recommend reaching out to the right resource. Is there anything WestPay-related I can help you with?"
+
+Or:
+"That's a bit outside my area — I specialize in WestPay support, including payments, API integrations, payouts, and merchant accounts. Is there anything on that front I can help with?"
+
+Never answer off-topic questions, even partially. Redirect warmly but clearly.
 
 ─── WHEN UNCERTAIN ──────────────────────────────────────────────────────────
 Never guess. Never assume. Never fabricate.
@@ -822,6 +836,16 @@ async function buildNaturalResponse(text: string, merchantId: number, _lang?: st
     return "I see you're mentioning an amount. Could you clarify — is this about a pending payment, a withdrawal, or a balance discrepancy? If you have a transaction reference (OP-XXXX), please share it so I can pass the details to our technical team.";
   }
 
+  // ── Out of scope / Off-topic detection ───────────────────────────────────────
+  // Patterns that are clearly unrelated to WestPay
+  const offTopicPattern = /\b(recette|cuisine|cuisine|météo|weather|news|actualité|actualites|sport|football|basket|politique|politics|histoire|history|géographie|geography|blague|joke|humour|humor|chanson|song|music|musique|film|movie|série|series|netflix|youtube|instagram|twitter|facebook|tiktok|google|amazon|whatsapp|wechat|général|general knowledge|wikipedia|capital.*city|capital city|president|premier ministre|prime minister|temperature|celsius|fahrenheit|recipe|ingredient|how to cook|comment cuisiner|poème|poem|proverbe|proverb|quiz|riddle|devinette|translate|traduire|traduction|language lesson|cours de|leçon de|explain.*history|explain.*science|science|biology|chemistry|physics|math problem|calcul|calculer|calculate|stock market|bourse|crypto.*price|bitcoin price|ethereum price|price.*bitcoin|cours.*bitcoin|dollar.*euro|exchange rate)\b/i;
+  if (offTopicPattern.test(lower) && !/\b(westpay|merchant|payment|paiement|wallet|solde|balance|api|webhook|transaction|withdrawal|retrait|transfer|virement|operator|opérateur|account|compte)\b/.test(lower)) {
+    return pick([
+      "I'm only able to assist with WestPay-related topics — things like payments, payouts, API integrations, merchant accounts, and platform operations. For anything outside of that, I'd recommend reaching out to the right resource. Is there anything WestPay-related I can help you with?",
+      "That's a bit outside my area — I specialize in WestPay support, covering payments, payouts, API integrations, merchant accounts, and platform features. Is there anything on that front I can help you with?",
+    ]);
+  }
+
   // ── Intelligent fallback ──────────────────────────────────────────────────────
   if (text.trim().length < 5) return null;
 
@@ -931,14 +955,18 @@ async function handleMessage(event: any): Promise<void> {
       const lang = detectLanguage(text);
       return buildNaturalResponse(text, merchantId, lang);
     })(),
-    // Humanized delay: base delay + typing simulation
+    // Humanized delay: full configured delay with periodic typing indicators
     (async () => {
-      const baseDelay = delayMs > 0 ? delayMs : 800 + Math.random() * 1200;
-      await new Promise(r => setTimeout(r, Math.min(baseDelay, 2500)));
-      await sendTyping(chat);
-      // Extra delay proportional to message complexity
-      const extraDelay = Math.min(text.length * 8, 2000);
-      await new Promise(r => setTimeout(r, extraDelay));
+      const totalDelay = delayMs > 0 ? delayMs : 30000;
+      const typingInterval = 4500; // renew typing indicator every 4.5s (Telegram clears it after 5s)
+      const elapsed = { ms: 0 };
+      // Send typing every ~4.5s for the full duration so it looks like the bot is composing
+      while (elapsed.ms < totalDelay) {
+        await sendTyping(chat);
+        const chunk = Math.min(typingInterval, totalDelay - elapsed.ms);
+        await new Promise(r => setTimeout(r, chunk));
+        elapsed.ms += chunk;
+      }
     })(),
   ]);
 
