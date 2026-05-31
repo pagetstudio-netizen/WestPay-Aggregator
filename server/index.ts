@@ -104,41 +104,6 @@ app.use((req, res, next) => {
 
   await registerRoutes(httpServer, app);
 
-  const { initTelegramBot, setupWebhook, registerWebhookUrl, startPolling } = await import("./telegram-bot");
-  const { storage } = await import("./storage");
-
-  const telegramBot = initTelegramBot();
-  if (telegramBot) {
-    if (process.env.NODE_ENV === "production") {
-      let webhookSecret = await storage.getSetting("telegram_webhook_secret");
-      if (!webhookSecret) {
-        const { randomBytes } = await import("crypto");
-        webhookSecret = randomBytes(24).toString("hex");
-        await storage.setSetting("telegram_webhook_secret", webhookSecret);
-      }
-      const webhookUrl = `${process.env.APP_URL || "https://west-pay-aggregator-1--beryowone.replit.app"}/api/telegram/webhook/${webhookSecret}`;
-      setupWebhook(app, webhookSecret);
-      await registerWebhookUrl(webhookUrl);
-    } else {
-      // En développement : activer le polling pour recevoir les commandes du groupe
-      await telegramBot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
-      startPolling();
-      console.log("[TELEGRAM] Mode developpement — polling actif (envoi + reception)");
-    }
-  }
-
-  // Initialize dedicated OTP bot (separate token, separate instance)
-  const { initOtpBot } = await import("./telegram-otp-bot");
-  await initOtpBot();
-
-  // Réconciliation automatique des paiements bloqués
-  const { startReconciliationJob } = await import("./reconciliation");
-  startReconciliationJob();
-
-  // Userbot — customer service agent (real Telegram account)
-  const { initUserbot } = await import("./userbot");
-  await initUserbot();
-
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
@@ -162,10 +127,7 @@ app.use((req, res, next) => {
     await setupVite(httpServer, app);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
+  // Start listening FIRST — optional services initialized after
   const port = parseInt(process.env.PORT || "5000", 10);
   httpServer.listen(
     {
@@ -177,4 +139,58 @@ app.use((req, res, next) => {
       log(`serving on port ${port}`);
     },
   );
+
+  // ── Optional services (failures must never crash the server) ──────────────
+
+  // Telegram main bot
+  try {
+    const { initTelegramBot, setupWebhook, registerWebhookUrl, startPolling } = await import("./telegram-bot");
+    const { storage } = await import("./storage");
+
+    const telegramBot = initTelegramBot();
+    if (telegramBot) {
+      if (process.env.NODE_ENV === "production") {
+        let webhookSecret = await storage.getSetting("telegram_webhook_secret");
+        if (!webhookSecret) {
+          const { randomBytes } = await import("crypto");
+          webhookSecret = randomBytes(24).toString("hex");
+          await storage.setSetting("telegram_webhook_secret", webhookSecret);
+        }
+        const appUrl = process.env.APP_URL || "https://westpay.cfd";
+        const webhookUrl = `${appUrl}/api/telegram/webhook/${webhookSecret}`;
+        setupWebhook(app, webhookSecret);
+        await registerWebhookUrl(webhookUrl);
+      } else {
+        await telegramBot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
+        startPolling();
+        console.log("[TELEGRAM] Mode developpement — polling actif (envoi + reception)");
+      }
+    }
+  } catch (err: any) {
+    console.error("[TELEGRAM] Init failed (non-fatal):", err.message);
+  }
+
+  // OTP bot
+  try {
+    const { initOtpBot } = await import("./telegram-otp-bot");
+    await initOtpBot();
+  } catch (err: any) {
+    console.error("[OTP BOT] Init failed (non-fatal):", err.message);
+  }
+
+  // Reconciliation job
+  try {
+    const { startReconciliationJob } = await import("./reconciliation");
+    startReconciliationJob();
+  } catch (err: any) {
+    console.error("[RECONCILIATION] Init failed (non-fatal):", err.message);
+  }
+
+  // Userbot — customer service agent
+  try {
+    const { initUserbot } = await import("./userbot");
+    await initUserbot();
+  } catch (err: any) {
+    console.error("[USERBOT] Init failed (non-fatal):", err.message);
+  }
 })();
