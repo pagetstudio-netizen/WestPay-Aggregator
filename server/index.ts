@@ -95,6 +95,13 @@ app.use((req, res, next) => {
     console.log("Seed skipped or already done:", (err as any).message);
   }
 
+  try {
+    const { seedKnowledge } = await import("./knowledge");
+    seedKnowledge().catch(e => console.log("[KNOWLEDGE] Seed error:", e.message));
+  } catch (err) {
+    console.log("Knowledge seed skipped:", (err as any).message);
+  }
+
   await registerRoutes(httpServer, app);
 
   const { initTelegramBot, setupWebhook, registerWebhookUrl, startPolling } = await import("./telegram-bot");

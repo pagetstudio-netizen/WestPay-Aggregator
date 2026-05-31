@@ -7178,5 +7178,54 @@ export async function registerRoutes(
     }
   });
 
+  // ─── Knowledge Base (RAG) Routes ──────────────────────────────────────────────
+  app.get("/api/admin/knowledge", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const { listKnowledge } = await import("./knowledge");
+      res.json(await listKnowledge());
+    } catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
+
+  app.post("/api/admin/knowledge", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { category, title, content } = req.body;
+      if (!title?.trim() || !content?.trim()) return res.status(400).json({ message: "title and content required" });
+      const { addKnowledge } = await import("./knowledge");
+      const id = await addKnowledge(category || "general", title.trim(), content.trim());
+      res.json({ success: true, id });
+    } catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
+
+  app.put("/api/admin/knowledge/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { category, title, content, active } = req.body;
+      const { addKnowledge, toggleKnowledge } = await import("./knowledge");
+      if (typeof active === "boolean") {
+        await toggleKnowledge(id, active);
+      } else {
+        if (!title?.trim() || !content?.trim()) return res.status(400).json({ message: "title and content required" });
+        await addKnowledge(category || "general", title.trim(), content.trim(), id);
+      }
+      res.json({ success: true });
+    } catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
+
+  app.delete("/api/admin/knowledge/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { deleteKnowledge } = await import("./knowledge");
+      await deleteKnowledge(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
+
+  app.post("/api/admin/knowledge/reembed", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const { reembedAll } = await import("./knowledge");
+      reembedAll().catch(console.error);
+      res.json({ success: true, message: "Re-embedding started in background" });
+    } catch (err: any) { res.status(500).json({ message: err.message }); }
+  });
+
   return httpServer;
 }

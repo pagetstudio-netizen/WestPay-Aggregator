@@ -367,9 +367,58 @@ async function askGemini(userMessage: string, systemPrompt: string): Promise<str
   }
 }
 
-// ─── AI Orchestrator: tries OpenAI → Groq → Gemini, stops at first success ───
+// ─── Intent & emotion pre-classifier (fast, minimal tokens) ──────────────────
+async function classifyIntent(text: string): Promise<{
+  intent: string; tone: string; urgency: "low" | "medium" | "high";
+}> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return { intent: "general", tone: "neutral", urgency: "low" };
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        max_tokens: 60,
+        temperature: 0,
+        messages: [
+          {
+            role: "system",
+            content: `Classify this support message. Reply ONLY with JSON: {"intent":"payment|withdrawal|api|webhook|balance|account|greeting|complaint|general","tone":"frustrated|neutral|confused|urgent|friendly","urgency":"low|medium|high"}`,
+          },
+          { role: "user", content: text.slice(0, 500) },
+        ],
+      }),
+    });
+    const data = await res.json() as any;
+    const raw = data.choices?.[0]?.message?.content?.trim() || "{}";
+    return JSON.parse(raw);
+  } catch {
+    return { intent: "general", tone: "neutral", urgency: "low" };
+  }
+}
+
+// ─── AI Orchestrator: RAG + intent → OpenAI → Groq → Gemini ─────────────────
 async function askAI(userMessage: string, merchantContext: string): Promise<string | null> {
-  const systemPrompt = buildSystemPrompt(merchantContext);
+  // Parallel: classify intent + retrieve relevant knowledge
+  const [classification, ragContext] = await Promise.all([
+    classifyIntent(userMessage).catch(() => ({ intent: "general", tone: "neutral", urgency: "low" as const })),
+    (async () => {
+      try {
+        const { retrieveRelevant } = await import("./knowledge");
+        return await retrieveRelevant(userMessage, 4);
+      } catch { return ""; }
+    })(),
+  ]);
+
+  const toneHint =
+    classification.tone === "frustrated" ? "\n\nTone hint: user seems frustrated — be especially empathetic and solution-focused." :
+    classification.tone === "urgent"     ? "\n\nTone hint: user has an urgent issue — be direct, skip pleasantries, give the solution first." :
+    classification.tone === "confused"   ? "\n\nTone hint: user seems confused — be extra clear and step-by-step." :
+    "";
+
+  const systemPrompt = buildSystemPrompt(merchantContext + ragContext + toneHint);
+
   const providers: Array<{ name: string; fn: () => Promise<string | null> }> = [
     { name: "OpenAI", fn: () => askOpenAI(userMessage, systemPrompt) },
     { name: "Groq",   fn: () => askGroq(userMessage, systemPrompt) },
@@ -380,12 +429,11 @@ async function askAI(userMessage: string, merchantContext: string): Promise<stri
     try {
       const result = await provider.fn();
       if (result) {
-        console.log(`[USERBOT] ${provider.name} responded successfully`);
+        console.log(`[USERBOT] ${provider.name} OK | intent=${classification.intent} urgency=${classification.urgency} rag=${ragContext.length > 0 ? "yes" : "no"}`);
         return result;
       }
-      console.log(`[USERBOT] ${provider.name} returned empty, trying next...`);
     } catch (err: any) {
-      console.error(`[USERBOT] ${provider.name} threw an error, trying next:`, err.message);
+      console.error(`[USERBOT] ${provider.name} error, trying next:`, err.message);
     }
   }
   console.log("[USERBOT] All AI providers failed, falling back to keyword responses");
@@ -675,27 +723,35 @@ async function handleMessage(event: any): Promise<void> {
   const merchant = await storage.getMerchantById(merchantId);
   if (!merchant) return;
 
-  // ── Apply delay + typing indicator before generating (feels human) ────────
+  // ── Initial typing indicator (shows bot is "reading" the message) ─────────
+  await sendTyping(chat);
+
+  // ── Try AI (RAG + intent) + keyword fallback in parallel with delay ────────
   const delayMs = await getResponseDelayMs();
-  if (delayMs > 0) {
-    await sendTyping(chat);
-    await new Promise(resolve => setTimeout(resolve, Math.min(delayMs, 2000)));
-  }
 
-  // ── Try AI providers (OpenAI → Groq → Gemini), fallback to keyword-based ──
-  let response: string | null = null;
-
-  try {
-    const merchantContext = await buildMerchantContext(merchantId);
-    response = await askAI(text, merchantContext);
-  } catch (err: any) {
-    console.error("[USERBOT] AI orchestrator failed:", err.message);
-  }
-
-  if (!response) {
-    const lang = detectLanguage(text);
-    response = await buildNaturalResponse(text, merchantId, lang);
-  }
+  const [response] = await Promise.all([
+    // Generate response
+    (async (): Promise<string | null> => {
+      try {
+        const merchantContext = await buildMerchantContext(merchantId);
+        const aiResp = await askAI(text, merchantContext);
+        if (aiResp) return aiResp;
+      } catch (err: any) {
+        console.error("[USERBOT] AI orchestrator failed:", err.message);
+      }
+      const lang = detectLanguage(text);
+      return buildNaturalResponse(text, merchantId, lang);
+    })(),
+    // Humanized delay: base delay + typing simulation
+    (async () => {
+      const baseDelay = delayMs > 0 ? delayMs : 800 + Math.random() * 1200;
+      await new Promise(r => setTimeout(r, Math.min(baseDelay, 2500)));
+      await sendTyping(chat);
+      // Extra delay proportional to message complexity
+      const extraDelay = Math.min(text.length * 8, 2000);
+      await new Promise(r => setTimeout(r, extraDelay));
+    })(),
+  ]);
 
   if (!response) return;
 

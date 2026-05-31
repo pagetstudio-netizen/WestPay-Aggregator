@@ -36,7 +36,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
 
-type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "sendavapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot";
+type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "sendavapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge";
 
 function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: { staleTime?: number; refetchOnWindowFocus?: boolean }) {
   const { token, logout } = useAuth();
@@ -6515,6 +6515,164 @@ function UserbotPanel() {
   );
 }
 
+// ─── Knowledge Panel ────────────────────────────────────────────────────────
+const KNOWLEDGE_CATEGORIES = ["general","platform","payments","withdrawals","api","webhooks","dashboard","crypto","security","troubleshooting","fees","account"];
+
+function KnowledgePanel() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [editItem, setEditItem] = useState<any>(null);
+  const [form, setForm] = useState({ category: "general", title: "", content: "" });
+  const [saving, setSaving] = useState(false);
+  const [reembedding, setReembedding] = useState(false);
+
+  const { data: chunks = [], isLoading, refetch } = useQuery<any[]>({
+    queryKey: ["/api/admin/knowledge"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/knowledge", { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+  });
+
+  const filtered = chunks.filter(c =>
+    (filter === "all" || c.category === filter) &&
+    (search === "" || c.title.toLowerCase().includes(search.toLowerCase()) || c.content.toLowerCase().includes(search.toLowerCase()))
+  );
+
+  const openCreate = () => { setForm({ category: "general", title: "", content: "" }); setEditItem(null); setShowForm(true); };
+  const openEdit = (item: any) => { setForm({ category: item.category, title: item.title, content: item.content }); setEditItem(item); setShowForm(true); };
+
+  const handleSave = async () => {
+    if (!form.title.trim() || !form.content.trim()) { toast({ title: "Titre et contenu requis", variant: "destructive" }); return; }
+    setSaving(true);
+    try {
+      const url = editItem ? `/api/admin/knowledge/${editItem.id}` : "/api/admin/knowledge";
+      const method = editItem ? "PUT" : "POST";
+      const res = await fetch(url, { method, headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(form) });
+      if (!res.ok) throw new Error((await res.json()).message);
+      toast({ title: editItem ? "Mis à jour ✅" : "Ajouté ✅", description: "Embedding généré automatiquement" });
+      setShowForm(false); setEditItem(null); refetch();
+    } catch (e: any) { toast({ title: "Erreur", description: e.message, variant: "destructive" }); }
+    setSaving(false);
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm("Supprimer ce chunk ?")) return;
+    await fetch(`/api/admin/knowledge/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+    toast({ title: "Supprimé" }); refetch();
+  };
+
+  const handleToggle = async (id: number, active: boolean) => {
+    await fetch(`/api/admin/knowledge/${id}`, { method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ active }) });
+    refetch();
+  };
+
+  const handleReembed = async () => {
+    setReembedding(true);
+    await fetch("/api/admin/knowledge/reembed", { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+    toast({ title: "Re-embedding lancé", description: "Les embeddings manquants sont générés en arrière-plan" });
+    setReembedding(false);
+  };
+
+  const stats = { total: chunks.length, active: chunks.filter(c => c.active).length, embedded: chunks.filter(c => c.active).length };
+
+  return (
+    <div className="space-y-4 p-1">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-foreground">Base de connaissances IA</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">Système RAG — {stats.total} chunks · {stats.active} actifs</p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={handleReembed} disabled={reembedding} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-muted transition-colors" data-testid="button-reembed-knowledge">
+            <RefreshCw className={`w-3.5 h-3.5 ${reembedding ? "animate-spin" : ""}`} />
+            Re-embed
+          </button>
+          <button onClick={openCreate} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors" data-testid="button-add-knowledge">
+            <Plus className="w-3.5 h-3.5" /> Ajouter
+          </button>
+        </div>
+      </div>
+
+      {/* Search + filter */}
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher..." className="w-full pl-8 pr-3 py-1.5 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" data-testid="input-search-knowledge" />
+        </div>
+        <select value={filter} onChange={e => setFilter(e.target.value)} className="text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none" data-testid="select-filter-knowledge">
+          <option value="all">Toutes ({chunks.length})</option>
+          {KNOWLEDGE_CATEGORIES.map(c => <option key={c} value={c}>{c} ({chunks.filter(x => x.category === c).length})</option>)}
+        </select>
+      </div>
+
+      {/* Form */}
+      {showForm && (
+        <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+          <h3 className="font-semibold text-sm text-foreground">{editItem ? "Modifier le chunk" : "Nouveau chunk de connaissance"}</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Catégorie</label>
+              <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none" data-testid="select-knowledge-category">
+                {KNOWLEDGE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Titre</label>
+              <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="Ex: How payments work" className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none" data-testid="input-knowledge-title" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Contenu</label>
+            <textarea value={form.content} onChange={e => setForm(f => ({ ...f, content: e.target.value }))} rows={5} placeholder="Décrivez en détail ce que le bot doit savoir sur ce sujet..." className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none resize-none" data-testid="textarea-knowledge-content" />
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => { setShowForm(false); setEditItem(null); }} className="px-4 py-1.5 text-sm rounded-lg border border-border text-muted-foreground hover:bg-muted" data-testid="button-cancel-knowledge">Annuler</button>
+            <button onClick={handleSave} disabled={saving} className="px-4 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground font-semibold hover:bg-primary/90 flex items-center gap-1.5" data-testid="button-save-knowledge">
+              {saving ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Génération embedding…</> : <><CheckCircle className="w-3.5 h-3.5" /> Enregistrer</>}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* List */}
+      {isLoading ? (
+        <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-20 w-full" />)}</div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground text-sm">
+          {chunks.length === 0 ? "Base de connaissances vide — le seed automatique est en cours…" : "Aucun résultat"}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((chunk: any) => (
+            <div key={chunk.id} className={`rounded-xl border p-3 transition-opacity ${chunk.active ? "border-border bg-card" : "border-border/50 bg-muted/30 opacity-60"}`} data-testid={`card-knowledge-${chunk.id}`}>
+              <div className="flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="text-[10px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">{chunk.category}</span>
+                    <span className="font-semibold text-sm text-foreground truncate">{chunk.title}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground line-clamp-2">{chunk.content}</p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Switch checked={chunk.active} onCheckedChange={(v) => handleToggle(chunk.id, v)} data-testid={`switch-knowledge-${chunk.id}`} />
+                  <button onClick={() => openEdit(chunk)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-muted transition-colors" data-testid={`button-edit-knowledge-${chunk.id}`}><Edit3 className="w-3.5 h-3.5 text-muted-foreground" /></button>
+                  <button onClick={() => handleDelete(chunk.id)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-destructive/10 transition-colors" data-testid={`button-delete-knowledge-${chunk.id}`}><Trash2 className="w-3.5 h-3.5 text-destructive" /></button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SdkPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
@@ -7652,6 +7810,7 @@ export default function AdminDashboard() {
         { title: "SDK API", icon: BookOpen, tab: "sdk" },
         { title: "Notifications", icon: Mail, tab: "notifications" },
         { title: "Support Bot", icon: MessageSquare, tab: "userbot" },
+        { title: "Base de connaissances", icon: BookOpen, tab: "knowledge" },
       ],
     },
   ];
@@ -7778,6 +7937,7 @@ export default function AdminDashboard() {
             {activeTab === "sdk" && <SdkPanel />}
             {activeTab === "notifications" && <NotificationsPanel />}
             {activeTab === "userbot" && <UserbotPanel />}
+            {activeTab === "knowledge" && <KnowledgePanel />}
           </main>
         </div>
       </div>
