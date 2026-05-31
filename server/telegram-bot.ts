@@ -264,7 +264,13 @@ export function initTelegramBot(): Telegraf | null {
       const known = await getKnownGroups();
       const toAdd: string[] = [];
 
-      const adminGroupId = await storage.getSetting("telegram_group_id");
+      // Priorité DB → env var TELEGRAM_ADMIN_GROUP_ID (auto-sauvegarde en DB si absent)
+      let adminGroupId = await storage.getSetting("telegram_group_id");
+      if (!adminGroupId && process.env.TELEGRAM_ADMIN_GROUP_ID) {
+        adminGroupId = process.env.TELEGRAM_ADMIN_GROUP_ID;
+        await storage.setSetting("telegram_group_id", adminGroupId);
+        console.log(`[TELEGRAM] telegram_group_id initialisé depuis env var : ${adminGroupId}`);
+      }
       if (adminGroupId && !known.includes(adminGroupId)) toAdd.push(adminGroupId);
 
       const merchants = await storage.getMerchants();
