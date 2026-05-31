@@ -1409,7 +1409,9 @@ export async function registerWebhookUrl(webhookUrl: string): Promise<void> {
 export async function startPolling(): Promise<void> {
   if (!bot) return;
   try {
-    await bot.telegram.deleteWebhook({ drop_pending_updates: false });
+    // Ne PAS appeler deleteWebhook() ici — si un webhook de production (Plesk) est actif,
+    // le supprimer couperait la réception des commandes en production.
+    // bot.launch() échouera avec une 409 si un webhook est actif, ce qui est ignoré ci-dessous.
     bot.launch({ dropPendingUpdates: false }).catch((err: any) => {
       console.warn("[TELEGRAM] Polling interrompu (conflit prod/dev — ignoré):", err.message);
     });
