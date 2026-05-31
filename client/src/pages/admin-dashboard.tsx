@@ -5892,7 +5892,7 @@ function TelegramBroadcastPanel({ merchants }: { merchants: Merchant[] }) {
                           <Input
                             value={btn.url}
                             onChange={e => updateButton(idx, "url", e.target.value)}
-                            placeholder="https://westpay.cloud/merchant-login"
+                            placeholder="https://westpay.cfd/merchant-login"
                             className="h-8 text-sm"
                             data-testid={`input-tg-btn-url-${idx}`}
                           />

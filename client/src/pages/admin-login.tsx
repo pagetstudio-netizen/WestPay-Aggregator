@@ -306,7 +306,7 @@ export default function AdminLogin() {
                     className="al-input"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="admin@westpay.cloud"
+                    placeholder="admin@westpay.cfd"
                     required
                     autoComplete="username"
                     data-testid="input-admin-email"

@@ -1,7 +1,7 @@
 import { Resend } from "resend";
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
-const FROM_EMAIL = "RobotPay <noreply@westpay.cloud>";
+const FROM_EMAIL = "RobotPay <noreply@westpay.cfd>";
 
 export async function sendMerchantOtpEmail(to: string, otp: string, merchantName?: string): Promise<boolean> {
   if (!resend) {
@@ -62,7 +62,7 @@ export async function sendMerchantOtpEmail(to: string, otp: string, merchantName
             <td style="padding:20px 40px 36px;border-top:1px solid #f1f5f9;">
               <p style="margin:0;color:#cbd5e1;font-size:12px;text-align:center;">
                 © ${new Date().getFullYear()} WestPay · Plateforme privée · 
-                <a href="https://westpay.cloud" style="color:#00b050;text-decoration:none;">westpay.cloud</a>
+                <a href="https://westpay.cfd" style="color:#00b050;text-decoration:none;">westpay.cfd</a>
               </p>
             </td>
           </tr>
@@ -149,7 +149,7 @@ export async function sendAdminNotificationEmail(
             <td style="padding:20px 40px 36px;border-top:1px solid #f1f5f9;">
               <p style="margin:0;color:#cbd5e1;font-size:12px;text-align:center;">
                 © ${new Date().getFullYear()} RobotPay · Plateforme privée ·
-                <a href="https://westpay.cloud" style="color:#00b050;text-decoration:none;">westpay.cloud</a>
+                <a href="https://westpay.cfd" style="color:#00b050;text-decoration:none;">westpay.cfd</a>
               </p>
             </td>
           </tr>

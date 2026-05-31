@@ -264,7 +264,7 @@ Togo: 22890123456 | Benin: 22997123456 | Côte d'Ivoire: 2250789012345 | Senegal
 
 ─── PAYIN ────────────────────────────────────────────────────────────────────
 WestPay supports Mobile Money payments through hosted payment pages.
-Payment URL format: https://westpay.cloud/pay
+Payment URL format: https://westpay.cfd/pay
 Flow: merchant calls POST /api/payment/initiate → WestPay sends USSD push to customer phone → customer validates → WestPay credits merchant balance and sends webhook.
 Wave operator: customer receives a payment URL to click (no USSD).
 Transaction references: OP-XXXX format.

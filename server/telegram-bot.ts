@@ -638,7 +638,7 @@ export function initTelegramBot(): Telegraf | null {
       "✅ Photo reçue" + (caption ? ` avec le texte :\n_${caption}_` : " (sans texte)") + "\n\n" +
       "📎 *Voulez-vous ajouter des boutons ?*\n\n" +
       "Format (un par ligne) :\n`Texte du bouton | https://lien.com`\n\n" +
-      "Exemple :\n`Se connecter | https://westpay.cloud/merchant-login`\n\n" +
+      "Exemple :\n`Se connecter | https://westpay.cfd/merchant-login`\n\n" +
       "Ou envoyez /skip pour diffuser sans boutons.",
       { parse_mode: "Markdown" }
     );
@@ -822,7 +822,7 @@ export function initTelegramBot(): Telegraf | null {
     }
 
     try {
-      const platformUrl = await storage.getSetting("platform_url") || "https://westpay.cloud";
+      const platformUrl = await storage.getSetting("platform_url") || "https://westpay.cfd";
       const adminEmail = await storage.getSetting("admin_email_hint") || "devappmanagement40@gmail.com";
 
       await ctx.reply(

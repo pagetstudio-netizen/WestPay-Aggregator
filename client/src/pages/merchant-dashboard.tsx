@@ -5018,7 +5018,7 @@ console.log(result);`} />
       </Section>
 
       <div className="text-center py-4 text-xs text-gray-400">
-        WestPay SDK v1 — Support: <a href="mailto:support@westpay.cloud" className="text-blue-500 hover:underline">support@westpay.cloud</a>
+        WestPay SDK v1 — Support: <a href="mailto:support@westpay.cfd" className="text-blue-500 hover:underline">support@westpay.cfd</a>
       </div>
     </div>
   );

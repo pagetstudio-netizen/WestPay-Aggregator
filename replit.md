@@ -58,7 +58,7 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 - OmniPay references prefixed: OP- (payments), TR- (transfers), WP (internal refs)
 - Service module: `server/omnipay.ts`
 - API keys stored as environment secrets: OMNIPAY_API_KEY, OMNIPAY_CALLBACK_KEY (DB fallback)
-- Callback URL: https://westpay.cloud/api/omnipay/callback
+- Callback URL: https://westpay.cfd/api/omnipay/callback
 
 ## API Management System
 - Each merchant has unique API keys per country (format: PREFIX-[40char hex])
@@ -115,7 +115,7 @@ admins, merchants, merchant_countries, transactions, sms_logs, numbers, settings
 - **Merchant dashboard CryptoPanel**: activation status, per-currency balance cards, API integration docs with copy buttons, recent transactions table (payAmount/payCurrency)
 - **Payment page**: shows "Crypto (via OxaPay)" option when enabled (no country check)
 - Public payment page: /pay/crypto/:trackId (QR code, wallet address, countdown, auto-polling 10s)
-- Payment URL format: https://westpay.cloud/pay/crypto/{trackId}
+- Payment URL format: https://westpay.cfd/pay/crypto/{trackId}
 - Merchant API contract: POST /api/merchant/crypto/invoice { amount, currency, description?, orderId?, returnUrl? }
 
 ## OmniPay Payment Flow

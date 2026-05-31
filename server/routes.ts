@@ -781,7 +781,7 @@ export async function registerRoutes(
 
   // Hôtes autorisés pour la validation Origin/Referer du login marchand
   const ALLOWED_HOSTS = (() => {
-    const base = ["westpay.cloud", "www.westpay.cloud"];
+    const base = ["westpay.cfd", "www.westpay.cfd", "westpay.cloud", "www.westpay.cloud"];
     // Toujours inclure les domaines Replit (dev ET production déployée)
     const replitDomains = process.env.REPLIT_DOMAINS || "";
     const devDomain = process.env.REPLIT_DEV_DOMAIN || "";
@@ -2748,7 +2748,7 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Le paiement crypto n'est pas activé pour ce marchand" });
       }
       const agg = merchantAggs[0];
-      const callbackUrl = `${process.env.APP_URL || "https://westpay.cloud"}/api/oxapay/callback`;
+      const callbackUrl = `${process.env.APP_URL || "https://westpay.cfd"}/api/oxapay/callback`;
       const XOF_PER_USD = parseInt(process.env.XOF_PER_USD || "600", 10);
       const currency = link.currency.toUpperCase();
       const isXof = currency === "XOF" || currency === "FCFA";
@@ -2825,7 +2825,7 @@ export async function registerRoutes(
         returnUrl: returnUrl || null,
         active: true,
       });
-      res.json({ success: true, link, url: `${process.env.APP_URL || "https://westpay.cloud"}/c/${uniqueId}` });
+      res.json({ success: true, link, url: `${process.env.APP_URL || "https://westpay.cfd"}/c/${uniqueId}` });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -2836,7 +2836,7 @@ export async function registerRoutes(
     try {
       const merchantId = (req as any).user.id;
       const links = await storage.getCryptoPaymentLinksByMerchant(merchantId);
-      const BASE = process.env.APP_URL || "https://westpay.cloud";
+      const BASE = process.env.APP_URL || "https://westpay.cfd";
       res.json(links.map(l => ({ ...l, url: `${BASE}/c/${l.uniqueId}` })));
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -2874,7 +2874,7 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Le paiement crypto n'est pas activé pour ce marchand" });
       }
       const agg = merchantAggs[0];
-      const callbackUrl = `${process.env.APP_URL || "https://westpay.cloud"}/api/oxapay/callback`;
+      const callbackUrl = `${process.env.APP_URL || "https://westpay.cfd"}/api/oxapay/callback`;
       const XOF_PER_USD = parseInt(process.env.XOF_PER_USD || "600", 10);
       const isXof = currency.toUpperCase() === "XOF" || currency.toUpperCase() === "FCFA";
       const invoiceAmount = isXof ? parseFloat((amountNum / XOF_PER_USD).toFixed(2)) : amountNum;
@@ -2905,7 +2905,7 @@ export async function registerRoutes(
       res.json({
         success: true,
         trackId: invoiceResult.trackId,
-        paymentUrl: `${process.env.APP_URL || "https://westpay.cloud"}/pay/crypto/${invoiceResult.trackId}`,
+        paymentUrl: `${process.env.APP_URL || "https://westpay.cfd"}/pay/crypto/${invoiceResult.trackId}`,
       });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -6239,7 +6239,7 @@ export async function registerRoutes(
       const isXof = rawCurrency.toUpperCase() === "XOF" || rawCurrency.toUpperCase() === "FCFA";
       const invoiceAmount = isXof ? parseFloat((amountNum / XOF_PER_USD).toFixed(2)) : amountNum;
       const invoiceCurrency = isXof ? "USD" : rawCurrency.toUpperCase();
-      const callbackUrl = `${process.env.APP_URL || "https://westpay.cloud"}/api/oxapay/callback`;
+      const callbackUrl = `${process.env.APP_URL || "https://westpay.cfd"}/api/oxapay/callback`;
       const invoiceResult = await oxapayCreateInvoice(agg.apiKey, {
         amount: invoiceAmount,
         currency: invoiceCurrency,
@@ -6294,7 +6294,7 @@ export async function registerRoutes(
         network: network || null,
         amount: amountNum,
         currency: rawCurrency.toUpperCase(),
-        paymentUrl: `${process.env.APP_URL || "https://westpay.cloud"}/pay/crypto/${invoiceResult.trackId}`,
+        paymentUrl: `${process.env.APP_URL || "https://westpay.cfd"}/pay/crypto/${invoiceResult.trackId}`,
       });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -6421,7 +6421,7 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Le paiement crypto n'est pas activé pour votre compte" });
       }
       const agg = merchantAggs[0];
-      const invoiceCallbackUrl = callbackUrl || `${process.env.APP_URL || "https://westpay.cloud"}/api/oxapay/callback`;
+      const invoiceCallbackUrl = callbackUrl || `${process.env.APP_URL || "https://westpay.cfd"}/api/oxapay/callback`;
       const XOF_PER_USD = parseInt(process.env.XOF_PER_USD || "600", 10);
       const isXof = currency.toUpperCase() === "XOF" || currency.toUpperCase() === "FCFA";
       const invoiceAmount = isXof ? parseFloat((amountNum / XOF_PER_USD).toFixed(2)) : amountNum;
@@ -6456,7 +6456,7 @@ export async function registerRoutes(
         trackId: invoiceResult.trackId,
         payLink: invoiceResult.payLink,
         expiredAt: invoiceResult.expiredAt,
-        paymentUrl: `${process.env.APP_URL || "https://westpay.cloud"}/pay/crypto/${invoiceResult.trackId}`,
+        paymentUrl: `${process.env.APP_URL || "https://westpay.cfd"}/pay/crypto/${invoiceResult.trackId}`,
         transaction: {
           id: cryptoTx.id,
           trackId: cryptoTx.trackId,
@@ -6838,7 +6838,7 @@ export async function registerRoutes(
         expiresAt,
       });
 
-      const appUrl = process.env.APP_URL || "https://westpay.cloud";
+      const appUrl = process.env.APP_URL || "https://westpay.cfd";
       const mbiyoResult = await mbiyoInitiatePayin({
         apiKey: mbiyoApiKey,
         amount,
@@ -6920,7 +6920,7 @@ export async function registerRoutes(
 
       await storage.updateMerchantCountryBalance(mc.id, mc.balance - totalDeducted);
 
-      const appUrl = process.env.APP_URL || "https://westpay.cloud";
+      const appUrl = process.env.APP_URL || "https://westpay.cfd";
       const mbiyoResult = await mbiyoInitiatePayout({
         apiKey: mbiyoApiKey,
         amount,
