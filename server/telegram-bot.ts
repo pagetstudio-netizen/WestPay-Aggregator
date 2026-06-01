@@ -141,15 +141,16 @@ function getBlockedUsers(): { userId: string; count: number; lockedUntil: Date |
 // ─── Known Groups Registry ───────────────────────────────────────────────────
 async function getKnownGroups(): Promise<string[]> {
   const raw = await storage.getSetting("telegram_known_groups");
-  if (!raw) return [];
-  try { return JSON.parse(raw); } catch { return []; }
+  try { return raw ? JSON.parse(raw) : []; } catch { return []; }
 }
 
 async function registerKnownGroup(chatId: string): Promise<void> {
+  if (!chatId) return;
   const groups = await getKnownGroups();
   if (!groups.includes(chatId)) {
     groups.push(chatId);
     await storage.setSetting("telegram_known_groups", JSON.stringify(groups));
+    console.log(`[TELEGRAM] Groupe enregistré: ${chatId} (total: ${groups.length})`);
   }
 }
 
@@ -159,6 +160,32 @@ async function removeKnownGroup(chatId: string): Promise<void> {
   if (filtered.length !== groups.length) {
     await storage.setSetting("telegram_known_groups", JSON.stringify(filtered));
   }
+}
+
+/**
+ * Fusionne et sauvegarde tous les groupes connus :
+ * setting DB + groupe admin + telegramChatId de tous les marchands.
+ * Retourne le nombre total et le nombre nouvellement ajoutés.
+ */
+export async function syncAllKnownGroups(): Promise<{ total: number; added: number }> {
+  const existing = await getKnownGroups();
+  const merged = new Set<string>(existing);
+
+  const adminGroupId = await storage.getSetting("telegram_group_id");
+  if (adminGroupId) merged.add(adminGroupId);
+
+  try {
+    const merchants = await storage.getMerchants();
+    for (const m of merchants) {
+      if ((m as any).telegramChatId) merged.add((m as any).telegramChatId as string);
+    }
+  } catch {}
+
+  const all = Array.from(merged);
+  const added = all.length - existing.length;
+  await storage.setSetting("telegram_known_groups", JSON.stringify(all));
+  console.log(`[TELEGRAM] syncAllKnownGroups: ${all.length} groupe(s) total, ${added} ajouté(s)`);
+  return { total: all.length, added };
 }
 
 // ─── Merchant group helper ───────────────────────────────────────────────────
@@ -266,6 +293,22 @@ export function initTelegramBot(): Telegraf | null {
   }
 
   bot = new Telegraf(token);
+
+  // ─── Middleware global : auto-enregistrer tout groupe qui envoie un update ─
+  // Cela capture les groupes où le bot est déjà présent mais pas encore dans le registre
+  bot.use(async (ctx, next) => {
+    try {
+      const chat = ctx.chat;
+      if (chat && (chat.type === "group" || chat.type === "supergroup")) {
+        const chatId = String(chat.id);
+        const groups = await getKnownGroups();
+        if (!groups.includes(chatId)) {
+          await registerKnownGroup(chatId);
+        }
+      }
+    } catch {}
+    return next();
+  });
 
   // ─── Initialisation : reconstruire la liste des groupes connus ────────────
   (async () => {
@@ -948,7 +991,8 @@ export function initTelegramBot(): Telegraf | null {
           `/solde — Soldes détaillés de tous les marchands\n\n` +
           `📢 *Diffusion*\n` +
           `/broadcast — Envoyer un message dans les groupes\n` +
-          `/groupes — Lister tous les groupes où le bot est présent\n\n` +
+          `/groupes — Lister tous les groupes où le bot est présent\n` +
+          `/scangroupes — Synchroniser et enregistrer tous les groupes\n\n` +
           `🔐 *Utilitaires*\n` +
           `/status — Vérifier l'état du bot et du webhook\n` +
           `/connexionid — Rappel des URLs et identifiants admin\n` +
@@ -1029,6 +1073,28 @@ export function initTelegramBot(): Telegraf | null {
         `🏪 Liés à un marchand : *${linkedCount}*\n` +
         `👥 Non liés (diffusion possible) : *${unlinkedCount}*\n\n` +
         `💡 Le broadcast _"Tous les groupes"_ envoie dans les ${groups.length} groupe(s) listés ci-dessus.`,
+        { parse_mode: "Markdown" }
+      );
+    } catch (err: any) {
+      await ctx.reply(`❌ Erreur : ${err.message}`);
+    }
+  });
+
+  // ─── /scangroupes (groupe admin uniquement) — force-sync tous les groupes ───
+  bot.command("scangroupes", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
+    if (!isGroup || !await isAdminGroup(chatId)) return;
+
+    try {
+      await ctx.reply("🔄 Synchronisation en cours...");
+      const result = await syncAllKnownGroups();
+      await ctx.reply(
+        `✅ *Synchronisation terminée*\n\n` +
+        `📦 Total groupes connus : *${result.total}*\n` +
+        `✨ Nouvellement ajoutés : *${result.added}*\n\n` +
+        `💡 Utilisez /groupes pour voir la liste complète.\n` +
+        `📢 Le prochain broadcast _"Tous les groupes"_ couvrira ces ${result.total} groupe(s).`,
         { parse_mode: "Markdown" }
       );
     } catch (err: any) {
@@ -1511,7 +1577,7 @@ async function tryRegisterWebhook(webhookUrl: string): Promise<boolean> {
     }
     await bot.telegram.deleteWebhook({ drop_pending_updates: false });
     await bot.telegram.setWebhook(webhookUrl, {
-      allowed_updates: ["message", "callback_query", "my_chat_member", "chat_member"],
+      allowed_updates: ["message", "callback_query", "my_chat_member", "chat_member", "edited_message", "channel_post"],
     });
     const check = await bot.telegram.getWebhookInfo();
     if (check.url === webhookUrl) {
@@ -1788,7 +1854,18 @@ export async function broadcastToMerchants(options: {
   if (options.targetChatIds && options.targetChatIds.length > 0) {
     chatIds = options.targetChatIds;
   } else if (options.useAllKnownGroups) {
-    chatIds = await getKnownGroups();
+    // Fusionner : setting DB + groupe admin + tous les telegramChatId marchands
+    // Cela garantit que même les groupes non enregistrés dans le setting reçoivent le message
+    const fromSetting = await getKnownGroups();
+    const merged = new Set<string>(fromSetting);
+    const adminGroupId = await storage.getSetting("telegram_group_id");
+    if (adminGroupId) merged.add(adminGroupId);
+    const merchants = await storage.getMerchants();
+    for (const m of merchants) {
+      if ((m as any).telegramChatId) merged.add((m as any).telegramChatId as string);
+    }
+    chatIds = Array.from(merged);
+    console.log(`[TELEGRAM] Broadcast "tous les groupes" : ${chatIds.length} destinataires (setting:${fromSetting.length} + marchands/admin fusionnés)`);
   } else {
     const merchants = await storage.getMerchants();
     chatIds = merchants

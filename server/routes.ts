@@ -1655,6 +1655,18 @@ export async function registerRoutes(
     }
   });
 
+  // ── Sync all known groups (merge setting + admin + merchant chatIds) ──────────
+  app.post("/api/admin/telegram/sync-groups", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { syncAllKnownGroups, getBot } = await import("./telegram-bot");
+      if (!getBot()) return res.status(400).json({ message: "Bot non initialisé — vérifiez TELEGRAM_BOT_TOKEN" });
+      const result = await syncAllKnownGroups();
+      res.json({ success: true, total: result.total, added: result.added });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.post("/api/admin/telegram/broadcast", authMiddleware("admin"), async (req, res) => {
     try {
       const { message, imageUrl, buttons, target, merchantIds } = req.body;
