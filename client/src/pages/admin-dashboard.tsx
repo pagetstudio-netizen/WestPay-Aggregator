@@ -301,12 +301,15 @@ function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string
 
 function OverviewPanel() {
   const { toast } = useToast();
+  const { token } = useAuth();
   const { data: stats, refetch: refetchStats, isFetching: isFetchingStats } = useAdminFetch("/api/admin/stats", ["/api/admin/stats"], { staleTime: 60_000, refetchOnWindowFocus: true });
   const { data: transactions = [] } = useAdminFetch("/api/admin/transactions", ["/api/admin/transactions"]);
   const { data: merchants = [] } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
   const { data: links = [] } = useAdminFetch("/api/admin/payment-links", ["/api/admin/payment-links"]);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const [showResetFeesConfirm, setShowResetFeesConfirm] = useState(false);
+  const [isResettingFees, setIsResettingFees] = useState(false);
 
   const recentTx = (transactions as Transaction[]).slice(0, 5);
   const recentLinks = (links as any[]).slice(0, 5);
@@ -317,7 +320,6 @@ function OverviewPanel() {
   const handleResetStats = async () => {
     setIsResetting(true);
     try {
-      const token = localStorage.getItem("adminToken");
       const res = await fetch("/api/admin/reset-stats", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -330,6 +332,24 @@ function OverviewPanel() {
     } finally {
       setIsResetting(false);
       setShowResetConfirm(false);
+    }
+  };
+
+  const handleResetFees = async () => {
+    setIsResettingFees(true);
+    try {
+      const res = await fetch("/api/admin/reset-fees", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Échec de la réinitialisation des frais");
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      toast({ title: "Frais réinitialisés", description: "Le compteur de bénéfice total a été remis à zéro." });
+    } catch (e: any) {
+      toast({ title: "Erreur", description: e.message, variant: "destructive" });
+    } finally {
+      setIsResettingFees(false);
+      setShowResetFeesConfirm(false);
     }
   };
 
@@ -415,7 +435,48 @@ function OverviewPanel() {
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Bénéfice net WestPay</p>
         <p className="text-xs text-muted-foreground mb-3">Après déduction des frais fournisseur (OmniPay / Mbiyo)</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard title="Bénéfice total" value={fmtF(stats?.commissionTotal || 0)} icon={DollarSign} accent="green" />
+          {/* Bénéfice total — avec bouton de réinitialisation des frais */}
+          <Card className="shadow-card hover:shadow-card-hover transition-shadow duration-200 overflow-hidden relative">
+            <div className="absolute inset-y-0 left-0 w-1" style={{ background: "#00b050" }} />
+            <CardContent className="p-4 pl-5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Bénéfice total</p>
+                  <p className="text-2xl font-bold text-foreground mt-1 leading-tight" data-testid="stat-bénéfice-total">{fmtF(stats?.commissionTotal || 0)}</p>
+                </div>
+                <div className="flex flex-col items-end gap-1.5 shrink-0">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-green-500/10 text-green-600 dark:text-green-400">
+                    <DollarSign className="w-5 h-5" />
+                  </div>
+                  {!showResetFeesConfirm ? (
+                    <button
+                      onClick={() => setShowResetFeesConfirm(true)}
+                      className="text-xs text-orange-500 hover:text-orange-600 flex items-center gap-1 transition-colors"
+                      data-testid="button-reset-fees"
+                      title="Réinitialiser uniquement les frais"
+                    >
+                      <RotateCcw className="w-3 h-3" /> Reset frais
+                    </button>
+                  ) : (
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => setShowResetFeesConfirm(false)}
+                        className="text-xs text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded border transition-colors"
+                      >Non</button>
+                      <button
+                        onClick={handleResetFees}
+                        disabled={isResettingFees}
+                        className="text-xs text-white bg-orange-500 hover:bg-orange-600 px-1.5 py-0.5 rounded transition-colors flex items-center gap-0.5"
+                        data-testid="button-confirm-reset-fees"
+                      >
+                        {isResettingFees ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />} Oui
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
           <StatCard title="Bénéfice du jour" value={fmtF(stats?.commissionToday || 0)} icon={TrendingUp} accent="orange" />
           <StatCard title="Bénéfice ce mois" value={fmtF(stats?.commissionThisMonth || 0)} icon={BarChart3} accent="blue" />
           <StatCard title="Mois précédent" value={fmtF(stats?.commissionPrevMonth || 0)} icon={BarChart3} accent="purple" />
@@ -1509,7 +1570,7 @@ function CountriesPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
   const [merchantId, setMerchantId] = useState("");
-  const [country, setCountry] = useState("");
+  const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [openMerchantCombo, setOpenMerchantCombo] = useState(false);
   const [filterSearch, setFilterSearch] = useState("");
@@ -1521,18 +1582,18 @@ function CountriesPanel() {
 
   const addCountryMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch("/api/admin/add-country", {
+      const res = await fetch("/api/admin/add-countries", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ merchantId: parseInt(merchantId), country }),
+        body: JSON.stringify({ merchantId: parseInt(merchantId), countries: selectedCountries }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/countries"] });
-      setShowAdd(false); setMerchantId(""); setCountry("");
-      toast({ title: "Pays ajoute" });
+      setShowAdd(false); setMerchantId(""); setSelectedCountries([]);
+      toast({ title: `${data.added || selectedCountries.length} pays ajouté(s)` });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
@@ -1604,12 +1665,12 @@ function CountriesPanel() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-lg font-semibold text-foreground">Pays & API Keys</h2>
-        <Dialog open={showAdd} onOpenChange={(o) => { setShowAdd(o); if (!o) { setMerchantId(""); setCountry(""); setOpenMerchantCombo(false); } }}>
+        <Dialog open={showAdd} onOpenChange={(o) => { setShowAdd(o); if (!o) { setMerchantId(""); setSelectedCountries([]); setOpenMerchantCombo(false); } }}>
           <DialogTrigger asChild>
             <Button data-testid="button-add-country"><Plus className="w-4 h-4 mr-2" />Ajouter un pays</Button>
           </DialogTrigger>
           <DialogContent>
-            <DialogHeader><DialogTitle>Activer un pays pour un marchand</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle>Activer des pays pour un marchand</DialogTitle></DialogHeader>
             <form onSubmit={(e) => { e.preventDefault(); addCountryMutation.mutate(); }} className="space-y-4">
               <div className="space-y-2">
                 <Label>Marchand</Label>
@@ -1651,19 +1712,54 @@ function CountriesPanel() {
                 </Popover>
               </div>
               <div className="space-y-2">
-                <Label>Pays</Label>
-                <Select value={country} onValueChange={setCountry}>
-                  <SelectTrigger data-testid="select-country"><SelectValue placeholder="Selectionner un pays" /></SelectTrigger>
-                  <SelectContent>
-                    {availableCountries.map((c) => (
-                      <SelectItem key={c} value={c}>{c}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center justify-between">
+                  <Label>Pays ({selectedCountries.length} sélectionné{selectedCountries.length > 1 ? "s" : ""})</Label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      className="text-xs text-primary hover:underline"
+                      onClick={() => setSelectedCountries([...availableCountries])}
+                      data-testid="button-select-all-countries"
+                    >Tout sélectionner</button>
+                    {selectedCountries.length > 0 && (
+                      <button
+                        type="button"
+                        className="text-xs text-muted-foreground hover:underline"
+                        onClick={() => setSelectedCountries([])}
+                        data-testid="button-deselect-all-countries"
+                      >Tout décocher</button>
+                    )}
+                  </div>
+                </div>
+                <div className="border rounded-md divide-y max-h-52 overflow-y-auto" data-testid="country-checkboxes">
+                  {availableCountries.map((c) => {
+                    const checked = selectedCountries.includes(c);
+                    return (
+                      <label
+                        key={c}
+                        className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors"
+                        data-testid={`checkbox-country-${c.replace(/\s/g, "-").toLowerCase()}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() =>
+                            setSelectedCountries(prev =>
+                              checked ? prev.filter(x => x !== c) : [...prev, c]
+                            )
+                          }
+                          className="rounded border-border w-4 h-4 accent-primary"
+                        />
+                        <span className="text-sm">{c}</span>
+                        {checked && <Check className="w-3.5 h-3.5 text-primary ml-auto" />}
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
-              <Button type="submit" className="w-full" disabled={addCountryMutation.isPending || !merchantId || !country} data-testid="button-submit-add-country">
+              <Button type="submit" className="w-full" disabled={addCountryMutation.isPending || !merchantId || selectedCountries.length === 0} data-testid="button-submit-add-country">
                 {addCountryMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                Activer le pays
+                Activer {selectedCountries.length > 1 ? `les ${selectedCountries.length} pays` : selectedCountries.length === 1 ? `${selectedCountries[0]}` : "les pays sélectionnés"}
               </Button>
             </form>
           </DialogContent>

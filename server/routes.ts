@@ -1809,6 +1809,31 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/admin/reset-fees", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const [stats, detailedStats, baseline] = await Promise.all([
+        storage.getStats(),
+        storage.getAdminDetailedStats(),
+        storage.getLatestStatsBaseline(),
+      ]);
+      const b = baseline || { transactionCount: 0, totalVolume: 0, commissionTotal: 0, apiPaymentsCount: 0, apiPaymentsTotal: 0, linkPaymentsCount: 0, linkPaymentsTotal: 0, withdrawalsCount: 0, withdrawalsTotal: 0 };
+      await storage.createStatsBaseline({
+        transactionCount: stats.transactionCount - Math.max(0, stats.transactionCount - b.transactionCount),
+        totalVolume: stats.totalVolume - Math.max(0, stats.totalVolume - b.totalVolume),
+        commissionTotal: detailedStats.commissionTotal,
+        apiPaymentsCount: stats.transactionCount - Math.max(0, detailedStats.apiPaymentsCount - b.apiPaymentsCount),
+        apiPaymentsTotal: detailedStats.apiPaymentsTotal - Math.max(0, detailedStats.apiPaymentsTotal - b.apiPaymentsTotal),
+        linkPaymentsCount: detailedStats.linkPaymentsCount - Math.max(0, detailedStats.linkPaymentsCount - b.linkPaymentsCount),
+        linkPaymentsTotal: detailedStats.linkPaymentsTotal - Math.max(0, detailedStats.linkPaymentsTotal - b.linkPaymentsTotal),
+        withdrawalsCount: detailedStats.withdrawalsCount - Math.max(0, detailedStats.withdrawalsCount - b.withdrawalsCount),
+        withdrawalsTotal: detailedStats.withdrawalsTotal - Math.max(0, detailedStats.withdrawalsTotal - b.withdrawalsTotal),
+      });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/admin/merchants", authMiddleware("admin"), async (_req, res) => {
     try {
       const result = await (storage as any).getMerchantsWithStats();
@@ -1999,6 +2024,35 @@ export async function registerRoutes(
       });
 
       res.json(mc);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/add-countries", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { merchantId, countries } = req.body;
+      if (!merchantId || !Array.isArray(countries) || countries.length === 0) {
+        return res.status(400).json({ message: "Marchand et au moins un pays requis" });
+      }
+      const results = [];
+      const errors = [];
+      for (const country of countries) {
+        try {
+          const apiKey = generateSecureApiKey(country);
+          const mc = await storage.addMerchantCountry({ merchantId, country, apiKey, balance: 0, active: true, omnipayEnabled: true });
+          results.push(mc);
+        } catch (e: any) {
+          errors.push({ country, error: e.message });
+        }
+      }
+      await storage.createApiLog({
+        merchantId,
+        action: "countries_added",
+        ip: req.ip || "",
+        description: `${results.length} pays activés : ${results.map((r: any) => r.country).join(", ")}`,
+      });
+      res.json({ added: results.length, countries: results, errors });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
