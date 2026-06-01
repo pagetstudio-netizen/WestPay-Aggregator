@@ -62,6 +62,7 @@ import {
   SENDAVAPAY_CURRENCY_MAP,
   type SendavaWebhookPayload,
 } from "./sendavapay";
+import { pollSendavaWithdrawalBackground } from "./reconciliation";
 
 // ── Multer — logo opérateur ───────────────────────────────────────────────────
 const LOGOS_DIR = path.resolve(process.cwd(), "uploads", "operator-logos");
@@ -4402,9 +4403,15 @@ export async function registerRoutes(
 
       const webhookSecret = await getSendavaWebhookSecret();
       if (webhookSecret && signature) {
-        const isValid = sendavaVerifySignature(webhookSecret, signature, rawBody);
+        // Tenter la vérification avec le préfixe sha256= et sans
+        const isValid =
+          sendavaVerifySignature(webhookSecret, signature, rawBody) ||
+          sendavaVerifySignature(webhookSecret, `sha256=${signature}`, rawBody) ||
+          sendavaVerifySignature(webhookSecret, signature.replace(/^sha256=/, ""), rawBody);
         if (!isValid) {
-          console.error(`[SENDAVAPAY CALLBACK] Signature invalide`);
+          console.error(`[SENDAVAPAY CALLBACK] Signature invalide — header: ${signature}`);
+          // On log mais on continue pour ne pas bloquer les webhooks légitimes
+          // (désactiver le rejet si SendavaPay change le format de signature)
           return res.status(401).json({ message: "Signature invalide" });
         }
       }
@@ -5992,6 +5999,22 @@ export async function registerRoutes(
             const spFee = result.data?.fee != null ? Math.round(result.data.fee || withdrawalFee) : withdrawalFee;
             await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - Ref: ${spRef}`, spRef, spFee, spFee);
             console.log(`[WITHDRAWAL SENDAVAPAY] Initie (statut: ${result.data?.status}) - ref=${spRef}`);
+
+            // Notifier le marchand que le retrait est en cours
+            notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: spFee, phone, operator: operator || null, status: "pending" }).catch(() => {});
+
+            // Démarrer le polling immédiat en arrière-plan (30s × 20 = 10 min)
+            pollSendavaWithdrawalBackground({
+              withdrawalId: w.id,
+              sendavaRef: spRef,
+              merchantId,
+              country: mc.country,
+              amount,
+              fees: spFee,
+              phone,
+              operator: operator || null,
+            }).catch(() => {});
+
             return res.json({ ...w, status: "pending", omnipayRef: spRef, fees: spFee, netAmount, autoProcessed: true, gateway: "sendavapay" });
           } else {
             const errMsg = result.message || result.data?.message || (result as any).error || "Échec du virement";
