@@ -199,4 +199,12 @@ app.use((req, res, next) => {
   } catch (err: any) {
     console.error("[USERBOT] Init failed (non-fatal):", err.message);
   }
+
+  // API health monitor — Telegram alert on key failure / recovery
+  try {
+    const { startApiHealthMonitor } = await import("./api-health-monitor");
+    startApiHealthMonitor();
+  } catch (err: any) {
+    console.error("[HEALTH] Init failed (non-fatal):", err.message);
+  }
 })();
