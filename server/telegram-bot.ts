@@ -60,6 +60,12 @@ function parseUserAgent(ua: string): { browser: string; os: string; device: stri
 
 let bot: Telegraf | null = null;
 
+// ─── Groupe admin ancré (ID immuable) ────────────────────────────────────────
+const HARDCODED_ADMIN_GROUP_ID = "-1003802528942";
+
+// ─── Flag : message de test envoyé une seule fois par démarrage serveur ───────
+let startupTestSent = false;
+
 const COUNTRIES_FR: Record<string, string> = {
   "togo": "🇹🇬 Togo",
   "benin": "🇧🇯 Bénin",
@@ -310,20 +316,21 @@ export function initTelegramBot(): Telegraf | null {
     return next();
   });
 
-  // ─── Initialisation : reconstruire la liste des groupes connus ────────────
+  // ─── Initialisation : forcer groupe admin + reconstruire la liste des groupes connus ──
   (async () => {
     try {
+      // ── 1. Forcer l'ID du groupe admin en DB (toujours, peu importe la valeur actuelle)
+      const currentAdminGroup = await storage.getSetting("telegram_group_id");
+      if (currentAdminGroup !== HARDCODED_ADMIN_GROUP_ID) {
+        await storage.setSetting("telegram_group_id", HARDCODED_ADMIN_GROUP_ID);
+        console.log(`[TELEGRAM] telegram_group_id forcé → ${HARDCODED_ADMIN_GROUP_ID} (était : "${currentAdminGroup || "vide"}")`);
+      }
+
+      // ── 2. Reconstruire la liste des groupes connus
       const known = await getKnownGroups();
       const toAdd: string[] = [];
 
-      // Priorité DB → env var TELEGRAM_ADMIN_GROUP_ID (auto-sauvegarde en DB si absent)
-      let adminGroupId = await storage.getSetting("telegram_group_id");
-      if (!adminGroupId && process.env.TELEGRAM_ADMIN_GROUP_ID) {
-        adminGroupId = process.env.TELEGRAM_ADMIN_GROUP_ID;
-        await storage.setSetting("telegram_group_id", adminGroupId);
-        console.log(`[TELEGRAM] telegram_group_id initialisé depuis env var : ${adminGroupId}`);
-      }
-      if (adminGroupId && !known.includes(adminGroupId)) toAdd.push(adminGroupId);
+      if (!known.includes(HARDCODED_ADMIN_GROUP_ID)) toAdd.push(HARDCODED_ADMIN_GROUP_ID);
 
       const merchants = await storage.getMerchants();
       for (const m of merchants) {
@@ -335,7 +342,20 @@ export function initTelegramBot(): Telegraf | null {
       if (toAdd.length > 0) {
         const updated = [...known, ...toAdd];
         await storage.setSetting("telegram_known_groups", JSON.stringify(updated));
-        console.log(`[TELEGRAM] Groupes connus mis a jour : ${updated.length} groupe(s)`);
+        console.log(`[TELEGRAM] Groupes connus mis à jour : ${updated.length} groupe(s)`);
+      }
+
+      // ── 3. Message de test au démarrage — une seule fois par lancement serveur
+      if (!startupTestSent) {
+        startupTestSent = true;
+        const now = new Date().toLocaleString("fr-FR", { timeZone: "Africa/Abidjan", hour12: false });
+        await bot!.telegram.sendMessage(
+          HARDCODED_ADMIN_GROUP_ID,
+          `✅ *WestPay — Serveur démarré*\n\n🕐 ${now}\n🤖 Bot Telegram connecté et opérationnel.\n📡 Groupe admin reconnu — toutes les alertes sont actives.`,
+          { parse_mode: "Markdown" }
+        ).catch((err: any) => {
+          console.error(`[TELEGRAM] Impossible d'envoyer le message de démarrage : ${err.message}`);
+        });
       }
     } catch (err) {
       console.error("[TELEGRAM] Erreur init groupes:", (err as any).message);
