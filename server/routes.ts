@@ -114,6 +114,54 @@ if (!JWT_SECRET) {
 // Cela déconnecte automatiquement tous les comptes connectés lors d'un redémarrage Plesk/serveur
 const SESSION_START = Date.now();
 
+// ── Restriction géographique absolue — seuls le Togo et la Côte d'Ivoire peuvent accéder au panel admin ─
+// Toute tentative depuis un autre pays est bloquée immédiatement et l'IP auto-blacklistée.
+// ip-api.com retourne "Togo" pour le Togo et "Ivory Coast" pour la Côte d'Ivoire.
+const ADMIN_GEO_WHITELIST = ["togo", "ivory coast", "côte d'ivoire", "cote d'ivoire", "cote divoire"];
+
+// Cache géo — évite de requêter ip-api.com à chaque appel API, TTL 10 min par IP
+const _geoCache = new Map<string, { country: string; allowed: boolean; ts: number }>();
+const GEO_CACHE_TTL = 10 * 60 * 1000;
+
+async function checkAdminGeoAllowed(ip: string): Promise<{ allowed: boolean; country: string }> {
+  // IPs locales — autorisées uniquement en développement local
+  const isLocal = ip === "127.0.0.1" || ip === "::1" || ip.startsWith("192.168.") || ip.startsWith("10.") || ip.startsWith("172.") || ip === "unknown" || ip === "local";
+  if (isLocal) {
+    return { allowed: process.env.NODE_ENV === "development", country: "local" };
+  }
+  // IP spoofée — toujours refusée (déjà marquée SPOOFED: par getClientIp)
+  if (ip.startsWith("SPOOFED:")) {
+    return { allowed: false, country: "spoofed" };
+  }
+  // Vérification du cache
+  const hit = _geoCache.get(ip);
+  if (hit && Date.now() - hit.ts < GEO_CACHE_TTL) {
+    return { allowed: hit.allowed, country: hit.country };
+  }
+  // Résolution géographique via ip-api.com
+  const geo = await getGeoInfo(ip).catch(() => ({ country: "", city: "" }));
+  const countryRaw = geo.country || "";
+  const countryLower = countryRaw.toLowerCase().trim();
+  // Whitelist stricte — si pays inconnu ou non listé → REFUSÉ (fail-secure)
+  const allowed = countryLower !== "" && ADMIN_GEO_WHITELIST.some(c => countryLower === c || countryLower.includes(c));
+  _geoCache.set(ip, { country: countryRaw || "inconnu", allowed, ts: Date.now() });
+  return { allowed, country: countryRaw || "inconnu" };
+}
+
+// Extraction IP minimale utilisable hors de registerRoutes (authMiddleware)
+function extractIp(req: Request): string {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (forwarded) {
+    const first = (Array.isArray(forwarded) ? forwarded[0] : forwarded).split(",")[0].trim().replace(/^::ffff:/, "");
+    // Plages privées/réservées = tentative de spoofing → bloquer
+    if (/^(0\.|10\.|127\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|192\.0\.2\.|192\.168\.|198\.51\.100\.|203\.0\.113\.|224\.|240\.|255\.255\.255\.255$)/.test(first)) {
+      return `SPOOFED:${first}`;
+    }
+    return first;
+  }
+  return (req.ip || req.socket?.remoteAddress || "unknown").replace(/^::ffff:/, "");
+}
+
 // ── Chiffrement AES-256-GCM des secrets TOTP — jamais stockés en clair en base ─
 // Les codes Google Authenticator (6 chiffres) ne sont JAMAIS sauvegardés — seul le secret
 // chiffré est stocké, et uniquement pour vérifier les futurs codes.
@@ -304,6 +352,31 @@ function authMiddleware(role: "admin" | "merchant") {
       if (role === "admin" && decoded.iat && decoded.iat * 1000 < SESSION_START) {
         return res.status(401).json({ message: "Session expirée — veuillez vous reconnecter" });
       }
+
+      // ── Restriction géographique sur chaque requête admin ─────────────────────
+      // Bloque immédiatement et blackliste l'IP si le pays n'est pas Togo ou Côte d'Ivoire.
+      // Cela empêche même une session valide depuis un autre pays d'accéder au dashboard.
+      if (role === "admin") {
+        const clientIp = extractIp(req);
+        const geoCheck = await checkAdminGeoAllowed(clientIp);
+        if (!geoCheck.allowed) {
+          storage.createSecurityLog({
+            eventType: "country_blocked",
+            ip: clientIp,
+            userEmail: decoded.email || "?",
+            action: "admin_request_blocked_geo",
+            details: `Pays non autorisé : ${geoCheck.country} — accès dashboard bloqué`,
+          }).catch(() => {});
+          // Auto-blacklist de l'IP (sauf IP locale ou spoofée déjà gérée)
+          if (!clientIp.startsWith("SPOOFED:") && clientIp !== "local" && clientIp !== "unknown") {
+            storage.addBlockedIp({ ipAddress: clientIp, reason: `Accès admin hors zone autorisée — ${geoCheck.country}`, blockedBy: "système-géo" }).catch(() => {});
+            // Invalider le cache pour forcer la re-vérification à la prochaine tentative
+            _geoCache.delete(clientIp);
+          }
+          return res.status(403).json({ message: "Accès refusé" });
+        }
+      }
+
       // Vérification critique : s'assurer que le compte existe toujours en base
       if (role === "admin") {
         const admin = await storage.getAdminById(decoded.id);
@@ -709,6 +782,29 @@ export async function registerRoutes(
       if (ipBlocked) {
         storage.createSecurityLog({ eventType: "blocked_login_attempt", ip: clientIp, userEmail: email, action: "ip_blocked", details: "Admin login blocked" }).catch(() => {});
         return res.status(403).json({ message: "Accès refusé" });
+      }
+
+      // ── RESTRICTION GÉOGRAPHIQUE ABSOLUE — avant toute autre vérification ─────
+      // Si le pays n'est pas Togo ou Côte d'Ivoire : blocage immédiat + auto-blacklist IP.
+      // Un bot ne peut même pas atteindre la vérification du mot de passe.
+      {
+        const geoCheck = await checkAdminGeoAllowed(clientIp);
+        if (!geoCheck.allowed) {
+          storage.createSecurityLog({
+            eventType: "country_blocked",
+            ip: clientIp,
+            userEmail: email,
+            action: "admin_login_blocked_geo",
+            details: `Pays non autorisé : ${geoCheck.country} — tentative connexion admin bloquée`,
+          }).catch(() => {});
+          // Auto-blacklist définitive de l'IP
+          if (!clientIp.startsWith("SPOOFED:") && clientIp !== "local" && clientIp !== "unknown") {
+            storage.addBlockedIp({ ipAddress: clientIp, reason: `Login admin hors zone — ${geoCheck.country}`, blockedBy: "système-géo" }).catch(() => {});
+            _geoCache.delete(clientIp);
+          }
+          // Réponse générique pour ne pas révéler la raison du blocage
+          return res.status(403).json({ message: "Accès refusé" });
+        }
       }
 
       // WHITELIST STRICTE — seul ce compte peut accéder au panel admin
