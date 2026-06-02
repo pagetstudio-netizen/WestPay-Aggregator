@@ -6799,9 +6799,6 @@ function TelegramBotPanel() {
         </CardContent>
       </Card>
 
-      {/* Token config card */}
-      <BotTokenCard onSaved={refetchStatus} />
-
       {/* Group ID config */}
       <Card>
         <CardHeader className="pb-3">
