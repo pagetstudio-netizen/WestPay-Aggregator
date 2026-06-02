@@ -2165,6 +2165,16 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/admin/stats-baseline", authMiddleware("admin"), async (_req, res) => {
+    try {
+      await storage.deleteAllStatsBaselines();
+      queryClient?.invalidateQueries?.({ queryKey: ["/api/admin/stats"] });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.post("/api/admin/reset-stats", authMiddleware("admin"), async (_req, res) => {
     try {
       const [stats, detailedStats] = await Promise.all([

@@ -665,6 +665,10 @@ export class DatabaseStorage implements IStorage {
     await db.insert(statsBaselines).values(values);
   }
 
+  async deleteAllStatsBaselines() {
+    await db.delete(statsBaselines);
+  }
+
   async getMerchantStats(merchantId: number) {
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());

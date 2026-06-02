@@ -310,12 +310,30 @@ function OverviewPanel() {
   const [isResetting, setIsResetting] = useState(false);
   const [showResetFeesConfirm, setShowResetFeesConfirm] = useState(false);
   const [isResettingFees, setIsResettingFees] = useState(false);
+  const [isDeletingBaseline, setIsDeletingBaseline] = useState(false);
 
   const recentTx = (transactions as Transaction[]).slice(0, 5);
   const recentLinks = (links as any[]).slice(0, 5);
   const recentMerchants = (merchants as any[]).slice(0, 5);
 
   const fmtF = (n: number) => `${n.toLocaleString("fr-FR")} F`;
+
+  const handleDeleteBaseline = async () => {
+    setIsDeletingBaseline(true);
+    try {
+      const res = await fetch("/api/admin/stats-baseline", {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Échec");
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      toast({ title: "✅ Baseline supprimée", description: "Les vraies statistiques sont maintenant affichées." });
+    } catch (e: any) {
+      toast({ title: "Erreur", description: e.message, variant: "destructive" });
+    } finally {
+      setIsDeletingBaseline(false);
+    }
+  };
 
   const handleResetStats = async () => {
     setIsResetting(true);
@@ -414,9 +432,22 @@ function OverviewPanel() {
             </div>
           )}
           {stats?.lastStatsReset && (
-            <p className="text-xs text-muted-foreground">
-              Dernier reset : {new Date(stats.lastStatsReset).toLocaleDateString("fr-FR")}
-            </p>
+            <div className="flex flex-col items-end gap-1">
+              <p className="text-xs text-muted-foreground">
+                Dernier reset : {new Date(stats.lastStatsReset).toLocaleDateString("fr-FR")}
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-xs border-red-300 text-red-700 hover:bg-red-50 dark:border-red-700 dark:text-red-400"
+                onClick={handleDeleteBaseline}
+                disabled={isDeletingBaseline}
+                data-testid="button-delete-baseline"
+              >
+                {isDeletingBaseline ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                Restaurer les vraies valeurs
+              </Button>
+            </div>
           )}
         </div>
       </div>
