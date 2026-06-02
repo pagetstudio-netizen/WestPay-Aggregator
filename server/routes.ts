@@ -557,7 +557,19 @@ export async function registerRoutes(
         }
       }
 
-      // 3. Check allowed IPs whitelist
+      // 3. If request carries a valid admin JWT, skip IP whitelist check
+      // (authMiddleware already validates the token on each route)
+      const authHeader = req.headers["authorization"];
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        try {
+          const decoded = jwt.verify(authHeader.split(" ")[1], JWT_SECRET) as any;
+          if (decoded?.role === "admin") return next();
+        } catch {
+          // Invalid token — fall through to whitelist check
+        }
+      }
+
+      // 4. Check allowed IPs whitelist
       const allowed = await storage.isIpAllowed(rawIp);
       if (!allowed) return res.status(403).json({ error: "access_denied" });
       next();
@@ -664,13 +676,6 @@ export async function registerRoutes(
       const ipBlocked = await storage.isIpBlocked(clientIp);
       if (ipBlocked) {
         storage.createSecurityLog({ eventType: "blocked_login_attempt", ip: clientIp, userEmail: email, action: "ip_blocked", details: "Admin login blocked" }).catch(() => {});
-        return res.status(403).json({ message: "Accès refusé" });
-      }
-
-      // 1b. Check allowed IPs whitelist — seules les IPs autorisées peuvent se connecter
-      const ipAllowed = await storage.isIpAllowed(clientIp);
-      if (!ipAllowed) {
-        storage.createSecurityLog({ eventType: "blocked_login_attempt", ip: clientIp, userEmail: email, action: "ip_not_whitelisted", details: "Admin login — IP non autorisée" }).catch(() => {});
         return res.status(403).json({ message: "Accès refusé" });
       }
 

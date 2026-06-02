@@ -1779,13 +1779,12 @@ async function safeSend(chatId: string, message: string): Promise<void> {
   if (!bot) return;
   try {
     await bot.telegram.sendMessage(chatId, message, { parse_mode: "Markdown" });
-  } catch (err: any) {
-    console.error("[TELEGRAM] Echec envoi Markdown, tentative texte brut:", err.message);
+  } catch {
+    // Markdown failed (special chars / emojis) — retry as plain text preserving all chars
     try {
-      const plain = message.replace(/[*_`[\]()~>#+=|{}.!\\-]/g, "");
-      await bot.telegram.sendMessage(chatId, plain);
+      await bot.telegram.sendMessage(chatId, message);
     } catch (err2: any) {
-      console.error("[TELEGRAM] Echec envoi texte brut:", err2.message);
+      console.error("[TELEGRAM] Echec envoi:", err2.message);
     }
   }
 }
@@ -1809,15 +1808,25 @@ async function safeSendWithMedia(
 
   if (imageSource) {
     try {
-      // imageSource peut être une URL http ou un file_id Telegram
+      // Try with Markdown formatting first
       await bot.telegram.sendPhoto(chatId, imageSource, {
         caption: message,
         parse_mode: "Markdown",
         ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
       });
       return;
-    } catch (err: any) {
-      console.error("[TELEGRAM] Echec sendPhoto, tentative sans image:", err.message);
+    } catch {
+      // Markdown failed — retry photo without parse_mode (preserves emojis)
+      try {
+        await bot.telegram.sendPhoto(chatId, imageSource, {
+          caption: message,
+          ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+        });
+        return;
+      } catch (err2: any) {
+        console.error("[TELEGRAM] Echec sendPhoto:", err2.message);
+        // Fall through to text-only send
+      }
     }
   }
 
@@ -1826,15 +1835,14 @@ async function safeSendWithMedia(
       parse_mode: "Markdown",
       ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
     });
-  } catch (err: any) {
-    console.error("[TELEGRAM] Echec envoi Markdown, tentative texte brut:", err.message);
+  } catch {
+    // Markdown failed (emojis / special chars) — retry as plain text preserving all chars
     try {
-      const plain = message.replace(/[*_`[\]()~>#+=|{}.!\\-]/g, "");
-      await bot.telegram.sendMessage(chatId, plain, {
+      await bot.telegram.sendMessage(chatId, message, {
         ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
       });
     } catch (err2: any) {
-      console.error("[TELEGRAM] Echec envoi texte brut:", err2.message);
+      console.error("[TELEGRAM] Echec envoi:", err2.message);
     }
   }
 }
