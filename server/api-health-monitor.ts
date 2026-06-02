@@ -70,16 +70,9 @@ async function checkService(
   const prev = healthState[name];
 
   if (prev === null || prev === undefined) {
-    // First run — initialise state, alert immediately if already broken
+    // Premier démarrage — initialise l'état silencieusement, sans envoyer d'alerte
+    // Les alertes ne sont envoyées qu'en cas de changement d'état (healthy→failing ou failing→healthy)
     healthState[name] = isOk;
-    if (!isOk) {
-      await notifyAdminGroup(
-        `🔴 *Alerte API — ${emoji} ${name}*\n\n` +
-          `La clé API est *invalide* ou le service est injoignable.\n` +
-          `⚠️ Les paiements via *${name}* échouent actuellement.\n\n` +
-          `👉 Mettez à jour la clé dans le tableau de bord admin.`,
-      ).catch(() => {});
-    }
     return;
   }
 

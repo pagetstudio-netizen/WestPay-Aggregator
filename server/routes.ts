@@ -381,12 +381,6 @@ function authMiddleware(role: "admin" | "merchant") {
       if (decoded.role !== role) {
         return res.status(403).json({ message: "Acces interdit" });
       }
-      // ── Invalidation de session au redémarrage serveur ───────────────────────
-      // Toutes les sessions émises avant ce démarrage sont rejetées (déconnexion Plesk automatique)
-      if (role === "admin" && decoded.iat && decoded.iat * 1000 < SESSION_START) {
-        return res.status(401).json({ message: "Session expirée — veuillez vous reconnecter" });
-      }
-
       // ── Restriction géographique sur chaque requête admin ─────────────────────
       // Bloque immédiatement et blackliste l'IP si le pays n'est pas Togo ou Côte d'Ivoire.
       // Cela empêche même une session valide depuis un autre pays d'accéder au dashboard.
@@ -885,8 +879,8 @@ export async function registerRoutes(
         }
       }
 
-      // WHITELIST STRICTE — seul ce compte peut accéder au panel admin
-      const ADMIN_WHITELIST = ["afrinovasolution@gmail.com"];
+      // WHITELIST STRICTE — seuls ces comptes peuvent accéder au panel admin
+      const ADMIN_WHITELIST = ["afrinovasolution@gmail.com", "blanchardk377@gmail.com"];
       if (!ADMIN_WHITELIST.includes(email.toLowerCase().trim())) {
         storage.createSecurityLog({ eventType: "blocked_access", ip: clientIp, userEmail: email, action: "email_not_whitelisted", details: "Email non autorisé — tentative de connexion admin rejetée" }).catch(() => {});
         return res.status(401).json({ message: "Identifiants invalides" });
