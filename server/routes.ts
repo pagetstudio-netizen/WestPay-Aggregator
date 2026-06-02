@@ -472,9 +472,50 @@ export async function registerRoutes(
 
   app.get("/api/auth/check-ip", async (req, res) => {
     try {
-      const ip = req.ip || req.socket.remoteAddress || "";
-      const allowed = await storage.isIpAllowed(ip);
-      res.json({ allowed, ip });
+      const rawIp = req.ip || req.socket.remoteAddress || "";
+      const cleanIp = rawIp.replace(/^::ffff:/, "");
+
+      // Local/private IPs → always allowed (dev environment)
+      const isLocal = cleanIp === "127.0.0.1" || cleanIp === "::1" ||
+        cleanIp.startsWith("192.168.") || cleanIp.startsWith("10.");
+      if (isLocal) return res.json({ allowed: true, ip: cleanIp, reason: "local" });
+
+      // 1. Explicitly blocked → deny immediately
+      const blocked = await storage.isIpBlocked(cleanIp);
+      if (blocked) return res.json({ allowed: false, ip: cleanIp, reason: "blocked" });
+
+      // 2. Admin-whitelisted → always allowed regardless of country
+      const whitelisted = await storage.isIpAllowed(rawIp);
+      // isIpAllowed returns true when table is empty (no restriction) OR ip is in list
+      // We need to know if it's *explicitly* whitelisted — check table count
+      const { db: dbConn } = await import("./db");
+      const { allowedIps: allowedIpsTable } = await import("../shared/schema");
+      const { sql: sqlTag } = await import("drizzle-orm");
+      const countResult = await dbConn.execute(sqlTag`SELECT COUNT(*)::int AS cnt FROM allowed_ips`);
+      const tableHasEntries = ((countResult.rows?.[0] as any)?.cnt ?? 0) > 0;
+      const isExplicitlyWhitelisted = tableHasEntries && whitelisted;
+      if (isExplicitlyWhitelisted) return res.json({ allowed: true, ip: cleanIp, reason: "whitelist" });
+
+      // 3. Geo check — allowed African/platform countries connect freely
+      const PLATFORM_COUNTRIES = new Set([
+        "Togo", "Benin", "Ivory Coast", "Côte d'Ivoire", "Senegal", "Mali",
+        "Burkina Faso", "Ghana", "Nigeria", "Guinea", "Niger", "Mauritania",
+        "Sierra Leone", "Liberia", "Cape Verde", "Gambia", "Guinea-Bissau",
+        "Cameroon", "Democratic Republic of the Congo", "Republic of the Congo",
+        "Congo", "Gabon", "Chad", "Central African Republic", "Equatorial Guinea",
+        "São Tomé and Príncipe", "Angola", "Rwanda", "Burundi",
+      ]);
+
+      const geo = await getGeoInfo(cleanIp).catch(() => null);
+      const country = geo?.country || "";
+
+      if (!country || PLATFORM_COUNTRIES.has(country)) {
+        // Country in platform OR geo failed (give benefit of doubt)
+        return res.json({ allowed: true, ip: cleanIp, reason: "geo", country });
+      }
+
+      // 4. Outside platform countries + not whitelisted → show IP verify page
+      return res.json({ allowed: false, ip: cleanIp, reason: "geo_blocked", country });
     } catch {
       res.json({ allowed: true, ip: "" });
     }
