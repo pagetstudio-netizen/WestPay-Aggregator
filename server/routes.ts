@@ -1141,10 +1141,17 @@ export async function registerRoutes(
     }
   });
 
-  // ── Rate-limit store pour login marchands ────────────────────────────────────
+  // ── Rate-limit store pour login marchands — par IP ───────────────────────────
   const merchantLoginAttempts = new Map<string, { count: number; firstFail: number }>();
   const MERCHANT_BRUTE_MAX = 5;
   const MERCHANT_BRUTE_WINDOW = 10 * 60 * 1000; // 10 min
+
+  // ── Rate-limit par EMAIL (résiste à la rotation d'IPs / Supabase Edge Runtime)
+  // Logique : si le même email cumule des échecs depuis N IPs différentes → verrouillage temporaire
+  const emailLoginAttempts = new Map<string, { count: number; firstFail: number; lockedUntil?: number }>();
+  const EMAIL_BRUTE_MAX = 8;              // 8 échecs toutes IPs confondues
+  const EMAIL_BRUTE_WINDOW = 15 * 60 * 1000; // fenêtre de 15 min
+  const EMAIL_LOCK_DURATION = 30 * 60 * 1000; // verrouillage 30 min
 
   // ── Patterns UA de bots/scanners — bloqués sur tous les endpoints sensibles ──────────
   const BLOCKED_UA_PATTERNS = [
@@ -1309,6 +1316,26 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Accès refusé" });
       }
 
+      // ── COUCHE 0b.1 : Rate-limit PAR EMAIL (résiste à la rotation d'IPs) ─────
+      // Vérifie si cet email est temporairement verrouillé suite à trop d'échecs
+      {
+        const emailKey = email.toLowerCase().trim();
+        const now = Date.now();
+        const emailEntry = emailLoginAttempts.get(emailKey);
+        if (emailEntry) {
+          // Verrouillage actif ?
+          if (emailEntry.lockedUntil && now < emailEntry.lockedUntil) {
+            const remainMin = Math.ceil((emailEntry.lockedUntil - now) / 60000);
+            storage.createSecurityLog({ eventType: "brute_force", ip: clientIp, userEmail: email, action: "email_rate_locked", details: `Email verrouillé — ${emailEntry.count} échecs — encore ${remainMin} min` }).catch(() => {});
+            return res.status(429).json({ message: `Trop de tentatives. Réessayez dans ${remainMin} minute${remainMin > 1 ? "s" : ""}.` });
+          }
+          // Fenêtre expirée → reset
+          if (now - emailEntry.firstFail > EMAIL_BRUTE_WINDOW) {
+            emailLoginAttempts.delete(emailKey);
+          }
+        }
+      }
+
       // ── COUCHE 0b : Blocage email immédiat (avant toute DB/geo/UA — coût zéro) ──
       if (blockedLoginEmails.has(email.toLowerCase().trim())) {
         // Log silencieux sans révéler la raison à l'attaquant
@@ -1423,14 +1450,40 @@ export async function registerRoutes(
 
       const valid = await bcrypt.compare(password, merchant.passwordHash);
       if (!valid) {
+        // Incrément rate-limit par IP
         attempt.count++;
         merchantLoginAttempts.set(clientIp, attempt);
+
+        // Incrément rate-limit par EMAIL (résiste à la rotation d'IPs)
+        {
+          const emailKey = email.toLowerCase().trim();
+          const now = Date.now();
+          const emailEntry = emailLoginAttempts.get(emailKey) || { count: 0, firstFail: now };
+          if (now - emailEntry.firstFail > EMAIL_BRUTE_WINDOW) { emailEntry.count = 0; emailEntry.firstFail = now; }
+          emailEntry.count++;
+          if (emailEntry.count >= EMAIL_BRUTE_MAX) {
+            emailEntry.lockedUntil = now + EMAIL_LOCK_DURATION;
+            storage.createSecurityLog({ eventType: "brute_force", ip: clientIp, userEmail: email, action: "email_auto_locked", details: `${emailEntry.count} échecs depuis plusieurs IPs — verrouillage 30 min` }).catch(() => {});
+            // Alerte Telegram unique quand le verrouillage se déclenche
+            notifyAdminGroup(
+              `🔒 *Verrouillage email marchand*\n\n` +
+              `📧 *Email :* \`${email}\`\n` +
+              `🔢 *Échecs :* ${emailEntry.count} (depuis plusieurs IPs)\n` +
+              `🌐 *Dernière IP :* \`${clientIp}\`\n` +
+              `⏱ *Durée :* 30 minutes`
+            ).catch(() => {});
+          }
+          emailLoginAttempts.set(emailKey, emailEntry);
+        }
+
         await storage.createLoginLog({ userId: merchant.id, role: "merchant", ip: clientIp, device: ua, success: false });
         notifyAdminMerchantLogin({ email: merchant.email, merchantName: merchant.name, ip: clientIp, device: ua, success: false }).catch(() => {});
         return res.status(401).json({ message: "Identifiants invalides" });
       }
 
+      // Reset des deux rate-limits sur succès
       merchantLoginAttempts.delete(clientIp);
+      emailLoginAttempts.delete(email.toLowerCase().trim());
 
       // Vérifier AVANT d'enregistrer le log si l'IP a déjà été vue pour ce compte
       const seenBefore = await storage.hasMerchantSeenIp(merchant.id, clientIp).catch(() => true);
