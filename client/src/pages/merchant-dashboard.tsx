@@ -2665,7 +2665,7 @@ const LINK_COUNTRY_FLAGS: Record<string, { flag: string; currency: string; label
 function PaymentLinksPanel({ token }: { token: string | null }) {
   const { t } = useLanguage();
   const { toast } = useToast();
-  const baseUrl = "https://west-pay-aggregator-1--beryowone.replit.app";
+  const baseUrl = "https://westpay.cfd";
   const [view, setView] = useState<"list" | "create" | "edit">("list");
   const [editLink, setEditLink] = useState<PaymentLink | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -4504,7 +4504,7 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
   const { toast } = useToast();
   const [showKey, setShowKey] = useState(false);
   const copy = (text: string, label = "Copié") => { navigator.clipboard.writeText(text); toast({ title: label }); };
-  const BASE_URL = "https://west-pay-aggregator-1--beryowone.replit.app";
+  const BASE_URL = "https://westpay.cfd";
   const KEY_DISPLAY = sdkApiKey ? (showKey ? sdkApiKey : sdkApiKey.slice(0, 10) + "••••••••••••••••••••••••••••••••••••••") : "WP-SDK-...";
 
   const CodeBlock = ({ code }: { code: string }) => (

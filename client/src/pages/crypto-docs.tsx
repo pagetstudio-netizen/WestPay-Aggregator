@@ -11,7 +11,7 @@ import {
   ShieldCheck, Copy, Check, Bitcoin, Zap, ArrowDownCircle,
 } from "lucide-react";
 
-const BASE_URL = "https://west-pay-aggregator-1--beryowone.replit.app";
+const BASE_URL = "https://westpay.cfd";
 
 // ─── Composant copie ─────────────────────────────────────────────────────────
 
