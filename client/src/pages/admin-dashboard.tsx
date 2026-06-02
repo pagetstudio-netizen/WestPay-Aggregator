@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, Component, type ReactNode, type ErrorInfo } from "react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -617,6 +617,33 @@ function OverviewPanel() {
   );
 }
 
+class DialogErrorBoundary extends Component<{ onClose: () => void; children: ReactNode }, { hasError: boolean; errorMsg: string }> {
+  constructor(props: { onClose: () => void; children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, errorMsg: "" };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, errorMsg: error.message };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("[MerchantDialog] Crash:", error.message, info.componentStack);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Dialog open onOpenChange={(o) => { if (!o) this.props.onClose(); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader><DialogTitle className="text-destructive">⚠️ Erreur d'affichage</DialogTitle></DialogHeader>
+            <p className="text-sm text-muted-foreground">{this.state.errorMsg || "Une erreur est survenue lors du chargement de ce marchand."}</p>
+            <Button onClick={this.props.onClose}>Fermer</Button>
+          </DialogContent>
+        </Dialog>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; onClose: () => void }) {
   const { token } = useAuth();
   const { toast } = useToast();
@@ -936,7 +963,7 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
                         <div className="flex items-center gap-2">
                           <p className="font-mono break-all">{merchant.webhookSecret}</p>
                           <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0"
-                            onClick={() => { navigator.clipboard.writeText(merchant.webhookSecret); toast({ title: "Secret copié" }); }}>
+                            onClick={() => { navigator.clipboard?.writeText?.(merchant.webhookSecret ?? ""); toast({ title: "Secret copié" }); }}>
                             <Copy className="w-3 h-3" />
                           </Button>
                         </div>
@@ -1146,7 +1173,11 @@ function MerchantsPanel() {
 
   return (
     <div className="space-y-4">
-      {selectedMerchantId && <MerchantDetailsDialog merchantId={selectedMerchantId} onClose={() => setSelectedMerchantId(null)} />}
+      {selectedMerchantId && (
+        <DialogErrorBoundary onClose={() => setSelectedMerchantId(null)}>
+          <MerchantDetailsDialog merchantId={selectedMerchantId} onClose={() => setSelectedMerchantId(null)} />
+        </DialogErrorBoundary>
+      )}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-lg font-semibold text-foreground">Marchands</h2>
         <Button

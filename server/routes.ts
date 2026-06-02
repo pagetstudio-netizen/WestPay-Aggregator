@@ -2565,11 +2565,11 @@ export async function registerRoutes(
       const txLimit = hasDateFilter ? undefined : 400;
 
       const [txs, wds, wts, merchantsList, pendingPays] = await Promise.all([
-        storage.getTransactions(undefined, { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined, limit: txLimit }),
-        storage.getWithdrawals(),
-        storage.getWalletTransfers(),
-        storage.getMerchants(),
-        storage.getPendingPayments(),
+        storage.getTransactions(undefined, { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined, limit: txLimit }).catch(() => []),
+        storage.getWithdrawals().catch(() => []),
+        storage.getWalletTransfers().catch(() => []),
+        storage.getMerchants().catch(() => []),
+        storage.getPendingPayments().catch(() => []),
       ]);
 
       const merchantMap = new Map(merchantsList.map(m => [m.id, m.name]));
