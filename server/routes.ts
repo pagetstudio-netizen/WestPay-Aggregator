@@ -406,15 +406,28 @@ function authMiddleware(role: "admin" | "merchant") {
       }
 
       // Vérification critique : s'assurer que le compte existe toujours en base
+      // + vérification de révocation de token (tokenInvalidatedAt)
       if (role === "admin") {
         const admin = await storage.getAdminById(decoded.id);
         if (!admin) {
           return res.status(401).json({ message: "Compte administrateur introuvable ou supprimé" });
         }
+        if (admin.tokenInvalidatedAt) {
+          const issuedAt = new Date((decoded.iat || 0) * 1000);
+          if (issuedAt <= admin.tokenInvalidatedAt) {
+            return res.status(401).json({ message: "Session révoquée — reconnectez-vous" });
+          }
+        }
       } else if (role === "merchant") {
         const merchant = await storage.getMerchantById(decoded.id);
         if (!merchant || merchant.suspended) {
           return res.status(401).json({ message: "Compte marchand introuvable ou suspendu" });
+        }
+        if (merchant.tokenInvalidatedAt) {
+          const issuedAt = new Date((decoded.iat || 0) * 1000);
+          if (issuedAt <= merchant.tokenInvalidatedAt) {
+            return res.status(401).json({ message: "Session révoquée — reconnectez-vous" });
+          }
         }
       }
       (req as any).user = decoded;
@@ -5020,6 +5033,40 @@ export async function registerRoutes(
       res.json({ success: true, credit, txId: tx.txId, merchantName: merchant?.name });
     } catch (err: any) {
       console.error("[MBIYO ADMIN] Erreur confirmation manuelle:", err.message);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Révoquer les sessions d'un admin ou d'un marchand
+  app.post("/api/admin/revoke-sessions", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { targetType, targetId } = req.body;
+      if (!targetType || !targetId) {
+        return res.status(400).json({ message: "targetType et targetId requis" });
+      }
+      if (targetType === "admin") {
+        await storage.revokeAdminTokens(parseInt(targetId));
+        storage.createSecurityLog({
+          eventType: "session_revoked",
+          ip: extractIp(req),
+          userEmail: (req as any).user?.email || "admin",
+          action: "admin_session_revoked",
+          details: `Sessions admin id=${targetId} révoquées manuellement`,
+        }).catch(() => {});
+      } else if (targetType === "merchant") {
+        await storage.revokeMerchantTokens(parseInt(targetId));
+        storage.createSecurityLog({
+          eventType: "session_revoked",
+          ip: extractIp(req),
+          userEmail: (req as any).user?.email || "admin",
+          action: "merchant_session_revoked",
+          details: `Sessions marchand id=${targetId} révoquées manuellement`,
+        }).catch(() => {});
+      } else {
+        return res.status(400).json({ message: "targetType invalide (admin|merchant)" });
+      }
+      res.json({ success: true, message: `Sessions ${targetType} id=${targetId} révoquées` });
+    } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
   });

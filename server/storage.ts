@@ -38,6 +38,8 @@ export interface IStorage {
   createAdmin(admin: InsertAdmin): Promise<Admin>;
   updateAdminPassword(id: number, passwordHash: string): Promise<void>;
   updateAdminTotp(id: number, totpSecret: string | null, totpEnabled: boolean): Promise<void>;
+  revokeAdminTokens(id: number): Promise<void>;
+  revokeMerchantTokens(id: number): Promise<void>;
 
   getMerchants(): Promise<Merchant[]>;
   getMerchantById(id: number): Promise<Merchant | undefined>;
@@ -271,6 +273,14 @@ export class DatabaseStorage implements IStorage {
 
   async updateAdminTotp(id: number, totpSecret: string | null, totpEnabled: boolean): Promise<void> {
     await db.update(admins).set({ totpSecret, totpEnabled }).where(eq(admins.id, id));
+  }
+
+  async revokeAdminTokens(id: number): Promise<void> {
+    await db.update(admins).set({ tokenInvalidatedAt: new Date() }).where(eq(admins.id, id));
+  }
+
+  async revokeMerchantTokens(id: number): Promise<void> {
+    await db.update(merchants).set({ tokenInvalidatedAt: new Date() }).where(eq(merchants.id, id));
   }
 
   async getMerchants(): Promise<Merchant[]> {

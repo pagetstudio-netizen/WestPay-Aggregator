@@ -10,6 +10,7 @@ export const admins = pgTable("admins", {
   apiKey: text("api_key").notNull(),
   totpSecret: text("totp_secret"),
   totpEnabled: boolean("totp_enabled").default(false).notNull(),
+  tokenInvalidatedAt: timestamp("token_invalidated_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -30,6 +31,7 @@ export const merchants = pgTable("merchants", {
   cryptoApiKey: text("crypto_api_key"),
   sdkEnabled: boolean("sdk_enabled").default(false).notNull(),
   sdkApiKey: text("sdk_api_key"),
+  tokenInvalidatedAt: timestamp("token_invalidated_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
