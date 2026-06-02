@@ -19,6 +19,7 @@ import CryptoDocsPage from "@/pages/crypto-docs";
 import CryptoLinkPage from "@/pages/crypto-link-page";
 import NotFound from "@/pages/not-found";
 import IpVerificationPage from "@/pages/ip-verification";
+import AdminCreateMerchant from "@/pages/admin-create-merchant";
 
 function Router() {
   return (
@@ -27,6 +28,7 @@ function Router() {
       <Route path="/ip-verify" component={IpVerificationPage} />
       <Route path="/admin-access-958425546648484886646634808526522886433" component={AdminLogin} />
       <Route path="/admin-access-958425546648484886646634808526522886433/dashboard" component={AdminDashboard} />
+      <Route path="/admin-access-958425546648484886646634808526522886433/create-merchant" component={AdminCreateMerchant} />
       <Route path="/merchant-login" component={MerchantLogin} />
       <Route path="/merchant/:slug" component={MerchantDashboard} />
       <Route path="/api-docs" component={ApiDocsPage} />

@@ -1936,6 +1936,22 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/admin/telegram/main-bot/settings", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { token } = req.body;
+      if (!token || typeof token !== "string" || !token.trim()) {
+        return res.status(400).json({ message: "token requis" });
+      }
+      const { reloadMainBot } = await import("./telegram-bot");
+      const result = await reloadMainBot(token.trim());
+      if (!result.ok) return res.status(400).json({ message: result.error || "Token invalide" });
+      await storage.createAuditLog({ adminId: (req as any).user.id, action: "telegram_main_bot_token_updated", details: `Token bot principal mis à jour — @${result.username}`, ip: req.ip || "" });
+      res.json({ success: true, username: result.username });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.post("/api/admin/telegram/settings", authMiddleware("admin"), async (req, res) => {
     try {
       const { groupId } = req.body;

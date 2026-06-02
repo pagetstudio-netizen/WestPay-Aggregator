@@ -1066,43 +1066,13 @@ function AdminPaymentLinksPanel() {
 }
 
 function MerchantsPanel() {
-  const { token } = useAuth();
   const { toast } = useToast();
-  const [showCreate, setShowCreate] = useState(false);
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [slug, setSlug] = useState("");
-  const [password, setPassword] = useState("");
-  const [pin, setPin] = useState("");
-  const [website, setWebsite] = useState("");
-  const [totpCode, setTotpCode] = useState("");
+  const [, setLocation] = useLocation();
   const [searchTerm, setSearchTerm] = useState("");
   const [websiteFilter, setWebsiteFilter] = useState("");
   const [selectedMerchantId, setSelectedMerchantId] = useState<number | null>(null);
 
   const { data: merchants = [], isLoading } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
-
-  const createMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch("/api/admin/create-merchant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name, email, slug, password, pin: pin || undefined, website: website || undefined, totpCode }),
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.message || "Erreur");
-      }
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
-      setShowCreate(false);
-      setName(""); setEmail(""); setSlug(""); setPassword(""); setPin(""); setWebsite(""); setTotpCode("");
-      toast({ title: "Marchand cree avec succes" });
-    },
-    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
-  });
 
   const suspendMutation = useMutation({
     mutationFn: async ({ id, suspended }: { id: number; suspended: boolean }) => {
@@ -1148,68 +1118,12 @@ function MerchantsPanel() {
       {selectedMerchantId && <MerchantDetailsDialog merchantId={selectedMerchantId} onClose={() => setSelectedMerchantId(null)} />}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-lg font-semibold text-foreground">Marchands</h2>
-        <Dialog open={showCreate} onOpenChange={setShowCreate}>
-          <DialogTrigger asChild>
-            <Button data-testid="button-create-merchant"><Plus className="w-4 h-4 mr-2" />Nouveau marchand</Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Creer un marchand</DialogTitle></DialogHeader>
-            <form onSubmit={(e) => { e.preventDefault(); createMutation.mutate(); }} className="space-y-4">
-              <div className="space-y-2">
-                <Label>Nom</Label>
-                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="EcoMat Togo" required data-testid="input-merchant-name" />
-              </div>
-              <div className="space-y-2">
-                <Label>Email</Label>
-                <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="contact@ecomat.com" required data-testid="input-merchant-create-email" />
-              </div>
-              <div className="space-y-2">
-                <Label>Slug (URL)</Label>
-                <Input value={slug} onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))} placeholder="ecomat" required data-testid="input-merchant-slug" />
-              </div>
-              <div className="space-y-2">
-                <Label>Mot de passe</Label>
-                <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mot de passe" required data-testid="input-merchant-create-password" />
-              </div>
-              <div className="space-y-2">
-                <Label>Site web <span className="text-muted-foreground text-xs font-normal">(optionnel)</span></Label>
-                <Input value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://example.com" type="url" data-testid="input-merchant-website" />
-              </div>
-              <div className="space-y-2">
-                <Label>Code PIN (6 chiffres, optionnel)</Label>
-                <Input
-                  value={pin}
-                  onChange={(e) => { const val = e.target.value.replace(/\D/g, "").slice(0, 6); setPin(val); }}
-                  placeholder="123456"
-                  maxLength={6}
-                  data-testid="input-merchant-create-pin"
-                />
-                <p className="text-xs text-muted-foreground">Requis pour acceder a la documentation API</p>
-              </div>
-              <div className="space-y-2 border border-amber-500/30 bg-amber-500/5 rounded-lg p-3">
-                <Label className="flex items-center gap-2 text-amber-400 font-semibold">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                  Code Google Authenticator <span className="text-red-400">*</span>
-                </Label>
-                <Input
-                  value={totpCode}
-                  onChange={(e) => { const val = e.target.value.replace(/\D/g, "").slice(0, 6); setTotpCode(val); }}
-                  placeholder="000000"
-                  maxLength={6}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  required
-                  data-testid="input-merchant-create-totp"
-                />
-                <p className="text-xs text-amber-400/80">Ouvrez Google Authenticator et entrez le code à 6 chiffres affiché pour votre compte WestPay</p>
-              </div>
-              <Button type="submit" className="w-full" disabled={createMutation.isPending || totpCode.length !== 6} data-testid="button-submit-create-merchant">
-                {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                Creer le marchand
-              </Button>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <Button
+          onClick={() => setLocation("/admin-access-958425546648484886646634808526522886433/create-merchant")}
+          data-testid="button-create-merchant"
+        >
+          <Plus className="w-4 h-4 mr-2" />Nouveau marchand
+        </Button>
       </div>
 
       <div className="flex gap-2 flex-wrap">
@@ -1370,9 +1284,29 @@ function TransactionsPanel() {
     return `/api/admin/transactions?${params.toString()}`;
   }, [dateFilter, startDate, endDate]);
 
-  const { data: transactions = [], isLoading, refetch } = useAdminFetch(apiUrl, ["/api/admin/transactions", dateFilter, startDate, endDate]);
+  const { data: transactions = [], isLoading, refetch, isError, error } = useAdminFetch(apiUrl, ["/api/admin/transactions", dateFilter, startDate, endDate]);
 
   if (isLoading) return <LoadingSkeleton />;
+
+  if (isError) return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <h2 className="text-lg font-semibold text-foreground">Transactions</h2>
+        <Button variant="outline" size="sm" onClick={() => refetch()} data-testid="button-refresh-transactions">
+          <RefreshCw className="w-4 h-4 mr-2" />Réessayer
+        </Button>
+      </div>
+      <Card className="border-destructive/40 bg-destructive/5">
+        <CardContent className="p-6 text-center space-y-2">
+          <p className="text-destructive font-semibold">⚠️ Erreur de chargement des transactions</p>
+          <p className="text-sm text-muted-foreground">{(error as any)?.message || "Impossible de charger les données"}</p>
+          <Button variant="outline" size="sm" onClick={() => refetch()} className="mt-2">
+            <RefreshCw className="w-4 h-4 mr-2" />Réessayer
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
 
   const filtered = (transactions as any[]).filter((t) => {
     const term = searchTerm.toLowerCase();
@@ -6625,6 +6559,76 @@ function OtpBotPanel() {
   );
 }
 
+function BotTokenCard({ onSaved }: { onSaved: () => void }) {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const [botToken, setBotToken] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [showToken, setShowToken] = useState(false);
+
+  const saveToken = async () => {
+    if (!botToken.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/admin/telegram/main-bot/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ token: botToken.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Erreur");
+      toast({ title: `✅ Bot activé : @${data.username}`, description: "Le bot Telegram est maintenant actif" });
+      setBotToken("");
+      onSaved();
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Key className="w-4 h-4 text-green-500" />
+          Token du bot principal
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Collez le token BotFather de votre bot Telegram principal. Il sera sauvegardé en base de données et le bot démarrera immédiatement.
+        </p>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Input
+              type={showToken ? "text" : "password"}
+              value={botToken}
+              onChange={e => setBotToken(e.target.value)}
+              placeholder="1234567890:ABCDefghIJKlmnOPQRstuvWXYZ"
+              className="font-mono text-sm pr-10"
+              data-testid="input-bot-token"
+            />
+            <button
+              type="button"
+              onClick={() => setShowToken(!showToken)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+          <Button onClick={saveToken} disabled={saving || !botToken.trim()} size="sm" data-testid="button-save-bot-token">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Activer"}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Créez un bot avec <code className="bg-muted px-1 rounded">@BotFather</code> → <code className="bg-muted px-1 rounded">/newbot</code> puis copiez le token ici.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 function TelegramBotPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
@@ -6787,13 +6791,16 @@ function TelegramBotPanel() {
               {!botStatus?.hasToken && (
                 <div className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/20 p-3 text-sm text-red-700 dark:text-red-400">
                   <p className="font-semibold mb-1">⚠ Token manquant</p>
-                  <p className="text-xs">Définissez <code className="bg-red-100 dark:bg-red-900/40 px-1 rounded">TELEGRAM_BOT_TOKEN</code> dans les variables d'environnement Plesk, puis redémarrez l'application.</p>
+                  <p className="text-xs">Configurez le token du bot ci-dessous pour l'activer.</p>
                 </div>
               )}
             </>
           )}
         </CardContent>
       </Card>
+
+      {/* Token config card */}
+      <BotTokenCard onSaved={refetchStatus} />
 
       {/* Group ID config */}
       <Card>

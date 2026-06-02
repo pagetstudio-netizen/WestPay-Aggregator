@@ -144,10 +144,10 @@ app.use((req, res, next) => {
 
   // Telegram main bot
   try {
-    const { initTelegramBot, setupWebhook, registerWebhookUrl, startPolling } = await import("./telegram-bot");
+    const { initTelegramBotFromDb: initTelegramBot, setupWebhook, registerWebhookUrl, startPolling } = await import("./telegram-bot");
     const { storage } = await import("./storage");
 
-    const telegramBot = initTelegramBot();
+    const telegramBot = await initTelegramBot();
     if (telegramBot) {
       // Mode production : NODE_ENV=production OU APP_URL défini sans REPLIT_DEV_DOMAIN (= Plesk/serveur dédié)
       const isProductionEnv = process.env.NODE_ENV === "production" ||

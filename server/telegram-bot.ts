@@ -291,8 +291,8 @@ async function buildMerchantSoldeMessage(merchantId: number, merchantName: strin
   return parts.join("\n\n─────────────────\n\n");
 }
 
-export function initTelegramBot(): Telegraf | null {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
+export function initTelegramBot(overrideToken?: string): Telegraf | null {
+  const token = overrideToken || process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
     console.log("[TELEGRAM] TELEGRAM_BOT_TOKEN non defini — bot non demarre");
     return null;
@@ -2918,6 +2918,40 @@ export async function getBotWebhookInfo(): Promise<{
 
 export function getBot(): Telegraf | null {
   return bot;
+}
+
+export async function initTelegramBotFromDb(): Promise<Telegraf | null> {
+  const tokenEnv = process.env.TELEGRAM_BOT_TOKEN;
+  if (tokenEnv) return initTelegramBot(tokenEnv);
+  try {
+    const tokenDb = await storage.getSetting("telegram_bot_token");
+    if (tokenDb) {
+      console.log("[TELEGRAM] Token chargé depuis la base de données");
+      return initTelegramBot(tokenDb);
+    }
+  } catch {}
+  return initTelegramBot();
+}
+
+export async function reloadMainBot(newToken: string): Promise<{ ok: boolean; error?: string; username?: string }> {
+  try {
+    if (bot) {
+      try { bot.stop("reload"); } catch {}
+      bot = null;
+    }
+    await storage.setSetting("telegram_bot_token", newToken);
+    const newBot = initTelegramBot(newToken);
+    if (!newBot) return { ok: false, error: "Impossible d'initialiser le bot" };
+    const me = await newBot.telegram.getMe();
+    const isProductionEnv = process.env.NODE_ENV === "production" ||
+      (!process.env.REPLIT_DEV_DOMAIN && !!process.env.APP_URL);
+    if (!isProductionEnv) {
+      startPolling();
+    }
+    return { ok: true, username: me.username };
+  } catch (err: any) {
+    return { ok: false, error: err.message };
+  }
 }
 
 export async function sendMerchantOtpTelegram(chatId: string, otp: string, merchantName: string): Promise<boolean> {
