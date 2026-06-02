@@ -1075,6 +1075,7 @@ function MerchantsPanel() {
   const [password, setPassword] = useState("");
   const [pin, setPin] = useState("");
   const [website, setWebsite] = useState("");
+  const [totpCode, setTotpCode] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [websiteFilter, setWebsiteFilter] = useState("");
   const [selectedMerchantId, setSelectedMerchantId] = useState<number | null>(null);
@@ -1086,7 +1087,7 @@ function MerchantsPanel() {
       const res = await fetch("/api/admin/create-merchant", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name, email, slug, password, pin: pin || undefined, website: website || undefined }),
+        body: JSON.stringify({ name, email, slug, password, pin: pin || undefined, website: website || undefined, totpCode }),
       });
       if (!res.ok) {
         const data = await res.json();
@@ -1097,7 +1098,7 @@ function MerchantsPanel() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
       setShowCreate(false);
-      setName(""); setEmail(""); setSlug(""); setPassword(""); setPin(""); setWebsite("");
+      setName(""); setEmail(""); setSlug(""); setPassword(""); setPin(""); setWebsite(""); setTotpCode("");
       toast({ title: "Marchand cree avec succes" });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
@@ -1185,7 +1186,24 @@ function MerchantsPanel() {
                 />
                 <p className="text-xs text-muted-foreground">Requis pour acceder a la documentation API</p>
               </div>
-              <Button type="submit" className="w-full" disabled={createMutation.isPending} data-testid="button-submit-create-merchant">
+              <div className="space-y-2 border border-amber-500/30 bg-amber-500/5 rounded-lg p-3">
+                <Label className="flex items-center gap-2 text-amber-400 font-semibold">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                  Code Google Authenticator <span className="text-red-400">*</span>
+                </Label>
+                <Input
+                  value={totpCode}
+                  onChange={(e) => { const val = e.target.value.replace(/\D/g, "").slice(0, 6); setTotpCode(val); }}
+                  placeholder="000000"
+                  maxLength={6}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  required
+                  data-testid="input-merchant-create-totp"
+                />
+                <p className="text-xs text-amber-400/80">Ouvrez Google Authenticator et entrez le code à 6 chiffres affiché pour votre compte WestPay</p>
+              </div>
+              <Button type="submit" className="w-full" disabled={createMutation.isPending || totpCode.length !== 6} data-testid="button-submit-create-merchant">
                 {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                 Creer le marchand
               </Button>

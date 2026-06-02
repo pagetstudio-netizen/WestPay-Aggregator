@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import { promises as dnsPromises } from "dns";
 import { storage } from "./storage";
 import { db } from "./db";
 import { pool } from "./db";
@@ -160,6 +161,39 @@ function extractIp(req: Request): string {
     return first;
   }
   return (req.ip || req.socket?.remoteAddress || "unknown").replace(/^::ffff:/, "");
+}
+
+// ── OTP marchands — JAMAIS stockés en base de données, uniquement en mémoire RAM ──────
+// Chaque entrée disparaît automatiquement après expiration (5 min) ou utilisation.
+// Un redémarrage serveur invalide automatiquement tous les OTPs en cours.
+interface MerchantOtpEntry {
+  otpHash: string;       // bcrypt du code 6 chiffres
+  tempToken: string;     // JWT lié à cette session OTP
+  expiresAt: number;     // timestamp ms
+  used: boolean;
+  attempts: number;
+}
+const merchantOtpStore = new Map<string, MerchantOtpEntry>(); // key = email
+
+// Nettoyage automatique des OTPs expirés toutes les 2 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of merchantOtpStore.entries()) {
+    if (val.expiresAt < now || val.used) merchantOtpStore.delete(key);
+  }
+}, 2 * 60 * 1000).unref();
+
+// ── Vérification DNS MX — l'email doit pointer vers un vrai serveur mail ─────────────
+// Protège contre la création de marchands avec des adresses email inventées.
+async function verifyEmailDomainHasMx(email: string): Promise<boolean> {
+  try {
+    const domain = email.split("@")[1];
+    if (!domain || domain.length < 4) return false;
+    const records = await dnsPromises.resolveMx(domain);
+    return records.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 // ── Chiffrement AES-256-GCM des secrets TOTP — jamais stockés en clair en base ─
@@ -567,6 +601,50 @@ export async function registerRoutes(
 
   app.get("/robots.txt", (_req, res) => {
     res.type("text/plain").send("User-agent: *\nDisallow: /\n");
+  });
+
+  // ── Blocage immédiat des chemins d'attaque courants des bots et scanners ──────────────
+  // Ces chemins n'existent pas dans l'app — seuls des bots/scanners les tentent.
+  // L'IP est auto-blacklistée dès la première tentative.
+  const BOT_ATTACK_PATH_RE = /^\/(\.env|\.git|\.htaccess|\.htpasswd|\.ssh|\.aws|\.DS_Store|web\.config|Dockerfile|Makefile|composer\.(json|lock)|package-lock\.json|node_modules|wp-admin|wp-login\.php|wp-config\.php|xmlrpc\.php|phpmyadmin|pma|admin\.php|config\.php|setup\.php|install\.php|backup|shell|cmd|eval|base64_decode|passwd|shadow|proc\/self|etc\/passwd|var\/www|usr\/bin|\.travis\.yml|Jenkinsfile|\.circleci|\.github\/workflows|autodiscover\.|owa\/|ecp\/|\.well-known\/autoconfig|cgi-bin|\.svn|\.hg|thumbs\.db|server-status|server-info)/i;
+
+  app.use((req, res, next) => {
+    if (BOT_ATTACK_PATH_RE.test(req.path)) {
+      const ip = extractIp(req);
+      storage.createSecurityLog({ eventType: "bot_blocked", ip, action: "attack_path_blocked", details: `${req.method} ${req.path} — ${(req.headers["user-agent"] || "?").substring(0, 80)}` }).catch(() => {});
+      if (!ip.startsWith("SPOOFED:") && ip !== "unknown" && ip !== "local" && ip !== "127.0.0.1" && ip !== "::1") {
+        storage.addBlockedIp({ ipAddress: ip, reason: `Scan de chemin d'attaque — ${req.path}`, blockedBy: "système-bot" }).catch(() => {});
+      }
+      return res.status(404).end();
+    }
+    next();
+  });
+
+  // ── Rate limiting global sur les endpoints d'authentification ─────────────────────────
+  // 30 requêtes max par fenêtre de 5 min par IP — après ça l'IP est auto-bloquée.
+  // Protège admin login, merchant login, verify-otp, complete-totp-setup, etc.
+  const authRateLimitStore = new Map<string, { count: number; firstReq: number }>();
+  const AUTH_RATE_MAX = 30;
+  const AUTH_RATE_WINDOW = 5 * 60 * 1000;
+
+  app.use("/api/auth", (req, res, next) => {
+    if (req.method === "OPTIONS") return next();
+    const ip = extractIp(req);
+    if (ip.startsWith("SPOOFED:")) {
+      return res.status(403).json({ message: "Accès refusé" });
+    }
+    const now = Date.now();
+    const entry = authRateLimitStore.get(ip) || { count: 0, firstReq: now };
+    if (now - entry.firstReq > AUTH_RATE_WINDOW) { entry.count = 0; entry.firstReq = now; }
+    entry.count++;
+    authRateLimitStore.set(ip, entry);
+    if (entry.count > AUTH_RATE_MAX) {
+      storage.addBlockedIp({ ipAddress: ip, reason: `Rate limit auth — ${entry.count} req/5min`, blockedBy: "système-ratelimit" }).catch(() => {});
+      storage.createSecurityLog({ eventType: "rate_limit", ip, action: "auth_rate_blocked", details: `${entry.count} req en 5min — ${req.path}` }).catch(() => {});
+      authRateLimitStore.delete(ip);
+      return res.status(429).json({ message: "Trop de requêtes. Veuillez patienter." });
+    }
+    next();
   });
 
   // ==================== IP SECURITY ====================
@@ -1061,16 +1139,29 @@ export async function registerRoutes(
   const MERCHANT_BRUTE_MAX = 5;
   const MERCHANT_BRUTE_WINDOW = 10 * 60 * 1000; // 10 min
 
-  // User-agents automatisés interdits sur le login marchand et les endpoints sensibles
+  // ── Patterns UA de bots/scanners — bloqués sur tous les endpoints sensibles ──────────
   const BLOCKED_UA_PATTERNS = [
-    /Deno\//i,
-    /SupabaseEdgeRuntime/i,
-    /python-requests/i,
-    /Go-http-client/i,
-    /curl\//i,
-    /axios\//i,
-    /node-fetch/i,
-    /undici/i,
+    // HTTP clients automatisés
+    /Deno\//i, /SupabaseEdgeRuntime/i, /python-requests/i, /Go-http-client/i,
+    /curl\//i, /axios\//i, /node-fetch/i, /undici/i, /libcurl/i, /pycurl/i,
+    /httpx/i, /aiohttp/i, /urllib/i, /requests\//i, /java\/[0-9]/i,
+    /okhttp/i, /apache-httpclient/i, /guzzle/i, /faraday/i, /rest-client/i,
+    // Outils de scan de sécurité / pentest
+    /sqlmap/i, /nikto/i, /nessus/i, /nmap/i, /masscan/i, /zap\//i,
+    /burpsuite/i, /metasploit/i, /acunetix/i, /w3af/i, /wfuzz/i,
+    /nuclei/i, /dirbuster/i, /gobuster/i, /ffuf/i, /hydra/i,
+    /zgrab/i, /shodan/i, /censys/i, /openvas/i, /whatweb/i,
+    // Crawlers / scrapers
+    /scrapy/i, /wget/i, /httrack/i, /wget\//i, /lwp-request/i,
+    /mechanize/i, /beautiful.?soup/i, /phantomjs/i,
+    // Headless browsers
+    /headlesschrome/i, /headless/i, /puppeteer/i, /playwright/i, /selenium/i,
+    /webdriver/i, /chromedriver/i, /geckodriver/i,
+    // Bots de recherche / indexation sur endpoints privés
+    /googlebot/i, /bingbot/i, /baiduspider/i, /yandexbot/i, /semrushbot/i,
+    /ahrefsbot/i, /dotbot/i, /mj12bot/i, /rogerbot/i, /exabot/i,
+    // UA vides ou suspects
+    /^-$/i, /^test$/i, /^bot$/i, /^scanner$/i, /^exploit/i,
   ];
 
   // Hôtes autorisés pour la validation Origin/Referer du login marchand
@@ -1367,14 +1458,15 @@ export async function registerRoutes(
         { expiresIn: "6m" }
       );
 
-      // Invalider les anciens OTPs non utilisés pour cet email
-      await pool.query(`DELETE FROM merchant_login_otps WHERE email = $1`, [merchant.email]);
-
-      await pool.query(
-        `INSERT INTO merchant_login_otps (email, otp_hash, temp_token, expires_at, used, attempts)
-         VALUES ($1, $2, $3, $4, false, 0)`,
-        [merchant.email, otpHash, tempToken, expiresAt]
-      );
+      // ── Stocker l'OTP en mémoire uniquement — JAMAIS en base de données ────────────
+      // L'entrée précédente est écrasée (invalide l'ancien OTP automatiquement)
+      merchantOtpStore.set(merchant.email, {
+        otpHash,
+        tempToken,
+        expiresAt: expiresAt.getTime(),
+        used: false,
+        attempts: 0,
+      });
 
       // Envoyer l'OTP — bot OTP dédié → bot principal → email (fallback chain)
       let otpVia: "telegram" | "email" = "email";
@@ -1426,38 +1518,38 @@ export async function registerRoutes(
 
       const { merchantId, email, slug, name } = payload;
 
-      // Récupérer l'OTP en DB
-      const otpRow = await pool.query(
-        `SELECT id, otp_hash, expires_at, used, attempts
-         FROM merchant_login_otps
-         WHERE email = $1 AND temp_token = $2
-         ORDER BY created_at DESC LIMIT 1`,
-        [email, tempToken]
-      );
+      // ── Récupérer l'OTP depuis la mémoire — jamais depuis la base de données ────────
+      const otpEntry = merchantOtpStore.get(email);
 
-      if (!otpRow.rowCount || otpRow.rowCount === 0) {
+      if (!otpEntry || otpEntry.tempToken !== tempToken) {
         return res.status(401).json({ message: "Code introuvable ou expiré." });
       }
 
-      const otp = otpRow.rows[0];
-
-      if (otp.used) return res.status(401).json({ message: "Ce code a déjà été utilisé." });
-      if (new Date(otp.expires_at) < new Date()) return res.status(401).json({ message: "Code expiré." });
-      if (otp.attempts >= 5) {
+      if (otpEntry.used) {
+        merchantOtpStore.delete(email);
+        return res.status(401).json({ message: "Ce code a déjà été utilisé." });
+      }
+      if (otpEntry.expiresAt < Date.now()) {
+        merchantOtpStore.delete(email);
+        return res.status(401).json({ message: "Code expiré." });
+      }
+      if (otpEntry.attempts >= 5) {
+        merchantOtpStore.delete(email);
         return res.status(429).json({ message: "Trop de tentatives. Veuillez vous reconnecter." });
       }
 
-      // Incrémenter les tentatives
-      await pool.query(`UPDATE merchant_login_otps SET attempts = attempts + 1 WHERE id = $1`, [otp.id]);
+      // Incrémenter les tentatives en mémoire
+      otpEntry.attempts++;
 
-      const valid = await bcrypt.compare(String(code).trim(), otp.otp_hash);
+      const valid = await bcrypt.compare(String(code).trim(), otpEntry.otpHash);
       if (!valid) {
-        const remaining = 4 - otp.attempts;
+        const remaining = 4 - otpEntry.attempts;
+        if (remaining <= 0) merchantOtpStore.delete(email);
         return res.status(401).json({ message: `Code incorrect. ${remaining > 0 ? `${remaining} tentative(s) restante(s).` : "Veuillez vous reconnecter."}` });
       }
 
-      // Marquer comme utilisé
-      await pool.query(`UPDATE merchant_login_otps SET used = true WHERE id = $1`, [otp.id]);
+      // Marquer comme utilisé puis supprimer immédiatement (ne reste pas en mémoire)
+      merchantOtpStore.delete(email);
 
       const token = signToken({ id: merchantId, role: "merchant", email });
       return res.json({ token, user: { id: merchantId, email, name, slug } });
@@ -2074,8 +2166,33 @@ export async function registerRoutes(
 
   app.post("/api/admin/create-merchant", authMiddleware("admin"), async (req, res) => {
     try {
-      const { name, email, slug, password, pin, website } = req.body;
+      const { name, email, slug, password, pin, website, totpCode } = req.body;
       if (!name || !email || !slug || !password) return res.status(400).json({ message: "Tous les champs sont requis" });
+
+      // ── Vérification TOTP Google Authenticator obligatoire ────────────────────────────
+      // L'admin doit fournir son code Google Authenticator pour créer un marchand.
+      // Cela empêche un attaquant ayant accès au dashboard de créer des comptes en masse.
+      if (!totpCode || typeof totpCode !== "string" || !/^\d{6}$/.test(totpCode.trim())) {
+        return res.status(400).json({ message: "Code Google Authenticator requis (6 chiffres)" });
+      }
+      const adminUser = (req as any).user;
+      const adminRecord = await storage.getAdminById(adminUser.id);
+      if (!adminRecord || !adminRecord.totpEnabled || !adminRecord.totpSecret) {
+        return res.status(403).json({ message: "Google Authenticator non configuré sur votre compte" });
+      }
+      const totpSecretDecrypted = decryptTotpSecret(adminRecord.totpSecret);
+      const totpValid = totpVerifySync(totpCode.trim(), totpSecretDecrypted);
+      if (!totpValid) {
+        const clientIp = extractIp(req);
+        storage.createSecurityLog({ eventType: "blocked_access", ip: clientIp, userEmail: adminUser.email, action: "create_merchant_totp_invalid", details: "Code TOTP invalide lors de la tentative de création marchand" }).catch(() => {});
+        return res.status(401).json({ message: "Code Google Authenticator invalide" });
+      }
+
+      // ── Vérification DNS MX — l'adresse email doit exister pour éviter les faux comptes ─
+      const emailDomainValid = await verifyEmailDomainHasMx(email);
+      if (!emailDomainValid) {
+        return res.status(400).json({ message: "L'adresse email semble invalide ou son domaine n'existe pas" });
+      }
 
       const existing = await storage.getMerchantByEmail(email);
       if (existing) return res.status(400).json({ message: "Email deja utilise" });
@@ -2098,7 +2215,6 @@ export async function registerRoutes(
         description: `Marchand ${name} cree par l'administrateur`,
       });
 
-      const adminUser = (req as any).user;
       const mcIp = req.ip || "";
       getGeoInfo(mcIp).then(geo => {
         notifyAdminMerchantCreated({
