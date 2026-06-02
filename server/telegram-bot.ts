@@ -351,7 +351,7 @@ export function initTelegramBot(): Telegraf | null {
         const now = new Date().toLocaleString("fr-FR", { timeZone: "Africa/Abidjan", hour12: false });
         await bot!.telegram.sendMessage(
           HARDCODED_ADMIN_GROUP_ID,
-          `✅ *WestPay — Serveur démarré*\n\n🕐 ${now}\n🤖 Bot Telegram connecté et opérationnel.\n📡 Groupe admin reconnu — toutes les alertes sont actives.`,
+          `✅ WestPay démarré — ${now}`,
           { parse_mode: "Markdown" }
         ).catch((err: any) => {
           console.error(`[TELEGRAM] Impossible d'envoyer le message de démarrage : ${err.message}`);
