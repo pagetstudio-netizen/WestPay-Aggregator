@@ -6934,13 +6934,18 @@ function TelegramBotPanel() {
             </button>
           </div>
 
-          <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground space-y-1">
-            <p className="font-semibold text-foreground">📋 Checklist dépannage :</p>
-            <p>1. <code className="bg-muted px-1 rounded">TELEGRAM_BOT_TOKEN</code> défini dans les variables Plesk</p>
-            <p>2. <code className="bg-muted px-1 rounded">APP_URL=https://westpay.cfd</code> défini dans les variables Plesk</p>
-            <p>3. Chat ID groupe admin configuré ci-dessus</p>
-            <p>4. Cliquez "Réveiller le bot" après chaque déploiement ou redémarrage</p>
-            <p>5. Vérifiez que le bot est bien <strong>membre administrateur</strong> du groupe Telegram</p>
+          <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground space-y-1.5">
+            <p className="font-semibold text-foreground">📋 Checklist — Bot ne répond pas aux commandes :</p>
+            <p>1. <code className="bg-muted px-1 rounded">TELEGRAM_BOT_TOKEN</code> défini dans les variables Plesk ✓</p>
+            <p>2. <code className="bg-muted px-1 rounded">APP_URL=https://westpay.cfd</code> défini dans Plesk (active le mode webhook) ✓</p>
+            <p>3. Cliquez <strong>"Réveiller le bot"</strong> → attend "Webhook configuré" sans erreur</p>
+            <p>4. Vérifiez que l'URL webhook affichée commence par <code className="bg-muted px-1 rounded">https://westpay.cfd/api/telegram/webhook/</code></p>
+            <p>5. Le bot doit être <strong>membre administrateur</strong> du groupe (sinon il ne voit pas les messages)</p>
+            <p className="mt-1 font-semibold text-amber-600 dark:text-amber-400">⚠ Commandes disponibles dans le groupe admin :</p>
+            <p><code className="bg-muted px-1 rounded">/setgroup CLE_ADMIN</code> · <code className="bg-muted px-1 rounded">/broadcast MSG</code> · <code className="bg-muted px-1 rounded">/listeips</code></p>
+            <p className="font-semibold text-amber-600 dark:text-amber-400">⚠ Commandes marchands (groupe lié uniquement) :</p>
+            <p><code className="bg-muted px-1 rounded">/solde</code> · <code className="bg-muted px-1 rounded">/transactions</code> · <code className="bg-muted px-1 rounded">/stats</code> · <code className="bg-muted px-1 rounded">/aide</code></p>
+            <p className="text-blue-600 dark:text-blue-400 font-medium">ℹ Dans le groupe admin, le bot n'exécute PAS les commandes marchands (/solde, /stats…). Il faut un groupe marchand lié séparément.</p>
           </div>
         </CardContent>
       </Card>

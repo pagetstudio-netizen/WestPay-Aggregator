@@ -1898,7 +1898,7 @@ export async function registerRoutes(
   // ── Force re-register webhook (réveiller le bot) ───────────────────────────
   app.post("/api/admin/telegram/refresh-webhook", authMiddleware("admin"), async (req, res) => {
     try {
-      const { registerWebhookUrl, getBot } = await import("./telegram-bot");
+      const { registerWebhookUrl, setupWebhook, getBot } = await import("./telegram-bot");
       if (!getBot()) return res.status(400).json({ message: "Bot non initialisé — vérifiez TELEGRAM_BOT_TOKEN" });
       const appUrl = process.env.APP_URL || "https://westpay.cfd";
       let webhookSecret = await storage.getSetting("telegram_webhook_secret");
@@ -1908,6 +1908,8 @@ export async function registerRoutes(
         await storage.setSetting("telegram_webhook_secret", webhookSecret);
       }
       const webhookUrl = `${appUrl}/api/telegram/webhook/${webhookSecret}`;
+      // Toujours réenregistrer la route Express ET informer Telegram
+      setupWebhook(app, webhookSecret);
       await registerWebhookUrl(webhookUrl);
       const { getBotWebhookInfo } = await import("./telegram-bot");
       const info = await getBotWebhookInfo();

@@ -149,20 +149,26 @@ app.use((req, res, next) => {
 
     const telegramBot = await initTelegramBot();
     if (telegramBot) {
+      // Toujours générer/lire le secret et enregistrer la route Express webhook.
+      // Cela garantit que la route existe même si le bot démarre en mode polling.
+      let webhookSecret = await storage.getSetting("telegram_webhook_secret");
+      if (!webhookSecret) {
+        const { randomBytes } = await import("crypto");
+        webhookSecret = randomBytes(24).toString("hex");
+        await storage.setSetting("telegram_webhook_secret", webhookSecret);
+      }
+      const appUrl = process.env.APP_URL || "https://westpay.cfd";
+      const webhookUrl = `${appUrl}/api/telegram/webhook/${webhookSecret}`;
+
+      // Enregistrer la route Express webhook SYSTÉMATIQUEMENT (peu importe le mode).
+      // Sans ça, si "Réveiller le bot" est cliqué, Telegram enverrait vers une URL sans route.
+      setupWebhook(app, webhookSecret);
+
       // Mode production : NODE_ENV=production OU APP_URL défini sans REPLIT_DEV_DOMAIN (= Plesk/serveur dédié)
       const isProductionEnv = process.env.NODE_ENV === "production" ||
         (!process.env.REPLIT_DEV_DOMAIN && !!process.env.APP_URL);
 
       if (isProductionEnv) {
-        let webhookSecret = await storage.getSetting("telegram_webhook_secret");
-        if (!webhookSecret) {
-          const { randomBytes } = await import("crypto");
-          webhookSecret = randomBytes(24).toString("hex");
-          await storage.setSetting("telegram_webhook_secret", webhookSecret);
-        }
-        const appUrl = process.env.APP_URL || "https://westpay.cfd";
-        const webhookUrl = `${appUrl}/api/telegram/webhook/${webhookSecret}`;
-        setupWebhook(app, webhookSecret);
         console.log(`[TELEGRAM] Mode production (webhook) — URL : ${webhookUrl}`);
         await registerWebhookUrl(webhookUrl);
       } else {
