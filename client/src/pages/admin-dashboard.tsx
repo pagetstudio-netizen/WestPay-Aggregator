@@ -37,7 +37,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
 
-type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "sendavapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge";
+type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "sendavapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge" | "actionlogs";
 
 function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: { staleTime?: number; refetchOnWindowFocus?: boolean }) {
   const { token, logout } = useAuth();
@@ -8426,6 +8426,144 @@ function SecurityIpsPanel() {
   );
 }
 
+function AdminActionLogsPanel() {
+  const { token } = useAuth();
+  const [filter, setFilter] = useState<"all" | "login" | "security">("all");
+  const [search, setSearch] = useState("");
+
+  const fetchWith = async (url: string) => {
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok) throw new Error("Erreur");
+    return r.json();
+  };
+
+  const { data: logs = [], isLoading, refetch } = useQuery<any[]>({
+    queryKey: ["/api/admin/action-logs"],
+    queryFn: () => fetchWith("/api/admin/action-logs?limit=100"),
+    refetchInterval: 30_000,
+  });
+
+  const filtered = (logs as any[]).filter(log => {
+    if (filter === "login" && log._type !== "login") return false;
+    if (filter === "security" && log._type !== "security") return false;
+    const q = search.toLowerCase();
+    if (!q) return true;
+    return (
+      (log.userEmail || "").toLowerCase().includes(q) ||
+      (log.ip || "").toLowerCase().includes(q) ||
+      (log.action || "").toLowerCase().includes(q) ||
+      (log.details || "").toLowerCase().includes(q) ||
+      (log.eventType || "").toLowerCase().includes(q) ||
+      (log.device || "").toLowerCase().includes(q)
+    );
+  });
+
+  const badgeForType = (log: any) => {
+    if (log._type === "login") {
+      return log.success
+        ? <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-green-500/15 text-green-400">Connexion réussie</span>
+        : <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-red-500/15 text-red-400">Échec connexion</span>;
+    }
+    const evtColor: Record<string, string> = {
+      blocked_access: "bg-red-500/15 text-red-400",
+      brute_force: "bg-orange-500/15 text-orange-400",
+      ip_blocked: "bg-orange-500/15 text-orange-400",
+      new_device: "bg-blue-500/15 text-blue-400",
+      blocked_device: "bg-red-500/15 text-red-400",
+      vpn_detected: "bg-yellow-500/15 text-yellow-400",
+      location_jump: "bg-purple-500/15 text-purple-400",
+      country_blocked: "bg-red-500/15 text-red-400",
+      unauthorized_2fa_disable: "bg-red-600/20 text-red-400",
+      unauthorized_admin_creation: "bg-red-600/20 text-red-400",
+    };
+    const cls = evtColor[log.eventType] || "bg-muted text-muted-foreground";
+    return <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${cls}`}>{log.eventType || log.action || "événement"}</span>;
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Logs d'actions</h2>
+          <p className="text-sm text-muted-foreground">Toutes les connexions et événements de sécurité — mis à jour en temps réel</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => refetch()} data-testid="button-refresh-actionlogs">
+            <RefreshCw className="w-3.5 h-3.5 mr-1" /> Rafraîchir
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {(["all", "login", "security"] as const).map(f => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            data-testid={`filter-actionlogs-${f}`}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${filter === f ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}
+          >
+            {f === "all" ? `Tous (${logs.length})` : f === "login" ? `Connexions (${logs.filter((l:any) => l._type === "login").length})` : `Sécurité (${logs.filter((l:any) => l._type === "security").length})`}
+          </button>
+        ))}
+        <div className="relative ml-auto">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Rechercher..."
+            data-testid="input-search-actionlogs"
+            className="pl-8 pr-3 py-1.5 bg-muted rounded-lg text-sm w-52 focus:outline-none focus:ring-2 focus:ring-primary/30"
+          />
+        </div>
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+          ) : filtered.length === 0 ? (
+            <div className="py-10 text-center text-muted-foreground text-sm">Aucun log trouvé</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border/50">
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Type</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden sm:table-cell">Email / Utilisateur</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden md:table-cell">IP</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden lg:table-cell">Détails</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((log: any, i: number) => (
+                    <tr key={`${log._type}-${log.id}-${i}`} className="border-b border-border/30 hover:bg-muted/30 transition-colors" data-testid={`row-actionlog-${i}`}>
+                      <td className="px-4 py-3">{badgeForType(log)}</td>
+                      <td className="px-4 py-3 hidden sm:table-cell text-muted-foreground text-xs font-mono">
+                        {log.userEmail || log.role || "—"}
+                        {log._type === "login" && log.device && (
+                          <div className="text-[10px] text-muted-foreground/60 truncate max-w-[180px]">{log.device}</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 hidden md:table-cell text-muted-foreground text-xs font-mono">{log.ip || "—"}</td>
+                      <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground text-xs max-w-[220px] truncate">
+                        {log.details || log.action || "—"}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground text-xs whitespace-nowrap">
+                        {log.createdAt ? new Date(log.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function AdminDashboard() {
   const { user, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
@@ -8483,6 +8621,7 @@ export default function AdminDashboard() {
       items: [
         { title: "Administrateurs", icon: Shield, tab: "admins" },
         { title: "Sécurité IP", icon: Lock, tab: "security" },
+        { title: "Logs d'actions", icon: FileText, tab: "actionlogs" },
         { title: "Paramètres", icon: Settings, tab: "settings" },
         { title: "SDK API", icon: BookOpen, tab: "sdk" },
         { title: "Notifications", icon: Mail, tab: "notifications" },
@@ -8610,6 +8749,7 @@ export default function AdminDashboard() {
             {activeTab === "reversements" && <AdminWithdrawalsPanel />}
             {activeTab === "admins" && <AdminsPanel />}
             {activeTab === "security" && <SecurityIpsPanel />}
+            {activeTab === "actionlogs" && <AdminActionLogsPanel />}
             {activeTab === "settings" && <SettingsPanel />}
             {activeTab === "sdk" && <SdkPanel />}
             {activeTab === "notifications" && <NotificationsPanel />}

@@ -110,6 +110,33 @@ if (!JWT_SECRET) {
   throw new Error("[SECURITY] SESSION_SECRET must be set — refusing to start without it. Generate one with: node -e \"console.log(require('crypto').randomBytes(64).toString('hex'))\"");
 }
 
+// ── Invalidation de sessions — toutes les sessions antérieures au redémarrage sont invalides ─
+// Cela déconnecte automatiquement tous les comptes connectés lors d'un redémarrage Plesk/serveur
+const SESSION_START = Date.now();
+
+// ── Chiffrement AES-256-GCM des secrets TOTP — jamais stockés en clair en base ─
+// Les codes Google Authenticator (6 chiffres) ne sont JAMAIS sauvegardés — seul le secret
+// chiffré est stocké, et uniquement pour vérifier les futurs codes.
+function encryptTotpSecret(plainSecret: string): string {
+  const key = crypto.createHash("sha256").update(JWT_SECRET + ":totp-key-v1").digest();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const enc = Buffer.concat([cipher.update(plainSecret, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `ENC:${iv.toString("hex")}:${tag.toString("hex")}:${enc.toString("hex")}`;
+}
+
+function decryptTotpSecret(stored: string): string {
+  if (!stored || !stored.startsWith("ENC:")) return stored; // rétrocompat secrets non-chiffrés
+  const parts = stored.split(":");
+  if (parts.length !== 4) throw new Error("Format secret TOTP invalide");
+  const key = crypto.createHash("sha256").update(JWT_SECRET + ":totp-key-v1").digest();
+  const [, ivHex, tagHex, encHex] = parts;
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivHex, "hex"));
+  decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+  return decipher.update(Buffer.from(encHex, "hex")).toString("utf8") + decipher.final("utf8");
+}
+
 async function getOmnipayApiKey(): Promise<string | undefined> {
   return process.env.OMNIPAY_API_KEY || await storage.getSetting("omnipay_api_key");
 }
@@ -271,6 +298,11 @@ function authMiddleware(role: "admin" | "merchant") {
       const decoded = jwt.verify(auth.split(" ")[1], JWT_SECRET) as any;
       if (decoded.role !== role) {
         return res.status(403).json({ message: "Acces interdit" });
+      }
+      // ── Invalidation de session au redémarrage serveur ───────────────────────
+      // Toutes les sessions émises avant ce démarrage sont rejetées (déconnexion Plesk automatique)
+      if (role === "admin" && decoded.iat && decoded.iat * 1000 < SESSION_START) {
+        return res.status(401).json({ message: "Session expirée — veuillez vous reconnecter" });
       }
       // Vérification critique : s'assurer que le compte existe toujours en base
       if (role === "admin") {
@@ -679,8 +711,8 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Accès refusé" });
       }
 
-      // WHITELIST STRICTE — seuls ces deux comptes peuvent accéder au panel admin
-      const ADMIN_WHITELIST = ["pagetstudio@gmail.com", "mouhamadoukouassi795@gmail.com"];
+      // WHITELIST STRICTE — seul ce compte peut accéder au panel admin
+      const ADMIN_WHITELIST = ["afrinovasolution@gmail.com"];
       if (!ADMIN_WHITELIST.includes(email.toLowerCase().trim())) {
         storage.createSecurityLog({ eventType: "blocked_access", ip: clientIp, userEmail: email, action: "email_not_whitelisted", details: "Email non autorisé — tentative de connexion admin rejetée" }).catch(() => {});
         return res.status(401).json({ message: "Identifiants invalides" });
@@ -827,7 +859,7 @@ export async function registerRoutes(
       if (payload.purpose !== "totp_verify") return res.status(401).json({ message: "Token invalide" });
       const admin = await storage.getAdminByEmail(payload.email);
       if (!admin || !admin.totpSecret || !admin.totpEnabled) return res.status(401).json({ message: "TOTP non configuré" });
-      const totpResult = totpVerifySync({ token: String(code).trim(), secret: admin.totpSecret, strategy: "totp" });
+      const totpResult = totpVerifySync({ token: String(code).trim(), secret: decryptTotpSecret(admin.totpSecret), strategy: "totp" });
       if (!totpResult?.valid) return res.status(401).json({ message: "Code invalide ou expiré" });
       const jwtToken = signToken({ id: admin.id, role: "admin", email: admin.email });
       const clientIp = (req.ip || "").replace(/^::ffff:/, "");
@@ -854,8 +886,8 @@ export async function registerRoutes(
       const totpResult = totpVerifySync({ token: String(code).trim(), secret, strategy: "totp" });
       if (!totpResult?.valid) return res.status(401).json({ message: "Code invalide — vérifiez votre application Google Authenticator" });
 
-      // Sauvegarder le secret et activer TOTP en base
-      await storage.updateAdminTotp(adminId, secret, true);
+      // Sauvegarder le secret CHIFFRÉ et activer TOTP en base (jamais en clair)
+      await storage.updateAdminTotp(adminId, encryptTotpSecret(secret), true);
 
       // Émettre le JWT final
       const admin = await storage.getAdminByEmail(email);
@@ -893,28 +925,27 @@ export async function registerRoutes(
       if (!secret || !code) return res.status(400).json({ message: "Données manquantes" });
       const totpResult = totpVerifySync({ token: String(code).trim(), secret, strategy: "totp" });
       if (!totpResult?.valid) return res.status(400).json({ message: "Code invalide — vérifiez votre application d'authentification" });
-      await storage.updateAdminTotp(adminUser.id, secret, true);
+      await storage.updateAdminTotp(adminUser.id, encryptTotpSecret(secret), true);
       res.json({ success: true, message: "Google Authenticator 2FA activé" });
     } catch (err: any) {
       res.status(500).json({ message: "Erreur interne" });
     }
   });
 
-  // ── TOTP disable: verify current code before disabling ───────────────────
+  // ── TOTP disable: DÉFINITIVEMENT BLOQUÉ — Google Authenticator est obligatoire ─
   app.post("/api/admin/2fa/disable", authMiddleware("admin"), async (req, res) => {
-    try {
-      const adminUser = (req as any).user;
-      const { code } = req.body;
-      if (!code) return res.status(400).json({ message: "Code requis" });
-      const admin = await storage.getAdminById(adminUser.id);
-      if (!admin || !admin.totpSecret || !admin.totpEnabled) return res.status(400).json({ message: "TOTP non activé" });
-      const totpResult = totpVerifySync({ token: String(code).trim(), secret: admin.totpSecret, strategy: "totp" });
-      if (!totpResult?.valid) return res.status(400).json({ message: "Code invalide" });
-      await storage.updateAdminTotp(adminUser.id, null, false);
-      res.json({ success: true, message: "Google Authenticator 2FA désactivé" });
-    } catch (err: any) {
-      res.status(500).json({ message: "Erreur interne" });
-    }
+    const adminUser = (req as any).user;
+    const clientIp = (req.ip || "").replace(/^::ffff:/, "");
+    storage.createSecurityLog({
+      eventType: "unauthorized_2fa_disable",
+      ip: clientIp,
+      userEmail: adminUser?.email || "?",
+      action: "blocked_permanently",
+      details: "Tentative de désactivation du Google Authenticator — opération définitivement interdite"
+    }).catch(() => {});
+    return res.status(403).json({
+      message: "La désactivation du Google Authenticator est définitivement interdite. L'authentification à deux facteurs est obligatoire et ne peut pas être désactivée."
+    });
   });
 
   // ── TOTP status: get current admin TOTP status ───────────────────────────
@@ -1385,6 +1416,31 @@ export async function registerRoutes(
       const limit = Math.min(Number(req.query.limit) || 20, 100);
       const logs = await storage.getRecentLoginLogs(limit);
       res.json(logs);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Action logs — journal complet des actions admin (connexions + événements sécurité) ─
+  app.get("/api/admin/action-logs", authMiddleware("admin"), async (req, res) => {
+    try {
+      const limit = Math.min(Number(req.query.limit) || 50, 200);
+      const [loginLogs, secLogs] = await Promise.all([
+        storage.getRecentLoginLogs(limit),
+        (async () => {
+          const r = await db.execute(
+            sql`SELECT id, event_type as "eventType", user_email as "userEmail", ip, action, details, telegram_admin as "telegramAdmin", created_at as "createdAt" FROM security_logs ORDER BY created_at DESC LIMIT ${limit}`
+          );
+          return r.rows as any[];
+        })(),
+      ]);
+      // Combine + sort by date descending
+      const combined = [
+        ...loginLogs.map((l: any) => ({ ...l, _type: "login" })),
+        ...secLogs.map((l: any) => ({ ...l, _type: "security" })),
+      ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, limit);
+      res.json(combined);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
