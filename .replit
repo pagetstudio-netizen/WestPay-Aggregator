@@ -50,7 +50,6 @@ XOF_PER_USD = "600"
 APP_URL = "https://west-pay-aggregator-1--beryowone.replit.app"
 TELEGRAM_API_ID = "36887606"
 TELEGRAM_ADMIN_GROUP_ID = "-1003802528942"
-CUSTOM_DATABASE_URL = "postgresql://postgres.bauubqsgtuoxxsufqklp:cotedivoire228@aws-1-us-west-2.pooler.supabase.com:5432/postgres"
 
 [postMerge]
 path = "scripts/post-merge.sh"
