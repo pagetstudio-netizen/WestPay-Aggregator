@@ -349,19 +349,31 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     }
   });
 
-  // ─── Middleware global : auto-enregistrer tout groupe qui envoie un update ─
-  // Cela capture les groupes où le bot est déjà présent mais pas encore dans le registre
+  // ─── Middleware global de logging + auto-enregistrement ──────────────────────
+  // CRITIQUE : ce middleware DOIT toujours appeler next() sans exception.
+  // Il log chaque update entrant pour diagnostiquer les problèmes de réception.
   bot.use(async (ctx, next) => {
     try {
-      const chat = ctx.chat;
-      if (chat && (chat.type === "group" || chat.type === "supergroup")) {
-        const chatId = String(chat.id);
+      const updateType = (ctx.update as any).message ? "message"
+        : (ctx.update as any).callback_query ? "callback_query"
+        : (ctx.update as any).my_chat_member ? "my_chat_member"
+        : (ctx.update as any).edited_message ? "edited_message"
+        : "other";
+      const chatId = ctx.chat ? String(ctx.chat.id) : ctx.from ? String(ctx.from.id) : "?";
+      const text = (ctx.update as any).message?.text || (ctx.update as any).callback_query?.data || "";
+      console.log(`[TG] update=${updateType} chat=${chatId} text="${text.slice(0, 60)}"`);
+
+      // Auto-enregistrement des groupes
+      if (ctx.chat && (ctx.chat.type === "group" || ctx.chat.type === "supergroup")) {
         const groups = await getKnownGroups();
         if (!groups.includes(chatId)) {
-          await registerKnownGroup(chatId);
+          registerKnownGroup(chatId).catch(() => {});
         }
       }
-    } catch {}
+    } catch (e: any) {
+      console.error("[TG] middleware error (ignoré):", e?.message);
+    }
+    // TOUJOURS passer au handler suivant, sans exception
     return next();
   });
 
@@ -1556,76 +1568,86 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
 
   const IP_REGEX = /^(\d{1,3}\.){3}\d{1,3}$/;
 
-  bot.on("message", async (ctx) => {
-    const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
-    const chatId = String(ctx.chat.id);
+  // ─── Catch-all message handler (doit être le DERNIER handler) ───────────────
+  // IMPORTANT : utiliser (ctx, next) et toujours appeler next() pour ne jamais
+  // bloquer les handlers qui pourraient venir après (callback_query, etc.)
+  bot.on("message", async (ctx, next) => {
+    try {
+      const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
+      const chatId = String(ctx.chat.id);
+      const text = ("text" in ctx.message ? (ctx.message as any).text : "") || "";
 
-    // ── Auto-enregistrement : tout groupe qui envoie un message est mémorisé ──
-    if (isGroup) {
-      registerKnownGroup(chatId).catch(() => {});
-    }
+      // Ignorer les commandes — elles sont gérées par bot.command() ci-dessus
+      if (text.startsWith("/")) {
+        console.log(`[TG] commande non matchée: "${text}" (chat=${chatId}) — ignoré`);
+        return next();
+      }
 
-    if (isGroup) {
-      const merchant = await getMerchantForGroup(chatId);
-      if (!merchant) return;
+      if (isGroup) {
+        // Vérifier si c'est un groupe marchand avec une IP à ajouter
+        const merchant = await getMerchantForGroup(chatId);
+        if (!merchant) return next();
 
-      const text = ("text" in ctx.message ? ctx.message.text : "") || "";
-      const candidate = text.trim();
+        const candidate = text.trim();
+        if (!IP_REGEX.test(candidate)) return next();
 
-      if (!IP_REGEX.test(candidate)) return;
+        // Réponse immédiate en chinois
+        await ctx.reply("请稍等，我这就帮你添加。");
 
-      // Réponse immédiate en chinois
-      await ctx.reply("请稍等，我这就帮你添加。");
+        const geo = await getGeoInfo(candidate);
 
-      const geo = await getGeoInfo(candidate);
+        if (!geo.country || !AFRICAN_COUNTRIES.has(geo.country)) {
+          await ctx.reply("❌fake ip 该IP地址无法添加到我们的白名单中。");
+          await alertAdminGroup(
+            `⚠️ *IP non africaine refusée*\n\n` +
+            `👤 Marchand : *${merchant.name}*\n` +
+            `🌐 IP : \`${candidate}\`\n` +
+            `📍 ${geo.city || "?"}${geo.country ? ", " + geo.country : " — pays inconnu"}\n` +
+            `🔌 ${geo.isp || "?"}\n\n` +
+            `❌ Impossible — cette IP vient de *${geo.country || "pays inconnu"}*, qui n'est pas en Afrique.`
+          );
+          return;
+        }
 
-      if (!geo.country || !AFRICAN_COUNTRIES.has(geo.country)) {
-        await ctx.reply("❌fake ip 该IP地址无法添加到我们的白名单中。");
-        await alertAdminGroup(
-          `⚠️ *IP non africaine refusée*\n\n` +
-          `👤 Marchand : *${merchant.name}*\n` +
-          `🌐 IP : \`${candidate}\`\n` +
-          `📍 ${geo.city || "?"}${geo.country ? ", " + geo.country : " — pays inconnu"}\n` +
-          `🔌 ${geo.isp || "?"}\n\n` +
-          `❌ Impossible — cette IP vient de *${geo.country || "pays inconnu"}*, qui n'est pas en Afrique.`
-        );
+        try {
+          await storage.addAllowedIp({
+            ipAddress: candidate,
+            userEmail: merchant.email,
+            role: "merchant",
+            country: geo.country,
+            city: geo.city || null,
+            note: `Ajouté via Telegram — ${merchant.name}`,
+            createdBy: `Telegram/${merchant.name}`,
+          });
+          await storage.createSecurityLog({
+            eventType: "ip_allowed",
+            ip: candidate,
+            action: "allowed_via_merchant_telegram",
+            details: `IP ajoutée par le marchand ${merchant.name} via Telegram — ${geo.city}, ${geo.country}`,
+          });
+          await ctx.reply("done ✅");
+          await alertAdminGroup(
+            `✅ *IP autorisée via Telegram marchand*\n\n` +
+            `👤 Marchand : *${merchant.name}*\n` +
+            `🌐 IP : \`${candidate}\`\n` +
+            `📍 ${geo.city}${geo.country ? ", " + geo.country : ""}\n` +
+            `🔌 ${geo.isp || "?"}`
+          );
+        } catch {
+          await ctx.reply("❌ Erreur lors de l'ajout. Contactez l'administrateur.");
+        }
         return;
       }
 
-      try {
-        await storage.addAllowedIp({
-          ipAddress: candidate,
-          userEmail: merchant.email,
-          role: "merchant",
-          country: geo.country,
-          city: geo.city || null,
-          note: `Ajouté via Telegram — ${merchant.name}`,
-          createdBy: `Telegram/${merchant.name}`,
-        });
-        await storage.createSecurityLog({
-          eventType: "ip_allowed",
-          ip: candidate,
-          action: "allowed_via_merchant_telegram",
-          details: `IP ajoutée par le marchand ${merchant.name} via Telegram — ${geo.city}, ${geo.country}`,
-        });
-        await ctx.reply("done ✅");
-        await alertAdminGroup(
-          `✅ *IP autorisée via Telegram marchand*\n\n` +
-          `👤 Marchand : *${merchant.name}*\n` +
-          `🌐 IP : \`${candidate}\`\n` +
-          `📍 ${geo.city}${geo.country ? ", " + geo.country : ""}\n` +
-          `🔌 ${geo.isp || "?"}`
-        );
-      } catch {
-        await ctx.reply("❌ Erreur lors de l'ajout. Contactez l'administrateur.");
+      // Message privé d'un utilisateur non lié
+      const merchant = await storage.getMerchantByTelegramChatId(chatId);
+      if (!merchant) {
+        await ctx.reply("🔒 此机器人仅供已获授权的 WestPay 商户使用。\n\n如果您是商户，请向您的管理员申请激活码。");
       }
-      return;
+    } catch (e: any) {
+      console.error("[TG] catch-all message error:", e?.message);
     }
-
-    const merchant = await storage.getMerchantByTelegramChatId(chatId);
-    if (!merchant) {
-      await ctx.reply("🔒 此机器人仅供已获授权的 WestPay 商户使用。\n\n如果您是商户，请向您的管理员申请激活码。");
-    }
+    return next();
   });
 
   console.log("[TELEGRAM] Bot initialise");
@@ -1638,11 +1660,28 @@ export function setupWebhook(app: Express, secret: string): void {
   if (!bot) return;
   const path = `/api/telegram/webhook/${secret}`;
   app.post(path, async (req: Request, res: Response) => {
+    // Répondre 200 IMMÉDIATEMENT — Telegram abandonne si la réponse tarde > 1s
     res.sendStatus(200);
     try {
-      await bot!.handleUpdate(req.body);
+      const body = req.body;
+      if (!body || typeof body !== "object") {
+        console.error("[TG-WEBHOOK] Body vide ou invalide — Content-Type incorrect ?", typeof body);
+        return;
+      }
+      // Log l'update brut pour diagnostic
+      const updateId = body.update_id;
+      const type = body.message ? "message"
+        : body.callback_query ? "callback_query"
+        : body.my_chat_member ? "my_chat_member"
+        : body.edited_message ? "edited_message"
+        : "unknown";
+      const chatId = body.message?.chat?.id || body.callback_query?.message?.chat?.id || "?";
+      const text = body.message?.text || body.callback_query?.data || "";
+      console.log(`[TG-WEBHOOK] update_id=${updateId} type=${type} chat=${chatId} text="${String(text).slice(0, 80)}"`);
+
+      await bot!.handleUpdate(body);
     } catch (err: any) {
-      console.error("[TELEGRAM] Erreur traitement update webhook:", err.message);
+      console.error("[TG-WEBHOOK] Erreur handleUpdate:", err.message);
     }
   });
   console.log(`[TELEGRAM] Route webhook enregistree : POST ${path}`);
