@@ -670,41 +670,54 @@ export async function registerRoutes(
         cleanIp.startsWith("192.168.") || cleanIp.startsWith("10.");
       if (isLocal) return res.json({ allowed: true, ip: cleanIp, reason: "local" });
 
-      // 1. Explicitly blocked → deny immediately
-      const blocked = await storage.isIpBlocked(cleanIp);
-      if (blocked) return res.json({ allowed: false, ip: cleanIp, reason: "blocked" });
+      // Pays supportés par la plateforme — noms anglais ET français (ip-api.com peut retourner l'un ou l'autre)
+      const PLATFORM_COUNTRIES = new Set([
+        // Afrique de l'Ouest
+        "Togo",
+        "Benin", "Bénin",
+        "Ivory Coast", "Côte d'Ivoire", "Cote d'Ivoire", "Cote Divoire",
+        "Senegal", "Sénégal",
+        "Mali",
+        "Burkina Faso",
+        "Guinea", "Guinée", "Guinee",
+        "Niger",
+        "Ghana", "Nigeria", "Mauritania", "Mauritanie",
+        "Sierra Leone", "Liberia", "Cape Verde", "Gambia", "Gambie", "Guinea-Bissau", "Guinée-Bissau",
+        // Afrique Centrale
+        "Cameroon", "Cameroun",
+        "Democratic Republic of the Congo", "DR Congo", "DRC", "Congo RDC", "Congo-Kinshasa",
+        "Republic of the Congo", "Congo", "Congo-Brazzaville", "Congo Brazzaville",
+        "Gabon",
+        "Chad", "Tchad",
+        "Central African Republic", "Centrafrique",
+        "Equatorial Guinea", "Guinée Équatoriale",
+        "São Tomé and Príncipe", "Angola", "Rwanda", "Burundi",
+      ]);
 
-      // 2. Admin-whitelisted → always allowed regardless of country
+      // 1. Geo check FIRST — si le pays est supporté, autoriser même si l'IP est dans blocked_ips
+      // (les FAI africains mobiles sont souvent faussement flaggés "datacenter" par ip-api.com)
+      const geo = await getGeoInfo(cleanIp).catch(() => null);
+      const country = geo?.country || "";
+
+      if (!country || PLATFORM_COUNTRIES.has(country)) {
+        // Pays supporté ou géoloc impossible → autorisé (bénéfice du doute)
+        return res.json({ allowed: true, ip: cleanIp, reason: "geo", country });
+      }
+
+      // 2. Pays non supporté — vérifier si explicitement blacklisté
+      const blocked = await storage.isIpBlocked(cleanIp);
+      if (blocked) return res.json({ allowed: false, ip: cleanIp, reason: "blocked", country });
+
+      // 3. Admin-whitelisted → always allowed regardless of country
       const whitelisted = await storage.isIpAllowed(rawIp);
-      // isIpAllowed returns true when table is empty (no restriction) OR ip is in list
-      // We need to know if it's *explicitly* whitelisted — check table count
       const { db: dbConn } = await import("./db");
-      const { allowedIps: allowedIpsTable } = await import("../shared/schema");
       const { sql: sqlTag } = await import("drizzle-orm");
       const countResult = await dbConn.execute(sqlTag`SELECT COUNT(*)::int AS cnt FROM allowed_ips`);
       const tableHasEntries = ((countResult.rows?.[0] as any)?.cnt ?? 0) > 0;
       const isExplicitlyWhitelisted = tableHasEntries && whitelisted;
       if (isExplicitlyWhitelisted) return res.json({ allowed: true, ip: cleanIp, reason: "whitelist" });
 
-      // 3. Geo check — allowed African/platform countries connect freely
-      const PLATFORM_COUNTRIES = new Set([
-        "Togo", "Benin", "Ivory Coast", "Côte d'Ivoire", "Senegal", "Mali",
-        "Burkina Faso", "Ghana", "Nigeria", "Guinea", "Niger", "Mauritania",
-        "Sierra Leone", "Liberia", "Cape Verde", "Gambia", "Guinea-Bissau",
-        "Cameroon", "Democratic Republic of the Congo", "Republic of the Congo",
-        "Congo", "Gabon", "Chad", "Central African Republic", "Equatorial Guinea",
-        "São Tomé and Príncipe", "Angola", "Rwanda", "Burundi",
-      ]);
-
-      const geo = await getGeoInfo(cleanIp).catch(() => null);
-      const country = geo?.country || "";
-
-      if (!country || PLATFORM_COUNTRIES.has(country)) {
-        // Country in platform OR geo failed (give benefit of doubt)
-        return res.json({ allowed: true, ip: cleanIp, reason: "geo", country });
-      }
-
-      // 4. Outside platform countries + not whitelisted → show IP verify page
+      // 4. Hors zone plateforme + non whitelisté → page de vérification IP
       return res.json({ allowed: false, ip: cleanIp, reason: "geo_blocked", country });
     } catch {
       res.json({ allowed: true, ip: "" });
@@ -1192,15 +1205,27 @@ export async function registerRoutes(
     return base;
   })();
 
-  // Pays autorisés pour la connexion marchand (Afrique de l'Ouest + Centrale uniquement)
+  // Pays autorisés pour la connexion marchand (noms anglais ET français — ip-api.com peut retourner l'un ou l'autre)
   const ALLOWED_MERCHANT_COUNTRIES = new Set([
     // Afrique de l'Ouest
-    "Togo", "Benin", "Ivory Coast", "Côte d'Ivoire", "Senegal", "Mali",
-    "Burkina Faso", "Ghana", "Nigeria", "Guinea", "Niger", "Mauritania",
-    "Sierra Leone", "Liberia", "Cape Verde", "Gambia", "Guinea-Bissau",
+    "Togo",
+    "Benin", "Bénin",
+    "Ivory Coast", "Côte d'Ivoire", "Cote d'Ivoire", "Cote Divoire",
+    "Senegal", "Sénégal",
+    "Mali",
+    "Burkina Faso",
+    "Guinea", "Guinée", "Guinee",
+    "Niger",
+    "Ghana", "Nigeria", "Mauritania", "Mauritanie",
+    "Sierra Leone", "Liberia", "Cape Verde", "Gambia", "Gambie", "Guinea-Bissau", "Guinée-Bissau",
     // Afrique Centrale
-    "Cameroon", "Democratic Republic of the Congo", "Republic of the Congo",
-    "Congo", "Gabon", "Chad", "Central African Republic", "Equatorial Guinea",
+    "Cameroon", "Cameroun",
+    "Democratic Republic of the Congo", "DR Congo", "DRC", "Congo RDC", "Congo-Kinshasa",
+    "Republic of the Congo", "Congo", "Congo-Brazzaville", "Congo Brazzaville",
+    "Gabon",
+    "Chad", "Tchad",
+    "Central African Republic", "Centrafrique",
+    "Equatorial Guinea", "Guinée Équatoriale",
     "São Tomé and Príncipe", "Angola", "Rwanda", "Burundi",
   ]);
 
@@ -1370,15 +1395,16 @@ export async function registerRoutes(
           if (geoCountry) geoLoginCache.set(clientIp, { country: geoCountry, ts: Date.now(), isHosting: isDatacenter } as any);
         }
 
-        // Bloquer les IPs de datacenter / VPS / serveurs cloud (jamais un vrai marchand)
-        if (isDatacenter) {
-          storage.addBlockedIp({ ipAddress: clientIp, reason: `IP datacenter/VPS: ${geoCountry || "inconnu"}`, blockedBy: "système" }).catch(() => {});
+        // Bloquer les IPs de datacenter / VPS — SAUF si le pays est supporté
+        // (les FAI mobiles africains sont souvent faussement flaggés "hosting" par ip-api.com)
+        if (isDatacenter && (!geoCountry || !ALLOWED_MERCHANT_COUNTRIES.has(geoCountry))) {
+          storage.addBlockedIp({ ipAddress: clientIp, reason: `IP datacenter/VPS hors zone: ${geoCountry || "inconnu"}`, blockedBy: "système" }).catch(() => {});
           storage.createSecurityLog({ eventType: "datacenter_blocked", ip: clientIp, userEmail: email, action: "hosting_ip_blocked", details: `Datacenter ${geoCountry || "?"} — ${ua.substring(0, 60)}` }).catch(() => {});
           return res.status(403).json({ message: "Accès refusé" });
         }
 
         if (geoCountry && !ALLOWED_MERCHANT_COUNTRIES.has(geoCountry)) {
-          // Auto-bloquer l'IP immédiatement + log + Telegram
+          // Auto-bloquer l'IP immédiatement + log + Telegram (pays non supporté)
           storage.addBlockedIp({ ipAddress: clientIp, reason: `Zone géographique non autorisée: ${geoCountry}`, blockedBy: "système" }).catch(() => {});
           storage.createSecurityLog({ eventType: "geo_blocked", ip: clientIp, userEmail: email, action: "country_not_allowed", details: `${geoCountry} — tentative login marchand` }).catch(() => {});
           notifyAdminCountryBlocked({ ip: clientIp, country: geoCountry, email }).catch(() => {});
