@@ -144,10 +144,33 @@ function getBlockedUsers(): { userId: string; count: number; lockedUntil: Date |
   return result;
 }
 
+// ─── Cache mémoire pour éviter les requêtes DB répétées à chaque update ──────
+// Sans ce cache, chaque message Telegram déclenche 3-5 requêtes DB (pool de 10
+// connexions Supabase → exhaustion rapide → bot figé).
+const _cache: {
+  knownGroups?: { value: string[]; expiresAt: number };
+  adminGroupId?: { value: string | undefined; expiresAt: number };
+  merchantByChat: Map<string, { value: any; expiresAt: number }>;
+} = { merchantByChat: new Map() };
+
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function _invalidateGroupCache() {
+  delete _cache.knownGroups;
+  delete _cache.adminGroupId;
+}
+
 // ─── Known Groups Registry ───────────────────────────────────────────────────
 async function getKnownGroups(): Promise<string[]> {
+  const now = Date.now();
+  if (_cache.knownGroups && now < _cache.knownGroups.expiresAt) {
+    return _cache.knownGroups.value;
+  }
   const raw = await storage.getSetting("telegram_known_groups");
-  try { return raw ? JSON.parse(raw) : []; } catch { return []; }
+  let value: string[];
+  try { value = raw ? JSON.parse(raw) : []; } catch { value = []; }
+  _cache.knownGroups = { value, expiresAt: now + CACHE_TTL_MS };
+  return value;
 }
 
 async function registerKnownGroup(chatId: string): Promise<void> {
@@ -156,6 +179,7 @@ async function registerKnownGroup(chatId: string): Promise<void> {
   if (!groups.includes(chatId)) {
     groups.push(chatId);
     await storage.setSetting("telegram_known_groups", JSON.stringify(groups));
+    _invalidateGroupCache(); // forcer rechargement au prochain appel
     console.log(`[TELEGRAM] Groupe enregistré: ${chatId} (total: ${groups.length})`);
   }
 }
@@ -165,6 +189,7 @@ async function removeKnownGroup(chatId: string): Promise<void> {
   const filtered = groups.filter(id => id !== chatId);
   if (filtered.length !== groups.length) {
     await storage.setSetting("telegram_known_groups", JSON.stringify(filtered));
+    _invalidateGroupCache();
   }
 }
 
@@ -196,7 +221,12 @@ export async function syncAllKnownGroups(): Promise<{ total: number; added: numb
 
 // ─── Merchant group helper ───────────────────────────────────────────────────
 async function getMerchantForGroup(chatId: string) {
-  return storage.getMerchantByTelegramChatId(chatId);
+  const now = Date.now();
+  const cached = _cache.merchantByChat.get(chatId);
+  if (cached && now < cached.expiresAt) return cached.value;
+  const merchant = await storage.getMerchantByTelegramChatId(chatId);
+  _cache.merchantByChat.set(chatId, { value: merchant, expiresAt: now + CACHE_TTL_MS });
+  return merchant;
 }
 
 const MERCHANT_AIDE_MSG = (name: string) =>
@@ -209,9 +239,15 @@ const MERCHANT_AIDE_MSG = (name: string) =>
 
 // ─── Security helpers ─────────────────────────────────────────────────────────
 async function getAdminGroupId(): Promise<string | undefined> {
+  const now = Date.now();
+  if (_cache.adminGroupId && now < _cache.adminGroupId.expiresAt) {
+    return _cache.adminGroupId.value;
+  }
   // Priorité : DB → env var TELEGRAM_ADMIN_GROUP_ID
   const fromDb = await storage.getSetting("telegram_group_id");
-  return fromDb || process.env.TELEGRAM_ADMIN_GROUP_ID || undefined;
+  const value = fromDb || process.env.TELEGRAM_ADMIN_GROUP_ID || undefined;
+  _cache.adminGroupId = { value, expiresAt: now + CACHE_TTL_MS };
+  return value;
 }
 
 async function isAdminGroup(chatId: string): Promise<boolean> {
@@ -532,6 +568,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     await storage.updateMerchantTelegramChatId(ac.merchantId, chatId);
     await storage.markTelegramActivationCodeUsed(code);
     await registerKnownGroup(chatId);
+    // Invalider le cache merchant pour ce chatId (la liaison vient de changer)
+    _cache.merchantByChat.delete(chatId);
     resetAttempts(userId);
 
     const merchant = await storage.getMerchantById(ac.merchantId);

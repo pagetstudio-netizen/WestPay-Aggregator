@@ -13,6 +13,12 @@ export const pool = new Pool({
     ? false
     : { rejectUnauthorized: false },
   max: 10,
+  // Timeout d'acquisition d'une connexion depuis le pool (évite les hangs infinis)
+  connectionTimeoutMillis: 8000,
+  // Timeout d'inactivité — libère les connexions idle après 30s
+  idleTimeoutMillis: 30000,
+  // Statement timeout côté serveur Postgres — tue toute requête > 15s
+  statement_timeout: 15000,
 });
 
 export const db = drizzle(pool, { schema });
