@@ -2295,7 +2295,7 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Google Authenticator non configuré sur votre compte" });
       }
       const totpSecretDecrypted = decryptTotpSecret(adminRecord.totpSecret);
-      const totpValid = totpVerifySync(totpCode.trim(), totpSecretDecrypted);
+      const totpValid = totpVerifySync({ token: totpCode.trim(), secret: totpSecretDecrypted, strategy: "totp" });
       if (!totpValid) {
         const clientIp = extractIp(req);
         storage.createSecurityLog({ eventType: "blocked_access", ip: clientIp, userEmail: adminUser.email, action: "create_merchant_totp_invalid", details: "Code TOTP invalide lors de la tentative de création marchand" }).catch(() => {});
