@@ -61,7 +61,7 @@ export interface IStorage {
   updateMerchantCountryApiKey(id: number, apiKey: string): Promise<void>;
   updateMerchantCountryActive(id: number, active: boolean): Promise<void>;
 
-  getTransactions(merchantId?: number): Promise<Transaction[]>;
+  getTransactions(merchantId?: number, opts?: { dateFrom?: Date; dateTo?: Date; limit?: number }): Promise<Transaction[]>;
   getTransactionByTxId(txId: string): Promise<Transaction | undefined>;
   createTransaction(tx: InsertTransaction): Promise<Transaction>;
 

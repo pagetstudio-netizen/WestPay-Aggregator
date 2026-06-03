@@ -2564,14 +2564,29 @@ export async function registerRoutes(
       }
 
       const hasDateFilter = !!dateFrom || !!dateTo;
-      const txLimit = hasDateFilter ? undefined : 400;
+      const txLimit = hasDateFilter ? undefined : 1000;
 
       const [txs, wds, wts, merchantsList, pendingPays] = await Promise.all([
-        storage.getTransactions(undefined, { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined, limit: txLimit }).catch(() => []),
-        storage.getWithdrawals().catch(() => []),
-        storage.getWalletTransfers().catch(() => []),
-        storage.getMerchants().catch(() => []),
-        storage.getPendingPayments().catch(() => []),
+        storage.getTransactions(undefined, { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined, limit: txLimit }).catch((err) => {
+          console.error("[ADMIN TRANSACTIONS] Erreur getTransactions:", err?.message || err);
+          return [] as any[];
+        }),
+        storage.getWithdrawals().catch((err) => {
+          console.error("[ADMIN TRANSACTIONS] Erreur getWithdrawals:", err?.message || err);
+          return [] as any[];
+        }),
+        storage.getWalletTransfers().catch((err) => {
+          console.error("[ADMIN TRANSACTIONS] Erreur getWalletTransfers:", err?.message || err);
+          return [] as any[];
+        }),
+        storage.getMerchants().catch((err) => {
+          console.error("[ADMIN TRANSACTIONS] Erreur getMerchants:", err?.message || err);
+          return [] as any[];
+        }),
+        storage.getPendingPayments().catch((err) => {
+          console.error("[ADMIN TRANSACTIONS] Erreur getPendingPayments:", err?.message || err);
+          return [] as any[];
+        }),
       ]);
 
       const merchantMap = new Map(merchantsList.map(m => [m.id, m.name]));
