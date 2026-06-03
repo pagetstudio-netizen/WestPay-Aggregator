@@ -345,17 +345,28 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         console.log(`[TELEGRAM] Groupes connus mis à jour : ${updated.length} groupe(s)`);
       }
 
-      // ── 3. Message de test au démarrage — une seule fois par lancement serveur
+      // ── 3. Message de démarrage — cooldown 1h en base pour éviter le spam lors des redémarrages fréquents
       if (!startupTestSent) {
         startupTestSent = true;
-        const now = new Date().toLocaleString("fr-FR", { timeZone: "Africa/Abidjan", hour12: false });
-        await bot!.telegram.sendMessage(
-          HARDCODED_ADMIN_GROUP_ID,
-          `✅ WestPay démarré — ${now}`,
-          { parse_mode: "Markdown" }
-        ).catch((err: any) => {
-          console.error(`[TELEGRAM] Impossible d'envoyer le message de démarrage : ${err.message}`);
-        });
+        const COOLDOWN_MS = 60 * 60 * 1000; // 1 heure minimum entre deux notifications
+        try {
+          const lastSentRaw = await storage.getSetting("telegram_startup_last_sent");
+          const lastSent = lastSentRaw ? parseInt(lastSentRaw, 10) : 0;
+          const elapsed = Date.now() - lastSent;
+          if (elapsed >= COOLDOWN_MS) {
+            await storage.setSetting("telegram_startup_last_sent", String(Date.now()));
+            const now = new Date().toLocaleString("fr-FR", { timeZone: "Africa/Abidjan", hour12: false });
+            await bot!.telegram.sendMessage(
+              HARDCODED_ADMIN_GROUP_ID,
+              `✅ WestPay démarré — ${now}`,
+              { parse_mode: "Markdown" }
+            ).catch((err: any) => {
+              console.error(`[TELEGRAM] Impossible d'envoyer le message de démarrage : ${err.message}`);
+            });
+          }
+        } catch {
+          // Si la DB est inaccessible, on n'envoie pas plutôt que de spammer
+        }
       }
     } catch (err) {
       console.error("[TELEGRAM] Erreur init groupes:", (err as any).message);
