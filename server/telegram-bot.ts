@@ -300,6 +300,19 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
 
   bot = new Telegraf(token);
 
+  // ─── Gestionnaire d'erreurs global — empêche le bot de se bloquer silencieusement ──
+  // Sans ce handler, une erreur non capturée dans un command/middleware arrête le traitement
+  // de tous les updates suivants sans aucun message d'erreur visible.
+  bot.catch((err: any, ctx: any) => {
+    const chatId = ctx?.chat?.id || ctx?.from?.id || "?";
+    const updateType = ctx?.updateType || "unknown";
+    console.error(`[TELEGRAM] Erreur non capturée (update: ${updateType}, chat: ${chatId}):`, err?.message || err);
+    // Tenter d'informer l'utilisateur si possible
+    if (ctx?.reply) {
+      ctx.reply("❌ Une erreur interne s'est produite. Veuillez réessayer.").catch(() => {});
+    }
+  });
+
   // ─── Middleware global : auto-enregistrer tout groupe qui envoie un update ─
   // Cela capture les groupes où le bot est déjà présent mais pas encore dans le registre
   bot.use(async (ctx, next) => {
@@ -1639,20 +1652,40 @@ export async function registerWebhookUrl(webhookUrl: string): Promise<void> {
   console.error(`[TELEGRAM] Echec definitif enregistrement webhook — bot en mode reception uniquement`);
 }
 
+let _pollingActive = false;
+
 export async function startPolling(): Promise<void> {
   if (!bot) return;
-  try {
+  if (_pollingActive) return; // Éviter les doublons
+  _pollingActive = true;
+
+  const launchWithRecovery = (attempt = 1) => {
+    if (!bot) { _pollingActive = false; return; }
     // Ne PAS appeler deleteWebhook() ici — si un webhook de production (Plesk) est actif,
     // le supprimer couperait la réception des commandes en production.
     // bot.launch() échouera avec une 409 si un webhook est actif, ce qui est ignoré ci-dessous.
     bot.launch({ dropPendingUpdates: false }).catch((err: any) => {
-      console.warn("[TELEGRAM] Polling interrompu (conflit prod/dev — ignoré):", err.message);
+      if (err?.message?.includes("409") || err?.message?.includes("Conflict")) {
+        // Conflit prod/dev — webhook actif en production, polling ignoré silencieusement
+        console.warn("[TELEGRAM] Polling ignoré (webhook prod actif — conflit 409)");
+        _pollingActive = false;
+        return;
+      }
+      // Erreur réseau ou autre — redémarrage automatique avec backoff exponentiel
+      const delay = Math.min(5000 * attempt, 60000); // max 60s
+      console.warn(`[TELEGRAM] Polling interrompu (tentative ${attempt}) — reprise dans ${delay / 1000}s:`, err.message);
+      setTimeout(() => launchWithRecovery(attempt + 1), delay);
     });
+  };
+
+  try {
     console.log("[TELEGRAM] Bot demarre en mode polling (developpement)");
-    process.once("SIGINT", () => bot?.stop("SIGINT"));
-    process.once("SIGTERM", () => bot?.stop("SIGTERM"));
+    launchWithRecovery();
+    process.once("SIGINT", () => { bot?.stop("SIGINT"); _pollingActive = false; });
+    process.once("SIGTERM", () => { bot?.stop("SIGTERM"); _pollingActive = false; });
   } catch (err: any) {
     console.error("[TELEGRAM] Erreur demarrage polling:", err.message);
+    _pollingActive = false;
   }
 }
 

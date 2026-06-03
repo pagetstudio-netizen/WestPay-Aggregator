@@ -293,7 +293,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getMerchantByEmail(email: string): Promise<Merchant | undefined> {
-    const [merchant] = await db.select().from(merchants).where(eq(merchants.email, email));
+    const [merchant] = await db.select().from(merchants).where(
+      sql`LOWER(${merchants.email}) = LOWER(${email.trim()})`
+    );
     return merchant;
   }
 

@@ -27,15 +27,18 @@ const COMPROMISED_MERCHANT_EMAILS = [
 async function enforceCompromisedAccountSuspensions(): Promise<void> {
   // One-time API key rotation flag — only executed once per environment
   const rotationDone = await storage.getSetting("incident_task12_api_keys_rotated");
+  // One-time initial suspension flag — after this runs once, admin can freely manage accounts
+  const suspensionDone = await storage.getSetting("incident_task12_initial_suspension_done");
 
   for (const email of COMPROMISED_MERCHANT_EMAILS) {
     const merchant = await storage.getMerchantByEmail(email);
     if (!merchant) continue;
 
-    // Always keep suspended
-    if (!merchant.suspended) {
+    // Suspend only on FIRST run — after that, respect admin's manual decisions
+    // If admin explicitly re-enables an account, that decision is preserved across restarts
+    if (!suspensionDone && !merchant.suspended) {
       await storage.updateMerchant(merchant.id, { suspended: true });
-      console.log(`[SECURITY] Compte compromis re-suspendu: ${email} (${merchant.slug})`);
+      console.log(`[SECURITY] Compte compromis suspendu (initialisation): ${email} (${merchant.slug})`);
     }
 
     // One-time: invalidate password hash so account cannot log in even if un-suspended without reset
@@ -59,18 +62,28 @@ async function enforceCompromisedAccountSuspensions(): Promise<void> {
     await storage.setSetting("incident_task12_api_keys_rotated", new Date().toISOString());
     console.log("[SECURITY] Rotation clés incident Task#12 marquée comme complète");
   }
+  // Mark initial suspension as done — admin can now freely re-enable accounts
+  if (!suspensionDone) {
+    await storage.setSetting("incident_task12_initial_suspension_done", new Date().toISOString());
+    console.log("[SECURITY] Suspension initiale Task#12 marquée comme complète — décisions admin préservées désormais");
+  }
 }
 
 export async function seedDatabase() {
-  // Enforce suspension of compromised accounts on every startup
+  // Enforce suspension of compromised accounts (one-time enforcement, then admin can manage freely)
   await enforceCompromisedAccountSuspensions().catch(err =>
     console.error("[SECURITY] Erreur vérification comptes compromis:", err.message)
   );
 
-  // Compte test toujours présent (dev + production)
-  await ensureTestMerchantExists().catch(err =>
-    console.error("[SEED] Erreur création compte test:", err.message)
-  );
+  // Compte test : uniquement en développement OU si le flag d'activation est posé en DB
+  // En production (Plesk), ce compte n'est pas recréé automatiquement après suppression
+  const isDevMode = process.env.NODE_ENV !== "production";
+  const testAccountEnabled = await storage.getSetting("enable_test_merchant_in_production").catch(() => null);
+  if (isDevMode || testAccountEnabled === "true") {
+    await ensureTestMerchantExists().catch(err =>
+      console.error("[SEED] Erreur création compte test:", err.message)
+    );
+  }
 
   // Protection permanente : ne JAMAIS recréer de compte admin automatiquement
   // Ce flag est posé une fois en DB et ne peut pas être retiré par un redémarrage
