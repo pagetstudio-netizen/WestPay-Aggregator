@@ -644,6 +644,32 @@ class DialogErrorBoundary extends Component<{ onClose: () => void; children: Rea
   }
 }
 
+class PanelErrorBoundary extends Component<{ label?: string; children: ReactNode }, { hasError: boolean; errorMsg: string }> {
+  constructor(props: { label?: string; children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, errorMsg: "" };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, errorMsg: error.message };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error(`[Panel:${this.props.label}] Crash:`, error.message, info.componentStack);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
+          <AlertTriangle className="w-8 h-8 text-destructive" />
+          <p className="text-sm font-medium text-destructive">Erreur d'affichage</p>
+          <p className="text-xs text-muted-foreground max-w-sm">{this.state.errorMsg || "Une erreur inattendue s'est produite."}</p>
+          <Button variant="outline" size="sm" onClick={() => this.setState({ hasError: false, errorMsg: "" })}>Réessayer</Button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; onClose: () => void }) {
   const { token } = useAuth();
   const { toast } = useToast();
@@ -1124,6 +1150,7 @@ function AdminPaymentLinksPanel() {
 }
 
 function MerchantsPanel() {
+  const { token } = useAuth();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const [searchTerm, setSearchTerm] = useState("");
@@ -8822,7 +8849,7 @@ export default function AdminDashboard() {
           <main className="flex-1 overflow-auto p-4 md:p-6">
             {activeTab === "overview" && <OverviewPanel />}
             {activeTab === "analytics" && <AnalyticsPanel />}
-            {activeTab === "merchants" && <MerchantsPanel />}
+            {activeTab === "merchants" && <PanelErrorBoundary label="merchants"><MerchantsPanel /></PanelErrorBoundary>}
             {activeTab === "paymentlinks" && <AdminPaymentLinksPanel />}
             {activeTab === "transactions" && <TransactionsPanel />}
             {activeTab === "countries" && <CountriesPanel />}
