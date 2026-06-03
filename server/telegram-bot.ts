@@ -1657,34 +1657,24 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
 }
 
 export function setupWebhook(app: Express, secret: string): void {
-  if (!bot) return;
-  const path = `/api/telegram/webhook/${secret}`;
-  app.post(path, async (req: Request, res: Response) => {
-    // Répondre 200 IMMÉDIATEMENT — Telegram abandonne si la réponse tarde > 1s
-    res.sendStatus(200);
-    try {
-      const body = req.body;
-      if (!body || typeof body !== "object") {
-        console.error("[TG-WEBHOOK] Body vide ou invalide — Content-Type incorrect ?", typeof body);
-        return;
-      }
-      // Log l'update brut pour diagnostic
-      const updateId = body.update_id;
-      const type = body.message ? "message"
-        : body.callback_query ? "callback_query"
-        : body.my_chat_member ? "my_chat_member"
-        : body.edited_message ? "edited_message"
-        : "unknown";
-      const chatId = body.message?.chat?.id || body.callback_query?.message?.chat?.id || "?";
-      const text = body.message?.text || body.callback_query?.data || "";
-      console.log(`[TG-WEBHOOK] update_id=${updateId} type=${type} chat=${chatId} text="${String(text).slice(0, 80)}"`);
+  // Route désormais enregistrée de façon permanente dans routes.ts via registerTelegramWebhookRoute().
+  // Cette fonction est conservée pour compatibilité (appelée depuis index.ts et refresh-webhook).
+  console.log(`[TELEGRAM] Webhook actif sur route fixe /api/telegram/webhook/:secret (secret vérifié en interne)`);
+}
 
-      await bot!.handleUpdate(body);
-    } catch (err: any) {
-      console.error("[TG-WEBHOOK] Erreur handleUpdate:", err.message);
-    }
-  });
-  console.log(`[TELEGRAM] Route webhook enregistree : POST ${path}`);
+export function handleWebhookUpdate(secret: string, body: any): boolean {
+  if (!bot) return false;
+  const updateId = body.update_id;
+  const type = body.message ? "message"
+    : body.callback_query ? "callback_query"
+    : body.my_chat_member ? "my_chat_member"
+    : body.edited_message ? "edited_message"
+    : "unknown";
+  const chatId = body.message?.chat?.id || body.callback_query?.message?.chat?.id || "?";
+  const text = body.message?.text || body.callback_query?.data || "";
+  console.log(`[TG-WEBHOOK] update_id=${updateId} type=${type} chat=${chatId} text="${String(text).slice(0, 80)}"`);
+  bot.handleUpdate(body).catch((err: any) => console.error("[TG-WEBHOOK] Erreur handleUpdate:", err.message));
+  return true;
 }
 
 async function tryRegisterWebhook(webhookUrl: string): Promise<boolean> {

@@ -610,6 +610,35 @@ export async function registerRoutes(
     res.type("text/plain").send("User-agent: *\nDisallow: /\n");
   });
 
+  // ── Route Telegram webhook PERMANENTE ─────────────────────────────────────────────────
+  // Enregistrée ici (avant tout autre middleware) pour éviter les fenêtres de 404 pendant
+  // les redémarrages Plesk. Le secret est vérifié dynamiquement depuis la DB à chaque appel.
+  app.post("/api/telegram/webhook/:secret", async (req: Request, res: Response) => {
+    // Répondre 200 immédiatement — Telegram abandonne si la réponse tarde > 1s
+    res.sendStatus(200);
+    try {
+      const { secret } = req.params;
+      // Vérifier le secret en DB
+      const storedSecret = await storage.getSetting("telegram_webhook_secret");
+      if (!storedSecret || secret !== storedSecret) {
+        console.warn(`[TG-WEBHOOK] Secret invalide reçu: "${secret?.slice(0, 8)}..."`);
+        return;
+      }
+      const body = req.body;
+      if (!body || typeof body !== "object") {
+        console.error("[TG-WEBHOOK] Body vide ou invalide — Content-Type incorrect ?", typeof body);
+        return;
+      }
+      const { handleWebhookUpdate } = await import("./telegram-bot");
+      const handled = handleWebhookUpdate(secret, body);
+      if (!handled) {
+        console.warn("[TG-WEBHOOK] Bot non initialisé — update ignoré (update_id=" + body.update_id + ")");
+      }
+    } catch (err: any) {
+      console.error("[TG-WEBHOOK] Erreur:", err.message);
+    }
+  });
+
   // ── Blocage immédiat des chemins d'attaque courants des bots et scanners ──────────────
   // Ces chemins n'existent pas dans l'app — seuls des bots/scanners les tentent.
   // L'IP est auto-blacklistée dès la première tentative.
