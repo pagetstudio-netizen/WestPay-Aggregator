@@ -3004,7 +3004,7 @@ export async function registerRoutes(
     try {
       const merchant = await storage.getMerchantById((req as any).user.id);
       if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
-      res.json({ id: merchant.id, name: merchant.name, email: merchant.email, slug: merchant.slug, feeExempt: merchant.feeExempt });
+      res.json({ id: merchant.id, name: merchant.name, email: merchant.email, slug: merchant.slug, feeExempt: merchant.feeExempt, withdrawalsDisabled: !!merchant.withdrawalsDisabled });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -6301,6 +6301,45 @@ export async function registerRoutes(
         return res.status(503).json({ message: "Les retraits sont temporairement indisponibles. Veuillez réessayer plus tard.", withdrawalsDisabled: true });
       }
 
+      // ── Vérification désactivation par marchand + suivi tentatives ────────────
+      const merchantRecord = await storage.getMerchantById(merchantId);
+      if (merchantRecord?.withdrawalsDisabled) {
+        const now = Date.now();
+        const retryKey = `wd_retry_${merchantId}`;
+        let retryData: { count: number; blockedUntil?: number } = { count: 0 };
+        const existing = await storage.getSetting(retryKey);
+        if (existing) {
+          try { retryData = JSON.parse(existing); } catch { retryData = { count: 0 }; }
+        }
+        if (retryData.blockedUntil && now < retryData.blockedUntil) {
+          const remaining = Math.ceil((retryData.blockedUntil - now) / 60000);
+          return res.status(503).json({
+            message: `Trop de tentatives. Les retraits sont bloqués sur votre compte. Réessayez dans ${remaining} minute(s).`,
+            withdrawalsDisabled: true,
+            blocked: true,
+            blockedUntil: retryData.blockedUntil,
+          });
+        }
+        const newCount = (retryData.count || 0) + 1;
+        if (newCount >= 3) {
+          const blockedUntil = now + 3 * 60 * 60 * 1000;
+          await storage.setSetting(retryKey, JSON.stringify({ count: newCount, blockedUntil }));
+          return res.status(503).json({
+            message: "Trop de tentatives. Les retraits sont bloqués sur votre compte. Réessayez dans 3 heures.",
+            withdrawalsDisabled: true,
+            blocked: true,
+            blockedUntil,
+          });
+        }
+        await storage.setSetting(retryKey, JSON.stringify({ count: newCount }));
+        return res.status(503).json({
+          message: "Les retraits sont désactivés sur votre compte. Veuillez patienter et réessayer dans quelques minutes.",
+          withdrawalsDisabled: true,
+          retryCount: newCount,
+          retriesLeft: 3 - newCount,
+        });
+      }
+
       const mc = await storage.getMerchantCountryById(Number(merchantCountryId));
       if (!mc || mc.merchantId !== merchantId) return res.status(403).json({ message: "Wallet introuvable" });
       if (amount <= 0) return res.status(400).json({ message: "Montant invalide" });
@@ -6780,6 +6819,21 @@ export async function registerRoutes(
       if (typeof feeExempt !== "boolean") return res.status(400).json({ message: "Valeur invalide" });
       await storage.updateMerchant(id, { feeExempt });
       res.json({ success: true, feeExempt });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.patch("/api/admin/merchants/:id/withdrawals-disabled", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { withdrawalsDisabled } = req.body;
+      if (typeof withdrawalsDisabled !== "boolean") return res.status(400).json({ message: "Valeur invalide" });
+      await storage.updateMerchant(id, { withdrawalsDisabled });
+      if (!withdrawalsDisabled) {
+        await storage.setSetting(`wd_retry_${id}`, JSON.stringify({ count: 0 }));
+      }
+      res.json({ success: true, withdrawalsDisabled });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

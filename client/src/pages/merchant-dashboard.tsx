@@ -1571,14 +1571,15 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
   const { toast } = useToast();
   const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
   const { data: withdrawalList = [], isLoading: wdLoading } = useMerchantFetch("/api/merchant/withdrawals", ["/api/merchant/withdrawals"], token);
-  const { data: me } = useMerchantFetch("/api/merchant/me", ["/api/merchant/me"], token);
+  const { data: me, refetch: refetchMe } = useMerchantFetch("/api/merchant/me", ["/api/merchant/me"], token);
   const feeExempt = !!(me as any)?.feeExempt;
+  const merchantWithdrawalsDisabled = !!(me as any)?.withdrawalsDisabled;
   const { data: platformFlags } = useQuery<{ withdrawalsDisabled: boolean; withdrawalMinAmount: number }>({
     queryKey: ["/api/public/platform-flags"],
     queryFn: () => fetch("/api/public/platform-flags").then(r => r.json()),
     refetchInterval: 60000,
   });
-  const withdrawalsDisabled = !!platformFlags?.withdrawalsDisabled;
+  const withdrawalsDisabled = !!platformFlags?.withdrawalsDisabled || merchantWithdrawalsDisabled;
   const withdrawalMinAmount = platformFlags?.withdrawalMinAmount ?? 200;
 
   const [selectedWalletId, setSelectedWalletId] = useState("");
@@ -1586,6 +1587,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
   const [amount, setAmount] = useState("");
   const [phone, setPhone] = useState("");
   const [recipientName, setRecipientName] = useState("");
+  const [retryState, setRetryState] = useState<{ retriesLeft?: number; blocked?: boolean; blockedUntil?: number } | null>(null);
 
   const activeWallets = (balance as MerchantCountry[]).filter(w => w.active);
   const selectedWallet = activeWallets.find(w => String(w.id) === selectedWalletId);
@@ -1614,20 +1616,33 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(data),
       });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
-      return res.json();
+      const d = await res.json();
+      if (!res.ok) {
+        const err: any = new Error(d.message || "Erreur");
+        err.data = d;
+        throw err;
+      }
+      return d;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/withdrawals"] });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/balance"] });
       setAmount(""); setPhone(""); setSelectedOperator(""); setRecipientName("");
+      setRetryState(null);
       toast({ title: "Demande soumise", description: "Votre demande de reversement est en cours de traitement." });
     },
-    onError: (err: any) => toast({
-      title: "Retrait non abouti",
-      description: err?.message || "Une erreur est survenue. Votre solde a été restitué.",
-      variant: "destructive",
-    }),
+    onError: (err: any) => {
+      const d = err?.data || {};
+      if (d.withdrawalsDisabled) {
+        setRetryState({ retriesLeft: d.retriesLeft, blocked: d.blocked, blockedUntil: d.blockedUntil });
+        refetchMe();
+      }
+      toast({
+        title: "Retrait non abouti",
+        description: err?.message || "Une erreur est survenue. Votre solde a été restitué.",
+        variant: "destructive",
+      });
+    },
   });
 
   const handleSubmit = (e: { preventDefault: () => void }) => {
@@ -1794,9 +1809,29 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
               {withdrawalsDisabled && operatorList.length > 0 && (
                 <div className="mt-3 rounded-xl p-4 flex items-start gap-3" style={{ background: "#fff0f0", border: "1.5px solid #ffb3b3" }}>
                   <span className="text-xl mt-0.5">🚫</span>
-                  <div>
-                    <p className="text-sm font-bold" style={{ color: "#c0392b" }}>Retrait non disponible</p>
-                    <p className="text-xs mt-0.5" style={{ color: "#922b21" }}>Les retraits sont temporairement suspendus. Veuillez réessayer ultérieurement ou contacter le support.</p>
+                  <div className="min-w-0 flex-1">
+                    {retryState?.blocked ? (
+                      <>
+                        <p className="text-sm font-bold" style={{ color: "#c0392b" }}>Compte temporairement bloqué</p>
+                        <p className="text-xs mt-0.5" style={{ color: "#922b21" }}>
+                          Trop de tentatives détectées. Les retraits sont suspendus sur votre compte pendant 3 heures.
+                          {retryState.blockedUntil && ` Réessayez après ${new Date(retryState.blockedUntil).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}.`}
+                        </p>
+                      </>
+                    ) : retryState?.retriesLeft !== undefined ? (
+                      <>
+                        <p className="text-sm font-bold" style={{ color: "#c0392b" }}>Retrait non disponible</p>
+                        <p className="text-xs mt-0.5" style={{ color: "#922b21" }}>
+                          Les retraits sont désactivés sur votre compte. Veuillez patienter et réessayer.
+                          Attention : encore {retryState.retriesLeft} tentative(s) avant blocage de 3 heures.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm font-bold" style={{ color: "#c0392b" }}>Retrait non disponible</p>
+                        <p className="text-xs mt-0.5" style={{ color: "#922b21" }}>Les retraits sont temporairement suspendus. Veuillez réessayer ultérieurement ou contacter le support.</p>
+                      </>
+                    )}
                   </div>
                 </div>
               )}

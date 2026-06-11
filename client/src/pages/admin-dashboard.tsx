@@ -1329,6 +1329,24 @@ function MerchantsPanel() {
                       </SelectContent>
                     </Select>
                     <Button
+                      variant={merchant.withdrawalsDisabled ? "destructive" : "outline"}
+                      size="sm"
+                      className="h-8 text-xs gap-1"
+                      title={merchant.withdrawalsDisabled ? "Réactiver les retraits" : "Bloquer les retraits"}
+                      onClick={async () => {
+                        const newVal = !merchant.withdrawalsDisabled;
+                        await fetch(`/api/admin/merchants/${merchant.id}/withdrawals-disabled`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                          body: JSON.stringify({ withdrawalsDisabled: newVal }),
+                        });
+                        queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
+                      }}
+                      data-testid={`button-toggle-withdrawals-${merchant.id}`}
+                    >
+                      {merchant.withdrawalsDisabled ? <><Ban className="w-3 h-3" />Retraits bloqués</> : <><Download className="w-3 h-3" />Retraits actifs</>}
+                    </Button>
+                    <Button
                       variant="ghost"
                       size="icon"
                       onClick={() => suspendMutation.mutate({ id: merchant.id, suspended: !merchant.suspended })}
@@ -4266,6 +4284,24 @@ function AdminWithdrawalsPanel() {
                             </div>
                           )}
                           {wd.adminNote && <p className="text-xs italic text-muted-foreground">Note : {wd.adminNote}</p>}
+                          {wd.status === "pending" && (
+                            <div className="flex gap-2 pt-1 border-t border-muted">
+                              {wd.omnipayRef ? (
+                                <div className="flex-1 text-xs text-yellow-600 border border-yellow-400 rounded px-2 py-1 flex items-center gap-1.5">
+                                  <Clock className="w-3 h-3 shrink-0" />En cours chez prestataire — attente confirmation
+                                </div>
+                              ) : (
+                                <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-7 text-xs flex-1"
+                                  onClick={() => openAction(wd, "approve")} data-testid={`button-approve-inline-${wd.id}`}>
+                                  <CheckCircle className="w-3 h-3" />Valider
+                                </Button>
+                              )}
+                              <Button size="sm" variant="destructive" className="gap-1 h-7 text-xs flex-1"
+                                onClick={() => openAction(wd, "reject")} data-testid={`button-reject-inline-${wd.id}`}>
+                                <XCircle className="w-3 h-3" />Rejeter
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       );
                     })}

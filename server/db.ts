@@ -425,6 +425,7 @@ export async function runMigrations() {
       ALTER TABLE payment_links ADD COLUMN IF NOT EXISTS notification_email text;
       ALTER TABLE admins ADD COLUMN IF NOT EXISTS totp_secret text;
       ALTER TABLE admins ADD COLUMN IF NOT EXISTS totp_enabled boolean NOT NULL DEFAULT false;
+      ALTER TABLE merchants ADD COLUMN IF NOT EXISTS withdrawals_disabled boolean NOT NULL DEFAULT false;
     `);
 
     // ── Merchant login OTP table ────────────────────────────────────────────────
