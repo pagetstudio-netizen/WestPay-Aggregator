@@ -1374,7 +1374,8 @@ function MerchantsPanel() {
 }
 
 function TransactionsPanel() {
-  const { toast } = useToast();
+  const { toast, } = useToast();
+  const { token } = useAuth();
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -1392,6 +1393,26 @@ function TransactionsPanel() {
   }, [dateFilter, startDate, endDate]);
 
   const { data: transactions = [], isLoading, refetch, isError, error } = useAdminFetch(apiUrl, ["/api/admin/transactions", dateFilter, startDate, endDate]);
+
+  const validateTxMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/admin/transactions/${id}/validate`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/transactions"] }); toast({ title: "Transaction validée" }); },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
+
+  const rejectTxMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/admin/transactions/${id}/reject`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/transactions"] }); toast({ title: "Transaction rejetée" }); },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
 
   if (isLoading) return <LoadingSkeleton />;
 
@@ -1609,9 +1630,27 @@ function TransactionsPanel() {
                           )}
                           <p className="text-xs text-muted-foreground mt-1">{new Date(tx.createdAt).toLocaleString("fr-FR")}</p>
                         </div>
-                        <div className="text-right shrink-0">
+                        <div className="flex flex-col items-end gap-1 shrink-0">
                           <p className={`text-lg font-bold ${isFailed ? "text-destructive" : "text-foreground"}`}>{tx.amount?.toLocaleString("fr-FR")}</p>
                           <p className="text-xs text-muted-foreground">F CFA</p>
+                          <div className="flex gap-1 mt-1">
+                            {tx.status !== "confirmed" && tx.status !== "completed" && tx.status !== "success" && (
+                              <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white gap-1"
+                                disabled={validateTxMutation.isPending}
+                                onClick={() => { if (confirm("Valider cette transaction manuellement ?")) validateTxMutation.mutate(tx.id); }}
+                                data-testid={`button-validate-tx-${tx.id}`}>
+                                <CheckCircle className="w-3 h-3" />Valider
+                              </Button>
+                            )}
+                            {tx.status !== "rejected" && tx.status !== "failed" && (
+                              <Button size="sm" variant="destructive" className="h-7 text-xs gap-1"
+                                disabled={rejectTxMutation.isPending}
+                                onClick={() => { if (confirm("Rejeter cette transaction manuellement ?")) rejectTxMutation.mutate(tx.id); }}
+                                data-testid={`button-reject-tx-${tx.id}`}>
+                                <XCircle className="w-3 h-3" />Rejeter
+                              </Button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -3994,13 +4033,17 @@ function AdminWithdrawalsPanel() {
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [selectedWd, setSelectedWd] = useState<any | null>(null);
-  const [wdAction, setWdAction] = useState<"approve" | "reject">("approve");
+  const [wdAction, setWdAction] = useState<"approve" | "reject" | "force-validate" | "force-reject">("approve");
   const [note, setNote] = useState("");
   const [searchWd, setSearchWd] = useState("");
   const [websiteFilterWd, setWebsiteFilterWd] = useState("");
   const [statusFilterWd, setStatusFilterWd] = useState("all");
   const [countryFilterWd, setCountryFilterWd] = useState("all");
   const [modeFilterWd, setModeFilterWd] = useState("all");
+
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
+  const [statusResult, setStatusResult] = useState<any>(null);
+  const [statusLoading, setStatusLoading] = useState(false);
 
   const actionMutation = useMutation({
     mutationFn: async ({ id, action, note: n }: { id: number; action: "approve" | "reject"; note: string }) => {
@@ -4025,9 +4068,83 @@ function AdminWithdrawalsPanel() {
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
-  const openAction = (wd: any, action: "approve" | "reject") => {
+  const forceValidateMutation = useMutation({
+    mutationFn: async ({ id, note: n }: { id: number; note: string }) => {
+      const res = await fetch(`/api/admin/withdrawals/${id}/force-validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ note: n }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawals"] });
+      toast({ title: "Reversement validé manuellement" });
+      setNoteDialogOpen(false);
+      setNote("");
+      setSelectedWd(null);
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const forceRejectMutation = useMutation({
+    mutationFn: async ({ id, note: n }: { id: number; note: string }) => {
+      const res = await fetch(`/api/admin/withdrawals/${id}/force-reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ note: n }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawals"] });
+      toast({ title: "Reversement rejeté (solde restitué si applicable)" });
+      setNoteDialogOpen(false);
+      setNote("");
+      setSelectedWd(null);
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const retryMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/admin/withdrawals/${id}/retry`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawals"] });
+      toast({ title: `Relancé chez SendavaPay (Réf: ${data.reference})` });
+    },
+    onError: (err: any) => toast({ title: "Échec relance", description: err.message, variant: "destructive" }),
+  });
+
+  const checkStatus = async (wd: any) => {
+    setStatusLoading(true);
+    setStatusResult(null);
     setSelectedWd(wd);
-    setWdAction(action);
+    setStatusDialogOpen(true);
+    try {
+      const res = await fetch(`/api/admin/withdrawals/${wd.id}/check-status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setStatusResult(data);
+    } catch (e: any) {
+      setStatusResult({ error: e.message });
+    } finally {
+      setStatusLoading(false);
+    }
+  };
+
+  const openAction = (wd: any, action: "approve" | "reject" | "force-validate" | "force-reject") => {
+    setSelectedWd(wd);
+    setWdAction(action as any);
     setNote("");
     setNoteDialogOpen(true);
   };
@@ -4160,19 +4277,32 @@ function AdminWithdrawalsPanel() {
                               <a href={wd.merchantWebsite.startsWith("http") ? wd.merchantWebsite : `https://${wd.merchantWebsite}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline">{wd.merchantWebsite}</a>
                             )}
                           </div>
-                          <div className="flex gap-2 shrink-0">
+                          <div className="flex gap-2 shrink-0 flex-wrap">
+                            {wd.omnipayRef && wd.gateway === "sendavapay" && (
+                              <>
+                                <Button size="sm" variant="outline" className="gap-1 h-8 text-xs border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50"
+                                  disabled={statusLoading} onClick={() => checkStatus(wd)} data-testid={`button-check-status-${wd.id}`}>
+                                  <RefreshCw className="w-3 h-3" />Get Statut
+                                </Button>
+                                <Button size="sm" variant="outline" className="gap-1 h-8 text-xs border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
+                                  disabled={retryMutation.isPending} onClick={() => { if (confirm("Relancer ce reversement chez SendavaPay ?")) retryMutation.mutate(wd.id); }} data-testid={`button-retry-wd-${wd.id}`}>
+                                  <RefreshCw className="w-3 h-3" />Relancer
+                                </Button>
+                              </>
+                            )}
                             {wd.omnipayRef ? (
-                              <Badge variant="outline" className="text-xs text-yellow-600 border-yellow-500 gap-1 h-8 px-3">
-                                <Clock className="w-3 h-3" />En cours chez prestataire
-                              </Badge>
+                              <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-8 text-xs"
+                                onClick={() => openAction(wd, "force-validate")} data-testid={`button-force-validate-wd-${wd.id}`}>
+                                <CheckCircle className="w-3 h-3" />Valider
+                              </Button>
                             ) : (
                               <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-8"
                                 onClick={() => openAction(wd, "approve")} data-testid={`button-approve-wd-${wd.id}`}>
-                                <CheckCircle className="w-3 h-3" />Valider le reversement
+                                <CheckCircle className="w-3 h-3" />Valider
                               </Button>
                             )}
                             <Button size="sm" variant="destructive" className="gap-1 h-8"
-                              onClick={() => openAction(wd, "reject")} data-testid={`button-reject-wd-${wd.id}`}>
+                              onClick={() => openAction(wd, "force-reject")} data-testid={`button-reject-wd-${wd.id}`}>
                               <XCircle className="w-3 h-3" />Rejeter
                             </Button>
                           </div>
@@ -4284,21 +4414,42 @@ function AdminWithdrawalsPanel() {
                             </div>
                           )}
                           {wd.adminNote && <p className="text-xs italic text-muted-foreground">Note : {wd.adminNote}</p>}
-                          {wd.status === "pending" && (
-                            <div className="flex gap-2 pt-1 border-t border-muted">
+                          {wd.status !== "approved" && wd.status !== "rejected" && (
+                            <div className="flex gap-1.5 pt-1 border-t border-muted flex-wrap">
+                              {wd.omnipayRef && wd.gateway === "sendavapay" && (
+                                <>
+                                  <Button size="sm" variant="outline" className="gap-1 h-7 text-xs border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50"
+                                    disabled={statusLoading} onClick={() => checkStatus(wd)} data-testid={`button-check-status-inline-${wd.id}`}>
+                                    <RefreshCw className="w-3 h-3" />Get Statut
+                                  </Button>
+                                  <Button size="sm" variant="outline" className="gap-1 h-7 text-xs border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
+                                    disabled={retryMutation.isPending} onClick={() => { if (confirm("Relancer ce reversement chez SendavaPay ?")) retryMutation.mutate(wd.id); }} data-testid={`button-retry-inline-${wd.id}`}>
+                                    <RefreshCw className="w-3 h-3" />Relancer
+                                  </Button>
+                                </>
+                              )}
                               {wd.omnipayRef ? (
-                                <div className="flex-1 text-xs text-yellow-600 border border-yellow-400 rounded px-2 py-1 flex items-center gap-1.5">
-                                  <Clock className="w-3 h-3 shrink-0" />En cours chez prestataire — attente confirmation
-                                </div>
+                                <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-7 text-xs"
+                                  onClick={() => openAction(wd, "force-validate")} data-testid={`button-force-validate-inline-${wd.id}`}>
+                                  <CheckCircle className="w-3 h-3" />Valider
+                                </Button>
                               ) : (
-                                <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-7 text-xs flex-1"
+                                <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-7 text-xs"
                                   onClick={() => openAction(wd, "approve")} data-testid={`button-approve-inline-${wd.id}`}>
                                   <CheckCircle className="w-3 h-3" />Valider
                                 </Button>
                               )}
-                              <Button size="sm" variant="destructive" className="gap-1 h-7 text-xs flex-1"
-                                onClick={() => openAction(wd, "reject")} data-testid={`button-reject-inline-${wd.id}`}>
+                              <Button size="sm" variant="destructive" className="gap-1 h-7 text-xs"
+                                onClick={() => openAction(wd, "force-reject")} data-testid={`button-reject-inline-${wd.id}`}>
                                 <XCircle className="w-3 h-3" />Rejeter
+                              </Button>
+                            </div>
+                          )}
+                          {(wd.status === "approved" || wd.status === "rejected") && (
+                            <div className="flex gap-1.5 pt-1 border-t border-muted">
+                              <Button size="sm" variant="destructive" className="gap-1 h-7 text-xs opacity-70"
+                                onClick={() => openAction(wd, "force-reject")} data-testid={`button-force-reject-done-${wd.id}`}>
+                                <XCircle className="w-3 h-3" />Rejeter (forcer)
                               </Button>
                             </div>
                           )}
@@ -4355,21 +4506,35 @@ function AdminWithdrawalsPanel() {
                 )}
                 {selectedWd.adminNote && <div className="flex gap-2"><span className="text-muted-foreground w-32 shrink-0">Note :</span><span className="italic">{selectedWd.adminNote}</span></div>}
               </div>
-              {selectedWd.status === "pending" && (
-                <div className="flex gap-2 pt-2">
-                  {selectedWd.omnipayRef ? (
-                    <div className="flex-1 text-xs text-yellow-600 border border-yellow-500 rounded px-3 py-2 flex items-center gap-2">
-                      <Clock className="w-3 h-3 shrink-0" />
-                      Déjà envoyé au prestataire — en attente de confirmation automatique
-                    </div>
-                  ) : (
-                    <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 flex-1"
-                      onClick={() => { setDetailDialogOpen(false); openAction(selectedWd, "approve"); }}>
-                      <CheckCircle className="w-3 h-3" />Valider le reversement
-                    </Button>
+              {selectedWd.status !== "rejected" && (
+                <div className="flex gap-2 pt-2 flex-wrap">
+                  {selectedWd.omnipayRef && selectedWd.gateway === "sendavapay" && (
+                    <>
+                      <Button size="sm" variant="outline" className="gap-1 border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50 text-xs"
+                        disabled={statusLoading} onClick={() => { setDetailDialogOpen(false); checkStatus(selectedWd); }} data-testid="button-check-status-dialog">
+                        <RefreshCw className="w-3 h-3" />Get Statut
+                      </Button>
+                      <Button size="sm" variant="outline" className="gap-1 border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50 text-xs"
+                        disabled={retryMutation.isPending} onClick={() => { setDetailDialogOpen(false); if (confirm("Relancer ce reversement chez SendavaPay ?")) retryMutation.mutate(selectedWd.id); }} data-testid="button-retry-dialog">
+                        <RefreshCw className="w-3 h-3" />Relancer
+                      </Button>
+                    </>
+                  )}
+                  {selectedWd.status !== "approved" && (
+                    selectedWd.omnipayRef ? (
+                      <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 flex-1"
+                        onClick={() => { setDetailDialogOpen(false); openAction(selectedWd, "force-validate"); }} data-testid="button-force-validate-dialog">
+                        <CheckCircle className="w-3 h-3" />Valider
+                      </Button>
+                    ) : (
+                      <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 flex-1"
+                        onClick={() => { setDetailDialogOpen(false); openAction(selectedWd, "approve"); }} data-testid="button-approve-dialog">
+                        <CheckCircle className="w-3 h-3" />Valider
+                      </Button>
+                    )
                   )}
                   <Button size="sm" variant="destructive" className="gap-1 flex-1"
-                    onClick={() => { setDetailDialogOpen(false); openAction(selectedWd, "reject"); }}>
+                    onClick={() => { setDetailDialogOpen(false); openAction(selectedWd, "force-reject"); }} data-testid="button-reject-dialog">
                     <XCircle className="w-3 h-3" />Rejeter
                   </Button>
                 </div>
@@ -4379,10 +4544,59 @@ function AdminWithdrawalsPanel() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Statut SendavaPay — Reversement #{selectedWd?.id}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            {statusLoading ? (
+              <div className="flex items-center gap-3 p-4 justify-center">
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Vérification en cours…</p>
+              </div>
+            ) : statusResult ? (
+              statusResult.error ? (
+                <div className="p-3 rounded bg-destructive/10 border border-destructive/30 text-sm text-destructive">
+                  <p className="font-semibold mb-1">Erreur</p>
+                  <p>{statusResult.error}</p>
+                </div>
+              ) : statusResult.data ? (
+                <div className="space-y-2">
+                  <div className="p-3 rounded bg-muted text-sm space-y-1.5">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Référence :</span><code className="font-mono text-xs">{statusResult.data.reference}</code></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Statut :</span>
+                      <Badge className={`text-xs ${["completed","success","approved","paid","sent","transferred"].includes((statusResult.data.status||"").toLowerCase()) ? "bg-green-500" : ["failed","failure","cancelled","canceled","rejected"].includes((statusResult.data.status||"").toLowerCase()) ? "bg-destructive" : "bg-yellow-500"}`}>
+                        {statusResult.data.status}
+                      </Badge>
+                    </div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Montant :</span><span className="font-semibold">{statusResult.data.amount} {statusResult.data.currency}</span></div>
+                    {statusResult.data.fee && <div className="flex justify-between"><span className="text-muted-foreground">Frais :</span><span>{statusResult.data.fee} {statusResult.data.currency}</span></div>}
+                    {statusResult.data.phoneNumber && <div className="flex justify-between"><span className="text-muted-foreground">Téléphone :</span><span className="font-mono">{statusResult.data.phoneNumber}</span></div>}
+                    {statusResult.data.operator && <div className="flex justify-between"><span className="text-muted-foreground">Opérateur :</span><span>{statusResult.data.operator}</span></div>}
+                    {statusResult.data.completedAt && <div className="flex justify-between"><span className="text-muted-foreground">Complété :</span><span>{new Date(statusResult.data.completedAt).toLocaleString("fr-FR")}</span></div>}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-2">Aucune donnée disponible.</p>
+              )
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setStatusDialogOpen(false)}>Fermer</Button>
+              {selectedWd && <Button size="sm" variant="outline" className="border-blue-400 text-blue-700 dark:text-blue-300" disabled={statusLoading} onClick={() => checkStatus(selectedWd)}>
+                <RefreshCw className="w-3 h-3 mr-1" />Rafraîchir
+              </Button>}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={noteDialogOpen} onOpenChange={setNoteDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{wdAction === "approve" ? "Valider le reversement" : "Rejeter le reversement"}</DialogTitle>
+            <DialogTitle>
+              {wdAction === "approve" ? "Valider le reversement" : wdAction === "force-validate" ? "Valider manuellement (forcer)" : "Rejeter le reversement"}
+            </DialogTitle>
           </DialogHeader>
           {selectedWd && (
             <div className="space-y-4">
@@ -4398,26 +4612,37 @@ function AdminWithdrawalsPanel() {
               {wdAction === "approve" && (
                 <p className="text-xs text-green-700 bg-green-50 dark:bg-green-950 dark:text-green-300 p-2 rounded">Le paiement sera traité automatiquement par Westpay.</p>
               )}
-              {wdAction === "reject" && (
-                <p className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-950 p-2 rounded">Le solde sera restitué au marchand en cas de rejet.</p>
+              {wdAction === "force-validate" && (
+                <p className="text-xs text-green-700 bg-green-50 dark:bg-green-950 dark:text-green-300 p-2 rounded">⚠️ Le reversement sera marqué comme approuvé sans vérification côté prestataire.</p>
+              )}
+              {(wdAction === "reject" || wdAction === "force-reject") && (
+                <p className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-950 p-2 rounded">Le solde sera restitué au marchand si le reversement était en attente ou échoué.</p>
               )}
               <div className="space-y-2">
                 <Label>Note (optionnelle)</Label>
                 <Input value={note} onChange={(e) => setNote(e.target.value)}
-                  placeholder={wdAction === "approve" ? "Ex: Paiement effectué" : "Ex: Informations insuffisantes"}
+                  placeholder={(wdAction === "approve" || wdAction === "force-validate") ? "Ex: Paiement confirmé" : "Ex: Informations insuffisantes"}
                   data-testid="input-wd-note" />
               </div>
               <div className="flex gap-2 justify-end">
                 <Button variant="outline" onClick={() => setNoteDialogOpen(false)}>Annuler</Button>
                 <Button
-                  onClick={() => actionMutation.mutate({ id: selectedWd.id, action: wdAction, note })}
-                  disabled={actionMutation.isPending}
-                  className={wdAction === "approve" ? "bg-green-600 hover:bg-green-700 text-white" : ""}
-                  variant={wdAction === "reject" ? "destructive" : "default"}
+                  onClick={() => {
+                    if (wdAction === "approve" || wdAction === "reject") {
+                      actionMutation.mutate({ id: selectedWd.id, action: wdAction as "approve" | "reject", note });
+                    } else if (wdAction === "force-validate") {
+                      forceValidateMutation.mutate({ id: selectedWd.id, note });
+                    } else if (wdAction === "force-reject") {
+                      forceRejectMutation.mutate({ id: selectedWd.id, note });
+                    }
+                  }}
+                  disabled={actionMutation.isPending || forceValidateMutation.isPending || forceRejectMutation.isPending}
+                  className={(wdAction === "approve" || wdAction === "force-validate") ? "bg-green-600 hover:bg-green-700 text-white" : ""}
+                  variant={(wdAction === "reject" || wdAction === "force-reject") ? "destructive" : "default"}
                   data-testid="button-confirm-wd-action"
                 >
-                  {actionMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                  {wdAction === "approve" ? "Valider et envoyer" : "Confirmer le rejet"}
+                  {(actionMutation.isPending || forceValidateMutation.isPending || forceRejectMutation.isPending) ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                  {(wdAction === "approve" || wdAction === "force-validate") ? "Confirmer la validation" : "Confirmer le rejet"}
                 </Button>
               </div>
             </div>

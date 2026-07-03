@@ -9,7 +9,7 @@ import { db } from "./db";
 import { pool } from "./db";
 import { generateSecret as totpGenerateSecret, generateURI as totpGenerateURI, verifySync as totpVerifySync } from "otplib";
 import QRCode from "qrcode";
-import { admins, merchantCountries } from "@shared/schema";
+import { admins, merchantCountries, transactions } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -58,6 +58,7 @@ import {
   configureWebhook as sendavaConfigureWebhook,
   generateReference as sendavaGenerateRef,
   verifyWebhookSignature as sendavaVerifySignature,
+  getWithdrawalStatus as sendavaGetWithdrawalStatus,
   toSendavaOperator,
   SENDAVAPAY_COUNTRY_CODES,
   SENDAVAPAY_CURRENCY_MAP,
@@ -6794,6 +6795,129 @@ export async function registerRoutes(
       await storage.incrementMerchantCountryBalance(w.merchantCountryId, w.amount);
       notifyAdminWithdrawal({ id, merchantName: rejMerchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: 0, phone: w.phone, operator: w.operator, status: "rejected", mode: "manual" }).catch(() => {});
       notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: 0, phone: w.phone, operator: w.operator, status: "rejected" }).catch(() => {});
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/withdrawals/:id/check-status", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const w = await storage.getWithdrawalById(id);
+      if (!w) return res.status(404).json({ message: "Reversement introuvable" });
+      if (w.gateway !== "sendavapay") return res.status(400).json({ message: "Ce reversement n'est pas géré par SendavaPay" });
+      if (!w.omnipayRef) return res.status(400).json({ message: "Aucune référence SendavaPay pour ce reversement" });
+      const sendavaApiKey = await getSendavaApiKey();
+      if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
+      const result = await sendavaGetWithdrawalStatus(sendavaApiKey, w.omnipayRef);
+      res.json({ success: result.success, data: result.data, error: result.error || result.message });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/withdrawals/:id/retry", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const w = await storage.getWithdrawalById(id);
+      if (!w) return res.status(404).json({ message: "Reversement introuvable" });
+      if (w.gateway !== "sendavapay") return res.status(400).json({ message: "Ce reversement n'est pas géré par SendavaPay" });
+      const sendavaApiKey = await getSendavaApiKey();
+      if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
+      const mc = await storage.getMerchantCountryById(w.merchantCountryId);
+      const merchant = await storage.getMerchantById(w.merchantId);
+      if (!mc || !merchant) return res.status(404).json({ message: "Marchand introuvable" });
+      const fees = w.fees || 0;
+      const netAmount = w.amount - fees;
+      const reference = sendavaGenerateRef();
+      const msisdnFull = "+" + prependDialCode(w.phone, w.country);
+      const countryCode = SENDAVAPAY_COUNTRY_CODES[w.country] || "";
+      const currency = SENDAVAPAY_CURRENCY_MAP[countryCode] || "XOF";
+      const sendavaOperator = toSendavaOperator(w.operator || "", countryCode);
+      const result = await sendavaInitiateWithdraw(sendavaApiKey, {
+        amount: netAmount,
+        phoneNumber: msisdnFull,
+        operator: sendavaOperator,
+        country: countryCode,
+        currency,
+        description: `Retrait WestPay (relance) - ${merchant.name}`,
+        externalReference: reference,
+      });
+      const spStatusLower = (result.data?.status || "").toLowerCase();
+      const spInitOk = result.success && !["failed", "failure", "cancelled", "canceled", "rejected"].includes(spStatusLower);
+      if (spInitOk) {
+        const spRef = result.data?.reference || reference;
+        const spFee = result.data?.fee != null ? Math.round(result.data.fee || fees) : fees;
+        await storage.updateWithdrawalStatus(id, "pending", `Relancé — Ref: ${spRef}`, spRef, spFee, spFee);
+        pollSendavaWithdrawalBackground({ withdrawalId: id, sendavaRef: spRef, merchantId: w.merchantId, country: w.country, amount: w.amount, fees: spFee, phone: w.phone, operator: w.operator });
+        console.log(`[ADMIN RETRY WD] Retrait #${id} relancé — ref=${spRef}`);
+        res.json({ success: true, reference: spRef, fees: spFee });
+      } else {
+        const errMsg = result.error || result.message || "Échec inconnu";
+        console.error(`[ADMIN RETRY WD] Retrait #${id} échec relance: ${errMsg}`);
+        res.status(502).json({ success: false, message: errMsg });
+      }
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/withdrawals/:id/force-validate", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { note } = req.body;
+      const w = await storage.getWithdrawalById(id);
+      if (!w) return res.status(404).json({ message: "Reversement introuvable" });
+      if (w.status === "approved") return res.status(400).json({ message: "Ce reversement est déjà approuvé" });
+      const merchant = await storage.getMerchantById(w.merchantId);
+      await storage.updateWithdrawalStatus(id, "approved", note || "Validé manuellement par l'administrateur");
+      notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: w.fees || 0, phone: w.phone, operator: w.operator, status: "approved", mode: "manual" }).catch(() => {});
+      notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: w.fees || 0, phone: w.phone, operator: w.operator, status: "approved" }).catch(() => {});
+      console.log(`[ADMIN FORCE-VALIDATE WD] Retrait #${id} validé manuellement (précédent: ${w.status})`);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/withdrawals/:id/force-reject", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { note } = req.body;
+      const w = await storage.getWithdrawalById(id);
+      if (!w) return res.status(404).json({ message: "Reversement introuvable" });
+      if (w.status === "rejected") return res.status(400).json({ message: "Ce reversement est déjà rejeté" });
+      const merchant = await storage.getMerchantById(w.merchantId);
+      await storage.updateWithdrawalStatus(id, "rejected", note || "Rejeté manuellement par l'administrateur");
+      if (w.status === "pending" || w.status === "failed") {
+        await storage.incrementMerchantCountryBalance(w.merchantCountryId, w.amount);
+      }
+      notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: 0, phone: w.phone, operator: w.operator, status: "rejected", mode: "manual" }).catch(() => {});
+      notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: 0, phone: w.phone, operator: w.operator, status: "rejected" }).catch(() => {});
+      console.log(`[ADMIN FORCE-REJECT WD] Retrait #${id} rejeté manuellement (précédent: ${w.status})`);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/transactions/:id/validate", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      await db.update(transactions).set({ status: "confirmed" }).where(eq(transactions.id, id));
+      console.log(`[ADMIN FORCE-VALIDATE TX] Transaction #${id} validée manuellement`);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/transactions/:id/reject", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      await db.update(transactions).set({ status: "rejected" }).where(eq(transactions.id, id));
+      console.log(`[ADMIN FORCE-REJECT TX] Transaction #${id} rejetée manuellement`);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
