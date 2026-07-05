@@ -98,53 +98,64 @@ export async function pollSendavaWithdrawalBackground(params: {
   const apiKey = await getSendavaKey();
   if (!apiKey) return;
 
-  const INTERVAL_MS = 30_000; // 30 secondes
-  const MAX_ATTEMPTS = 20;    // 20 × 30s = 10 minutes max
-  const SUCCESS_STATUSES = ["completed", "success", "approved", "paid", "sent", "transferred"];
-  const FAILURE_STATUSES = ["failed", "failure", "cancelled", "canceled", "rejected"];
+  // Intervalles progressifs : on vérifie très vite au début (l'argent arrive souvent
+  // en quelques secondes chez l'opérateur), puis on espace les vérifications.
+  // Total ~10 minutes de couverture avant que le job de fond ne prenne le relais.
+  const INTERVALS_MS = [
+    3_000, 3_000, 4_000, 5_000, 5_000,   // 0-20s : vérifications rapprochées
+    10_000, 10_000, 10_000,               // 20-50s
+    15_000, 15_000, 15_000, 15_000,       // 50s-110s
+    30_000, 30_000, 30_000, 30_000,       // 110s-230s
+    60_000, 60_000, 60_000, 60_000, 60_000, // jusqu'à ~10min
+  ];
+  const SUCCESS_STATUSES = ["completed", "success", "approved", "paid", "sent", "transferred", "processed", "delivered", "confirmed", "done", "ok"];
+  const FAILURE_STATUSES = ["failed", "failure", "cancelled", "canceled", "rejected", "declined", "error"];
 
-  console.log(`[POLL-WD] Démarrage polling retrait #${withdrawalId} — ref=${sendavaRef}`);
+  console.log(`[POLL-WD] Démarrage vérification retrait #${withdrawalId} — ref=${sendavaRef}`);
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    await new Promise(resolve => setTimeout(resolve, INTERVAL_MS));
+  let elapsedMs = 0;
+  for (let attempt = 1; attempt <= INTERVALS_MS.length; attempt++) {
+    const waitMs = INTERVALS_MS[attempt - 1];
+    await new Promise(resolve => setTimeout(resolve, waitMs));
+    elapsedMs += waitMs;
 
     try {
-      // Vérifier si déjà traité par le webhook
+      // Vérifier si déjà traité par le webhook entre-temps
       const current = await storage.getWithdrawalById(withdrawalId);
       if (!current || current.status !== "pending") {
-        console.log(`[POLL-WD] Retrait #${withdrawalId} déjà traité (statut: ${current?.status}) — arrêt polling`);
+        console.log(`[POLL-WD] Retrait #${withdrawalId} déjà traité (statut: ${current?.status}) — arrêt vérification`);
         return;
       }
 
       const result = await sendavaGetWithdrawalStatus(apiKey, sendavaRef);
       const status = (result.data?.status || "").toLowerCase();
-      console.log(`[POLL-WD] Retrait #${withdrawalId} tentative ${attempt}/${MAX_ATTEMPTS} — statut SendavaPay: ${status || "inconnu"}`);
+      console.log(`[POLL-WD] Retrait #${withdrawalId} tentative ${attempt}/${INTERVALS_MS.length} (${Math.round(elapsedMs / 1000)}s) — statut fournisseur: ${status || "inconnu"}`);
 
       if (SUCCESS_STATUSES.includes(status)) {
         const merchant = await storage.getMerchantById(merchantId);
-        await storage.updateWithdrawalStatus(withdrawalId, "approved", `Retrait confirmé (polling ${attempt * 30}s)`, sendavaRef, fees, fees);
+        await storage.updateWithdrawalStatus(withdrawalId, "approved", `Retrait confirmé`, sendavaRef, fees, fees);
         notifyAdminWithdrawal({ id: withdrawalId, merchantName: merchant?.name || `#${merchantId}`, country, amount, fees, phone, operator, status: "approved", mode: "auto" }).catch(() => {});
         notifyMerchantWithdrawal(merchantId, { id: withdrawalId, country, amount, fees, phone, operator, status: "approved" }).catch(() => {});
-        console.log(`[POLL-WD] Retrait #${withdrawalId} approuvé après ${attempt * 30}s — ref=${sendavaRef}`);
+        console.log(`[POLL-WD] Retrait #${withdrawalId} approuvé après ${Math.round(elapsedMs / 1000)}s — ref=${sendavaRef}`);
         return;
       }
 
       if (FAILURE_STATUSES.includes(status)) {
         const merchant = await storage.getMerchantById(merchantId);
-        await storage.updateWithdrawalStatus(withdrawalId, "failed", `Retrait refusé (polling ${attempt * 30}s: ${status})`, sendavaRef);
+        await storage.updateWithdrawalStatus(withdrawalId, "failed", `Retrait refusé (${status})`, sendavaRef);
         const mc = await storage.findMerchantCountryBySimAndCountry(merchantId, country);
         if (mc) await storage.incrementMerchantCountryBalance(mc.id, amount);
         notifyAdminWithdrawal({ id: withdrawalId, merchantName: merchant?.name || `#${merchantId}`, country, amount, fees: 0, phone, operator, status: "failed", mode: "auto" }).catch(() => {});
         notifyMerchantWithdrawal(merchantId, { id: withdrawalId, country, amount, fees: 0, phone, operator, status: "failed" }).catch(() => {});
-        console.log(`[POLL-WD] Retrait #${withdrawalId} échoué après ${attempt * 30}s — ref=${sendavaRef} statut=${status}`);
+        console.log(`[POLL-WD] Retrait #${withdrawalId} échoué après ${Math.round(elapsedMs / 1000)}s — ref=${sendavaRef} statut=${status}`);
         return;
       }
     } catch (err: any) {
-      console.error(`[POLL-WD] Erreur polling retrait #${withdrawalId} tentative ${attempt}:`, err.message);
+      console.error(`[POLL-WD] Erreur vérification retrait #${withdrawalId} tentative ${attempt}:`, err.message);
     }
   }
 
-  console.log(`[POLL-WD] Timeout polling retrait #${withdrawalId} (${MAX_ATTEMPTS * INTERVAL_MS / 60000}min) — la réconciliation prendra le relais`);
+  console.log(`[POLL-WD] Fin de la vérification rapprochée pour le retrait #${withdrawalId} (${Math.round(elapsedMs / 60000)}min) — le job de fond prendra le relais`);
 }
 
 async function reconcileStaleWithdrawals(): Promise<void> {
@@ -153,7 +164,7 @@ async function reconcileStaleWithdrawals(): Promise<void> {
     if (!apiKey) return;
 
     const now = Date.now();
-    const TWO_MIN = 2 * 60 * 1000;
+    const ONE_MIN = 60 * 1000;
     const SIX_HOURS = 6 * 60 * 60 * 1000;
 
     const staleWithdrawals = await storage.getPendingWithdrawals?.() || [];
@@ -162,11 +173,11 @@ async function reconcileStaleWithdrawals(): Promise<void> {
       if (w.gateway !== "sendavapay") return false;
       if (!w.omnipayRef) return false;
       const age = now - new Date(w.createdAt).getTime();
-      return age >= TWO_MIN && age < SIX_HOURS;
+      return age >= ONE_MIN && age < SIX_HOURS;
     });
 
     if (sendavaStale.length === 0) return;
-    console.log(`[RECONCILIATION-WD] ${sendavaStale.length} retrait(s) SendavaPay bloqué(s) >2min — vérification...`);
+    console.log(`[RECONCILIATION-WD] ${sendavaStale.length} retrait(s) bloqué(s) >1min — vérification...`);
 
     for (const wd of sendavaStale) {
       try {
@@ -174,14 +185,14 @@ async function reconcileStaleWithdrawals(): Promise<void> {
         const status = (result.data?.status || "").toLowerCase();
         const merchant = await storage.getMerchantById(wd.merchantId);
 
-        if (["completed", "success", "approved", "paid", "sent", "transferred"].includes(status)) {
+        if (["completed", "success", "approved", "paid", "sent", "transferred", "processed", "delivered", "confirmed", "done", "ok"].includes(status)) {
           const fees = wd.fees || 0;
-          await storage.updateWithdrawalStatus(wd.id, "approved", `Retrait confirmé (réconciliation)`, wd.omnipayRef, fees, fees);
+          await storage.updateWithdrawalStatus(wd.id, "approved", `Retrait confirmé`, wd.omnipayRef, fees, fees);
           notifyAdminWithdrawal({ id: wd.id, merchantName: merchant?.name || `#${wd.merchantId}`, country: wd.country, amount: wd.amount, fees, phone: wd.phone, operator: wd.operator, status: "approved", mode: "auto" }).catch(() => {});
           notifyMerchantWithdrawal(wd.merchantId, { id: wd.id, country: wd.country, amount: wd.amount, fees, phone: wd.phone, operator: wd.operator, status: "approved" }).catch(() => {});
           console.log(`[RECONCILIATION-WD] Retrait #${wd.id} approuvé — ref=${wd.omnipayRef}`);
-        } else if (["failed", "failure", "cancelled", "canceled", "rejected"].includes(status)) {
-          await storage.updateWithdrawalStatus(wd.id, "failed", `Retrait refusé (réconciliation: ${status})`, wd.omnipayRef);
+        } else if (["failed", "failure", "cancelled", "canceled", "rejected", "declined", "error"].includes(status)) {
+          await storage.updateWithdrawalStatus(wd.id, "failed", `Retrait refusé (${status})`, wd.omnipayRef);
           const mc = await storage.findMerchantCountryBySimAndCountry(wd.merchantId, wd.country);
           if (mc) await storage.incrementMerchantCountryBalance(mc.id, wd.amount);
           notifyAdminWithdrawal({ id: wd.id, merchantName: merchant?.name || `#${wd.merchantId}`, country: wd.country, amount: wd.amount, fees: 0, phone: wd.phone, operator: wd.operator, status: "failed", mode: "auto" }).catch(() => {});
