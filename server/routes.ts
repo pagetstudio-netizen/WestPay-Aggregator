@@ -112,6 +112,28 @@ if (!JWT_SECRET) {
   throw new Error("[SECURITY] SESSION_SECRET must be set — refusing to start without it. Generate one with: node -e \"console.log(require('crypto').randomBytes(64).toString('hex'))\"");
 }
 
+// ── Rate limiter en mémoire pour les routes de retrait ─────────────────────
+// Limite : max 5 demandes par IP par fenêtre de 10 minutes.
+// Séparé de l'anti-doublon DB (2h) — ici on bloque les rafales brutes.
+const _withdrawalRateMap = new Map<string, { count: number; windowStart: number }>();
+const WITHDRAWAL_RATE_WINDOW_MS = 10 * 60 * 1000; // 10 min
+const WITHDRAWAL_RATE_MAX = 5;
+
+function checkWithdrawalRateLimit(ip: string): { allowed: boolean; retryAfterSec: number } {
+  const now = Date.now();
+  const entry = _withdrawalRateMap.get(ip);
+  if (!entry || now - entry.windowStart > WITHDRAWAL_RATE_WINDOW_MS) {
+    _withdrawalRateMap.set(ip, { count: 1, windowStart: now });
+    return { allowed: true, retryAfterSec: 0 };
+  }
+  if (entry.count >= WITHDRAWAL_RATE_MAX) {
+    const retryAfterSec = Math.ceil((WITHDRAWAL_RATE_WINDOW_MS - (now - entry.windowStart)) / 1000);
+    return { allowed: false, retryAfterSec };
+  }
+  entry.count += 1;
+  return { allowed: true, retryAfterSec: 0 };
+}
+
 // ── Invalidation de sessions — toutes les sessions antérieures au redémarrage sont invalides ─
 // Cela déconnecte automatiquement tous les comptes connectés lors d'un redémarrage Plesk/serveur
 const SESSION_START = Date.now();
@@ -4143,16 +4165,19 @@ export async function registerRoutes(
       }
 
       const callbackKey = await getOmnipayCallbackKey();
-      if (callbackKey) {
-        if (!payload.signature) {
-          console.error("[OMNIPAY CALLBACK] Signature manquante");
-          return res.status(401).json({ message: "Signature manquante" });
-        }
-        const isValid = omnipayVerifySignature(callbackKey, payload);
-        if (!isValid) {
-          console.error("[OMNIPAY CALLBACK] Signature invalide");
-          return res.status(401).json({ message: "Signature invalide" });
-        }
+      // SÉCURITÉ : rejet fail-closed — si la clé n'est pas configurée, on refuse tout webhook
+      if (!callbackKey) {
+        console.error("[OMNIPAY CALLBACK] SÉCURITÉ: Clé de callback non configurée — webhook rejeté. Configurez omnipay_callback_key dans les paramètres admin.");
+        return res.status(503).json({ message: "Webhook non sécurisé — configurez la clé de callback OmniPay dans les paramètres admin" });
+      }
+      if (!payload.signature) {
+        console.error("[OMNIPAY CALLBACK] Signature manquante");
+        return res.status(401).json({ message: "Signature manquante" });
+      }
+      const isValid = omnipayVerifySignature(callbackKey, payload);
+      if (!isValid) {
+        console.error("[OMNIPAY CALLBACK] Signature invalide");
+        return res.status(401).json({ message: "Signature invalide" });
       }
 
       const pending = await storage.getPendingPaymentByOmnipayReference(payload.reference);
@@ -4579,16 +4604,21 @@ export async function registerRoutes(
       console.log(`[MBIYO CALLBACK] Headers: ${JSON.stringify(req.headers)}`);
       console.log(`[MBIYO CALLBACK] Body: ${rawBody}`);
 
-      if (webhookSecret) {
-        const expected = crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
-        console.log(`[MBIYO CALLBACK] Signature recue: ${signature} — attendue: ${expected}`);
-        const isValid = mbiyoVerifySignature(webhookSecret, signature, rawBody);
-        if (!isValid) {
-          console.error(`[MBIYO CALLBACK] Signature invalide — recue: ${signature} — attendue: ${expected}`);
-          return res.status(401).json({ message: "Signature invalide" });
-        }
-      } else {
-        console.log(`[MBIYO CALLBACK] Signature recue: ${signature} (verification ignoree — secret non configure)`);
+      // SÉCURITÉ : rejet fail-closed — secret obligatoire
+      if (!webhookSecret) {
+        console.error("[MBIYO CALLBACK] SÉCURITÉ: Secret webhook Mbiyo non configuré — webhook rejeté. Configurez mbiyo_webhook_secret dans les paramètres admin.");
+        return res.status(503).json({ message: "Webhook Mbiyo non sécurisé — configurez le secret dans les paramètres admin" });
+      }
+      if (!signature) {
+        console.error("[MBIYO CALLBACK] Signature manquante dans les headers");
+        return res.status(401).json({ message: "Signature manquante" });
+      }
+      const expected = crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
+      console.log(`[MBIYO CALLBACK] Signature recue: ${signature} — attendue: ${expected}`);
+      const isValid = mbiyoVerifySignature(webhookSecret, signature, rawBody);
+      if (!isValid) {
+        console.error(`[MBIYO CALLBACK] Signature invalide — recue: ${signature} — attendue: ${expected}`);
+        return res.status(401).json({ message: "Signature invalide" });
       }
 
       const payload = req.body as MbiyoWebhookPayload;
@@ -4718,16 +4748,21 @@ export async function registerRoutes(
       console.log(`[MBIYO PAYOUT CALLBACK] Headers: ${JSON.stringify(req.headers)}`);
       console.log(`[MBIYO PAYOUT CALLBACK] Body: ${rawBody}`);
 
-      if (webhookSecret) {
-        const expected = crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
-        console.log(`[MBIYO PAYOUT CALLBACK] Signature recue: ${signature} — attendue: ${expected}`);
-        const isValid = mbiyoVerifySignature(webhookSecret, signature, rawBody);
-        if (!isValid) {
-          console.error(`[MBIYO PAYOUT CALLBACK] Signature invalide — recue: ${signature} — attendue: ${expected}`);
-          return res.status(401).json({ message: "Signature invalide" });
-        }
-      } else {
-        console.log(`[MBIYO PAYOUT CALLBACK] Signature recue: ${signature} (verification ignoree — secret non configure)`);
+      // SÉCURITÉ : rejet fail-closed — secret obligatoire
+      if (!webhookSecret) {
+        console.error("[MBIYO PAYOUT CALLBACK] SÉCURITÉ: Secret webhook Mbiyo non configuré — webhook rejeté. Configurez mbiyo_webhook_secret dans les paramètres admin.");
+        return res.status(503).json({ message: "Webhook Mbiyo Payout non sécurisé — configurez le secret dans les paramètres admin" });
+      }
+      if (!signature) {
+        console.error("[MBIYO PAYOUT CALLBACK] Signature manquante dans les headers");
+        return res.status(401).json({ message: "Signature manquante" });
+      }
+      const expected = crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
+      console.log(`[MBIYO PAYOUT CALLBACK] Signature recue: ${signature} — attendue: ${expected}`);
+      const isValid = mbiyoVerifySignature(webhookSecret, signature, rawBody);
+      if (!isValid) {
+        console.error(`[MBIYO PAYOUT CALLBACK] Signature invalide — recue: ${signature} — attendue: ${expected}`);
+        return res.status(401).json({ message: "Signature invalide" });
       }
 
       const payload = req.body as MbiyoPayoutWebhookPayload;
@@ -4920,18 +4955,23 @@ export async function registerRoutes(
       console.log(`[SENDAVAPAY CALLBACK] Body: ${rawBody}`);
 
       const webhookSecret = await getSendavaWebhookSecret();
-      if (webhookSecret && signature) {
-        // Tenter la vérification avec le préfixe sha256= et sans
-        const isValid =
-          sendavaVerifySignature(webhookSecret, signature, rawBody) ||
-          sendavaVerifySignature(webhookSecret, `sha256=${signature}`, rawBody) ||
-          sendavaVerifySignature(webhookSecret, signature.replace(/^sha256=/, ""), rawBody);
-        if (!isValid) {
-          console.error(`[SENDAVAPAY CALLBACK] Signature invalide — header: ${signature}`);
-          // On log mais on continue pour ne pas bloquer les webhooks légitimes
-          // (désactiver le rejet si SendavaPay change le format de signature)
-          return res.status(401).json({ message: "Signature invalide" });
-        }
+      // SÉCURITÉ : rejet fail-closed — secret obligatoire
+      if (!webhookSecret) {
+        console.error("[SENDAVAPAY CALLBACK] SÉCURITÉ: Secret webhook SendavaPay non configuré — webhook rejeté. Configurez sendavapay_webhook_secret dans les paramètres admin.");
+        return res.status(503).json({ message: "Webhook SendavaPay non sécurisé — configurez le secret dans les paramètres admin" });
+      }
+      if (!signature) {
+        console.error("[SENDAVAPAY CALLBACK] Signature manquante dans les headers");
+        return res.status(401).json({ message: "Signature manquante" });
+      }
+      // Tenter la vérification avec le préfixe sha256= et sans
+      const isValid =
+        sendavaVerifySignature(webhookSecret, signature, rawBody) ||
+        sendavaVerifySignature(webhookSecret, `sha256=${signature}`, rawBody) ||
+        sendavaVerifySignature(webhookSecret, signature.replace(/^sha256=/, ""), rawBody);
+      if (!isValid) {
+        console.error(`[SENDAVAPAY CALLBACK] Signature invalide — header: ${signature}`);
+        return res.status(401).json({ message: "Signature invalide" });
       }
 
       const payload = req.body as SendavaWebhookPayload;
@@ -6327,8 +6367,37 @@ export async function registerRoutes(
   app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
+
+      // ── Rate limiting par IP ──────────────────────────────────────────────────
+      const clientIp = extractIp(req);
+      const rlCheck = checkWithdrawalRateLimit(clientIp);
+      if (!rlCheck.allowed) {
+        console.warn(`[WITHDRAWAL RATE LIMIT] IP ${clientIp} bloquée — trop de tentatives. Retry dans ${rlCheck.retryAfterSec}s`);
+        res.setHeader("Retry-After", String(rlCheck.retryAfterSec));
+        return res.status(429).json({
+          message: `Trop de demandes de retrait. Veuillez réessayer dans ${Math.ceil(rlCheck.retryAfterSec / 60)} minute(s).`,
+          retryAfterSec: rlCheck.retryAfterSec,
+        });
+      }
+
+      // ── Validation des entrées ────────────────────────────────────────────────
       const { merchantCountryId, amount, phone, operator, recipientName } = req.body;
       if (!merchantCountryId || !amount || !phone) return res.status(400).json({ message: "Champs requis manquants" });
+
+      // Validation stricte du numéro de téléphone (chiffres + indicatifs internationaux)
+      const phoneClean = String(phone).trim();
+      if (!/^\+?[0-9\s\-().]{6,20}$/.test(phoneClean)) {
+        return res.status(400).json({ message: "Numéro de téléphone invalide" });
+      }
+      // Validation du montant : entier positif raisonnable
+      const parsedAmount = Number(amount);
+      if (!Number.isInteger(parsedAmount) || parsedAmount <= 0 || parsedAmount > 50_000_000) {
+        return res.status(400).json({ message: "Montant invalide (doit être un entier positif, max 50 000 000)" });
+      }
+      // merchantCountryId doit être un entier
+      if (!Number.isInteger(Number(merchantCountryId)) || Number(merchantCountryId) <= 0) {
+        return res.status(400).json({ message: "merchantCountryId invalide" });
+      }
 
       const withdrawalsDisabledFlag = await storage.getSetting("withdrawals_disabled");
       if (withdrawalsDisabledFlag === "true") {
@@ -6376,8 +6445,8 @@ export async function registerRoutes(
 
       const mc = await storage.getMerchantCountryById(Number(merchantCountryId));
       if (!mc || mc.merchantId !== merchantId) return res.status(403).json({ message: "Wallet introuvable" });
-      if (amount <= 0) return res.status(400).json({ message: "Montant invalide" });
-      if (mc.balance < amount) return res.status(400).json({ message: "Solde insuffisant" });
+      if (parsedAmount <= 0) return res.status(400).json({ message: "Montant invalide" });
+      if (mc.balance < parsedAmount) return res.status(400).json({ message: "Solde insuffisant" });
       const merchant = await storage.getMerchantById(merchantId);
       if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
 
@@ -6399,20 +6468,18 @@ export async function registerRoutes(
            AND status IN ('pending', 'approved')
            AND created_at > NOW() - INTERVAL '2 hours'
          ORDER BY created_at DESC LIMIT 1`,
-        [merchantId, phone, amount, mc.country]
+        [merchantId, phoneClean, parsedAmount, mc.country]
       );
       if (recentDuplicate.rowCount && recentDuplicate.rowCount > 0) {
         const dup = recentDuplicate.rows[0];
         const dupDate = new Date(dup.created_at).toLocaleString("fr-FR", { hour: "2-digit", minute: "2-digit" });
         return res.status(409).json({
-          message: `Un retrait identique (${amount} FCFA → ${phone}) est déjà ${dup.status === "approved" ? "approuvé" : "en cours"} depuis ${dupDate}. Attendez 2 heures avant de réessayer.`,
+          message: `Un retrait identique (${parsedAmount} FCFA → ${phoneClean}) est déjà ${dup.status === "approved" ? "approuvé" : "en cours"} depuis ${dupDate}. Attendez 2 heures avant de réessayer.`,
           duplicateId: dup.id,
         });
       }
 
       // ── VÉRIFICATION SÉCURITÉ : dépôts reçus vs retraits effectués ──────────────
-      // Bloque si le total des retraits demandés dépasse les dépôts confirmés + crédits admin.
-      // Empêche tout retrait frauduleux en cas de double crédit ou de bug de solde.
       const totalDeposits = await storage.getTotalConfirmedDepositsForMC(merchantId, mc.country);
       const adminCredits = (mc as any).adminCreditsTotal ?? 0;
       const totalAllowed = totalDeposits + adminCredits;
@@ -6423,22 +6490,20 @@ export async function registerRoutes(
           securityBlock: true,
         });
       }
-      if ((totalAlreadyWithdrawn + amount) > totalAllowed) {
+      if ((totalAlreadyWithdrawn + parsedAmount) > totalAllowed) {
         return res.status(400).json({
-          message: `Sécurité: Le total de vos retraits (${(totalAlreadyWithdrawn + amount).toLocaleString("fr-FR")} F) dépasse vos dépôts confirmés (${totalAllowed.toLocaleString("fr-FR")} F). Retrait bloqué pour anomalie de solde.`,
+          message: `Sécurité: Le total de vos retraits (${(totalAlreadyWithdrawn + parsedAmount).toLocaleString("fr-FR")} F) dépasse vos dépôts confirmés (${totalAllowed.toLocaleString("fr-FR")} F). Retrait bloqué pour anomalie de solde.`,
           securityBlock: true,
           totalDeposits,
           adminCredits,
           totalAllowed,
           totalAlreadyWithdrawn,
-          requested: amount,
+          requested: parsedAmount,
         });
       }
 
-      // ── DÉBIT ATOMIQUE (SELECT … WHERE balance >= amount) ─────────────────────
-      // Élimine la race condition : le solde ne peut pas devenir négatif même
-      // si deux requêtes simultanées passent la vérification précédente.
-      const debited = await storage.decrementMerchantCountryBalanceAtomic(mc.id, amount);
+      // ── DÉBIT ATOMIQUE ─────────────────────────────────────────────────────────
+      const debited = await storage.decrementMerchantCountryBalanceAtomic(mc.id, parsedAmount);
       if (!debited) {
         return res.status(400).json({ message: "Solde insuffisant (vérification atomique échouée)" });
       }
@@ -6447,8 +6512,8 @@ export async function registerRoutes(
         merchantId,
         merchantCountryId: mc.id,
         country: mc.country,
-        amount,
-        phone,
+        amount: parsedAmount,
+        phone: phoneClean,
         recipientName: recipientName || null,
         operator: operator || null,
         status: "pending",

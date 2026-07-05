@@ -2,6 +2,25 @@ import { Telegraf } from "telegraf";
 import type { Express, Request, Response } from "express";
 import { storage } from "./storage";
 import { pool } from "./db";
+import {
+  initiateTransfer as omnipayInitiateTransfer,
+  getTransactionStatus as omnipayGetStatus,
+} from "./omnipay";
+import {
+  initiatePayout as mbiyoInitiatePayout,
+  getTransactionStatus as mbiyoGetStatus,
+  mbiyoCountryCode,
+  mbiyoCurrency,
+  mbiyoNetwork,
+  generateReference as mbiyoGenerateRef,
+} from "./mbiyo";
+import {
+  initiateWithdraw as sendavaInitiateWithdraw,
+  getWithdrawalStatus as sendavaGetWithdrawalStatus,
+  toSendavaOperator,
+  SENDAVAPAY_COUNTRY_CODES,
+  SENDAVAPAY_CURRENCY_MAP,
+} from "./sendavapay";
 
 export interface GeoInfo {
   ip: string;
@@ -106,6 +125,26 @@ interface BroadcastSession {
   initiator: string;
 }
 const broadcastSessions = new Map<string, BroadcastSession>(); // chatId -> session
+
+// ─── Session /commander ────────────────────────────────────────────────────
+interface CommanderSession {
+  step: "waiting_phone";
+}
+const commanderSessions = new Map<string, CommanderSession>();
+
+// Ajoute le préfixe international à un numéro selon le pays (usage interne bot)
+function botPrependDialCode(phone: string, country: string): string {
+  const codes: Record<string, string> = {
+    "Togo": "228", "Côte d'Ivoire": "225", "Bénin": "229", "Sénégal": "221",
+    "Mali": "223", "Burkina Faso": "226", "Niger": "227", "Ghana": "233",
+    "Nigeria": "234", "Cameroun": "237", "Guinée": "224", "Guinée-Bissau": "245",
+  };
+  const code = codes[country];
+  if (!code) return phone;
+  const digits = phone.replace(/\D/g, "");
+  if (digits.startsWith(code)) return digits;
+  return code + digits.replace(/^0+/, "");
+}
 
 function isRateLimited(userId: string): boolean {
   const r = failedAttempts.get(userId);
@@ -808,13 +847,31 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     );
   });
 
-  // ─── /annuler (annule le broadcast en cours) ──────────────────────────────
+  // ─── /annuler (annule le broadcast ou commander en cours) ────────────────
   bot.command("annuler", async (ctx) => {
     const chatId = String(ctx.chat.id);
     if (broadcastSessions.has(chatId)) {
       broadcastSessions.delete(chatId);
       await ctx.reply("❌ Broadcast annulé.");
+    } else if (commanderSessions.has(chatId)) {
+      commanderSessions.delete(chatId);
+      await ctx.reply("❌ Commander annulé.");
     }
+  });
+
+  // ─── /commander (groupe admin uniquement) ─────────────────────────────────
+  // Recherche un retrait par numéro de téléphone et propose 4 actions.
+  bot.command("commander", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    if (!await isAdminGroup(chatId)) return;
+    commanderSessions.set(chatId, { step: "waiting_phone" });
+    await ctx.reply(
+      "📱 *Commander — Recherche de retrait*\n\n" +
+      "Envoyez le numéro de téléphone du bénéficiaire :\n" +
+      "_(ex: 22890123456 ou 90123456)_\n\n" +
+      "Envoyez /annuler pour annuler.",
+      { parse_mode: "Markdown" }
+    );
   });
 
   // ─── Photo reçue dans le groupe admin (pour le broadcast) ─────────────────
@@ -864,6 +921,88 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       `✅ *Diffusion terminée*\n\n📋 Type : ${typeLabel}\n📤 Envoyé : *${result.sent}*\n❌ Échec : *${result.failed}*`,
       { parse_mode: "Markdown" }
     );
+  });
+
+  // ─── Messages texte (flux commander conversationnel) ─────────────────────
+  bot.on("message", async (ctx, next) => {
+    const chatId = String(ctx.chat.id);
+    const cmdSession = commanderSessions.get(chatId);
+    if (cmdSession && cmdSession.step === "waiting_phone") {
+      if (!await isAdminGroup(chatId)) { commanderSessions.delete(chatId); return next(); }
+      const msg = ctx.message as any;
+      const text: string = (msg.text || "").trim();
+      if (!text || text.startsWith("/")) return next();
+      commanderSessions.delete(chatId);
+
+      // Normalise : garde uniquement les chiffres pour la recherche
+      const digitsOnly = text.replace(/\D/g, "");
+      if (digitsOnly.length < 6) {
+        await ctx.reply("❌ Numéro de téléphone invalide (trop court). Relancez /commander.");
+        return;
+      }
+
+      const result = await pool.query<any>(
+        `SELECT w.id, w.phone, w.amount, w.country, w.status, w.gateway, w.operator,
+                w.omnipay_ref, w.created_at, w.fees, w.admin_note,
+                m.name AS merchant_name
+         FROM withdrawals w
+         JOIN merchants m ON m.id = w.merchant_id
+         WHERE REGEXP_REPLACE(w.phone, '[^0-9]', '', 'g') LIKE $1
+           AND w.status IN ('pending', 'failed')
+         ORDER BY w.created_at DESC
+         LIMIT 5`,
+        [`%${digitsOnly}%`]
+      );
+
+      if (result.rows.length === 0) {
+        await ctx.reply(
+          `🔍 Aucun retrait en attente trouvé pour *${text}*\n\n_Seuls les retraits en statut "pending" ou "failed" sont affichés._`,
+          { parse_mode: "Markdown" }
+        );
+        return;
+      }
+
+      await ctx.reply(
+        `📋 *${result.rows.length} retrait(s) trouvé(s) pour \`${text}\`*`,
+        { parse_mode: "Markdown" }
+      );
+
+      for (const w of result.rows) {
+        const date = new Date(w.created_at).toLocaleString("fr-FR", {
+          timeZone: "Africa/Abidjan", day: "2-digit", month: "2-digit",
+          year: "2-digit", hour: "2-digit", minute: "2-digit",
+        });
+        const statusEmoji = w.status === "pending" ? "⏳" : "❌";
+        const wMsg =
+          `${statusEmoji} *Retrait #${w.id}*\n` +
+          `👤 Marchand : ${w.merchant_name}\n` +
+          `💰 Montant : ${Number(w.amount).toLocaleString("fr-FR")} FCFA\n` +
+          `📱 Téléphone : \`${w.phone}\`\n` +
+          `🌍 Pays : ${w.country}\n` +
+          `🏦 Opérateur : ${w.operator || "N/A"}\n` +
+          `⚙️ Fournisseur : ${w.gateway || "N/A"}\n` +
+          `🔗 Réf fournisseur : ${w.omnipay_ref || "—"}\n` +
+          `📅 Date : ${date}` +
+          (w.admin_note ? `\n📝 Note : ${String(w.admin_note).slice(0, 80)}` : "");
+        await ctx.reply(wMsg, {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "✅ Valider", callback_data: `wd:validate:${w.id}` },
+                { text: "✓ Approuvé", callback_data: `wd:approve:${w.id}` },
+              ],
+              [
+                { text: "🚀 Déclencher fournisseur", callback_data: `wd:trigger:${w.id}` },
+                { text: "🔍 Vérifier fournisseur", callback_data: `wd:check:${w.id}` },
+              ],
+            ],
+          },
+        });
+      }
+      return;
+    }
+    return next();
   });
 
   // ─── Messages texte (flux broadcast conversationnel) ─────────────────────
@@ -1377,6 +1516,244 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
 
   bot.action("sec:noop", async (ctx) => {
     await ctx.answerCbQuery();
+  });
+
+  // ─── Actions boutons /commander ───────────────────────────────────────────
+
+  // wd:noop — bouton inerte après action confirmée
+  bot.action("wd:noop", async (ctx) => { await ctx.answerCbQuery(); });
+
+  // wd:validate — ajoute une note de validation manuelle, garde le statut pending
+  bot.action(/^wd:validate:(\d+)$/, async (ctx) => {
+    const chatId = String(ctx.chat?.id ?? "");
+    if (!await isAdminGroup(chatId)) { await ctx.answerCbQuery("⛔ Non autorisé"); return; }
+    const id = Number(ctx.match![1]);
+    const admin = formatUser(ctx);
+    try {
+      const now = new Date().toLocaleString("fr-FR", { timeZone: "Africa/Abidjan", hour: "2-digit", minute: "2-digit" });
+      await pool.query(
+        `UPDATE withdrawals
+         SET admin_note = TRIM(COALESCE(admin_note, '') || $2)
+         WHERE id = $1`,
+        [id, ` [Validé via Telegram par ${admin} à ${now}]`]
+      );
+      await ctx.answerCbQuery("✅ Note de validation ajoutée");
+      await ctx.editMessageReplyMarkup({
+        inline_keyboard: [
+          [{ text: `✅ Validé à ${now} par ${admin}`, callback_data: "wd:noop" }],
+          [
+            { text: "✓ Approuvé", callback_data: `wd:approve:${id}` },
+            { text: "🚀 Déclencher fournisseur", callback_data: `wd:trigger:${id}` },
+            { text: "🔍 Vérifier fournisseur", callback_data: `wd:check:${id}` },
+          ],
+        ],
+      }).catch(() => {});
+    } catch (e: any) {
+      await ctx.answerCbQuery("❌ " + String(e.message || "Erreur").slice(0, 60));
+    }
+  });
+
+  // wd:approve — marque le retrait comme approuvé manuellement (sans appel fournisseur)
+  bot.action(/^wd:approve:(\d+)$/, async (ctx) => {
+    const chatId = String(ctx.chat?.id ?? "");
+    if (!await isAdminGroup(chatId)) { await ctx.answerCbQuery("⛔ Non autorisé"); return; }
+    const id = Number(ctx.match![1]);
+    const admin = formatUser(ctx);
+    try {
+      const w = await storage.getWithdrawalById(id);
+      if (!w) { await ctx.answerCbQuery("❌ Retrait introuvable"); return; }
+      if (w.status === "approved") { await ctx.answerCbQuery("ℹ️ Déjà approuvé"); return; }
+      const now = new Date().toLocaleString("fr-FR", { timeZone: "Africa/Abidjan", hour: "2-digit", minute: "2-digit" });
+      await storage.updateWithdrawalStatus(id, "approved", `Approuvé manuellement via Telegram bot par ${admin} à ${now}`);
+      const merchant = await storage.getMerchantById(w.merchantId);
+      notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: w.fees || 0, phone: w.phone, operator: w.operator || null, status: "approved", mode: "manual" }).catch(() => {});
+      notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: w.fees || 0, phone: w.phone, operator: w.operator || null, status: "approved" }).catch(() => {});
+      await ctx.answerCbQuery("✓ Retrait approuvé");
+      await ctx.editMessageReplyMarkup({
+        inline_keyboard: [[{ text: `✓ Approuvé à ${now} par ${admin}`, callback_data: "wd:noop" }]],
+      }).catch(() => {});
+    } catch (e: any) {
+      await ctx.answerCbQuery("❌ " + String(e.message || "Erreur").slice(0, 60));
+    }
+  });
+
+  // wd:trigger — déclenche le paiement chez le fournisseur configuré sur le retrait
+  bot.action(/^wd:trigger:(\d+)$/, async (ctx) => {
+    const chatId = String(ctx.chat?.id ?? "");
+    if (!await isAdminGroup(chatId)) { await ctx.answerCbQuery("⛔ Non autorisé"); return; }
+    const id = Number(ctx.match![1]);
+    const admin = formatUser(ctx);
+    await ctx.answerCbQuery("⏳ Déclenchement en cours...");
+    try {
+      const w = await storage.getWithdrawalById(id);
+      if (!w) { await ctx.reply(`❌ Retrait #${id} introuvable`); return; }
+      if (w.omnipayRef && w.status === "pending") {
+        await ctx.reply(
+          `⚠️ *Retrait #${id}* — déjà en cours chez *${w.gateway}*\n` +
+          `Réf : \`${w.omnipayRef}\`\n\nAttendez la confirmation ou utilisez 🔍 Vérifier.`,
+          { parse_mode: "Markdown" }
+        );
+        return;
+      }
+      const gateway = (w.gateway || "omnipay").toLowerCase();
+      const appUrl = process.env.APP_URL || "";
+      let resultMsg = "";
+
+      if (gateway === "mbiyo") {
+        const apiKey = process.env.MBIYO_API_KEY || await storage.getSetting("mbiyo_api_key");
+        if (!apiKey) { await ctx.reply("❌ Clé API Mbiyo non configurée"); return; }
+        const reference = mbiyoGenerateRef();
+        const msisdn = botPrependDialCode(w.phone, w.country);
+        const result = await mbiyoInitiatePayout({
+          apiKey,
+          amount: w.amount - (w.fees || 0),
+          currency: mbiyoCurrency(w.country),
+          orderId: reference,
+          callbackUrl: `${appUrl}/api/mbiyo/payout-callback`,
+          network: mbiyoNetwork(w.operator || ""),
+          phoneNumber: msisdn,
+          countryCode: mbiyoCountryCode(w.country),
+          beneficiary: `Retrait #${w.id}`,
+        });
+        if ((result.status === "success" || result.status === "pending") && result.data) {
+          await storage.updateWithdrawalStatus(id, "pending", `Déclenché via Telegram bot par ${admin}`, reference, w.fees || 0, w.fees || 0);
+          resultMsg = `✅ Déclenché chez *Mbiyo*\nRéf : \`${reference}\`\nStatut : ${result.status}`;
+        } else {
+          resultMsg = `❌ Mbiyo : ${result.message || "Échec"}`;
+        }
+      } else if (gateway === "sendavapay") {
+        const apiKey = process.env.SENDAVA_API_KEY || process.env.SENDAVAPAY_API_KEY || await storage.getSetting("sendavapay_api_key");
+        if (!apiKey) { await ctx.reply("❌ Clé API SendavaPay non configurée"); return; }
+        const reference = `SD-WD-${w.id}-${Date.now()}`;
+        const countryCode = SENDAVAPAY_COUNTRY_CODES[w.country] || "";
+        const currency = SENDAVAPAY_CURRENCY_MAP[countryCode] || "XOF";
+        const msisdn = botPrependDialCode(w.phone, w.country);
+        const mappedOperator = toSendavaOperator(w.operator || "", countryCode);
+        const result = await sendavaInitiateWithdraw(apiKey, {
+          amount: w.amount - (w.fees || 0),
+          phoneNumber: msisdn,
+          operator: mappedOperator,
+          country: countryCode,
+          currency,
+          description: `Retrait WestPay #${w.id}`,
+          externalReference: reference,
+        });
+        if (result.success) {
+          const ref = result.data?.reference || reference;
+          await storage.updateWithdrawalStatus(id, "pending", `Déclenché via Telegram bot par ${admin}`, ref, w.fees || 0, w.fees || 0);
+          resultMsg = `✅ Déclenché chez *SendavaPay*\nRéf : \`${ref}\``;
+        } else {
+          resultMsg = `❌ SendavaPay : ${result.message || result.error || "Échec"}`;
+        }
+      } else {
+        // OmniPay (default)
+        const apiKey = process.env.OMNIPAY_PAYOUT_API_KEY || process.env.OMNIPAY_API_KEY
+          || await storage.getSetting("omnipay_payout_api_key") || await storage.getSetting("omnipay_api_key");
+        if (!apiKey) { await ctx.reply("❌ Clé API OmniPay non configurée"); return; }
+        const reference = `WD-${w.id}-${Date.now()}`;
+        const msisdn = botPrependDialCode(w.phone, w.country);
+        const nameParts = (w.recipientName || `Retrait WP${w.id}`).split(" ");
+        const result = await omnipayInitiateTransfer({
+          apikey: apiKey,
+          msisdn,
+          amount: w.amount - (w.fees || 0),
+          reference,
+          first_name: nameParts[0] || "Retrait",
+          last_name: nameParts.slice(1).join(" ") || `WP${w.id}`,
+          operator: w.operator || undefined,
+        });
+        if (result.success === 1) {
+          const omnipayRef = (result as any).reference || reference;
+          await storage.updateWithdrawalStatus(id, "pending", `Déclenché via Telegram bot par ${admin}`, omnipayRef, w.fees || 0, w.fees || 0);
+          resultMsg = `✅ Déclenché chez *OmniPay*\nRéf : \`${omnipayRef}\``;
+        } else {
+          resultMsg = `❌ OmniPay (code ${(result as any).code || "?"}) : ${result.message || "Échec"}`;
+        }
+      }
+
+      const triggerSuccess = resultMsg.startsWith("✅");
+      await ctx.reply(`🚀 *Retrait #${id} — Déclenchement*\n\n${resultMsg}`, { parse_mode: "Markdown" });
+      if (triggerSuccess) {
+        await ctx.editMessageReplyMarkup({
+          inline_keyboard: [
+            [{ text: `🚀 Déclenché par ${admin}`, callback_data: "wd:noop" }],
+            [{ text: "🔍 Vérifier fournisseur", callback_data: `wd:check:${id}` }],
+          ],
+        }).catch(() => {});
+      } else {
+        // Garder les boutons d'action actifs pour permettre un retry
+        await ctx.editMessageReplyMarkup({
+          inline_keyboard: [
+            [
+              { text: "✅ Valider", callback_data: `wd:validate:${id}` },
+              { text: "✓ Approuvé", callback_data: `wd:approve:${id}` },
+            ],
+            [
+              { text: "🚀 Réessayer fournisseur", callback_data: `wd:trigger:${id}` },
+              { text: "🔍 Vérifier fournisseur", callback_data: `wd:check:${id}` },
+            ],
+          ],
+        }).catch(() => {});
+      }
+    } catch (e: any) {
+      await ctx.reply(`❌ Retrait #${id} — Erreur déclenchement : ${e.message}`);
+    }
+  });
+
+  // wd:check — vérifie le statut du retrait auprès du fournisseur (structure réelle)
+  bot.action(/^wd:check:(\d+)$/, async (ctx) => {
+    const chatId = String(ctx.chat?.id ?? "");
+    if (!await isAdminGroup(chatId)) { await ctx.answerCbQuery("⛔ Non autorisé"); return; }
+    const id = Number(ctx.match![1]);
+    await ctx.answerCbQuery("⏳ Vérification en cours...");
+    try {
+      const w = await storage.getWithdrawalById(id);
+      if (!w) { await ctx.reply(`❌ Retrait #${id} introuvable`); return; }
+      if (!w.omnipayRef) {
+        await ctx.reply(
+          `⚠️ *Retrait #${id}* — Aucune référence fournisseur.\n` +
+          `Le retrait n'a pas encore été déclenché chez le fournisseur.\n` +
+          `Utilisez 🚀 Déclencher fournisseur d'abord.`,
+          { parse_mode: "Markdown" }
+        );
+        return;
+      }
+      const gateway = (w.gateway || "omnipay").toLowerCase();
+      let statusMsg = "";
+
+      if (gateway === "mbiyo") {
+        const apiKey = process.env.MBIYO_API_KEY || await storage.getSetting("mbiyo_api_key");
+        if (!apiKey) { await ctx.reply("❌ Clé API Mbiyo non configurée"); return; }
+        const result = await mbiyoGetStatus(apiKey, w.omnipayRef);
+        const ps = String(result.data?.status || result.status || "inconnu");
+        statusMsg = `Fournisseur : *Mbiyo*\nStatut fournisseur : *${ps}*\nRéf : \`${w.omnipayRef}\``;
+        if (result.data) statusMsg += `\n\`\`\`\n${JSON.stringify(result.data, null, 2).slice(0, 400)}\n\`\`\``;
+      } else if (gateway === "sendavapay") {
+        const apiKey = process.env.SENDAVA_API_KEY || process.env.SENDAVAPAY_API_KEY || await storage.getSetting("sendavapay_api_key");
+        if (!apiKey) { await ctx.reply("❌ Clé API SendavaPay non configurée"); return; }
+        const result = await sendavaGetWithdrawalStatus(apiKey, w.omnipayRef);
+        const ps = String(result.data?.status || (result.success ? "trouvé" : "inconnu"));
+        statusMsg = `Fournisseur : *SendavaPay*\nStatut fournisseur : *${ps}*\nRéf : \`${w.omnipayRef}\``;
+        if (result.data) statusMsg += `\n\`\`\`\n${JSON.stringify(result.data, null, 2).slice(0, 400)}\n\`\`\``;
+        else if (result.message) statusMsg += `\nDétail : ${result.message}`;
+      } else {
+        const apiKey = process.env.OMNIPAY_PAYOUT_API_KEY || process.env.OMNIPAY_API_KEY
+          || await storage.getSetting("omnipay_payout_api_key") || await storage.getSetting("omnipay_api_key");
+        if (!apiKey) { await ctx.reply("❌ Clé API OmniPay non configurée"); return; }
+        const result = await omnipayGetStatus(apiKey, w.omnipayRef);
+        const ps = String((result as any).data?.status || (result as any).status || "inconnu");
+        statusMsg = `Fournisseur : *OmniPay*\nStatut fournisseur : *${ps}*\nRéf : \`${w.omnipayRef}\``;
+        const d = (result as any).data;
+        if (d) statusMsg += `\n\`\`\`\n${JSON.stringify(d, null, 2).slice(0, 400)}\n\`\`\``;
+      }
+
+      await ctx.reply(
+        `🔍 *Retrait #${id} — Structure fournisseur*\n\n${statusMsg}`,
+        { parse_mode: "Markdown" }
+      );
+    } catch (e: any) {
+      await ctx.reply(`❌ Retrait #${id} — Erreur vérification : ${e.message}`);
+    }
   });
 
   // ─── Inline callbacks appareils ──────────────────────────────────────────────
