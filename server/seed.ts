@@ -79,7 +79,8 @@ export async function seedDatabase() {
   // En production (Plesk), ce compte n'est pas recréé automatiquement après suppression
   const isDevMode = process.env.NODE_ENV !== "production";
   const testAccountEnabled = await storage.getSetting("enable_test_merchant_in_production").catch(() => null);
-  if (isDevMode || testAccountEnabled === "true") {
+  const testAccountDisabled = await storage.getSetting("disable_test_merchant").catch(() => null);
+  if ((isDevMode || testAccountEnabled === "true") && testAccountDisabled !== "true") {
     await ensureTestMerchantExists().catch(err =>
       console.error("[SEED] Erreur création compte test:", err.message)
     );
