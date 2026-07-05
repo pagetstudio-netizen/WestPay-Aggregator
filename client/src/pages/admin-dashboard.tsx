@@ -1373,6 +1373,31 @@ function MerchantsPanel() {
   );
 }
 
+const PROVIDER_CHOICES: [string, string][] = [["sendavapay", "SendavaPay"], ["mbiyo", "Mbiyo"], ["omnipay", "OmniPay"]];
+
+function ProviderPickerButton({ label, icon: Icon, colorClass, disabled, onPick, testId }: { label: string; icon: any; colorClass: string; disabled?: boolean; onPick: (provider: string) => void; testId: string }) {
+  const [open, setOpen] = useState(false);
+  const Icon2 = Icon;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button size="sm" variant="outline" className={`gap-1 h-7 text-xs ${colorClass}`} disabled={disabled} data-testid={testId}>
+          <Icon2 className="w-3 h-3" />{label}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-48 p-1" align="start">
+        <p className="text-xs text-muted-foreground px-2 py-1.5">Choisir le fournisseur</p>
+        {PROVIDER_CHOICES.map(([val, lbl]) => (
+          <Button key={val} variant="ghost" size="sm" className="w-full justify-start text-xs h-8"
+            onClick={() => { setOpen(false); onPick(val); }} data-testid={`${testId}-${val}`}>
+            {lbl}
+          </Button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function TransactionsPanel() {
   const { toast, } = useToast();
   const { token } = useAuth();
@@ -1411,6 +1436,50 @@ function TransactionsPanel() {
       return res.json();
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/transactions"] }); toast({ title: "Transaction rejetée" }); },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
+
+  const [txStatusDialogOpen, setTxStatusDialogOpen] = useState(false);
+  const [txStatusLoading, setTxStatusLoading] = useState(false);
+  const [txStatusResult, setTxStatusResult] = useState<any>(null);
+
+  const checkTxStatus = async (tx: any, provider: string) => {
+    setTxStatusLoading(true);
+    setTxStatusResult(null);
+    setTxStatusDialogOpen(true);
+    const source = tx.type === "pending" ? "pending" : "payment";
+    try {
+      const res = await fetch(`/api/admin/transactions/${tx.rowId}/check-status?provider=${provider}&source=${source}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Erreur");
+      setTxStatusResult(data);
+    } catch (e: any) {
+      setTxStatusResult({ error: e.message });
+    } finally {
+      setTxStatusLoading(false);
+    }
+  };
+
+  const syncTxStatusMutation = useMutation({
+    mutationFn: async ({ tx, provider }: { tx: any; provider: string }) => {
+      const source = tx.type === "pending" ? "pending" : "payment";
+      const res = await fetch(`/api/admin/transactions/${tx.rowId}/sync-status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ provider, source }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Erreur");
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/transactions"] });
+      if (data.applied === "confirmed") toast({ title: "Transaction confirmée par le fournisseur" });
+      else if (data.applied === "failed") toast({ title: "Transaction marquée échouée (confirmé par le fournisseur)", variant: "destructive" });
+      else toast({ title: "Statut fournisseur non final", description: data.message || `Statut: ${data.providerStatus || "inconnu"}` });
+    },
     onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
   });
 
@@ -1633,13 +1702,22 @@ function TransactionsPanel() {
                         <div className="flex flex-col items-end gap-1 shrink-0">
                           <p className={`text-lg font-bold ${isFailed ? "text-destructive" : "text-foreground"}`}>{tx.amount?.toLocaleString("fr-FR")}</p>
                           <p className="text-xs text-muted-foreground">F CFA</p>
-                          <div className="flex gap-1 mt-1">
+                          <div className="flex gap-1 mt-1 flex-wrap justify-end">
+                            {["pending", "en cours", "approved", "confirmed", "omnipay_pending", "submitted"].includes(tx.status) && (
+                              <>
+                                <ProviderPickerButton label="Vérifier statut" icon={RefreshCw} colorClass="border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50"
+                                  onPick={(provider) => checkTxStatus(tx, provider)} testId={`button-check-status-tx-${tx.id}`} />
+                                <ProviderPickerButton label="Approuver chez fournisseur" icon={CheckCircle} colorClass="border-teal-400 text-teal-700 dark:text-teal-300 hover:bg-teal-50"
+                                  disabled={syncTxStatusMutation.isPending}
+                                  onPick={(provider) => syncTxStatusMutation.mutate({ tx, provider })} testId={`button-sync-status-tx-${tx.id}`} />
+                              </>
+                            )}
                             {tx.status !== "confirmed" && tx.status !== "completed" && tx.status !== "success" && (
                               <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white gap-1"
                                 disabled={validateTxMutation.isPending}
-                                onClick={() => { if (confirm("Valider cette transaction manuellement ?")) validateTxMutation.mutate(tx.id); }}
+                                onClick={() => { if (confirm("Valider cette transaction manuellement ? (à utiliser si l'argent est bien arrivé au client)")) validateTxMutation.mutate(tx.id); }}
                                 data-testid={`button-validate-tx-${tx.id}`}>
-                                <CheckCircle className="w-3 h-3" />Valider
+                                <CheckCircle className="w-3 h-3" />Valider manuellement
                               </Button>
                             )}
                             {tx.status !== "rejected" && tx.status !== "failed" && (
@@ -1660,6 +1738,26 @@ function TransactionsPanel() {
             })
           )}
         </div>
+
+        <Dialog open={txStatusDialogOpen} onOpenChange={setTxStatusDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Statut chez le fournisseur</DialogTitle>
+            </DialogHeader>
+            {txStatusLoading ? (
+              <div className="flex items-center justify-center py-6"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+            ) : txStatusResult?.error ? (
+              <p className="text-sm text-destructive">{txStatusResult.error}</p>
+            ) : txStatusResult ? (
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-muted-foreground">Fournisseur</span><span className="font-semibold capitalize">{txStatusResult.provider}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Statut</span><span className="font-semibold">{txStatusResult.status || "inconnu"}</span></div>
+                {txStatusResult.error && <p className="text-destructive text-xs">{txStatusResult.error}</p>}
+                <pre className="bg-muted rounded p-2 text-xs overflow-x-auto max-h-48">{JSON.stringify(txStatusResult.data, null, 2)}</pre>
+              </div>
+            ) : null}
+          </DialogContent>
+        </Dialog>
     </div>
   );
 }
@@ -4109,31 +4207,53 @@ function AdminWithdrawalsPanel() {
   });
 
   const retryMutation = useMutation({
-    mutationFn: async (id: number) => {
+    mutationFn: async ({ id, provider }: { id: number; provider: string }) => {
       const res = await fetch(`/api/admin/withdrawals/${id}/retry`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ provider }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
       return res.json();
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawals"] });
-      toast({ title: `Relancé chez SendavaPay (Réf: ${data.reference})` });
+      toast({ title: `Paiement déclenché chez ${data.provider} (Réf: ${data.reference})` });
     },
-    onError: (err: any) => toast({ title: "Échec relance", description: err.message, variant: "destructive" }),
+    onError: (err: any) => toast({ title: "Échec du déclenchement", description: err.message, variant: "destructive" }),
   });
 
-  const checkStatus = async (wd: any) => {
+  const syncStatusMutation = useMutation({
+    mutationFn: async ({ id, provider }: { id: number; provider: string }) => {
+      const res = await fetch(`/api/admin/withdrawals/${id}/sync-status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ provider }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Erreur");
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawals"] });
+      if (data.applied === "approved") toast({ title: "Reversement approuvé (confirmé par le fournisseur)" });
+      else if (data.applied === "failed") toast({ title: "Reversement marqué échoué (confirmé par le fournisseur)", variant: "destructive" });
+      else toast({ title: "Statut fournisseur non final", description: data.message || `Statut: ${data.providerStatus || "inconnu"}` });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const checkStatus = async (wd: any, provider: string) => {
     setStatusLoading(true);
     setStatusResult(null);
     setSelectedWd(wd);
     setStatusDialogOpen(true);
     try {
-      const res = await fetch(`/api/admin/withdrawals/${wd.id}/check-status`, {
+      const res = await fetch(`/api/admin/withdrawals/${wd.id}/check-status?provider=${provider}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Erreur");
       setStatusResult(data);
     } catch (e: any) {
       setStatusResult({ error: e.message });
@@ -4278,22 +4398,20 @@ function AdminWithdrawalsPanel() {
                             )}
                           </div>
                           <div className="flex gap-2 shrink-0 flex-wrap">
-                            {wd.omnipayRef && wd.gateway === "sendavapay" && (
-                              <>
-                                <Button size="sm" variant="outline" className="gap-1 h-8 text-xs border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50"
-                                  disabled={statusLoading} onClick={() => checkStatus(wd)} data-testid={`button-check-status-${wd.id}`}>
-                                  <RefreshCw className="w-3 h-3" />Get Statut
-                                </Button>
-                                <Button size="sm" variant="outline" className="gap-1 h-8 text-xs border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
-                                  disabled={retryMutation.isPending} onClick={() => { if (confirm("Relancer ce reversement chez SendavaPay ?")) retryMutation.mutate(wd.id); }} data-testid={`button-retry-wd-${wd.id}`}>
-                                  <RefreshCw className="w-3 h-3" />Relancer
-                                </Button>
-                              </>
+                            {wd.omnipayRef && (
+                              <ProviderPickerButton label="Vérifier statut" icon={RefreshCw} colorClass="h-8 border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50"
+                                disabled={statusLoading} onPick={(provider) => checkStatus(wd, provider)} testId={`button-check-status-${wd.id}`} />
                             )}
+                            {wd.omnipayRef && (
+                              <ProviderPickerButton label="Approuver chez fournisseur" icon={CheckCircle} colorClass="h-8 border-teal-400 text-teal-700 dark:text-teal-300 hover:bg-teal-50"
+                                disabled={syncStatusMutation.isPending} onPick={(provider) => syncStatusMutation.mutate({ id: wd.id, provider })} testId={`button-sync-status-${wd.id}`} />
+                            )}
+                            <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="h-8 border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
+                              disabled={retryMutation.isPending} onPick={(provider) => { if (confirm(`Déclencher le paiement de ce reversement chez ${provider} ?`)) retryMutation.mutate({ id: wd.id, provider }); }} testId={`button-retry-wd-${wd.id}`} />
                             {wd.omnipayRef ? (
                               <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-8 text-xs"
                                 onClick={() => openAction(wd, "force-validate")} data-testid={`button-force-validate-wd-${wd.id}`}>
-                                <CheckCircle className="w-3 h-3" />Valider
+                                <CheckCircle className="w-3 h-3" />Valider manuellement
                               </Button>
                             ) : (
                               <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-8"
@@ -4416,22 +4534,20 @@ function AdminWithdrawalsPanel() {
                           {wd.adminNote && <p className="text-xs italic text-muted-foreground">Note : {wd.adminNote}</p>}
                           {wd.status !== "approved" && wd.status !== "rejected" && (
                             <div className="flex gap-1.5 pt-1 border-t border-muted flex-wrap">
-                              {wd.omnipayRef && wd.gateway === "sendavapay" && (
-                                <>
-                                  <Button size="sm" variant="outline" className="gap-1 h-7 text-xs border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50"
-                                    disabled={statusLoading} onClick={() => checkStatus(wd)} data-testid={`button-check-status-inline-${wd.id}`}>
-                                    <RefreshCw className="w-3 h-3" />Get Statut
-                                  </Button>
-                                  <Button size="sm" variant="outline" className="gap-1 h-7 text-xs border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
-                                    disabled={retryMutation.isPending} onClick={() => { if (confirm("Relancer ce reversement chez SendavaPay ?")) retryMutation.mutate(wd.id); }} data-testid={`button-retry-inline-${wd.id}`}>
-                                    <RefreshCw className="w-3 h-3" />Relancer
-                                  </Button>
-                                </>
+                              {wd.omnipayRef && (
+                                <ProviderPickerButton label="Vérifier statut" icon={RefreshCw} colorClass="h-7 border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50"
+                                  disabled={statusLoading} onPick={(provider) => checkStatus(wd, provider)} testId={`button-check-status-inline-${wd.id}`} />
                               )}
+                              {wd.omnipayRef && (
+                                <ProviderPickerButton label="Approuver chez fournisseur" icon={CheckCircle} colorClass="h-7 border-teal-400 text-teal-700 dark:text-teal-300 hover:bg-teal-50"
+                                  disabled={syncStatusMutation.isPending} onPick={(provider) => syncStatusMutation.mutate({ id: wd.id, provider })} testId={`button-sync-status-inline-${wd.id}`} />
+                              )}
+                              <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="h-7 border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
+                                disabled={retryMutation.isPending} onPick={(provider) => { if (confirm(`Déclencher le paiement de ce reversement chez ${provider} ?`)) retryMutation.mutate({ id: wd.id, provider }); }} testId={`button-retry-inline-${wd.id}`} />
                               {wd.omnipayRef ? (
                                 <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-7 text-xs"
                                   onClick={() => openAction(wd, "force-validate")} data-testid={`button-force-validate-inline-${wd.id}`}>
-                                  <CheckCircle className="w-3 h-3" />Valider
+                                  <CheckCircle className="w-3 h-3" />Valider manuellement
                                 </Button>
                               ) : (
                                 <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-7 text-xs"
@@ -4508,23 +4624,21 @@ function AdminWithdrawalsPanel() {
               </div>
               {selectedWd.status !== "rejected" && (
                 <div className="flex gap-2 pt-2 flex-wrap">
-                  {selectedWd.omnipayRef && selectedWd.gateway === "sendavapay" && (
-                    <>
-                      <Button size="sm" variant="outline" className="gap-1 border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50 text-xs"
-                        disabled={statusLoading} onClick={() => { setDetailDialogOpen(false); checkStatus(selectedWd); }} data-testid="button-check-status-dialog">
-                        <RefreshCw className="w-3 h-3" />Get Statut
-                      </Button>
-                      <Button size="sm" variant="outline" className="gap-1 border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50 text-xs"
-                        disabled={retryMutation.isPending} onClick={() => { setDetailDialogOpen(false); if (confirm("Relancer ce reversement chez SendavaPay ?")) retryMutation.mutate(selectedWd.id); }} data-testid="button-retry-dialog">
-                        <RefreshCw className="w-3 h-3" />Relancer
-                      </Button>
-                    </>
+                  {selectedWd.omnipayRef && (
+                    <ProviderPickerButton label="Vérifier statut" icon={RefreshCw} colorClass="border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50 text-xs"
+                      disabled={statusLoading} onPick={(provider) => { setDetailDialogOpen(false); checkStatus(selectedWd, provider); }} testId="button-check-status-dialog" />
                   )}
+                  {selectedWd.omnipayRef && (
+                    <ProviderPickerButton label="Approuver chez fournisseur" icon={CheckCircle} colorClass="border-teal-400 text-teal-700 dark:text-teal-300 hover:bg-teal-50 text-xs"
+                      disabled={syncStatusMutation.isPending} onPick={(provider) => syncStatusMutation.mutate({ id: selectedWd.id, provider })} testId="button-sync-status-dialog" />
+                  )}
+                  <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50 text-xs"
+                    disabled={retryMutation.isPending} onPick={(provider) => { setDetailDialogOpen(false); if (confirm(`Déclencher le paiement de ce reversement chez ${provider} ?`)) retryMutation.mutate({ id: selectedWd.id, provider }); }} testId="button-retry-dialog" />
                   {selectedWd.status !== "approved" && (
                     selectedWd.omnipayRef ? (
                       <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 flex-1"
                         onClick={() => { setDetailDialogOpen(false); openAction(selectedWd, "force-validate"); }} data-testid="button-force-validate-dialog">
-                        <CheckCircle className="w-3 h-3" />Valider
+                        <CheckCircle className="w-3 h-3" />Valider manuellement
                       </Button>
                     ) : (
                       <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 flex-1"
@@ -4547,7 +4661,7 @@ function AdminWithdrawalsPanel() {
       <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Statut SendavaPay — Reversement #{selectedWd?.id}</DialogTitle>
+            <DialogTitle>Statut {statusResult?.provider ? statusResult.provider.charAt(0).toUpperCase() + statusResult.provider.slice(1) : "fournisseur"} — Reversement #{selectedWd?.id}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             {statusLoading ? (
@@ -4583,7 +4697,7 @@ function AdminWithdrawalsPanel() {
             ) : null}
             <div className="flex justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => setStatusDialogOpen(false)}>Fermer</Button>
-              {selectedWd && <Button size="sm" variant="outline" className="border-blue-400 text-blue-700 dark:text-blue-300" disabled={statusLoading} onClick={() => checkStatus(selectedWd)}>
+              {selectedWd && statusResult?.provider && <Button size="sm" variant="outline" className="border-blue-400 text-blue-700 dark:text-blue-300" disabled={statusLoading} onClick={() => checkStatus(selectedWd, statusResult.provider)}>
                 <RefreshCw className="w-3 h-3 mr-1" />Rafraîchir
               </Button>}
             </div>

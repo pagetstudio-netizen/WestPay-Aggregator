@@ -6814,63 +6814,212 @@ export async function registerRoutes(
     }
   });
 
+  // Vérifie le statut d'un reversement directement auprès d'un fournisseur (choisi par l'admin)
   app.get("/api/admin/withdrawals/:id/check-status", authMiddleware("admin"), async (req, res) => {
     try {
       const id = Number(req.params.id);
+      const provider = String(req.query.provider || "").toLowerCase();
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
-      if (w.gateway !== "sendavapay") return res.status(400).json({ message: "Ce reversement n'est pas géré par SendavaPay" });
-      if (!w.omnipayRef) return res.status(400).json({ message: "Aucune référence SendavaPay pour ce reversement" });
-      const sendavaApiKey = await getSendavaApiKey();
-      if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
-      const result = await sendavaGetWithdrawalStatus(sendavaApiKey, w.omnipayRef);
-      res.json({ success: result.success, data: result.data, error: result.error || result.message });
+      const effectiveProvider = provider || w.gateway || "";
+      if (!["sendavapay", "mbiyo", "omnipay"].includes(effectiveProvider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo ou OmniPay)" });
+      }
+      if (!w.omnipayRef) return res.status(400).json({ message: "Aucune référence fournisseur pour ce reversement" });
+
+      if (effectiveProvider === "sendavapay") {
+        const sendavaApiKey = await getSendavaApiKey();
+        if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
+        const result = await sendavaGetWithdrawalStatus(sendavaApiKey, w.omnipayRef);
+        return res.json({ provider: "sendavapay", success: result.success, status: result.data?.status, data: result.data, error: result.error || result.message });
+      }
+      if (effectiveProvider === "mbiyo") {
+        const mbiyoApiKey = await getMbiyoApiKey();
+        if (!mbiyoApiKey) return res.status(500).json({ message: "Clé API Mbiyo non configurée" });
+        const result = await mbiyoGetStatus(mbiyoApiKey, w.omnipayRef);
+        return res.json({ provider: "mbiyo", success: result.status === "success", status: result.data?.status, data: result.data, error: result.message });
+      }
+      const omnipayApiKey = await getOmnipayPayoutApiKey();
+      if (!omnipayApiKey) return res.status(500).json({ message: "Clé API OmniPay non configurée" });
+      const result = await omnipayGetStatus(omnipayApiKey, w.omnipayRef);
+      return res.json({ provider: "omnipay", success: result.success === 1, status: (result as any).status || (result as any).data?.status, data: result, error: result.message });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
   });
 
+  // Applique le statut renvoyé par le fournisseur au reversement local ("Approuver chez le fournisseur")
+  app.post("/api/admin/withdrawals/:id/sync-status", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const provider = String(req.body.provider || "").toLowerCase();
+      const w = await storage.getWithdrawalById(id);
+      if (!w) return res.status(404).json({ message: "Reversement introuvable" });
+      const effectiveProvider = provider || w.gateway || "";
+      if (!["sendavapay", "mbiyo", "omnipay"].includes(effectiveProvider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo ou OmniPay)" });
+      }
+      if (!w.omnipayRef) return res.status(400).json({ message: "Aucune référence fournisseur pour ce reversement" });
+
+      let providerStatus = "";
+      let raw: any = null;
+      if (effectiveProvider === "sendavapay") {
+        const sendavaApiKey = await getSendavaApiKey();
+        if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
+        const result = await sendavaGetWithdrawalStatus(sendavaApiKey, w.omnipayRef);
+        providerStatus = (result.data?.status || "").toLowerCase();
+        raw = result.data;
+      } else if (effectiveProvider === "mbiyo") {
+        const mbiyoApiKey = await getMbiyoApiKey();
+        if (!mbiyoApiKey) return res.status(500).json({ message: "Clé API Mbiyo non configurée" });
+        const result = await mbiyoGetStatus(mbiyoApiKey, w.omnipayRef);
+        providerStatus = (result.data?.status || result.status || "").toLowerCase();
+        raw = result.data;
+      } else {
+        const omnipayApiKey = await getOmnipayPayoutApiKey();
+        if (!omnipayApiKey) return res.status(500).json({ message: "Clé API OmniPay non configurée" });
+        const result = await omnipayGetStatus(omnipayApiKey, w.omnipayRef);
+        providerStatus = String((result as any).status || (result as any).data?.status || "").toLowerCase();
+        raw = result;
+      }
+
+      const successStatuses = ["success", "successful", "completed", "complete", "confirmed", "approved", "paid"];
+      const failureStatuses = ["failed", "failure", "cancelled", "canceled", "rejected", "expired"];
+      const merchant = await storage.getMerchantById(w.merchantId);
+
+      if (successStatuses.includes(providerStatus)) {
+        await storage.updateWithdrawalStatus(id, "approved", `Confirmé chez ${effectiveProvider} par l'admin`, undefined, w.fees || undefined, w.fees || undefined);
+        notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: w.fees || 0, phone: w.phone, operator: w.operator, status: "approved", mode: "manual" }).catch(() => {});
+        notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: w.fees || 0, phone: w.phone, operator: w.operator, status: "approved" }).catch(() => {});
+        console.log(`[ADMIN SYNC-STATUS WD] Retrait #${id} approuvé suite à confirmation ${effectiveProvider} (statut: ${providerStatus})`);
+        return res.json({ success: true, applied: "approved", providerStatus, data: raw });
+      }
+      if (failureStatuses.includes(providerStatus)) {
+        await storage.updateWithdrawalStatus(id, "failed", `Échec confirmé chez ${effectiveProvider} par l'admin`);
+        console.log(`[ADMIN SYNC-STATUS WD] Retrait #${id} marqué échoué suite à ${effectiveProvider} (statut: ${providerStatus})`);
+        return res.json({ success: true, applied: "failed", providerStatus, data: raw });
+      }
+      return res.json({ success: true, applied: "none", providerStatus, message: "Le fournisseur n'a pas encore confirmé le statut final", data: raw });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Déclenche (ou relance) le paiement chez le fournisseur choisi par l'admin
   app.post("/api/admin/withdrawals/:id/retry", authMiddleware("admin"), async (req, res) => {
     try {
       const id = Number(req.params.id);
+      const requestedProvider = String(req.body?.provider || "").toLowerCase();
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
-      if (w.gateway !== "sendavapay") return res.status(400).json({ message: "Ce reversement n'est pas géré par SendavaPay" });
-      const sendavaApiKey = await getSendavaApiKey();
-      if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
+      const provider = requestedProvider || w.gateway || "sendavapay";
+      if (!["sendavapay", "mbiyo", "omnipay"].includes(provider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo ou OmniPay)" });
+      }
+      if (w.status === "pending" && w.omnipayRef && provider === w.gateway) {
+        return res.status(400).json({ message: `Ce retrait est déjà en cours de traitement chez ${provider} (réf: ${w.omnipayRef}). Attendez la confirmation ou choisissez un autre fournisseur.` });
+      }
       const mc = await storage.getMerchantCountryById(w.merchantCountryId);
       const merchant = await storage.getMerchantById(w.merchantId);
       if (!mc || !merchant) return res.status(404).json({ message: "Marchand introuvable" });
       const fees = w.fees || 0;
       const netAmount = w.amount - fees;
-      const reference = sendavaGenerateRef();
-      const msisdnFull = "+" + prependDialCode(w.phone, w.country);
-      const countryCode = SENDAVAPAY_COUNTRY_CODES[w.country] || "";
-      const currency = SENDAVAPAY_CURRENCY_MAP[countryCode] || "XOF";
-      const sendavaOperator = toSendavaOperator(w.operator || "", countryCode);
-      const result = await sendavaInitiateWithdraw(sendavaApiKey, {
-        amount: netAmount,
-        phoneNumber: msisdnFull,
-        operator: sendavaOperator,
-        country: countryCode,
-        currency,
-        description: `Retrait WestPay (relance) - ${merchant.name}`,
-        externalReference: reference,
-      });
-      const spStatusLower = (result.data?.status || "").toLowerCase();
-      const spInitOk = result.success && !["failed", "failure", "cancelled", "canceled", "rejected"].includes(spStatusLower);
-      if (spInitOk) {
-        const spRef = result.data?.reference || reference;
-        const spFee = result.data?.fee != null ? Math.round(result.data.fee || fees) : fees;
-        await storage.updateWithdrawalStatus(id, "pending", `Relancé — Ref: ${spRef}`, spRef, spFee, spFee);
-        pollSendavaWithdrawalBackground({ withdrawalId: id, sendavaRef: spRef, merchantId: w.merchantId, country: w.country, amount: w.amount, fees: spFee, phone: w.phone, operator: w.operator });
-        console.log(`[ADMIN RETRY WD] Retrait #${id} relancé — ref=${spRef}`);
-        res.json({ success: true, reference: spRef, fees: spFee });
-      } else {
+
+      if (provider === "sendavapay") {
+        const sendavaApiKey = await getSendavaApiKey();
+        if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
+        const reference = sendavaGenerateRef();
+        const msisdnFull = "+" + prependDialCode(w.phone, w.country);
+        const countryCode = SENDAVAPAY_COUNTRY_CODES[w.country] || "";
+        const currency = SENDAVAPAY_CURRENCY_MAP[countryCode] || "XOF";
+        const sendavaOperator = toSendavaOperator(w.operator || "", countryCode);
+        const result = await sendavaInitiateWithdraw(sendavaApiKey, {
+          amount: netAmount,
+          phoneNumber: msisdnFull,
+          operator: sendavaOperator,
+          country: countryCode,
+          currency,
+          description: `Retrait WestPay (relance) - ${merchant.name}`,
+          externalReference: reference,
+        });
+        const spStatusLower = (result.data?.status || "").toLowerCase();
+        const spInitOk = result.success && !["failed", "failure", "cancelled", "canceled", "rejected"].includes(spStatusLower);
+        if (spInitOk) {
+          const spRef = result.data?.reference || reference;
+          const spFee = result.data?.fee != null ? Math.round(result.data.fee || fees) : fees;
+          await storage.updateWithdrawalGateway(id, "sendavapay");
+          await storage.updateWithdrawalStatus(id, "pending", `Relancé chez SendavaPay — Ref: ${spRef}`, spRef, spFee, spFee);
+          pollSendavaWithdrawalBackground({ withdrawalId: id, sendavaRef: spRef, merchantId: w.merchantId, country: w.country, amount: w.amount, fees: spFee, phone: w.phone, operator: w.operator });
+          console.log(`[ADMIN TRIGGER WD] Retrait #${id} relancé chez SendavaPay — ref=${spRef}`);
+          return res.json({ success: true, provider: "sendavapay", reference: spRef, fees: spFee });
+        }
         const errMsg = result.error || result.message || "Échec inconnu";
-        console.error(`[ADMIN RETRY WD] Retrait #${id} échec relance: ${errMsg}`);
-        res.status(502).json({ success: false, message: errMsg });
+        console.error(`[ADMIN TRIGGER WD] Retrait #${id} échec relance SendavaPay: ${errMsg}`);
+        return res.status(502).json({ success: false, message: errMsg });
       }
+
+      if (provider === "mbiyo") {
+        const mbiyoApiKey = await getMbiyoApiKey();
+        if (!mbiyoApiKey) return res.status(500).json({ message: "Clé API Mbiyo non configurée" });
+        const reference = mbiyoGenerateRef();
+        const msisdnFull = prependDialCode(w.phone, w.country);
+        const countryCode = mbiyoCountryCode(w.country);
+        const currency = mbiyoCurrency(w.country);
+        const wdOpRecord = w.operator ? await storage.getWithdrawalOperatorByNameAndCountry(w.operator, w.country) : null;
+        const network = wdOpRecord?.mbiyoCode || mbiyoNetwork(w.operator || "");
+        const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+        const callbackUrl = `${callbackBaseUrl}/api/mbiyo/payout-callback`;
+        const result = await mbiyoInitiatePayout({
+          apiKey: mbiyoApiKey,
+          amount: netAmount,
+          currency,
+          orderId: reference,
+          callbackUrl,
+          network,
+          phoneNumber: msisdnFull,
+          countryCode,
+          beneficiary: merchant.name,
+        });
+        if ((result.status === "success" || result.status === "pending") && result.data) {
+          const mbFee = Math.round(parseFloat(String(result.data.fee || fees)) || fees);
+          await storage.updateWithdrawalGateway(id, "mbiyo");
+          await storage.updateWithdrawalStatus(id, "pending", `Relancé chez Mbiyo — Ref: ${reference}`, reference, mbFee, mbFee);
+          console.log(`[ADMIN TRIGGER WD] Retrait #${id} relancé chez Mbiyo — ref=${reference}`);
+          return res.json({ success: true, provider: "mbiyo", reference, fees: mbFee });
+        }
+        console.error(`[ADMIN TRIGGER WD] Retrait #${id} échec relance Mbiyo: ${result.message}`);
+        return res.status(502).json({ success: false, message: result.message || "Échec inconnu" });
+      }
+
+      // provider === "omnipay"
+      const omnipayApiKey = await getOmnipayPayoutApiKey();
+      if (!omnipayApiKey) return res.status(500).json({ message: "Clé API OmniPay non configurée" });
+      const reference = `WD-${id}-${Date.now()}`;
+      const mNameParts = merchant.name.trim().split(/\s+/);
+      const mFirstName = mNameParts[0] || merchant.name;
+      const mLastName = mNameParts.length > 1 ? mNameParts.slice(1).join(" ") : mNameParts[0] || merchant.name;
+      const adminOmnipayCode = await resolveOmnipayOperatorCode(w.operator, w.country);
+      const wdMsisdn = prependDialCode(w.phone, w.country);
+      const result = await omnipayInitiateTransfer({
+        apikey: omnipayApiKey,
+        msisdn: wdMsisdn,
+        amount: netAmount,
+        reference,
+        first_name: mFirstName,
+        last_name: mLastName,
+        operator: adminOmnipayCode,
+      });
+      if (result.success === 1) {
+        const opRef = result.reference || reference;
+        const opFee = result.fees || fees;
+        await storage.updateWithdrawalGateway(id, "omnipay");
+        await storage.updateWithdrawalStatus(id, "pending", `Relancé chez OmniPay — Ref: ${opRef}`, opRef, opFee, opFee);
+        console.log(`[ADMIN TRIGGER WD] Retrait #${id} relancé chez OmniPay — ref=${opRef}`);
+        return res.json({ success: true, provider: "omnipay", reference: opRef, fees: opFee });
+      }
+      const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Échec inconnu";
+      console.error(`[ADMIN TRIGGER WD] Retrait #${id} échec relance OmniPay (code ${result.code}): ${errMsg}`);
+      return res.status(502).json({ success: false, message: errMsg });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -6932,6 +7081,116 @@ export async function registerRoutes(
       await db.update(transactions).set({ status: "rejected" }).where(eq(transactions.id, id));
       console.log(`[ADMIN FORCE-REJECT TX] Transaction #${id} rejetée manuellement`);
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Vérifie le statut d'un paiement (transaction confirmée ou en attente) auprès d'un fournisseur choisi par l'admin
+  app.get("/api/admin/transactions/:id/check-status", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const source = String(req.query.source || "payment");
+      const provider = String(req.query.provider || "").toLowerCase();
+
+      let ref: string | null | undefined;
+      if (source === "pending") {
+        const pp = await storage.getPendingPaymentById(id);
+        if (!pp) return res.status(404).json({ message: "Paiement en cours introuvable" });
+        ref = pp.omnipayReference;
+      } else {
+        const [tx] = await db.select().from(transactions).where(eq(transactions.id, id));
+        if (!tx) return res.status(404).json({ message: "Transaction introuvable" });
+        ref = tx.omnipayReference;
+      }
+      if (!ref) return res.status(400).json({ message: "Aucune référence fournisseur pour ce paiement" });
+      if (!["sendavapay", "mbiyo", "omnipay"].includes(provider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo ou OmniPay)" });
+      }
+
+      if (provider === "sendavapay") {
+        const sendavaApiKey = await getSendavaApiKey();
+        if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
+        const result = await sendavaGetPaymentStatus(sendavaApiKey, ref);
+        return res.json({ provider: "sendavapay", success: result.success, status: (result as any).data?.status, data: (result as any).data, error: (result as any).error || (result as any).message });
+      }
+      if (provider === "mbiyo") {
+        const mbiyoApiKey = await getMbiyoApiKey();
+        if (!mbiyoApiKey) return res.status(500).json({ message: "Clé API Mbiyo non configurée" });
+        const result = await mbiyoGetStatus(mbiyoApiKey, ref);
+        return res.json({ provider: "mbiyo", success: result.status === "success", status: result.data?.status, data: result.data, error: result.message });
+      }
+      const omnipayApiKey = await getOmnipayApiKey();
+      if (!omnipayApiKey) return res.status(500).json({ message: "Clé API OmniPay non configurée" });
+      const result = await omnipayGetStatus(omnipayApiKey, ref);
+      return res.json({ provider: "omnipay", success: result.success === 1, status: (result as any).status || (result as any).data?.status, data: result, error: result.message });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Applique le statut renvoyé par le fournisseur à une transaction/paiement en cours ("Approuver chez le fournisseur")
+  app.post("/api/admin/transactions/:id/sync-status", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const source = String(req.body.source || "payment");
+      const provider = String(req.body.provider || "").toLowerCase();
+      if (!["sendavapay", "mbiyo", "omnipay"].includes(provider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo ou OmniPay)" });
+      }
+
+      let ref: string | null | undefined;
+      if (source === "pending") {
+        const pp = await storage.getPendingPaymentById(id);
+        if (!pp) return res.status(404).json({ message: "Paiement en cours introuvable" });
+        ref = pp.omnipayReference;
+      } else {
+        const [tx] = await db.select().from(transactions).where(eq(transactions.id, id));
+        if (!tx) return res.status(404).json({ message: "Transaction introuvable" });
+        ref = tx.omnipayReference;
+      }
+      if (!ref) return res.status(400).json({ message: "Aucune référence fournisseur pour ce paiement" });
+
+      let providerStatus = "";
+      if (provider === "sendavapay") {
+        const sendavaApiKey = await getSendavaApiKey();
+        if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
+        const result = await sendavaGetPaymentStatus(sendavaApiKey, ref);
+        providerStatus = ((result as any).data?.status || "").toLowerCase();
+      } else if (provider === "mbiyo") {
+        const mbiyoApiKey = await getMbiyoApiKey();
+        if (!mbiyoApiKey) return res.status(500).json({ message: "Clé API Mbiyo non configurée" });
+        const result = await mbiyoGetStatus(mbiyoApiKey, ref);
+        providerStatus = (result.data?.status || result.status || "").toLowerCase();
+      } else {
+        const omnipayApiKey = await getOmnipayApiKey();
+        if (!omnipayApiKey) return res.status(500).json({ message: "Clé API OmniPay non configurée" });
+        const result = await omnipayGetStatus(omnipayApiKey, ref);
+        providerStatus = String((result as any).status || (result as any).data?.status || "").toLowerCase();
+      }
+
+      const successStatuses = ["success", "successful", "completed", "complete", "confirmed", "approved", "paid"];
+      const failureStatuses = ["failed", "failure", "cancelled", "canceled", "rejected", "expired"];
+
+      if (successStatuses.includes(providerStatus)) {
+        if (source === "pending") {
+          await storage.updatePendingPaymentStatus(id, "confirmed");
+        } else {
+          await db.update(transactions).set({ status: "confirmed" }).where(eq(transactions.id, id));
+        }
+        console.log(`[ADMIN SYNC-STATUS TX] ${source} #${id} confirmé suite à ${provider} (statut: ${providerStatus})`);
+        return res.json({ success: true, applied: "confirmed", providerStatus });
+      }
+      if (failureStatuses.includes(providerStatus)) {
+        if (source === "pending") {
+          await storage.updatePendingPaymentStatus(id, "failed");
+        } else {
+          await db.update(transactions).set({ status: "failed" }).where(eq(transactions.id, id));
+        }
+        console.log(`[ADMIN SYNC-STATUS TX] ${source} #${id} marqué échoué suite à ${provider} (statut: ${providerStatus})`);
+        return res.json({ success: true, applied: "failed", providerStatus });
+      }
+      return res.json({ success: true, applied: "none", providerStatus, message: "Le fournisseur n'a pas encore confirmé le statut final" });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

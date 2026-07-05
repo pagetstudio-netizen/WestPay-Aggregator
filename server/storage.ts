@@ -153,6 +153,7 @@ export interface IStorage {
   getWithdrawalById(id: number): Promise<Withdrawal | undefined>;
   getWithdrawalByOmnipayRef(ref: string): Promise<Withdrawal | undefined>;
   updateWithdrawalStatus(id: number, status: string, adminNote?: string, omnipayRef?: string, fees?: number, providerPayoutFee?: number): Promise<void>;
+  updateWithdrawalGateway(id: number, gateway: string): Promise<void>;
   applyWithdrawal(id: number): Promise<void>;
 
   getWithdrawalOperators(country?: string, activeOnly?: boolean): Promise<WithdrawalOperator[]>;
@@ -1052,6 +1053,10 @@ export class DatabaseStorage implements IStorage {
     if (fees !== undefined) updateData.fees = fees;
     if (providerPayoutFee !== undefined) updateData.providerPayoutFee = providerPayoutFee;
     await db.update(withdrawals).set(updateData).where(eq(withdrawals.id, id));
+  }
+
+  async updateWithdrawalGateway(id: number, gateway: string): Promise<void> {
+    await db.update(withdrawals).set({ gateway }).where(eq(withdrawals.id, id));
   }
 
   async applyWithdrawal(id: number): Promise<void> {
