@@ -1,4 +1,3 @@
-import { useState, useCallback } from "react";
 import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -7,7 +6,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/lib/auth";
 import { ThemeProvider } from "@/lib/theme";
 import { LanguageProvider } from "@/lib/language";
-import SplashScreen from "@/components/splash-screen";
 import RestrictedPage from "@/pages/restricted";
 import AdminLogin from "@/pages/admin-login";
 import AdminDashboard from "@/pages/admin-dashboard";
@@ -46,9 +44,6 @@ function Router() {
 }
 
 function App() {
-  const [splashDone, setSplashDone] = useState(false);
-  const handleSplashDone = useCallback(() => setSplashDone(true), []);
-
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
@@ -56,7 +51,6 @@ function App() {
           <AuthProvider>
             <TooltipProvider>
               <Toaster />
-              {!splashDone && <SplashScreen onDone={handleSplashDone} />}
               <Router />
             </TooltipProvider>
           </AuthProvider>
