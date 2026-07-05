@@ -9,7 +9,7 @@ import { db } from "./db";
 import { pool } from "./db";
 import { generateSecret as totpGenerateSecret, generateURI as totpGenerateURI, verifySync as totpVerifySync } from "otplib";
 import QRCode from "qrcode";
-import { admins, merchantCountries, transactions } from "@shared/schema";
+import { admins, merchantCountries, transactions, pendingPayments } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -7191,6 +7191,121 @@ export async function registerRoutes(
         return res.json({ success: true, applied: "failed", providerStatus });
       }
       return res.json({ success: true, applied: "none", providerStatus, message: "Le fournisseur n'a pas encore confirmé le statut final" });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Re-déclenche un paiement en attente auprès du fournisseur choisi par l'admin
+  app.post("/api/admin/transactions/:id/trigger", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const provider = String(req.body?.provider || "").toLowerCase();
+      if (!["sendavapay", "mbiyo", "omnipay"].includes(provider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo ou OmniPay)" });
+      }
+      const pp = await storage.getPendingPaymentById(id);
+      if (!pp) return res.status(404).json({ message: "Paiement en cours introuvable" });
+      const merchant = await storage.getMerchantById(pp.merchantId);
+      if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
+      const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+
+      if (provider === "omnipay") {
+        const omnipayApiKey = await getOmnipayApiKey();
+        if (!omnipayApiKey) return res.status(500).json({ message: "Clé API OmniPay non configurée" });
+        const reference = omnipayGenerateRef();
+        const msisdn = prependDialCode(pp.payerPhone || "", pp.country);
+        const nameParts = (pp.payerName || "Client WestPay").split(" ");
+        const fName = nameParts[0] || "Client";
+        const lName = nameParts.slice(1).join(" ") || "WestPay";
+        const omnipayOperator = toOmnipayOperatorCode(pp.paymentMethod) || undefined;
+        const returnUrl = `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
+        const autoOtp = String(Math.floor(1000 + Math.random() * 9000));
+        const result = await omnipayInitiatePayment({
+          apikey: omnipayApiKey,
+          msisdn,
+          amount: pp.amount,
+          reference,
+          first_name: fName,
+          last_name: lName,
+          otp: autoOtp,
+          operator: omnipayOperator,
+          return_url: omnipayOperator === "wave" ? returnUrl : undefined,
+        });
+        if (result.success !== 1) {
+          const errorMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Échec inconnu";
+          return res.status(502).json({ success: false, message: errorMsg });
+        }
+        await db.update(pendingPayments).set({
+          status: "omnipay_pending",
+          omnipayReference: reference,
+          omnipayTxId: result.id ? String(result.id) : null,
+          omnipayPaymentUrl: result.payment_url || null,
+          gateway: "westpay",
+        }).where(eq(pendingPayments.id, id));
+        console.log(`[ADMIN TRIGGER TX] Paiement #${id} re-déclenché chez OmniPay — ref=${reference}`);
+        return res.json({ success: true, provider: "omnipay", reference, paymentUrl: result.payment_url });
+      }
+
+      if (provider === "sendavapay") {
+        const sendavaApiKey = await getSendavaApiKey();
+        if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
+        const reference = sendavaGenerateRef();
+        const msisdnFull = "+" + prependDialCode(pp.payerPhone || "", pp.country);
+        const countryCode = SENDAVAPAY_COUNTRY_CODES[pp.country] || "";
+        const currency = SENDAVAPAY_CURRENCY_MAP[countryCode] || "XOF";
+        const sendavaOperator = toSendavaOperator(pp.paymentMethod || "", countryCode);
+        const result = await sendavaCreatePayment(sendavaApiKey, {
+          amount: pp.amount,
+          phoneNumber: msisdnFull,
+          operator: sendavaOperator,
+          country: countryCode,
+          currency,
+          description: `Paiement WestPay (relance admin) - ${merchant.name}`,
+          externalReference: reference,
+          callbackUrl: `${callbackBaseUrl}/api/sendavapay/callback`,
+        });
+        if (!result.success) {
+          return res.status(502).json({ success: false, message: (result as any).error || (result as any).message || "Échec inconnu" });
+        }
+        await db.update(pendingPayments).set({
+          status: "omnipay_pending",
+          omnipayReference: reference,
+          gateway: "sendavapay",
+        }).where(eq(pendingPayments.id, id));
+        console.log(`[ADMIN TRIGGER TX] Paiement #${id} re-déclenché chez SendavaPay — ref=${reference}`);
+        return res.json({ success: true, provider: "sendavapay", reference });
+      }
+
+      if (provider === "mbiyo") {
+        const mbiyoApiKey = await getMbiyoApiKey();
+        if (!mbiyoApiKey) return res.status(500).json({ message: "Clé API Mbiyo non configurée" });
+        const reference = mbiyoGenerateRef();
+        const msisdnMbiyo = prependDialCode(pp.payerPhone || "", pp.country);
+        const countryCode = mbiyoCountryCode(pp.country);
+        const currency = mbiyoCurrency(pp.country);
+        const network = mbiyoNetwork(pp.paymentMethod || "");
+        const result = await mbiyoInitiatePayin({
+          apiKey: mbiyoApiKey,
+          amount: pp.amount,
+          currency,
+          orderId: reference,
+          callbackUrl: `${callbackBaseUrl}/api/mbiyo/callback`,
+          network,
+          phoneNumber: msisdnMbiyo,
+          countryCode,
+        });
+        if (result.status !== "success" && result.status !== "pending") {
+          return res.status(502).json({ success: false, message: result.message || "Échec inconnu" });
+        }
+        await db.update(pendingPayments).set({
+          status: "omnipay_pending",
+          omnipayReference: reference,
+          gateway: "mbiyo",
+        }).where(eq(pendingPayments.id, id));
+        console.log(`[ADMIN TRIGGER TX] Paiement #${id} re-déclenché chez Mbiyo — ref=${reference}`);
+        return res.json({ success: true, provider: "mbiyo", reference });
+      }
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

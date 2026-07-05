@@ -1483,6 +1483,24 @@ function TransactionsPanel() {
     onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
   });
 
+  const retryTxMutation = useMutation({
+    mutationFn: async ({ tx, provider }: { tx: any; provider: string }) => {
+      const res = await fetch(`/api/admin/transactions/${tx.rowId}/trigger`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ provider }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Erreur");
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/transactions"] });
+      toast({ title: `Paiement déclenché chez ${data.provider} (Réf: ${data.reference})` });
+    },
+    onError: (e: any) => toast({ title: "Échec du déclenchement", description: e.message, variant: "destructive" }),
+  });
+
   if (isLoading) return <LoadingSkeleton />;
 
   if (isError) return (
@@ -1711,6 +1729,12 @@ function TransactionsPanel() {
                                   disabled={syncTxStatusMutation.isPending}
                                   onPick={(provider) => syncTxStatusMutation.mutate({ tx, provider })} testId={`button-sync-status-tx-${tx.id}`} />
                               </>
+                            )}
+                            {(tx.type === "pending" || ["omnipay_pending", "submitted"].includes(tx.status)) && (
+                              <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
+                                disabled={retryTxMutation.isPending}
+                                onPick={(provider) => { if (confirm(`Déclencher le paiement chez ${provider} ?\nUne nouvelle invite USSD sera envoyée au client.`)) retryTxMutation.mutate({ tx, provider }); }}
+                                testId={`button-trigger-tx-${tx.id}`} />
                             )}
                             {tx.status !== "confirmed" && tx.status !== "completed" && tx.status !== "success" && (
                               <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white gap-1"
@@ -4561,7 +4585,29 @@ function AdminWithdrawalsPanel() {
                               </Button>
                             </div>
                           )}
-                          {(wd.status === "approved" || wd.status === "rejected") && (
+                          {wd.status === "approved" && (
+                            <div className="flex gap-1.5 pt-1 border-t border-muted flex-wrap">
+                              {wd.omnipayRef && (
+                                <ProviderPickerButton label="Vérifier statut" icon={RefreshCw} colorClass="h-7 border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50"
+                                  disabled={statusLoading} onPick={(provider) => checkStatus(wd, provider)} testId={`button-check-status-approved-${wd.id}`} />
+                              )}
+                              {wd.omnipayRef && (
+                                <ProviderPickerButton label="Approuver chez fournisseur" icon={CheckCircle} colorClass="h-7 border-teal-400 text-teal-700 dark:text-teal-300 hover:bg-teal-50"
+                                  disabled={syncStatusMutation.isPending} onPick={(provider) => syncStatusMutation.mutate({ id: wd.id, provider })} testId={`button-sync-status-approved-${wd.id}`} />
+                              )}
+                              <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="h-7 border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
+                                disabled={retryMutation.isPending} onPick={(provider) => { if (confirm(`Déclencher le paiement chez ${provider} ?`)) retryMutation.mutate({ id: wd.id, provider }); }} testId={`button-retry-approved-${wd.id}`} />
+                              <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-7 text-xs"
+                                onClick={() => openAction(wd, "force-validate")} data-testid={`button-force-validate-approved-${wd.id}`}>
+                                <CheckCircle className="w-3 h-3" />Valider manuellement
+                              </Button>
+                              <Button size="sm" variant="destructive" className="gap-1 h-7 text-xs opacity-70"
+                                onClick={() => openAction(wd, "force-reject")} data-testid={`button-force-reject-approved-${wd.id}`}>
+                                <XCircle className="w-3 h-3" />Rejeter (forcer)
+                              </Button>
+                            </div>
+                          )}
+                          {wd.status === "rejected" && (
                             <div className="flex gap-1.5 pt-1 border-t border-muted">
                               <Button size="sm" variant="destructive" className="gap-1 h-7 text-xs opacity-70"
                                 onClick={() => openAction(wd, "force-reject")} data-testid={`button-force-reject-done-${wd.id}`}>
