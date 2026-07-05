@@ -54,6 +54,7 @@ export const merchantCountries = pgTable("merchant_countries", {
   active: boolean("active").default(true).notNull(),
   omnipayEnabled: boolean("omnipay_enabled").default(false).notNull(),
   payinGateway: text("payin_gateway").default("omnipay").notNull(),
+  adminCreditsTotal: integer("admin_credits_total").default(0).notNull(),
 });
 
 export const transactions = pgTable("transactions", {

@@ -32,7 +32,7 @@ import {
   Link, BarChart3, TrendingUp, Eye, ToggleLeft as Toggle, ExternalLink, Filter,
   Check, ChevronsUpDown, ArrowUpRight, Edit3, Wallet, AlertTriangle, RotateCcw, Bitcoin,
   Monitor, EyeOff, KeyRound, Mail, GripVertical, ImagePlus, X, Upload, Smartphone,
-  Bot, Send
+  Bot, Send, ShieldCheck
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
@@ -706,6 +706,9 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
   const [slugError, setSlugError] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
   const [balanceEdits, setBalanceEdits] = useState<Record<number, string>>({});
+  const [balancePwDialog, setBalancePwDialog] = useState<{ walletId: number; balance: number } | null>(null);
+  const [balancePwInput, setBalancePwInput] = useState("");
+  const [balancePwSaving, setBalancePwSaving] = useState(false);
 
   useEffect(() => {
     if (merchant) {
@@ -786,16 +789,32 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
-  const saveBalance = async (walletId: number) => {
+  const saveBalance = (walletId: number) => {
     const balance = parseInt(balanceEdits[walletId] || "0");
     if (isNaN(balance) || balance < 0) { toast({ title: "Solde invalide", variant: "destructive" }); return; }
+    setBalancePwInput("");
+    setBalancePwDialog({ walletId, balance });
+  };
+
+  const confirmBalanceUpdate = async () => {
+    if (!balancePwDialog) return;
+    if (!balancePwInput.trim()) { toast({ title: "Mot de passe requis", variant: "destructive" }); return; }
+    setBalancePwSaving(true);
     const res = await fetch("/api/admin/update-balance", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ id: walletId, balance }),
+      body: JSON.stringify({ id: balancePwDialog.walletId, balance: balancePwDialog.balance, adminPassword: balancePwInput }),
     });
-    if (res.ok) { refetchWallets(); toast({ title: "Solde mis à jour" }); }
-    else { const d = await res.json(); toast({ title: "Erreur", description: d.message, variant: "destructive" }); }
+    setBalancePwSaving(false);
+    if (res.ok) {
+      setBalancePwDialog(null);
+      setBalancePwInput("");
+      refetchWallets();
+      toast({ title: "Solde mis à jour avec succès" });
+    } else {
+      const d = await res.json();
+      toast({ title: "Erreur", description: d.message, variant: "destructive" });
+    }
   };
 
   const toggleWalletActive = async (walletId: number, merchantId: number, active: boolean) => {
@@ -965,6 +984,44 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
                 ))}
               </div>
             )}
+
+            {/* Dialog confirmation mot de passe admin pour crédit de solde */}
+            <Dialog open={!!balancePwDialog} onOpenChange={(o) => { if (!o) { setBalancePwDialog(null); setBalancePwInput(""); } }}>
+              <DialogContent className="max-w-sm">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-amber-500" />
+                    Confirmation sécurité
+                  </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+                    <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Nouveau solde : <span className="font-bold">{balancePwDialog?.balance?.toLocaleString("fr-FR")} F CFA</span></p>
+                    <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">Cette action créditera le compte marchand. Le montant crédité sera comptabilisé comme crédit administrateur pour les contrôles de sécurité des retraits.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="balance-pw-wallet">Mot de passe administrateur</Label>
+                    <Input
+                      id="balance-pw-wallet"
+                      type="password"
+                      placeholder="Votre mot de passe"
+                      value={balancePwInput}
+                      onChange={e => setBalancePwInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") confirmBalanceUpdate(); }}
+                      autoFocus
+                      data-testid="input-balance-admin-password-wallet"
+                    />
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <Button variant="outline" onClick={() => { setBalancePwDialog(null); setBalancePwInput(""); }}>Annuler</Button>
+                    <Button onClick={confirmBalanceUpdate} disabled={balancePwSaving} className="bg-amber-600 hover:bg-amber-700 text-white" data-testid="button-confirm-balance-update">
+                      {balancePwSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ShieldCheck className="w-4 h-4 mr-2" />}
+                      Confirmer le crédit
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
 
             {subTab === "webhook" && (
               <div className="space-y-4">
@@ -1796,6 +1853,9 @@ function CountriesPanel() {
   const [filterSearch, setFilterSearch] = useState("");
   const [editingBalance, setEditingBalance] = useState<number | null>(null);
   const [balanceInput, setBalanceInput] = useState("");
+  const [balancePwInput2, setBalancePwInput2] = useState("");
+  const [pendingBalanceUpdate, setPendingBalanceUpdate] = useState<{ id: number; balance: number; label: string } | null>(null);
+  const [balancePw2Saving, setBalancePw2Saving] = useState(false);
 
   const { data: merchants = [] } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
   const { data: countries = [], isLoading } = useAdminFetch("/api/admin/countries", ["/api/admin/countries"]);
@@ -1819,23 +1879,36 @@ function CountriesPanel() {
   });
 
   const updateBalanceMutation = useMutation({
-    mutationFn: async ({ id, balance }: { id: number; balance: number }) => {
+    mutationFn: async ({ id, balance, adminPassword }: { id: number; balance: number; adminPassword: string }) => {
       const res = await fetch("/api/admin/update-balance", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ id, balance }),
+        body: JSON.stringify({ id, balance, adminPassword }),
       });
-      if (!res.ok) throw new Error("Erreur");
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/countries"] });
       setEditingBalance(null);
       setBalanceInput("");
-      toast({ title: "Solde mis à jour" });
+      setPendingBalanceUpdate(null);
+      setBalancePwInput2("");
+      toast({ title: "Solde mis à jour avec succès" });
     },
-    onError: () => toast({ title: "Erreur", description: "Impossible de modifier le solde", variant: "destructive" }),
+    onError: (err: any) => toast({ title: "Erreur", description: err.message || "Impossible de modifier le solde", variant: "destructive" }),
   });
+
+  const openBalancePwDialog2 = (id: number, balance: number, label: string) => {
+    setBalancePwInput2("");
+    setPendingBalanceUpdate({ id, balance, label });
+  };
+
+  const confirmBalanceUpdate2 = () => {
+    if (!pendingBalanceUpdate) return;
+    if (!balancePwInput2.trim()) { toast({ title: "Mot de passe requis", variant: "destructive" }); return; }
+    updateBalanceMutation.mutate({ id: pendingBalanceUpdate.id, balance: pendingBalanceUpdate.balance, adminPassword: balancePwInput2 });
+  };
 
   const toggleOmnipayMutation = useMutation({
     mutationFn: async ({ merchantId, countryId, omnipayEnabled }: { merchantId: number; countryId: number; omnipayEnabled: boolean }) => {
@@ -2034,7 +2107,7 @@ function CountriesPanel() {
                           placeholder="Nouveau solde"
                           autoFocus
                           onKeyDown={(e) => {
-                            if (e.key === "Enter") updateBalanceMutation.mutate({ id: mc.id, balance: parseInt(balanceInput) || 0 });
+                            if (e.key === "Enter") openBalancePwDialog2(mc.id, parseInt(balanceInput) || 0, `${mc.merchantName || "Marchand"} — ${mc.country}`);
                             if (e.key === "Escape") { setEditingBalance(null); setBalanceInput(""); }
                           }}
                           data-testid={`input-balance-${mc.id}`}
@@ -2043,7 +2116,7 @@ function CountriesPanel() {
                           size="sm"
                           className="h-8 px-2"
                           disabled={updateBalanceMutation.isPending}
-                          onClick={() => updateBalanceMutation.mutate({ id: mc.id, balance: parseInt(balanceInput) || 0 })}
+                          onClick={() => openBalancePwDialog2(mc.id, parseInt(balanceInput) || 0, `${mc.merchantName || "Marchand"} — ${mc.country}`)}
                           data-testid={`button-save-balance-inline-${mc.id}`}
                         >
                           {updateBalanceMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
@@ -2107,6 +2180,45 @@ function CountriesPanel() {
           ))
         )}
       </div>
+
+      {/* Dialog confirmation mot de passe admin pour crédit de solde (CountriesPanel) */}
+      <Dialog open={!!pendingBalanceUpdate} onOpenChange={(o) => { if (!o) { setPendingBalanceUpdate(null); setBalancePwInput2(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-amber-500" />
+              Confirmation sécurité
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-300">{pendingBalanceUpdate?.label}</p>
+              <p className="text-sm font-bold text-amber-900 dark:text-amber-200 mt-1">Nouveau solde : {pendingBalanceUpdate?.balance?.toLocaleString("fr-FR")} F CFA</p>
+              <p className="text-xs text-amber-700 dark:text-amber-400 mt-2">Le montant crédité sera comptabilisé comme crédit administrateur et autorisera les futurs retraits jusqu'à ce montant.</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="balance-pw-countries">Mot de passe administrateur</Label>
+              <Input
+                id="balance-pw-countries"
+                type="password"
+                placeholder="Votre mot de passe"
+                value={balancePwInput2}
+                onChange={e => setBalancePwInput2(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") confirmBalanceUpdate2(); }}
+                autoFocus
+                data-testid="input-balance-admin-password-countries"
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => { setPendingBalanceUpdate(null); setBalancePwInput2(""); }}>Annuler</Button>
+              <Button onClick={confirmBalanceUpdate2} disabled={updateBalanceMutation.isPending} className="bg-amber-600 hover:bg-amber-700 text-white" data-testid="button-confirm-balance-update-countries">
+                {updateBalanceMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ShieldCheck className="w-4 h-4 mr-2" />}
+                Confirmer le crédit
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

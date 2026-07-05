@@ -2571,13 +2571,32 @@ export async function registerRoutes(
 
   app.post("/api/admin/update-balance", authMiddleware("admin"), async (req, res) => {
     try {
-      const { id, balance } = req.body;
+      const { id, balance, adminPassword } = req.body;
       if (id === undefined || balance === undefined) return res.status(400).json({ message: "ID et solde requis" });
+      if (!adminPassword) return res.status(400).json({ message: "Mot de passe administrateur requis pour créditer un compte" });
+
+      // ── Vérification du mot de passe admin ───────────────────────────────────
+      const adminUser = (req as any).user;
+      const adminRecord = await storage.getAdminById(adminUser.id);
+      if (!adminRecord) return res.status(403).json({ message: "Administrateur introuvable" });
+      const passwordValid = await bcrypt.compare(adminPassword, adminRecord.passwordHash);
+      if (!passwordValid) return res.status(403).json({ message: "Mot de passe administrateur incorrect" });
+
+      // ── Lecture du solde actuel pour calculer le crédit admin ──────────────
+      const currentMC = await storage.getMerchantCountryById(id);
+      if (!currentMC) return res.status(404).json({ message: "Wallet introuvable" });
+
       await storage.updateMerchantCountryBalance(id, balance);
+
+      // ── Si le nouveau solde > solde actuel, enregistrer le crédit admin ────
+      if (balance > (currentMC.balance ?? 0)) {
+        const creditAmount = balance - (currentMC.balance ?? 0);
+        await storage.addAdminCreditToMC(id, creditAmount);
+      }
+
       const updatedMC = await storage.getMerchantCountryById(id);
       if (updatedMC) {
         const balMerchant = await storage.getMerchantById(updatedMC.merchantId);
-        const adminUser = (req as any).user;
         const rawIp = (req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "").split(",")[0].trim();
         getGeoInfo(rawIp).then(geo => {
           notifyAdminBalanceUpdate({
@@ -6388,6 +6407,31 @@ export async function registerRoutes(
         return res.status(409).json({
           message: `Un retrait identique (${amount} FCFA → ${phone}) est déjà ${dup.status === "approved" ? "approuvé" : "en cours"} depuis ${dupDate}. Attendez 2 heures avant de réessayer.`,
           duplicateId: dup.id,
+        });
+      }
+
+      // ── VÉRIFICATION SÉCURITÉ : dépôts reçus vs retraits effectués ──────────────
+      // Bloque si le total des retraits demandés dépasse les dépôts confirmés + crédits admin.
+      // Empêche tout retrait frauduleux en cas de double crédit ou de bug de solde.
+      const totalDeposits = await storage.getTotalConfirmedDepositsForMC(merchantId, mc.country);
+      const adminCredits = (mc as any).adminCreditsTotal ?? 0;
+      const totalAllowed = totalDeposits + adminCredits;
+      const totalAlreadyWithdrawn = await storage.getTotalApprovedWithdrawalsForMC(mc.id);
+      if (totalAllowed === 0) {
+        return res.status(400).json({
+          message: "Sécurité: Aucun dépôt confirmé sur ce compte. Vous ne pouvez pas effectuer de retrait.",
+          securityBlock: true,
+        });
+      }
+      if ((totalAlreadyWithdrawn + amount) > totalAllowed) {
+        return res.status(400).json({
+          message: `Sécurité: Le total de vos retraits (${(totalAlreadyWithdrawn + amount).toLocaleString("fr-FR")} F) dépasse vos dépôts confirmés (${totalAllowed.toLocaleString("fr-FR")} F). Retrait bloqué pour anomalie de solde.`,
+          securityBlock: true,
+          totalDeposits,
+          adminCredits,
+          totalAllowed,
+          totalAlreadyWithdrawn,
+          requested: amount,
         });
       }
 

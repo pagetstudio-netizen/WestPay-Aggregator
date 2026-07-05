@@ -57,6 +57,9 @@ export interface IStorage {
   incrementMerchantCountryBalance(id: number, amount: number): Promise<void>;
   decrementMerchantCountryBalanceAtomic(id: number, amount: number): Promise<boolean>;
   findMerchantCountryBySimAndCountry(merchantId: number, country: string): Promise<MerchantCountry | undefined>;
+  getTotalConfirmedDepositsForMC(merchantId: number, country: string): Promise<number>;
+  getTotalApprovedWithdrawalsForMC(merchantCountryId: number): Promise<number>;
+  addAdminCreditToMC(id: number, amount: number): Promise<void>;
   findMerchantCountryByApiKey(apiKey: string): Promise<MerchantCountry | undefined>;
   updateMerchantCountryApiKey(id: number, apiKey: string): Promise<void>;
   updateMerchantCountryActive(id: number, active: boolean): Promise<void>;
@@ -367,6 +370,33 @@ export class DatabaseStorage implements IStorage {
         sql`LOWER(${merchantCountries.country}) = LOWER(${country.trim()})`
       ));
     return mc;
+  }
+
+  async getTotalConfirmedDepositsForMC(merchantId: number, country: string): Promise<number> {
+    const [row] = await db.select({ total: sql<string>`COALESCE(SUM(${transactions.amount}), 0)` })
+      .from(transactions)
+      .where(and(
+        eq(transactions.merchantId, merchantId),
+        sql`LOWER(${transactions.country}) = LOWER(${country.trim()})`,
+        eq(transactions.status, "confirmed")
+      ));
+    return parseInt(row?.total ?? "0") || 0;
+  }
+
+  async getTotalApprovedWithdrawalsForMC(merchantCountryId: number): Promise<number> {
+    const [row] = await db.select({ total: sql<string>`COALESCE(SUM(${withdrawals.amount}), 0)` })
+      .from(withdrawals)
+      .where(and(
+        eq(withdrawals.merchantCountryId, merchantCountryId),
+        sql`${withdrawals.status} IN ('pending', 'approved')`
+      ));
+    return parseInt(row?.total ?? "0") || 0;
+  }
+
+  async addAdminCreditToMC(id: number, amount: number): Promise<void> {
+    await db.update(merchantCountries)
+      .set({ adminCreditsTotal: sql`${merchantCountries.adminCreditsTotal} + ${amount}` })
+      .where(eq(merchantCountries.id, id));
   }
 
   async findMerchantCountryByApiKey(apiKey: string): Promise<MerchantCountry | undefined> {
