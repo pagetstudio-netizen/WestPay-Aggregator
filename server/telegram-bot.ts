@@ -863,7 +863,10 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
   // Recherche un retrait par numéro de téléphone et propose 4 actions.
   bot.command("commander", async (ctx) => {
     const chatId = String(ctx.chat.id);
-    if (!await isAdminGroup(chatId)) return;
+    if (!await isAdminGroup(chatId)) {
+      await ctx.reply("⛔ Cette commande est réservée au groupe admin WestPay.").catch(() => {});
+      return;
+    }
     commanderSessions.set(chatId, { step: "waiting_phone" });
     await ctx.reply(
       "📱 *Commander — Recherche de retrait*\n\n" +
