@@ -93,6 +93,7 @@ const BOT_LANGUAGES = [
   { value: "en", label: "🇬🇧 English" },
   { value: "zh", label: "🇨🇳 中文 (Chinois)" },
   { value: "de", label: "🇩🇪 Deutsch (Allemand)" },
+  { value: "hi", label: "🇮🇳 हिन्दी (Hindi)" },
 ];
 
 function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string }) {

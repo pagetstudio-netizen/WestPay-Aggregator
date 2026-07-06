@@ -2211,6 +2211,21 @@ const NOTIFY_TRANSLATIONS: Record<string, {
     successRate: "📈 Erfolgsquote:",
     currency: "FCFA",
   },
+  hi: {
+    header: (c) => `🧡🧡 *${c} जमा* 🧡🧡`,
+    newPayment: `✅ *नया भुगतान प्राप्त हुआ!*`,
+    amount: "💰 *राशि:*",
+    payer: "📞 *भुगतानकर्ता:*",
+    country: "🌍 *देश:*",
+    via: "📡 *माध्यम:*",
+    mobileMoney: "मोबाइल मनी",
+    balanceHeader: `🧡🧡 *खाता शेष* 🧡🧡`,
+    totalBalance: "💰 कुल शेष:",
+    payoutBalance: "💳 निकासी शेष:",
+    successfulDeposits: (n, amt, cur) => `📊 आज के सफल जमा: ${n} ; राशि: ${amt} ${cur}`,
+    successRate: "📈 सफलता दर:",
+    currency: "INR",
+  },
 };
 
 export async function notifyMerchantPayment(merchantId: number, data: {
@@ -2648,6 +2663,23 @@ const WITHDRAWAL_TRANSLATIONS: Record<string, {
     statusPending: "Ausstehend ⏳",
     dateLocale: "de-DE",
   },
+  hi: {
+    title: "निकासी अनुरोध",
+    reference: "संदर्भ",
+    amountRequested: "अनुरोधित राशि",
+    fees: "शुल्क",
+    amountSent: "भेजी गई राशि",
+    phone: "प्राप्त नंबर",
+    country: "देश",
+    operator: "ऑपरेटर",
+    status: "स्थिति",
+    date: "तिथि",
+    statusApproved: "स्वीकृत ✅",
+    statusRejected: "अस्वीकृत ❌",
+    statusFailed: "विफल ❌",
+    statusPending: "लंबित ⏳",
+    dateLocale: "hi-IN",
+  },
 };
 
 const TRANSFER_TRANSLATIONS: Record<string, {
@@ -2724,6 +2756,21 @@ const TRANSFER_TRANSLATIONS: Record<string, {
     statusRejected: "Abgelehnt ❌",
     statusPending: "Ausstehend ⏳",
     dateLocale: "de-DE",
+  },
+  hi: {
+    title: "वॉलेट ट्रांसफ़र",
+    reference: "संदर्भ",
+    from: "से",
+    to: "तक",
+    amount: "राशि",
+    fees: "शुल्क",
+    received: "प्राप्त राशि",
+    status: "स्थिति",
+    date: "तिथि",
+    statusApproved: "स्वीकृत ✅",
+    statusRejected: "अस्वीकृत ❌",
+    statusPending: "लंबित ⏳",
+    dateLocale: "hi-IN",
   },
 };
 
@@ -3445,24 +3492,33 @@ export async function reloadMainBot(newToken: string): Promise<{ ok: boolean; er
   }
 }
 
-export async function sendMerchantOtpTelegram(chatId: string, otp: string, merchantName: string): Promise<boolean> {
+const OTP_TRANSLATIONS: Record<string, { title: string; merchant: string; otpLabel: string; validity: string; warning: string }> = {
+  fr: { title: "RobotPay — Code de connexion", merchant: "Marchand", otpLabel: "Votre code OTP :", validity: "Valide 5 minutes — usage unique.", warning: "Ne communiquez jamais ce code." },
+  en: { title: "RobotPay — Login code", merchant: "Merchant", otpLabel: "Your OTP code:", validity: "Valid 5 minutes — single use.", warning: "Never share this code." },
+  zh: { title: "RobotPay — 登录验证码", merchant: "商户", otpLabel: "您的 OTP 验证码：", validity: "有效期 5 分钟 — 仅限一次使用。", warning: "请勿向任何人透露此验证码。" },
+  de: { title: "RobotPay — Anmeldecode", merchant: "Händler", otpLabel: "Ihr OTP-Code:", validity: "Gültig 5 Minuten — Einmalverwendung.", warning: "Geben Sie diesen Code niemals weiter." },
+  hi: { title: "RobotPay — लॉगिन कोड", merchant: "व्यापारी", otpLabel: "आपका OTP कोड:", validity: "5 मिनट के लिए मान्य — एकल उपयोग।", warning: "यह कोड कभी किसी को न बताएँ।" },
+};
+
+export async function sendMerchantOtpTelegram(chatId: string, otp: string, merchantName: string, lang = "fr"): Promise<boolean> {
   if (!bot) {
     console.log(`[TELEGRAM OTP] Bot non initialisé — OTP pour ${chatId}: ${otp}`);
     return false;
   }
+  const tr = OTP_TRANSLATIONS[lang] || OTP_TRANSLATIONS["fr"];
   const msg = [
-    `🤖 *RobotPay — Code de connexion*`,
+    `🤖 *${tr.title}*`,
     ``,
-    `👤 *Marchand :* ${merchantName}`,
+    `👤 *${tr.merchant} :* ${merchantName}`,
     ``,
-    `🔑 *Votre code OTP :*`,
+    `🔑 *${tr.otpLabel}*`,
     ``,
     `\`\`\``,
     `  ${otp}`,
     `\`\`\``,
     ``,
-    `⏱️ _Valide 5 minutes — usage unique._`,
-    `🔒 _Ne communiquez jamais ce code._`,
+    `⏱️ _${tr.validity}_`,
+    `🔒 _${tr.warning}_`,
   ].join("\n");
   try {
     await safeSend(chatId, msg);
