@@ -3,7 +3,7 @@ import {
   merchantPins, apiLogs, pendingPayments, webhookLogs, telegramActivationCodes, paymentLinks,
   walletTransfers, walletTransferCountries, withdrawals, withdrawalOperators, statsBaselines,
   cryptoAggregators, cryptoAggregatorCountries, cryptoAggregatorMerchants, cryptoTransactions, cryptoBalances, cryptoWithdrawalRequests, cryptoPaymentLinks,
-  allowedIps, blockedIps, blockedDevices, securityLogs, devices, adminOtpCodes,
+  allowedIps, blockedIps, blockedDevices, securityLogs, devices, adminOtpCodes, merchantLoginOtps,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
@@ -253,6 +253,12 @@ export interface IStorage {
   createAdminOtp(email: string, code: string, expiresAt: Date): Promise<void>;
   getAdminOtp(email: string): Promise<{ code: string; expiresAt: Date } | undefined>;
   deleteAdminOtp(email: string): Promise<void>;
+
+  // Merchant login OTP (DB-backed — survives server restarts)
+  createMerchantLoginOtp(email: string, otpHash: string, tempToken: string, expiresAt: Date): Promise<void>;
+  getMerchantLoginOtp(email: string): Promise<{ otpHash: string; tempToken: string; expiresAt: Date; used: boolean; attempts: number } | undefined>;
+  deleteMerchantLoginOtp(email: string): Promise<void>;
+  incrementMerchantLoginOtpAttempts(email: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1640,6 +1646,28 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAdminOtp(email: string): Promise<void> {
     await db.delete(adminOtpCodes).where(eq(adminOtpCodes.email, email));
+  }
+
+  // ── Merchant login OTP (DB-backed) ────────────────────────────────────────
+  async createMerchantLoginOtp(email: string, otpHash: string, tempToken: string, expiresAt: Date): Promise<void> {
+    await db.delete(merchantLoginOtps).where(eq(merchantLoginOtps.email, email));
+    await db.insert(merchantLoginOtps).values({ email, otpHash, tempToken, expiresAt, used: false, attempts: 0 });
+  }
+
+  async getMerchantLoginOtp(email: string): Promise<{ otpHash: string; tempToken: string; expiresAt: Date; used: boolean; attempts: number } | undefined> {
+    const [row] = await db.select().from(merchantLoginOtps).where(eq(merchantLoginOtps.email, email)).limit(1);
+    if (!row) return undefined;
+    return { otpHash: row.otpHash, tempToken: row.tempToken, expiresAt: row.expiresAt, used: row.used, attempts: row.attempts };
+  }
+
+  async deleteMerchantLoginOtp(email: string): Promise<void> {
+    await db.delete(merchantLoginOtps).where(eq(merchantLoginOtps.email, email));
+  }
+
+  async incrementMerchantLoginOtpAttempts(email: string): Promise<void> {
+    await db.update(merchantLoginOtps)
+      .set({ attempts: sql`${merchantLoginOtps.attempts} + 1` })
+      .where(eq(merchantLoginOtps.email, email));
   }
 }
 

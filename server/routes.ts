@@ -197,24 +197,8 @@ function extractIp(req: Request): string {
 }
 
 // ── OTP marchands — JAMAIS stockés en base de données, uniquement en mémoire RAM ──────
-// Chaque entrée disparaît automatiquement après expiration (5 min) ou utilisation.
-// Un redémarrage serveur invalide automatiquement tous les OTPs en cours.
-interface MerchantOtpEntry {
-  otpHash: string;       // bcrypt du code 6 chiffres
-  tempToken: string;     // JWT lié à cette session OTP
-  expiresAt: number;     // timestamp ms
-  used: boolean;
-  attempts: number;
-}
-const merchantOtpStore = new Map<string, MerchantOtpEntry>(); // key = email
-
-// Nettoyage automatique des OTPs expirés toutes les 2 minutes
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, val] of merchantOtpStore.entries()) {
-    if (val.expiresAt < now || val.used) merchantOtpStore.delete(key);
-  }
-}, 2 * 60 * 1000).unref();
+// Les OTPs marchands sont désormais stockés en base de données (table merchant_login_otps)
+// afin de survivre aux redémarrages du serveur. Le hash bcrypt garantit la sécurité.
 
 // ── Vérification DNS MX — l'email doit pointer vers un vrai serveur mail ─────────────
 // Protège contre la création de marchands avec des adresses email inventées.
@@ -1662,15 +1646,9 @@ export async function registerRoutes(
         { expiresIn: "6m" }
       );
 
-      // ── Stocker l'OTP en mémoire uniquement — JAMAIS en base de données ────────────
+      // ── Stocker l'OTP en base de données (survit aux redémarrages serveur) ──────────
       // L'entrée précédente est écrasée (invalide l'ancien OTP automatiquement)
-      merchantOtpStore.set(merchant.email, {
-        otpHash,
-        tempToken,
-        expiresAt: expiresAt.getTime(),
-        used: false,
-        attempts: 0,
-      });
+      await storage.createMerchantLoginOtp(merchant.email, otpHash, tempToken, expiresAt);
 
       // Envoyer l'OTP — bot OTP dédié → bot principal → email (fallback chain)
       let otpVia: "telegram" | "email" = "email";
@@ -1722,38 +1700,38 @@ export async function registerRoutes(
 
       const { merchantId, email, slug, name } = payload;
 
-      // ── Récupérer l'OTP depuis la mémoire — jamais depuis la base de données ────────
-      const otpEntry = merchantOtpStore.get(email);
+      // ── Récupérer l'OTP depuis la base de données ────────────────────────────────
+      const otpEntry = await storage.getMerchantLoginOtp(email);
 
       if (!otpEntry || otpEntry.tempToken !== tempToken) {
         return res.status(401).json({ message: "Code introuvable ou expiré." });
       }
 
       if (otpEntry.used) {
-        merchantOtpStore.delete(email);
+        await storage.deleteMerchantLoginOtp(email);
         return res.status(401).json({ message: "Ce code a déjà été utilisé." });
       }
-      if (otpEntry.expiresAt < Date.now()) {
-        merchantOtpStore.delete(email);
+      if (otpEntry.expiresAt.getTime() < Date.now()) {
+        await storage.deleteMerchantLoginOtp(email);
         return res.status(401).json({ message: "Code expiré." });
       }
       if (otpEntry.attempts >= 5) {
-        merchantOtpStore.delete(email);
+        await storage.deleteMerchantLoginOtp(email);
         return res.status(429).json({ message: "Trop de tentatives. Veuillez vous reconnecter." });
       }
 
-      // Incrémenter les tentatives en mémoire
-      otpEntry.attempts++;
+      // Incrémenter les tentatives en base de données
+      await storage.incrementMerchantLoginOtpAttempts(email);
 
       const valid = await bcrypt.compare(String(code).trim(), otpEntry.otpHash);
       if (!valid) {
-        const remaining = 4 - otpEntry.attempts;
-        if (remaining <= 0) merchantOtpStore.delete(email);
+        const remaining = 4 - (otpEntry.attempts + 1);
+        if (remaining <= 0) await storage.deleteMerchantLoginOtp(email);
         return res.status(401).json({ message: `Code incorrect. ${remaining > 0 ? `${remaining} tentative(s) restante(s).` : "Veuillez vous reconnecter."}` });
       }
 
-      // Marquer comme utilisé puis supprimer immédiatement (ne reste pas en mémoire)
-      merchantOtpStore.delete(email);
+      // Supprimer l'OTP après utilisation réussie
+      await storage.deleteMerchantLoginOtp(email);
 
       const token = signToken({ id: merchantId, role: "merchant", email });
       return res.json({ token, user: { id: merchantId, email, name, slug } });
