@@ -464,6 +464,43 @@ export async function runMigrations() {
       console.log("[KNOWLEDGE] pgvector not available, skipping knowledge_chunks table:", e.message);
     }
 
+    // ── Tables manquantes : stats_baselines + crypto_aggregator_countries/merchants ─
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS stats_baselines (
+        id serial PRIMARY KEY,
+        reset_at timestamp DEFAULT now() NOT NULL,
+        transaction_count integer NOT NULL DEFAULT 0,
+        total_volume integer NOT NULL DEFAULT 0,
+        commission_total integer NOT NULL DEFAULT 0,
+        api_payments_count integer NOT NULL DEFAULT 0,
+        api_payments_total integer NOT NULL DEFAULT 0,
+        link_payments_count integer NOT NULL DEFAULT 0,
+        link_payments_total integer NOT NULL DEFAULT 0,
+        withdrawals_count integer NOT NULL DEFAULT 0,
+        withdrawals_total integer NOT NULL DEFAULT 0
+      );
+
+      CREATE TABLE IF NOT EXISTS crypto_aggregator_countries (
+        id serial PRIMARY KEY,
+        aggregator_id integer NOT NULL REFERENCES crypto_aggregators(id) ON DELETE CASCADE,
+        country text NOT NULL,
+        active boolean NOT NULL DEFAULT false
+      );
+
+      CREATE TABLE IF NOT EXISTS crypto_aggregator_merchants (
+        id serial PRIMARY KEY,
+        aggregator_id integer NOT NULL REFERENCES crypto_aggregators(id) ON DELETE CASCADE,
+        merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+        active boolean NOT NULL DEFAULT true
+      );
+    `);
+
+    // ── Colonnes manquantes sur crypto_aggregators ────────────────────────────────
+    await client.query(`
+      ALTER TABLE crypto_aggregators ADD COLUMN IF NOT EXISTS payout_api_key text;
+      ALTER TABLE crypto_aggregators ADD COLUMN IF NOT EXISTS callback_key text;
+    `);
+
     // ── Index uniques ──────────────────────────────────────────────────────────────
     await client.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS merchants_crypto_api_key_idx ON merchants(crypto_api_key) WHERE crypto_api_key IS NOT NULL;
