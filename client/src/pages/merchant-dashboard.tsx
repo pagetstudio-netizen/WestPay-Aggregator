@@ -70,6 +70,10 @@ function countryToCurrency(country: string): string {
   if (country === "Congo RDC") return "CDF";
   if (country === "Guinee") return "GNF";
   if (country === "Gambie") return "GMD";
+  if (country === "Nigeria") return "NGN";
+  if (country === "Pakistan") return "PKR";
+  if (country === "Philippines") return "PHP";
+  if (country === "India") return "INR";
   return "FCFA";
 }
 

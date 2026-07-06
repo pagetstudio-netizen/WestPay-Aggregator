@@ -691,24 +691,29 @@ Content-Type: application/json`} />
                     <thead><tr className="border-b">
                       <th className="text-left p-2 text-foreground font-semibold">Pays</th>
                       <th className="text-left p-2 text-foreground font-semibold">Code</th>
+                      <th className="text-left p-2 text-foreground font-semibold">Devise</th>
                       <th className="text-left p-2 text-foreground font-semibold">Operateurs</th>
                     </tr></thead>
                     <tbody className="text-muted-foreground">
                       {[
-                        ["Togo", "+228", "Moov Money, TMoney"],
-                        ["Benin", "+229", "MTN Mobile Money"],
-                        ["Burkina Faso", "+226", "Moov Money, Orange Money"],
-                        ["Cote d'Ivoire", "+225", "Moov Money, MTN, Orange Money, Wave"],
-                        ["Senegal", "+221", "Mixx by Yas, Orange Money, Wave"],
-                        ["Mali", "+223", "Orange Money"],
-                        ["Cameroun", "+237", "MTN Mobile Money, Orange Money"],
-                        ["Congo Brazzaville", "+242", "MTN Mobile Money"],
-                        ["Congo RDC", "+243", "Orange Money, M-Pesa"],
-                        ["Gabon", "+241", "Airtel Money, Moov Money"],
-                        ["Guinée", "+224", "MTN Mobile Money, Orange Money"],
-                      ].map(([pays, code, ops]) => (
+                        ["Togo", "+228", "XOF", "Moov Money, TMoney"],
+                        ["Benin", "+229", "XOF", "MTN Mobile Money"],
+                        ["Burkina Faso", "+226", "XOF", "Moov Money, Orange Money"],
+                        ["Cote d'Ivoire", "+225", "XOF", "Moov Money, MTN, Orange Money, Wave"],
+                        ["Senegal", "+221", "XOF", "Mixx by Yas, Orange Money, Wave"],
+                        ["Mali", "+223", "XOF", "Orange Money"],
+                        ["Cameroun", "+237", "XAF", "MTN Mobile Money, Orange Money"],
+                        ["Congo Brazzaville", "+242", "XAF", "MTN Mobile Money"],
+                        ["Congo RDC", "+243", "CDF", "Orange Money, M-Pesa"],
+                        ["Gabon", "+241", "XAF", "Airtel Money, Moov Money"],
+                        ["Guinée", "+224", "GNF", "MTN Mobile Money, Orange Money"],
+                        ["Nigeria", "+234", "NGN", "MTN MoMo Nigeria, Airtel Money, OPay, PalmPay"],
+                        ["Pakistan", "+92", "PKR", "EasyPaisa, JazzCash, NayaPay, SadaPay"],
+                        ["Philippines", "+63", "PHP", "GCash, Maya (PayMaya)"],
+                        ["India", "+91", "INR", "UPI / IMPS, NEFT / RTGS, PhonePe, Google Pay"],
+                      ].map(([pays, code, devise, ops]) => (
                         <tr key={pays} className="border-b last:border-0">
-                          <td className="p-2">{pays}</td><td className="p-2 font-mono">{code}</td><td className="p-2">{ops}</td>
+                          <td className="p-2">{pays}</td><td className="p-2 font-mono">{code}</td><td className="p-2 font-mono font-semibold">{devise}</td><td className="p-2">{ops}</td>
                         </tr>
                       ))}
                     </tbody>

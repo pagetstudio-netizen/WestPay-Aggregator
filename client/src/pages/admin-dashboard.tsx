@@ -1945,7 +1945,7 @@ function CountriesPanel() {
 
   if (isLoading) return <LoadingSkeleton />;
 
-  const availableCountries = ["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon", "Guinee", "Gambie"];
+  const availableCountries = ["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon", "Guinee", "Gambie", "Niger", "Guinee-Bissau", "Tchad", "Centrafrique", "Guinee Equatoriale", "Nigeria", "Pakistan", "Philippines", "India"];
   const selectedMerchantName = (merchants as Merchant[]).find(m => m.id.toString() === merchantId)?.name;
   const filteredCountries = filterSearch.trim()
     ? (countries as any[]).filter((mc: any) =>
