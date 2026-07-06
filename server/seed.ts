@@ -69,11 +69,103 @@ async function enforceCompromisedAccountSuspensions(): Promise<void> {
   }
 }
 
+// ── SeaPay (Pakistan, Philippines, India) — opérateurs de retrait ───────────
+// Codes officiels tirés de la documentation SeaPay (api-docs.seaglb.xyz).
+const SEAPAY_PAKISTAN_BANKS: [string, string][] = [
+  ["PKR1", "JS Bank"], ["PKR2", "Allied Bank"], ["PKR3", "Askari Bank"],
+  ["PKR4", "Summit Bank"], ["PKR5", "Bank AlHabib"], ["PKR6", "Faysal Bank"],
+  ["PKR7", "Habib Bank (HBL)"], ["PKR8", "BankIslami"], ["PKR9", "KASB Bank"],
+  ["PKR10", "NIB Bank"], ["PKR11", "Samba Bank"], ["PKR12", "Soneri Bank"],
+  ["PKR13", "Standard Chartered Bank"], ["PKR14", "Tameer Microfinance Bank"],
+  ["PKR15", "United Bank (UBL)"], ["PKR16", "Burj Bank"], ["PKR17", "Bank of Punjab"],
+  ["PKR18", "Citi Bank"], ["PKR19", "Silk Bank"], ["PKR20", "Dubai Islamic Bank"],
+  ["PKR21", "Al Baraka Bank"], ["PKR22", "Meezan Bank"], ["PKR23", "Sindh Bank"],
+  ["PKR24", "Apna Microfinance Bank"], ["PKR25", "Bank Alfalah"], ["PKR26", "Habib Metro Bank"],
+  ["PKR27", "FINCA Microfinance Bank"], ["PKR28", "National Bank of Pakistan"],
+  ["PKR29", "First Women Bank"], ["PKR30", "U Microfinance Bank"],
+  ["PKR31", "Waseela Microfinance Bank"], ["PKR32", "MCB Bank"],
+  ["PKR33", "Advans Microfinance Bank"], ["PKR34", "ICBC"],
+  ["PKR35", "Bank of Tokyo Mitsubishi"], ["PKR36", "Deutsche Bank"],
+  ["PKR37", "First Microfinance Bank"], ["PKR38", "Industrial Development Bank"],
+  ["PKR39", "Oman International Bank"], ["PKR40", "SME Bank"],
+  ["PKR41", "Bank of Khyber"], ["PKR42", "NRSP Microfinance Bank"],
+  ["PKR43", "State Bank of Pakistan"], ["PKR44", "Zarai Taraqiati Bank"],
+  ["PKR45", "Khushali Bank"], ["PKR46", "MCB Islamic Bank"],
+  ["PKREAYPAISA", "Easypaisa"], ["PKRJAZZCASH", "JazzCash"],
+  ["PKRAMEX", "AMEX (carte de credit)"], ["PKRISLAMI", "BankIslami Pakistan"],
+  ["PKRBARCLAYS", "Barclays Bank"],
+];
+
+async function ensureSeaPayOperatorsExist() {
+  try {
+    // Pakistan — 46 banques + 5 portefeuilles/cartes (SeaPay)
+    for (let i = 0; i < SEAPAY_PAKISTAN_BANKS.length; i++) {
+      const [code, name] = SEAPAY_PAKISTAN_BANKS[i];
+      const existing = await storage.getWithdrawalOperatorByNameAndCountry(name, "Pakistan");
+      if (!existing) {
+        const isWallet = ["PKREAYPAISA", "PKRJAZZCASH"].includes(code);
+        await storage.createWithdrawalOperator({
+          name,
+          type: isWallet ? "Mobile Money" : (code === "PKRAMEX" ? "Carte bancaire" : "Virement bancaire"),
+          country: "Pakistan",
+          dailyLimit: 1000000,
+          gateway: "SeaPay",
+          seapayCode: code,
+          sortOrder: i,
+          active: true,
+        } as any);
+      }
+    }
+
+    // Philippines — GCash + Maya (SeaPay)
+    const phOperators: [string, string][] = [["GCASH", "GCash"], ["PHPPAYMAYA", "Maya (PayMaya)"]];
+    for (let i = 0; i < phOperators.length; i++) {
+      const [code, name] = phOperators[i];
+      const existing = await storage.getWithdrawalOperatorByNameAndCountry(name, "Philippines");
+      if (!existing) {
+        await storage.createWithdrawalOperator({
+          name,
+          type: "Mobile Money",
+          country: "Philippines",
+          dailyLimit: 1000000,
+          gateway: "SeaPay",
+          seapayCode: code,
+          sortOrder: i,
+          active: true,
+        } as any);
+      }
+    }
+
+    // India — virement bancaire via code IFSC (saisi par le marchand a la demande de retrait,
+    // pas de liste fixe de banques cote SeaPay)
+    const indiaExisting = await storage.getWithdrawalOperatorByNameAndCountry("Virement bancaire (IFSC)", "India");
+    if (!indiaExisting) {
+      await storage.createWithdrawalOperator({
+        name: "Virement bancaire (IFSC)",
+        type: "Virement bancaire",
+        country: "India",
+        dailyLimit: 1000000,
+        gateway: "SeaPay",
+        seapayCode: "",
+        sortOrder: 0,
+        active: true,
+      } as any);
+    }
+
+    console.log("[SEED] Opérateurs SeaPay vérifiés/créés (Pakistan, Philippines, India)");
+  } catch (err: any) {
+    console.error("[SEED] Erreur seed opérateurs SeaPay:", err.message);
+  }
+}
+
 export async function seedDatabase() {
   // Enforce suspension of compromised accounts (one-time enforcement, then admin can manage freely)
   await enforceCompromisedAccountSuspensions().catch(err =>
     console.error("[SECURITY] Erreur vérification comptes compromis:", err.message)
   );
+
+  // SeaPay : créer les opérateurs de retrait Pakistan/Philippines/India s'ils n'existent pas encore
+  await ensureSeaPayOperatorsExist();
 
   // Compte test : uniquement en développement OU si le flag d'activation est posé en DB
   // En production (Plesk), ce compte n'est pas recréé automatiquement après suppression

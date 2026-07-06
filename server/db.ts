@@ -415,6 +415,7 @@ export async function runMigrations() {
       ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS recipient_name text;
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS omnipay_code text;
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS mbiyo_code text;
+      ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS seapay_code text;
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS logo text;
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS sort_order integer NOT NULL DEFAULT 0;
       ALTER TABLE payment_links ADD COLUMN IF NOT EXISTS description text;

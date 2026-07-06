@@ -4037,9 +4037,10 @@ const COUNTRIES_LIST = [
   "Togo", "Benin", "Burkina Faso", "Cote d'Ivoire", "Senegal", "Mali",
   "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon", "Guinee", "Niger", "Guinee-Bissau",
   "Tchad", "Centrafrique", "Guinee Equatoriale",
+  "Pakistan", "Philippines", "India", "Nigeria",
 ];
 const OPERATOR_TYPES = ["Mobile Money", "Virement bancaire", "Carte bancaire", "Cryptomonnaie", "Autre"];
-const GATEWAYS = ["OmniPay", "Mbiyo", "SendavaPay", "Manuel"];
+const GATEWAYS = ["OmniPay", "Mbiyo", "SendavaPay", "SeaPay", "Manuel"];
 
 function SortableOpRow({
   op, onEdit, onDelete, onToggle, onUploadLogo, onRemoveLogo, uploadingFor,
@@ -4158,13 +4159,13 @@ function WithdrawalOperatorsPanel() {
 
   useEffect(() => { setLocalOps(opList as WithdrawalOperator[]); }, [opList]);
 
-  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "OmniPay", omnipayCode: "", mbiyoCode: "", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false };
+  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "OmniPay", omnipayCode: "", mbiyoCode: "", seapayCode: "", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false };
   const [form, setForm] = useState(emptyForm);
 
   const openCreate = () => { setEditingOp(null); setForm(emptyForm); setOpDialogOpen(true); };
   const openEdit = (op: WithdrawalOperator) => {
     setEditingOp(op);
-    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, omnipayCode: op.omnipayCode || "", mbiyoCode: op.mbiyoCode || "", active: op.active, maintenanceAll: op.maintenanceAll, maintenanceDeposits: op.maintenanceDeposits, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment });
+    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, omnipayCode: op.omnipayCode || "", mbiyoCode: op.mbiyoCode || "", seapayCode: (op as any).seapayCode || "", active: op.active, maintenanceAll: op.maintenanceAll, maintenanceDeposits: op.maintenanceDeposits, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment });
     setOpDialogOpen(true);
   };
 
@@ -4353,6 +4354,13 @@ function WithdrawalOperatorsPanel() {
                 <Label>Code réseau Mbiyo</Label>
                 <Input value={form.mbiyoCode} onChange={e => setForm(f => ({ ...f, mbiyoCode: e.target.value }))} placeholder="Ex: mtn, moov, wave, celtiis, orange..." data-testid="input-op-mbiyo-code" />
                 <p className="text-xs text-muted-foreground">Code réseau exact attendu par Mbiyo pour les retraits (ex: <code>mtn</code>, <code>moov</code>, <code>wave</code>, <code>celtiis</code>). Obligatoire si la passerelle est Mbiyo.</p>
+              </div>
+            )}
+            {form.gateway?.toLowerCase() === "seapay" && (
+              <div className="space-y-2">
+                <Label>Code canal SeaPay</Label>
+                <Input value={form.seapayCode} onChange={e => setForm(f => ({ ...f, seapayCode: e.target.value }))} placeholder="Ex: GCASH, PHPPAYMAYA, PKR1, PKREASYPAISA..." data-testid="input-op-seapay-code" />
+                <p className="text-xs text-muted-foreground">Code de canal (channel_code) exact fourni par SeaPay pour ce moyen de paiement/opérateur. Obligatoire si la passerelle est SeaPay.</p>
               </div>
             )}
             <div className="flex items-center gap-3">

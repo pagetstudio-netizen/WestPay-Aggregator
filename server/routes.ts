@@ -3964,7 +3964,7 @@ export async function registerRoutes(
         const returnUrl = redirectUrl
           ? `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`
           : `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
-        const channelCode = (operatorRecord as any)?.seapay_code || undefined;
+        const channelCode = operatorRecord?.seapayCode || undefined;
 
         try {
           const spResult = await seapayPayin({
@@ -5176,6 +5176,67 @@ export async function registerRoutes(
     } catch (err: any) {
       console.error("[SEAPAY CALLBACK] Erreur:", err.message);
       return res.status(200).send("ok");
+    }
+  });
+
+  // ==================== SEAPAY PAYOUT CALLBACK (reversements) ====================
+  app.post("/api/seapay/payout-callback", async (req, res) => {
+    try {
+      const body = req.body as Record<string, any>;
+      console.log(`[SEAPAY PAYOUT CALLBACK] Body: ${JSON.stringify(body)}`);
+
+      const apiSecret = await getSeapayApiSecret();
+      if (!apiSecret) {
+        console.error("[SEAPAY PAYOUT CALLBACK] Secret API non configuré");
+        return res.status(200).send("ok");
+      }
+      const receivedSign = body.sign || "";
+      if (!verifySeapaySign(body, apiSecret, receivedSign)) {
+        console.error("[SEAPAY PAYOUT CALLBACK] Signature invalide");
+        return res.status(200).send("ok");
+      }
+
+      const orderId = body.order_id || body.out_trade_no || "";
+      const status = (body.status || "").toLowerCase();
+      if (!orderId) return res.status(200).send("ok");
+
+      const withdrawal = await storage.getWithdrawalByOmnipayRef(orderId);
+      if (!withdrawal) {
+        console.warn(`[SEAPAY PAYOUT CALLBACK] Retrait non trouve: ${orderId}`);
+        return res.status(200).send("ok");
+      }
+      if (withdrawal.status === "approved" || withdrawal.status === "rejected" || withdrawal.status === "failed") {
+        return res.json({ status: "already_processed" });
+      }
+
+      const isSuccess = ["success", "paid", "completed"].includes(status);
+      const isFailure = ["failed", "expired", "cancelled"].includes(status);
+      if (!isSuccess && !isFailure) return res.json({ status: "pending" });
+
+      const locked = await pool.query(
+        `UPDATE withdrawals SET status = $1 WHERE id = $2 AND status = 'pending' RETURNING id`,
+        [isSuccess ? "approved" : "failed", withdrawal.id]
+      );
+      if (locked.rowCount === 0) return res.json({ status: "already_processed" });
+
+      const wdMerchant = await storage.getMerchantById(withdrawal.merchantId);
+      if (isSuccess) {
+        await storage.updateWithdrawalStatus(withdrawal.id, "approved", "Transfert SeaPay confirme", orderId, withdrawal.fees || 0, withdrawal.fees || 0);
+        console.log(`[SEAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} approuve - ref=${orderId}`);
+      } else {
+        await storage.updateWithdrawalStatus(withdrawal.id, "failed", `Transfert SeaPay echoue - statut: ${status}`, orderId);
+        const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
+        if (mc) await storage.incrementMerchantCountryBalance(mc.id, withdrawal.amount);
+        console.log(`[SEAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} echoue - ref=${orderId}`);
+      }
+      res.json({ status: isSuccess ? "approved" : "failed" });
+      setImmediate(() => {
+        notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: withdrawal.fees || 0, phone: withdrawal.phone, operator: withdrawal.operator, status: isSuccess ? "approved" : "failed", mode: withdrawal.withdrawalMode }).catch(() => {});
+        notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: withdrawal.fees || 0, phone: withdrawal.phone, operator: withdrawal.operator, status: isSuccess ? "approved" : "failed" }).catch(() => {});
+      });
+    } catch (err: any) {
+      console.error("[SEAPAY PAYOUT CALLBACK] Erreur:", err.message);
+      res.status(200).send("ok");
     }
   });
 
@@ -7049,8 +7110,47 @@ export async function registerRoutes(
       let fees: number | undefined;
       let sentToProvider = false;
       const useMbiyoPayout = w.gateway === "mbiyo";
+      const useSeapayPayout = w.gateway === "seapay";
 
-      if (useMbiyoPayout) {
+      if (useSeapayPayout) {
+        const [spMerchantId, spApiSecret] = await Promise.all([getSeapayMerchantId(), getSeapayApiSecret()]);
+        if (mc && spMerchantId && spApiSecret && merchant) {
+          try {
+            const reference = seapayGenerateRef();
+            const currency = SEAPAY_CURRENCY_COUNTRY[w.country] || "USD";
+            const wdOpRecord = w.operator ? await storage.getWithdrawalOperatorByNameAndCountry(w.operator, w.country) : null;
+            const channelCode = wdOpRecord?.seapayCode || undefined;
+            const isBankTransfer = wdOpRecord?.type === "Virement bancaire";
+            const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+            const notifyUrl = `${callbackBaseUrl}/api/seapay/payout-callback`;
+            console.log(`[ADMIN APPROVE WD SEAPAY] Transfert: ${w.amount} ${currency} vers ${w.phone}, canal: ${channelCode || "(non defini)"}, ref: ${reference}`);
+            const result = await seapayPayout({
+              merchantId: spMerchantId,
+              currency,
+              amount: w.amount,
+              orderId: reference,
+              notifyUrl,
+              bankCode: isBankTransfer ? channelCode : undefined,
+              walletCode: !isBankTransfer ? channelCode : undefined,
+              channelCode,
+              account: w.phone,
+              accountName: w.recipientName || merchant.name,
+            }, spApiSecret);
+            if (result.code === 200 && result.data) {
+              omnipayRef = reference;
+              fees = 0;
+              sentToProvider = true;
+              console.log(`[ADMIN APPROVE WD SEAPAY] Initié - TradeNo: ${result.data.trade_no}, Ref: ${reference} - en attente callback`);
+            } else {
+              console.error(`[ADMIN APPROVE WD SEAPAY] Echec: ${result.msg}`);
+            }
+          } catch (seapayErr: any) {
+            console.error("[ADMIN APPROVE WD SEAPAY] Erreur:", seapayErr.message);
+          }
+        } else {
+          console.error("[ADMIN APPROVE WD SEAPAY] Configuration SeaPay incomplete (merchantId/apiSecret manquant)");
+        }
+      } else if (useMbiyoPayout) {
         const mbiyoApiKey = await getMbiyoApiKey();
         if (mc && mbiyoApiKey && merchant) {
           try {
@@ -7164,8 +7264,8 @@ export async function registerRoutes(
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
       const effectiveProvider = provider || w.gateway || "";
-      if (!["sendavapay", "mbiyo", "omnipay"].includes(effectiveProvider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo ou OmniPay)" });
+      if (!["sendavapay", "mbiyo", "omnipay", "seapay"].includes(effectiveProvider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay ou SeaPay)" });
       }
       if (!w.omnipayRef) return res.status(400).json({ message: "Aucune référence fournisseur pour ce reversement" });
 
@@ -7180,6 +7280,13 @@ export async function registerRoutes(
         if (!mbiyoApiKey) return res.status(500).json({ message: "Clé API Mbiyo non configurée" });
         const result = await mbiyoGetStatus(mbiyoApiKey, w.omnipayRef);
         return res.json({ provider: "mbiyo", success: result.status === "success", status: result.data?.status, data: result.data, error: result.message });
+      }
+      if (effectiveProvider === "seapay") {
+        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(), getSeapayApiKey()]);
+        if (!spMerchantId || !spApiKey) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
+        const currency = SEAPAY_CURRENCY_COUNTRY[w.country] || "USD";
+        const result = await seapayQuery(spMerchantId, w.omnipayRef, currency, spApiKey);
+        return res.json({ provider: "seapay", success: result.code === 200, status: result.data?.status, data: result.data, error: result.msg });
       }
       const omnipayApiKey = await getOmnipayPayoutApiKey();
       if (!omnipayApiKey) return res.status(500).json({ message: "Clé API OmniPay non configurée" });
@@ -7198,8 +7305,8 @@ export async function registerRoutes(
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
       const effectiveProvider = provider || w.gateway || "";
-      if (!["sendavapay", "mbiyo", "omnipay"].includes(effectiveProvider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo ou OmniPay)" });
+      if (!["sendavapay", "mbiyo", "omnipay", "seapay"].includes(effectiveProvider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay ou SeaPay)" });
       }
       if (!w.omnipayRef) return res.status(400).json({ message: "Aucune référence fournisseur pour ce reversement" });
 
@@ -7216,6 +7323,13 @@ export async function registerRoutes(
         if (!mbiyoApiKey) return res.status(500).json({ message: "Clé API Mbiyo non configurée" });
         const result = await mbiyoGetStatus(mbiyoApiKey, w.omnipayRef);
         providerStatus = (result.data?.status || result.status || "").toLowerCase();
+        raw = result.data;
+      } else if (effectiveProvider === "seapay") {
+        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(), getSeapayApiKey()]);
+        if (!spMerchantId || !spApiKey) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
+        const currency = SEAPAY_CURRENCY_COUNTRY[w.country] || "USD";
+        const result = await seapayQuery(spMerchantId, w.omnipayRef, currency, spApiKey);
+        providerStatus = String(result.data?.status || "").toLowerCase();
         raw = result.data;
       } else {
         const omnipayApiKey = await getOmnipayPayoutApiKey();
@@ -7255,8 +7369,8 @@ export async function registerRoutes(
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
       const provider = requestedProvider || w.gateway || "sendavapay";
-      if (!["sendavapay", "mbiyo", "omnipay"].includes(provider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo ou OmniPay)" });
+      if (!["sendavapay", "mbiyo", "omnipay", "seapay"].includes(provider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay ou SeaPay)" });
       }
       if (w.status === "pending" && w.omnipayRef && provider === w.gateway) {
         return res.status(400).json({ message: `Ce retrait est déjà en cours de traitement chez ${provider} (réf: ${w.omnipayRef}). Attendez la confirmation ou choisissez un autre fournisseur.` });
@@ -7331,6 +7445,38 @@ export async function registerRoutes(
         }
         console.error(`[ADMIN TRIGGER WD] Retrait #${id} échec relance Mbiyo: ${result.message}`);
         return res.status(502).json({ success: false, message: result.message || "Échec inconnu" });
+      }
+
+      if (provider === "seapay") {
+        const [spMerchantId, spApiSecret] = await Promise.all([getSeapayMerchantId(), getSeapayApiSecret()]);
+        if (!spMerchantId || !spApiSecret) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
+        const reference = seapayGenerateRef();
+        const currency = SEAPAY_CURRENCY_COUNTRY[w.country] || "USD";
+        const wdOpRecord = w.operator ? await storage.getWithdrawalOperatorByNameAndCountry(w.operator, w.country) : null;
+        const channelCode = wdOpRecord?.seapayCode || undefined;
+        const isBankTransfer = wdOpRecord?.type === "Virement bancaire";
+        const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+        const notifyUrl = `${callbackBaseUrl}/api/seapay/payout-callback`;
+        const result = await seapayPayout({
+          merchantId: spMerchantId,
+          currency,
+          amount: netAmount,
+          orderId: reference,
+          notifyUrl,
+          bankCode: isBankTransfer ? channelCode : undefined,
+          walletCode: !isBankTransfer ? channelCode : undefined,
+          channelCode,
+          account: w.phone,
+          accountName: w.recipientName || merchant.name,
+        }, spApiSecret);
+        if (result.code === 200 && result.data) {
+          await storage.updateWithdrawalGateway(id, "seapay");
+          await storage.updateWithdrawalStatus(id, "pending", `Relancé chez SeaPay — Ref: ${reference}`, reference, fees, fees);
+          console.log(`[ADMIN TRIGGER WD] Retrait #${id} relancé chez SeaPay — ref=${reference}`);
+          return res.json({ success: true, provider: "seapay", reference, fees });
+        }
+        console.error(`[ADMIN TRIGGER WD] Retrait #${id} échec relance SeaPay: ${result.msg}`);
+        return res.status(502).json({ success: false, message: result.msg || "Échec inconnu" });
       }
 
       // provider === "omnipay"
@@ -7436,18 +7582,21 @@ export async function registerRoutes(
       const provider = String(req.query.provider || "").toLowerCase();
 
       let ref: string | null | undefined;
+      let txCountry: string | null | undefined;
       if (source === "pending") {
         const pp = await storage.getPendingPaymentById(id);
         if (!pp) return res.status(404).json({ message: "Paiement en cours introuvable" });
         ref = pp.omnipayReference;
+        txCountry = pp.country;
       } else {
         const [tx] = await db.select().from(transactions).where(eq(transactions.id, id));
         if (!tx) return res.status(404).json({ message: "Transaction introuvable" });
         ref = tx.omnipayReference;
+        txCountry = tx.country;
       }
       if (!ref) return res.status(400).json({ message: "Aucune référence fournisseur pour ce paiement" });
-      if (!["sendavapay", "mbiyo", "omnipay"].includes(provider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo ou OmniPay)" });
+      if (!["sendavapay", "mbiyo", "omnipay", "seapay"].includes(provider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay ou SeaPay)" });
       }
 
       if (provider === "sendavapay") {
@@ -7461,6 +7610,13 @@ export async function registerRoutes(
         if (!mbiyoApiKey) return res.status(500).json({ message: "Clé API Mbiyo non configurée" });
         const result = await mbiyoGetStatus(mbiyoApiKey, ref);
         return res.json({ provider: "mbiyo", success: result.status === "success", status: result.data?.status, data: result.data, error: result.message });
+      }
+      if (provider === "seapay") {
+        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(), getSeapayApiKey()]);
+        if (!spMerchantId || !spApiKey) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
+        const currency = SEAPAY_CURRENCY_COUNTRY[txCountry || ""] || "USD";
+        const result = await seapayQuery(spMerchantId, ref, currency, spApiKey);
+        return res.json({ provider: "seapay", success: result.code === 200, status: result.data?.status, data: result.data, error: result.msg });
       }
       const omnipayApiKey = await getOmnipayApiKey();
       if (!omnipayApiKey) return res.status(500).json({ message: "Clé API OmniPay non configurée" });
@@ -7477,19 +7633,22 @@ export async function registerRoutes(
       const id = Number(req.params.id);
       const source = String(req.body.source || "payment");
       const provider = String(req.body.provider || "").toLowerCase();
-      if (!["sendavapay", "mbiyo", "omnipay"].includes(provider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo ou OmniPay)" });
+      if (!["sendavapay", "mbiyo", "omnipay", "seapay"].includes(provider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay ou SeaPay)" });
       }
 
       let ref: string | null | undefined;
+      let txCountry: string | null | undefined;
       if (source === "pending") {
         const pp = await storage.getPendingPaymentById(id);
         if (!pp) return res.status(404).json({ message: "Paiement en cours introuvable" });
         ref = pp.omnipayReference;
+        txCountry = pp.country;
       } else {
         const [tx] = await db.select().from(transactions).where(eq(transactions.id, id));
         if (!tx) return res.status(404).json({ message: "Transaction introuvable" });
         ref = tx.omnipayReference;
+        txCountry = tx.country;
       }
       if (!ref) return res.status(400).json({ message: "Aucune référence fournisseur pour ce paiement" });
 
@@ -7504,6 +7663,12 @@ export async function registerRoutes(
         if (!mbiyoApiKey) return res.status(500).json({ message: "Clé API Mbiyo non configurée" });
         const result = await mbiyoGetStatus(mbiyoApiKey, ref);
         providerStatus = (result.data?.status || result.status || "").toLowerCase();
+      } else if (provider === "seapay") {
+        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(), getSeapayApiKey()]);
+        if (!spMerchantId || !spApiKey) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
+        const currency = SEAPAY_CURRENCY_COUNTRY[txCountry || ""] || "USD";
+        const result = await seapayQuery(spMerchantId, ref, currency, spApiKey);
+        providerStatus = String(result.data?.status || "").toLowerCase();
       } else {
         const omnipayApiKey = await getOmnipayApiKey();
         if (!omnipayApiKey) return res.status(500).json({ message: "Clé API OmniPay non configurée" });
@@ -7543,8 +7708,8 @@ export async function registerRoutes(
     try {
       const id = Number(req.params.id);
       const provider = String(req.body?.provider || "").toLowerCase();
-      if (!["sendavapay", "mbiyo", "omnipay"].includes(provider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo ou OmniPay)" });
+      if (!["sendavapay", "mbiyo", "omnipay", "seapay"].includes(provider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay ou SeaPay)" });
       }
       const pp = await storage.getPendingPaymentById(id);
       if (!pp) return res.status(404).json({ message: "Paiement en cours introuvable" });
@@ -7647,6 +7812,39 @@ export async function registerRoutes(
         }).where(eq(pendingPayments.id, id));
         console.log(`[ADMIN TRIGGER TX] Paiement #${id} re-déclenché chez Mbiyo — ref=${reference}`);
         return res.json({ success: true, provider: "mbiyo", reference });
+      }
+
+      if (provider === "seapay") {
+        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(), getSeapayApiKey()]);
+        if (!spMerchantId || !spApiKey) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
+        const reference = seapayGenerateRef();
+        const currency = SEAPAY_CURRENCY_COUNTRY[pp.country] || "USD";
+        const operatorRecord = pp.paymentMethod ? await storage.getWithdrawalOperatorByNameAndCountry(pp.paymentMethod, pp.country) : null;
+        const channelCode = operatorRecord?.seapayCode || undefined;
+        const returnUrl = `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
+        const result = await seapayPayin({
+          merchantId: spMerchantId,
+          currency,
+          amount: pp.amount,
+          orderId: reference,
+          notifyUrl: `${callbackBaseUrl}/api/seapay/callback`,
+          channelCode,
+          returnUrl,
+          customerPhone: pp.payerPhone || undefined,
+          customerName: pp.payerName || undefined,
+        }, spApiKey);
+        if (result.code !== 200 || !result.data) {
+          return res.status(502).json({ success: false, message: result.msg || "Échec inconnu" });
+        }
+        await db.update(pendingPayments).set({
+          status: "omnipay_pending",
+          omnipayReference: reference,
+          omnipayTxId: result.data.trade_no || null,
+          omnipayPaymentUrl: result.data.payment_url || null,
+          gateway: "seapay",
+        }).where(eq(pendingPayments.id, id));
+        console.log(`[ADMIN TRIGGER TX] Paiement #${id} re-déclenché chez SeaPay — ref=${reference}`);
+        return res.json({ success: true, provider: "seapay", reference, paymentUrl: result.data.payment_url });
       }
     } catch (err: any) {
       res.status(500).json({ message: err.message });

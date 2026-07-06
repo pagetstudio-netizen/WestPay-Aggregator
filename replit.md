@@ -1,7 +1,20 @@
 # RobotPay - Private Mobile Money Payment Aggregator Platform
 
 ## Overview
-WestPay is a private Mobile Money payment aggregation platform with admin and merchant dashboards. No public registration - admin creates all merchant accounts. Payments processed via OmniPay API v2.0, Mbiyo (payin + payout), and SendavaPay — routed per operator/country via the `gateway` field on withdrawal_operators.
+WestPay is a private Mobile Money payment aggregation platform with admin and merchant dashboards. No public registration - admin creates all merchant accounts. Payments processed via OmniPay API v2.0, Mbiyo (payin + payout), SendavaPay, and SeaPay — routed per operator/country via the `gateway` field on withdrawal_operators.
+
+## SeaPay Integration (Pakistan, Philippines, India)
+- SDK module: `server/seapay.ts` (seapayPayin/Payout/Balance/Query, SEAPAY_CURRENCY_COUNTRY, buildSeapaySign/verifySeapaySign — MD5 signature)
+- Countries added: Pakistan (PKR), Philippines (PHP), India (INR) — added to `COUNTRIES_LIST` everywhere in admin (reversements, merchant country assignment, operator dropdowns), with the same activate/maintenance toggles as other countries
+- **Nigeria is NOT officially supported by SeaPay** (their supported list is India, Pakistan, Bangladesh, Philippines, Vietnam, Egypt) — flagged to user, not integrated with SeaPay
+- `withdrawal_operators.seapay_code` column stores the SeaPay routing/channel code per operator
+- Seeded automatically on every server start via `ensureSeaPayOperatorsExist()` in `server/seed.ts` (idempotent, skips existing):
+  - Pakistan: 51 operators (46 banks PKR1-PKR46 + Easypaisa/JazzCash/AMEX/BankIslami/Barclays), gateway="SeaPay"
+  - Philippines: GCash + Maya (PayMaya), gateway="SeaPay"
+  - India: single generic "Virement bancaire (IFSC)" operator — SeaPay India payouts require a free-form IFSC bank code entered per-transaction (`payee_bank` param), not a fixed operator list. Current withdrawal form only has a phone field; a dedicated IFSC input still needs to be added for India withdrawals to be fully functional.
+- Payin flow (`/api/payment/initiate`), payout/approve flow (`/api/admin/withdrawals/:id/approve`), and payout callback (`/api/seapay/payout-callback`, MD5-verified) are implemented
+- Admin tools `/api/admin/withdrawals/:id/{check-status,sync-status,retry}` and `/api/admin/transactions/:id/{check-status,sync-status,trigger}` also support "seapay" as a provider (query/payout/payin via SeaPay SDK)
+- No live SeaPay API keys configured yet — admin must add them via Settings once available (env var fallback to DB setting, same pattern as OmniPay/Mbiyo)
 
 ## Architecture
 - **Frontend**: React + Tailwind CSS + shadcn/ui (dark theme by default)
