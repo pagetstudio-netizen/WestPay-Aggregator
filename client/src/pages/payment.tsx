@@ -14,8 +14,8 @@ import bankCardIcon  from "@assets/mine-mod-bankcard-CLOhqwHj_1779636875827.png"
 import phoneHandIcon from "@assets/file_00000000d2f47246aaf6fa11ae0a4003_1779726190358.png";
 import mixxIcon      from "@assets/mixxByYas-web-page_1763835083140-t9C-E95C_1780044772406.png";
 import mpesaIcon     from "@assets/M-pesa-logo_1780044772360.png";
-import gcashIcon     from "@assets/images_(24)_1783336061888.png";
-import paymayaIcon   from "@assets/images_(25)_1783336061844.png";
+import gcashIcon     from "@assets/images_(24)_1783366582605.png";
+import paymayaIcon   from "@assets/images_(25)_1783366582572.png";
 
 /* ── types ─────────────────────────────────────────────────────────────── */
 type MerchantInfo = { name: string; slug: string; countries: string[] };
@@ -34,9 +34,9 @@ const PAYMENT_METHODS: Record<string, string[]> = {
   "Senegal":            ["Wave", "Mixx by Yas", "Orange Money"],
   "Guinee":             ["MTN Mobile Money", "Orange Money"],
   "Gambie":             ["Africell Money"],
-  "Philippines":        ["GCash", "Maya (PayMaya)", "ShopeePay", "GrabPay"],
+  "Philippines":        ["GCash", "Maya (PayMaya)"],
   "Pakistan":           ["EasyPaisa", "JazzCash", "NayaPay", "SadaPay"],
-  "India":              ["UPI / IMPS", "NEFT / RTGS", "PhonePe", "Google Pay", "Paytm"],
+  "India":              [],
   "Nigeria":            ["MTN MoMo Nigeria", "Airtel Money Nigeria", "OPay", "PalmPay", "Kuda Bank"],
 };
 
@@ -209,8 +209,15 @@ export default function PaymentPage() {
   const otpUssd          = country === "Burkina Faso" ? "*144*4*6*montant#" : "#144*82#";
   const maliOrange       = method === "Orange Money" && country === "Mali";
   const isSeapayCountry  = ["Philippines","Pakistan","India","Nigeria"].includes(country);
-  const isSeapayRedirect = isSeapayCountry && !!method && !isCrypto;
+  const isIndia          = country === "India";
+  const isPhilippines    = country === "Philippines";
+  const isSeapayRedirect = isSeapayCountry && (isIndia || !!method) && !isCrypto;
   const dialCode         = DIAL_CODES[country] || "+";
+
+  /* ── Auto-sélection méthode pour l'Inde (pas de choix opérateur) ─────── */
+  useEffect(() => {
+    if (isIndia) setMethod("UPI");
+  }, [isIndia]);
 
   /* ── fetch merchant ─────────────────────────────────────────────────── */
   useEffect(() => {
@@ -294,9 +301,9 @@ export default function PaymentPage() {
   const selectMethod = useCallback((m: string) => { setMethod(m); setOtpCode(""); }, []);
 
   const handlePay = () => {
-    if (!method) { toast({ title: t("payMethodRequired"), description: t("payMethodRequiredDesc"), variant:"destructive" }); return; }
+    if (!isIndia && !method) { toast({ title: t("payMethodRequired"), description: t("payMethodRequiredDesc"), variant:"destructive" }); return; }
     if (isCrypto) { doInitiate(); return; }
-    if (!payerPhone.trim()) { toast({ title: t("payPhoneRequired"), description: t("payPhoneRequired"), variant:"destructive" }); return; }
+    if (!isSeapayCountry && !payerPhone.trim()) { toast({ title: t("payPhoneRequired"), description: t("payPhoneRequired"), variant:"destructive" }); return; }
     if (needsOtp && !otpCode.trim()) { setShowOtpModal(true); return; }
     doInitiate();
   };
@@ -588,6 +595,8 @@ export default function PaymentPage() {
                 </div>
               )}
 
+              {/* ── Opérateur : caché pour l'Inde (redirect direct SeaPay) ── */}
+              {!isIndia && (
               <div>
                 <p style={{ fontSize:13, fontWeight:500, color:"#6b7280", marginBottom:10 }}>{t("payChooseMethod")}</p>
                 {methods.length === 0 && !cryptoOn ? (
@@ -629,8 +638,10 @@ export default function PaymentPage() {
                   </div>
                 )}
               </div>
+              )}
 
-              {!isCrypto && (
+              {/* ── Téléphone : caché pour les pays SeaPay (Inde, Philippines) ── */}
+              {!isCrypto && !isSeapayCountry && (
                 <div>
                   <p style={{ fontSize:13, fontWeight:600, color:"#374151", marginBottom:8 }}>{t("payPhoneNumber")}</p>
                   <div style={{ display:"flex", alignItems:"stretch", border:"1.5px solid #d1d5db", borderRadius:12, overflow:"hidden", background:"#fff" }}>
@@ -667,11 +678,11 @@ export default function PaymentPage() {
 
               <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
                 <button type="button" onClick={handlePay}
-                  disabled={isSubmitting || cryptoLoading || !method || (!isCrypto && !payerPhone.trim())}
+                  disabled={isSubmitting || cryptoLoading || (!isIndia && !method) || (!isCrypto && !isSeapayCountry && !payerPhone.trim())}
                   className="paybtn" data-testid="button-pay"
                   style={{ background:"#f5c100", color:"#111" }}>
                   {(isSubmitting || cryptoLoading) && <Loader2 style={{ width:18, height:18, animation:"spin 1s linear infinite" }} />}
-                  {isCrypto ? t("payCrypto") : t("payPayNow")}
+                  {isCrypto ? t("payCrypto") : isIndia ? t("payPayNow") : t("payPayNow")}
                 </button>
                 <p style={{ textAlign:"center", fontSize:12, color:"#374151", fontWeight:500 }}>{t("payProcessing")}</p>
               </div>
