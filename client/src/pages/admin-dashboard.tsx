@@ -3042,50 +3042,114 @@ function MbiyoPanel() {
   );
 }
 
+type SeapayCountryForm = { merchantId: string; apiKey: string; apiSecret: string };
+
+function SeaPayCountryCard({ countryName, flag, currency, initialData, envOverride, onSave }: {
+  countryName: string; flag: string; currency: string;
+  initialData: SeapayCountryForm; envOverride: boolean;
+  onSave: (country: string, data: SeapayCountryForm) => Promise<void>;
+}) {
+  const { toast } = useToast();
+  const [form, setForm] = useState<SeapayCountryForm>(initialData);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { setForm(initialData); }, [initialData.merchantId, initialData.apiKey, initialData.apiSecret]);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await onSave(countryName, form);
+      toast({ title: `${countryName} — configuration sauvegardée` });
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const isConfigured = !!(form.merchantId && form.apiKey);
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <span>{flag}</span>
+          <span>{countryName}</span>
+          <Badge variant="outline" className="ml-1 text-xs">{currency}</Badge>
+          <Badge variant={isConfigured ? "default" : "destructive"} className="ml-auto text-xs">
+            {isConfigured ? "Configuré" : "Non configuré"}
+          </Badge>
+          {envOverride && <Badge variant="outline" className="text-xs">ENV</Badge>}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSave} className="space-y-3">
+          <div className="space-y-1">
+            <Label className="text-xs">Merchant ID</Label>
+            <Input
+              value={form.merchantId}
+              onChange={e => setForm(f => ({ ...f, merchantId: e.target.value }))}
+              placeholder={`Merchant ID SeaPay ${countryName}`}
+              data-testid={`input-seapay-merchant-id-${countryName.toLowerCase()}`}
+              className="text-sm h-8"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">API Key (Pay-in / signature MD5)</Label>
+            <Input
+              value={form.apiKey}
+              onChange={e => setForm(f => ({ ...f, apiKey: e.target.value }))}
+              placeholder="API Key"
+              data-testid={`input-seapay-api-key-${countryName.toLowerCase()}`}
+              className="text-sm h-8"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">API Secret (Pay-out & Balance)</Label>
+            <Input
+              value={form.apiSecret}
+              onChange={e => setForm(f => ({ ...f, apiSecret: e.target.value }))}
+              placeholder="API Secret"
+              data-testid={`input-seapay-api-secret-${countryName.toLowerCase()}`}
+              className="text-sm h-8"
+            />
+          </div>
+          <Button type="submit" size="sm" disabled={saving} data-testid={`button-save-seapay-${countryName.toLowerCase()}`}>
+            {saving ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Globe className="w-3 h-3 mr-1" />}
+            Sauvegarder
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
 function SeaPayPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
-  const [merchantId, setMerchantId] = useState("");
-  const [apiKey, setApiKey]         = useState("");
-  const [apiSecret, setApiSecret]   = useState("");
-  const [isInitialized, setIsInitialized] = useState(false);
 
   const { data: spSettings, isLoading } = useAdminFetch("/api/admin/seapay/settings", ["/api/admin/seapay/settings"]);
 
-  useEffect(() => {
-    if (spSettings && !isInitialized) {
-      setMerchantId(spSettings.merchantId || "");
-      setApiKey(spSettings.apiKey       || "");
-      setApiSecret(spSettings.apiSecret || "");
-      setIsInitialized(true);
-    }
-  }, [spSettings, isInitialized]);
-
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch("/api/admin/seapay/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ merchantId, apiKey, apiSecret }),
-      });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/seapay/settings"] });
-      toast({ title: "Configuration SeaPay sauvegardee" });
-    },
-    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
-  });
-
   const callbackUrl = "https://westpay.cfd/api/seapay/callback";
+  const payoutCallbackUrl = "https://westpay.cfd/api/seapay/payout-callback";
 
-  const countries = [
+  const SEAPAY_COUNTRIES_META = [
     { flag: "🇵🇰", name: "Pakistan",    currency: "PKR" },
     { flag: "🇵🇭", name: "Philippines", currency: "PHP" },
     { flag: "🇮🇳", name: "India",       currency: "INR" },
     { flag: "🇳🇬", name: "Nigeria",     currency: "NGN" },
   ];
+
+  const handleSave = async (country: string, data: SeapayCountryForm) => {
+    const res = await fetch("/api/admin/seapay/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ country, ...data }),
+    });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/seapay/settings"] });
+  };
 
   if (isLoading) return <LoadingSkeleton />;
 
@@ -3093,96 +3157,88 @@ function SeaPayPanel() {
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-foreground">Configuration SeaPay</h2>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <Globe className="w-4 h-4" />Statut
+              <Globe className="w-4 h-4" />Statut global
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center justify-between gap-2 flex-wrap">
-              <span className="text-sm text-muted-foreground">Configuration</span>
+              <span className="text-sm text-muted-foreground">Au moins un pays configuré</span>
               <Badge variant={spSettings?.configured ? "default" : "destructive"} data-testid="badge-seapay-status">
-                {spSettings?.configured ? "Configure" : "Non configure"}
+                {spSettings?.configured ? "Opérationnel" : "Non configuré"}
               </Badge>
             </div>
-            {spSettings?.envOverride && (
-              <Badge variant="outline" className="text-xs">Variables d'environnement actives</Badge>
-            )}
             <p className="text-xs text-muted-foreground">
-              SeaPay (api.seaglb.xyz) — paiements mobiles : Pakistan (PKR), Philippines (PHP), Inde (INR), Nigeria (NGN).
+              SeaPay (api.seaglb.xyz) — chaque pays dispose d'un compte marchand distinct. Configurez les clés API pour chaque pays ci-dessous.
             </p>
+            <div className="space-y-2">
+              {SEAPAY_COUNTRIES_META.map(c => {
+                const cfg = spSettings?.countries?.[c.name];
+                return (
+                  <div key={c.name} className="flex items-center gap-2">
+                    <span>{c.flag}</span>
+                    <span className="text-sm">{c.name}</span>
+                    <Badge variant="outline" className="text-xs">{c.currency}</Badge>
+                    <Badge variant={cfg?.configured ? "default" : "secondary"} className="ml-auto text-xs">
+                      {cfg?.configured ? "✓" : "—"}
+                    </Badge>
+                    {spSettings?.envOverrides?.[c.name] && <Badge variant="outline" className="text-xs">ENV</Badge>}
+                  </div>
+                );
+              })}
+            </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <Link2 className="w-4 h-4" />Callback URL
+              <Link2 className="w-4 h-4" />URLs de callback
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-xs text-muted-foreground">URL a renseigner dans votre dashboard SeaPay pour les notifications de paiement.</p>
-            <div className="flex items-center gap-2">
-              <code className="text-xs bg-muted px-3 py-2 rounded-md font-mono flex-1 break-all text-foreground" data-testid="text-seapay-callback-url">
-                {callbackUrl}
-              </code>
-              <Button variant="ghost" size="icon" onClick={() => { navigator.clipboard.writeText(callbackUrl); toast({ title: "URL copiee" }); }} data-testid="button-copy-seapay-callback-url">
-                <Copy className="w-3 h-3" />
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Globe className="w-4 h-4" />Pays supportes
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {countries.map(c => (
-              <div key={c.name} className="flex items-center gap-2">
-                <span>{c.flag}</span>
-                <span className="text-sm">{c.name}</span>
-                <Badge variant="outline" className="ml-auto text-xs">{c.currency}</Badge>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Pay-in (dépôts)</p>
+              <div className="flex items-center gap-2">
+                <code className="text-xs bg-muted px-2 py-1 rounded font-mono flex-1 break-all text-foreground" data-testid="text-seapay-callback-url">{callbackUrl}</code>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { navigator.clipboard.writeText(callbackUrl); toast({ title: "URL copiée" }); }} data-testid="button-copy-seapay-callback-url">
+                  <Copy className="w-3 h-3" />
+                </Button>
               </div>
-            ))}
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Pay-out (retraits)</p>
+              <div className="flex items-center gap-2">
+                <code className="text-xs bg-muted px-2 py-1 rounded font-mono flex-1 break-all text-foreground" data-testid="text-seapay-payout-callback-url">{payoutCallbackUrl}</code>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { navigator.clipboard.writeText(payoutCallbackUrl); toast({ title: "URL copiée" }); }} data-testid="button-copy-seapay-payout-callback-url">
+                  <Copy className="w-3 h-3" />
+                </Button>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">Renseignez ces URLs dans le dashboard SeaPay de chaque compte pays.</p>
           </CardContent>
         </Card>
       </div>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Key className="w-4 h-4" />Cles API SeaPay
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={(e) => { e.preventDefault(); saveMutation.mutate(); }} className="space-y-4">
-            <div className="space-y-2">
-              <Label>Merchant ID (identifiant marchand)</Label>
-              <Input value={merchantId} onChange={(e) => setMerchantId(e.target.value)} placeholder="Votre Merchant ID SeaPay" data-testid="input-seapay-merchant-id" />
-              <p className="text-xs text-muted-foreground">Identifiant unique de votre compte marchand SeaPay.</p>
-            </div>
-            <div className="space-y-2">
-              <Label>API Key (signature Pay-in)</Label>
-              <Input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Votre cle API SeaPay" data-testid="input-seapay-api-key" />
-              <p className="text-xs text-muted-foreground">Cle utilisee pour signer les requetes de collecte (Pay-in). Signature MD5.</p>
-            </div>
-            <div className="space-y-2">
-              <Label>API Secret (signature Pay-out & Balance)</Label>
-              <Input value={apiSecret} onChange={(e) => setApiSecret(e.target.value)} placeholder="Votre secret API SeaPay" data-testid="input-seapay-api-secret" />
-              <p className="text-xs text-muted-foreground">Secret utilise pour les requetes de reversement (Pay-out) et verification de solde.</p>
-            </div>
-            <Button type="submit" disabled={saveMutation.isPending} data-testid="button-save-seapay">
-              {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Globe className="w-4 h-4 mr-2" />}
-              Sauvegarder la configuration
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      <div>
+        <h3 className="text-sm font-semibold text-foreground mb-3">Clés API par pays</h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {SEAPAY_COUNTRIES_META.map(c => (
+            <SeaPayCountryCard
+              key={c.name}
+              countryName={c.name}
+              flag={c.flag}
+              currency={c.currency}
+              initialData={spSettings?.countries?.[c.name] || { merchantId: "", apiKey: "", apiSecret: "" }}
+              envOverride={!!spSettings?.envOverrides?.[c.name]}
+              onSave={handleSave}
+            />
+          ))}
+        </div>
+      </div>
 
       <Card>
         <CardHeader className="pb-3">

@@ -266,6 +266,15 @@ async function getSendavaWebhookSecret(): Promise<string | undefined> {
 
 /* SeaPay : chaque pays possede son propre compte marchand (merchant_id/api_key/api_secret distincts) */
 const SEAPAY_COUNTRIES = ["Pakistan", "Philippines", "India", "Nigeria"] as const;
+const SEAPAY_COUNTRY_FROM_CURRENCY: Record<string, string> = {
+  PKR: "Pakistan",
+  PHP: "Philippines",
+  INR: "India",
+  NGN: "Nigeria",
+  BDT: "Bangladesh",
+  VND: "Vietnam",
+  EGP: "Egypt",
+};
 function seapayCountrySlug(country: string): string {
   return country.trim().toLowerCase().replace(/[^a-z]/g, "");
 }
@@ -3961,7 +3970,7 @@ export async function registerRoutes(
         }
       } else if (useSeapay) {
         /* ── SeaPay : GCash / Maya / UPI / EasyPaisa / JazzCash ─────────── */
-        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(), getSeapayApiKey()]);
+        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(country), getSeapayApiKey(country)]);
         if (!spMerchantId || !spApiKey) {
           return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
         }
@@ -4990,21 +4999,31 @@ export async function registerRoutes(
     }
   });
 
-  // ==================== SEAPAY ADMIN SETTINGS ====================
+  // ==================== SEAPAY ADMIN SETTINGS (par pays) ====================
 
   app.get("/api/admin/seapay/settings", authMiddleware("admin"), async (_req, res) => {
     try {
-      const merchantId = await storage.getSetting("seapay_merchant_id");
-      const apiKey     = await storage.getSetting("seapay_api_key");
-      const apiSecret  = await storage.getSetting("seapay_api_secret");
-      const envOverride = !!(process.env.SEAPAY_MERCHANT_ID || process.env.SEAPAY_API_KEY);
-      res.json({
-        merchantId: merchantId || "",
-        apiKey:     apiKey     || "",
-        apiSecret:  apiSecret  || "",
-        envOverride,
-        configured: !!(merchantId && apiKey),
-      });
+      const countriesList = ["Pakistan", "Philippines", "India", "Nigeria"];
+      const countries: Record<string, any> = {};
+      const envOverrides: Record<string, boolean> = {};
+      for (const c of countriesList) {
+        const [mid, ak, as_] = await Promise.all([
+          getSeapayMerchantId(c),
+          getSeapayApiKey(c),
+          getSeapayApiSecret(c),
+        ]);
+        const envPrefix = seapayCountryEnvPrefix(c);
+        countries[c] = {
+          merchantId: mid || "",
+          apiKey:     ak  || "",
+          apiSecret:  as_ || "",
+          configured: !!(mid && ak),
+        };
+        envOverrides[c] = !!(process.env[`${envPrefix}_MERCHANT_ID`] || process.env[`${envPrefix}_API_KEY`]);
+      }
+      // Rétrocompatibilité — indique si au moins un pays est configuré
+      const configured = countriesList.some(c => countries[c].configured);
+      res.json({ countries, envOverrides, configured });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -5012,10 +5031,12 @@ export async function registerRoutes(
 
   app.post("/api/admin/seapay/settings", authMiddleware("admin"), async (req, res) => {
     try {
-      const { merchantId, apiKey, apiSecret } = req.body;
-      if (merchantId !== undefined) await storage.setSetting("seapay_merchant_id", merchantId);
-      if (apiKey    !== undefined) await storage.setSetting("seapay_api_key", apiKey);
-      if (apiSecret !== undefined) await storage.setSetting("seapay_api_secret", apiSecret);
+      const { country, merchantId, apiKey, apiSecret } = req.body;
+      if (!country) return res.status(400).json({ message: "Pays requis (country)" });
+      const slug = seapayCountrySlug(country);
+      if (merchantId !== undefined) await storage.setSetting(`seapay_merchant_id_${slug}`, merchantId);
+      if (apiKey    !== undefined) await storage.setSetting(`seapay_api_key_${slug}`, apiKey);
+      if (apiSecret !== undefined) await storage.setSetting(`seapay_api_secret_${slug}`, apiSecret);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -5025,11 +5046,13 @@ export async function registerRoutes(
   app.get("/api/admin/seapay/balance", authMiddleware("admin"), async (req, res) => {
     try {
       const { currency } = req.query;
-      const [merchantId, apiSecret] = await Promise.all([getSeapayMerchantId(), getSeapayApiSecret()]);
+      const currStr = String(currency || "PKR").toUpperCase();
+      const balanceCountry = SEAPAY_COUNTRY_FROM_CURRENCY[currStr] || "Pakistan";
+      const [merchantId, apiSecret] = await Promise.all([getSeapayMerchantId(balanceCountry), getSeapayApiSecret(balanceCountry)]);
       if (!merchantId || !apiSecret) {
-        return res.status(400).json({ message: "SeaPay non configuré" });
+        return res.status(400).json({ message: `SeaPay non configuré pour ${balanceCountry}` });
       }
-      const result = await seapayGetBalance(merchantId, String(currency || "PKR"), apiSecret);
+      const result = await seapayGetBalance(merchantId, currStr, apiSecret);
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -5107,9 +5130,16 @@ export async function registerRoutes(
       const body = req.body as Record<string, any>;
       console.log(`[SEAPAY CALLBACK] Body: ${JSON.stringify(body)}`);
 
-      const apiKey = await getSeapayApiKey();
+      const orderId = body.order_id || body.out_trade_no || "";
+      if (!orderId) { return res.status(200).send("ok"); }
+
+      // Trouver le pays depuis l'ordre pour utiliser la bonne cle API
+      const pendingForCountry = await storage.getPendingPaymentByReference(orderId);
+      const callbackCountry = pendingForCountry?.country || "";
+      const cbCountry = SEAPAY_COUNTRY_FROM_CURRENCY[SEAPAY_CURRENCY_COUNTRY[callbackCountry] || ""] || callbackCountry;
+      const apiKey = await getSeapayApiKey(cbCountry);
       if (!apiKey) {
-        console.error("[SEAPAY CALLBACK] API Key non configurée");
+        console.error("[SEAPAY CALLBACK] API Key non configurée pour le pays:", cbCountry);
         return res.status(200).send("ok");
       }
 
@@ -5118,15 +5148,11 @@ export async function registerRoutes(
         console.error("[SEAPAY CALLBACK] Signature invalide");
         return res.status(200).send("ok");
       }
-
-      const orderId = body.order_id || body.out_trade_no || "";
       const status  = (body.status || "").toLowerCase();
       const tradeNo = body.trade_no || "";
       const amount  = parseInt(body.amount || "0", 10);
 
-      if (!orderId) { return res.status(200).send("ok"); }
-
-      const pending = await storage.getPendingPaymentByReference(orderId);
+      const pending = pendingForCountry || await storage.getPendingPaymentByReference(orderId);
       if (!pending) {
         console.warn(`[SEAPAY CALLBACK] Paiement en attente introuvable: ${orderId}`);
         return res.status(200).send("ok");
@@ -5193,9 +5219,17 @@ export async function registerRoutes(
       const body = req.body as Record<string, any>;
       console.log(`[SEAPAY PAYOUT CALLBACK] Body: ${JSON.stringify(body)}`);
 
-      const apiSecret = await getSeapayApiSecret();
+      const orderId = body.order_id || body.out_trade_no || "";
+      const status = (body.status || "").toLowerCase();
+      if (!orderId) return res.status(200).send("ok");
+
+      const withdrawal = await storage.getWithdrawalByOmnipayRef(orderId);
+
+      // Utiliser le bon secret API selon le pays du retrait
+      const payoutCountry = withdrawal?.country || "";
+      const apiSecret = await getSeapayApiSecret(payoutCountry);
       if (!apiSecret) {
-        console.error("[SEAPAY PAYOUT CALLBACK] Secret API non configuré");
+        console.error("[SEAPAY PAYOUT CALLBACK] Secret API non configuré pour le pays:", payoutCountry);
         return res.status(200).send("ok");
       }
       const receivedSign = body.sign || "";
@@ -5203,12 +5237,6 @@ export async function registerRoutes(
         console.error("[SEAPAY PAYOUT CALLBACK] Signature invalide");
         return res.status(200).send("ok");
       }
-
-      const orderId = body.order_id || body.out_trade_no || "";
-      const status = (body.status || "").toLowerCase();
-      if (!orderId) return res.status(200).send("ok");
-
-      const withdrawal = await storage.getWithdrawalByOmnipayRef(orderId);
       if (!withdrawal) {
         console.warn(`[SEAPAY PAYOUT CALLBACK] Retrait non trouve: ${orderId}`);
         return res.status(200).send("ok");
@@ -7121,7 +7149,7 @@ export async function registerRoutes(
       const useSeapayPayout = w.gateway === "seapay";
 
       if (useSeapayPayout) {
-        const [spMerchantId, spApiSecret] = await Promise.all([getSeapayMerchantId(), getSeapayApiSecret()]);
+        const [spMerchantId, spApiSecret] = await Promise.all([getSeapayMerchantId(w.country), getSeapayApiSecret(w.country)]);
         if (mc && spMerchantId && spApiSecret && merchant) {
           try {
             const reference = seapayGenerateRef();
@@ -7290,7 +7318,7 @@ export async function registerRoutes(
         return res.json({ provider: "mbiyo", success: result.status === "success", status: result.data?.status, data: result.data, error: result.message });
       }
       if (effectiveProvider === "seapay") {
-        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(), getSeapayApiKey()]);
+        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(w.country), getSeapayApiKey(w.country)]);
         if (!spMerchantId || !spApiKey) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
         const currency = SEAPAY_CURRENCY_COUNTRY[w.country] || "USD";
         const result = await seapayQuery(spMerchantId, w.omnipayRef, currency, spApiKey);
@@ -7333,7 +7361,7 @@ export async function registerRoutes(
         providerStatus = (result.data?.status || result.status || "").toLowerCase();
         raw = result.data;
       } else if (effectiveProvider === "seapay") {
-        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(), getSeapayApiKey()]);
+        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(w.country), getSeapayApiKey(w.country)]);
         if (!spMerchantId || !spApiKey) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
         const currency = SEAPAY_CURRENCY_COUNTRY[w.country] || "USD";
         const result = await seapayQuery(spMerchantId, w.omnipayRef, currency, spApiKey);
@@ -7456,7 +7484,7 @@ export async function registerRoutes(
       }
 
       if (provider === "seapay") {
-        const [spMerchantId, spApiSecret] = await Promise.all([getSeapayMerchantId(), getSeapayApiSecret()]);
+        const [spMerchantId, spApiSecret] = await Promise.all([getSeapayMerchantId(w.country), getSeapayApiSecret(w.country)]);
         if (!spMerchantId || !spApiSecret) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
         const reference = seapayGenerateRef();
         const currency = SEAPAY_CURRENCY_COUNTRY[w.country] || "USD";
@@ -7620,7 +7648,7 @@ export async function registerRoutes(
         return res.json({ provider: "mbiyo", success: result.status === "success", status: result.data?.status, data: result.data, error: result.message });
       }
       if (provider === "seapay") {
-        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(), getSeapayApiKey()]);
+        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(txCountry || ""), getSeapayApiKey(txCountry || "")]);
         if (!spMerchantId || !spApiKey) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
         const currency = SEAPAY_CURRENCY_COUNTRY[txCountry || ""] || "USD";
         const result = await seapayQuery(spMerchantId, ref, currency, spApiKey);
@@ -7672,7 +7700,7 @@ export async function registerRoutes(
         const result = await mbiyoGetStatus(mbiyoApiKey, ref);
         providerStatus = (result.data?.status || result.status || "").toLowerCase();
       } else if (provider === "seapay") {
-        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(), getSeapayApiKey()]);
+        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(txCountry || ""), getSeapayApiKey(txCountry || "")]);
         if (!spMerchantId || !spApiKey) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
         const currency = SEAPAY_CURRENCY_COUNTRY[txCountry || ""] || "USD";
         const result = await seapayQuery(spMerchantId, ref, currency, spApiKey);
@@ -7823,7 +7851,7 @@ export async function registerRoutes(
       }
 
       if (provider === "seapay") {
-        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(), getSeapayApiKey()]);
+        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(pp.country), getSeapayApiKey(pp.country)]);
         if (!spMerchantId || !spApiKey) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
         const reference = seapayGenerateRef();
         const currency = SEAPAY_CURRENCY_COUNTRY[pp.country] || "USD";
