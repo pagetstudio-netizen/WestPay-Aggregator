@@ -49,6 +49,8 @@ import icnSettingsProfile from "@assets/téléchargement_(71)_1779628273093.png"
 import icnSettingsPassword from "@assets/mine-mod-change-pwd-D4tL_Aft_1779628273126.png";
 import icnSettingsContact from "@assets/téléchargement_(59)_1779628273158.png";
 import { getAvatarUrl, getInitials, getAvatarColor } from "@/lib/avatar";
+import gcashLogo   from "@assets/images_(24)_1783366582605.png";
+import paymayaLogo from "@assets/images_(25)_1783366582572.png";
 
 type MerchantTab = "overview" | "apikeys" | "webhook" | "virements" | "reversements" | "settings" | "paymentlinks" | "transactions" | "crypto" | "sdk" | "wallet" | "analyse";
 
@@ -76,6 +78,11 @@ function countryToCurrency(country: string): string {
   if (country === "India") return "INR";
   return "FCFA";
 }
+
+const WITHDRAWAL_OPERATOR_LOGOS: Record<string, string> = {
+  "GCash":          gcashLogo,
+  "Maya (PayMaya)": paymayaLogo,
+};
 
 const COUNTRY_COLORS = [
   "#1976d2", "#26a69a", "#e57373", "#7e57c2",
@@ -1592,6 +1599,8 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
   const [phone, setPhone] = useState("");
   const [recipientName, setRecipientName] = useState("");
   const [retryState, setRetryState] = useState<{ retriesLeft?: number; blocked?: boolean; blockedUntil?: number } | null>(null);
+  const [showPkModal, setShowPkModal] = useState(false);
+  const [pkSearch, setPkSearch] = useState("");
 
   const activeWallets = (balance as MerchantCountry[]).filter(w => w.active);
   const selectedWallet = activeWallets.find(w => String(w.id) === selectedWalletId);
@@ -1784,30 +1793,132 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                 <div className="p-3 rounded-xl text-sm" style={{ background: "#fff3cd", color: "#856404" }}>
                   {t("noData")} — {selectedWallet.country}
                 </div>
-              ) : (
-                <div className="grid gap-2 grid-cols-2">
-                  {operatorList.map((op) => (
-                    <div
-                      key={op.id}
-                      onClick={() => { if (!withdrawalsDisabled) setSelectedOperator(op.name); }}
-                      className="rounded-xl p-3 transition-all flex items-center gap-2"
-                      style={{
-                        background: withdrawalsDisabled ? "#f5f6f8" : selectedOperator === op.name ? "#1e88e5" : "#f5f6f8",
-                        border: `2px solid ${withdrawalsDisabled ? "#e8ecf0" : selectedOperator === op.name ? "#1e88e5" : "#e8ecf0"}`,
-                        cursor: withdrawalsDisabled ? "not-allowed" : "pointer",
-                        opacity: withdrawalsDisabled ? 0.6 : 1,
-                      }}
-                      data-testid={`operator-card-${op.id}`}
-                    >
-                      <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: (!withdrawalsDisabled && selectedOperator === op.name) ? "rgba(255,255,255,0.2)" : "#e8ecf0" }}>
-                        <Zap className="w-4 h-4" style={{ color: (!withdrawalsDisabled && selectedOperator === op.name) ? "#fff" : "#00b050" }} />
+              ) : (selectedWallet.country === "Pakistan" || selectedWallet.country === "India") ? (
+                /* ── Pakistan / Inde : bouton d'ouverture du modal de recherche ── */
+                <>
+                  <button
+                    type="button"
+                    disabled={withdrawalsDisabled}
+                    onClick={() => { if (!withdrawalsDisabled) { setPkSearch(""); setShowPkModal(true); } }}
+                    className="w-full rounded-xl p-3 flex items-center justify-between gap-2 transition-all"
+                    style={{
+                      background: selectedOperator ? "#e3f2fd" : "#f5f6f8",
+                      border: `2px solid ${selectedOperator ? "#1e88e5" : "#e8ecf0"}`,
+                      cursor: withdrawalsDisabled ? "not-allowed" : "pointer",
+                      opacity: withdrawalsDisabled ? 0.6 : 1,
+                    }}
+                    data-testid="button-pk-operator-picker"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: selectedOperator ? "#1e88e5" : "#e8ecf0" }}>
+                        <Zap className="w-4 h-4" style={{ color: selectedOperator ? "#fff" : "#00b050" }} />
                       </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold truncate" style={{ color: (!withdrawalsDisabled && selectedOperator === op.name) ? "#fff" : "#1a1a1a" }}>{op.name}</p>
-                        <p className="text-xs" style={{ color: (!withdrawalsDisabled && selectedOperator === op.name) ? "rgba(255,255,255,0.7)" : "#aaa" }}>{op.type}</p>
+                      <div className="min-w-0 text-left">
+                        <p className="text-xs font-bold truncate" style={{ color: selectedOperator ? "#1e88e5" : "#888" }}>
+                          {selectedOperator || "Choisir un opérateur"}
+                        </p>
+                        {selectedOperator && <p className="text-xs" style={{ color: "#64b5f6" }}>{operatorList.find(o => o.name === selectedOperator)?.type || "Bank"}</p>}
                       </div>
                     </div>
-                  ))}
+                    <ChevronDown className="w-4 h-4 shrink-0" style={{ color: selectedOperator ? "#1e88e5" : "#aaa" }} />
+                  </button>
+
+                  {/* Modal de sélection opérateur Pakistan / Inde */}
+                  <Dialog open={showPkModal} onOpenChange={setShowPkModal}>
+                    <DialogContent className="max-w-sm p-0 gap-0" style={{ borderRadius: 20, overflow: "hidden" }}>
+                      <DialogHeader className="px-5 py-4" style={{ borderBottom: "1px solid #f0f0f0" }}>
+                        <DialogTitle className="text-base font-bold" style={{ color: "#1a1a1a" }}>
+                          {selectedWallet.country === "India" ? "🇮🇳 Opérateur Inde" : "🇵🇰 Opérateur Pakistan"}
+                        </DialogTitle>
+                      </DialogHeader>
+                      <div className="px-4 pt-3 pb-2">
+                        <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: "#f5f6f8", border: "1.5px solid #e8ecf0" }}>
+                          <Search className="w-4 h-4 shrink-0" style={{ color: "#aaa" }} />
+                          <input
+                            type="text"
+                            value={pkSearch}
+                            onChange={e => setPkSearch(e.target.value)}
+                            placeholder="Rechercher une banque ou opérateur…"
+                            className="flex-1 text-sm outline-none bg-transparent"
+                            style={{ color: "#1a1a1a" }}
+                            autoFocus
+                            data-testid="input-pk-search"
+                          />
+                          {pkSearch && (
+                            <button type="button" onClick={() => setPkSearch("")}>
+                              <X className="w-4 h-4" style={{ color: "#aaa" }} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <ScrollArea className="h-72">
+                        <div className="px-4 pb-4 space-y-1">
+                          {operatorList
+                            .filter(op => op.name.toLowerCase().includes(pkSearch.toLowerCase()))
+                            .map(op => (
+                              <button
+                                key={op.id}
+                                type="button"
+                                onClick={() => { setSelectedOperator(op.name); setShowPkModal(false); }}
+                                className="w-full rounded-xl px-3 py-2.5 flex items-center gap-3 transition-all text-left"
+                                style={{
+                                  background: selectedOperator === op.name ? "#e3f2fd" : "transparent",
+                                  border: `1.5px solid ${selectedOperator === op.name ? "#1e88e5" : "transparent"}`,
+                                }}
+                                data-testid={`pk-op-${op.id}`}
+                              >
+                                <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: selectedOperator === op.name ? "#1e88e5" : "#f0f0f0" }}>
+                                  <Zap className="w-4 h-4" style={{ color: selectedOperator === op.name ? "#fff" : "#00b050" }} />
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-sm font-semibold truncate" style={{ color: selectedOperator === op.name ? "#1565c0" : "#1a1a1a" }}>{op.name}</p>
+                                  <p className="text-xs" style={{ color: "#aaa" }}>{op.type}</p>
+                                </div>
+                                {selectedOperator === op.name && (
+                                  <CheckCircle2 className="w-4 h-4 ml-auto shrink-0" style={{ color: "#1e88e5" }} />
+                                )}
+                              </button>
+                            ))}
+                          {operatorList.filter(op => op.name.toLowerCase().includes(pkSearch.toLowerCase())).length === 0 && (
+                            <p className="text-sm text-center py-6" style={{ color: "#aaa" }}>Aucun résultat pour « {pkSearch} »</p>
+                          )}
+                        </div>
+                      </ScrollArea>
+                    </DialogContent>
+                  </Dialog>
+                </>
+              ) : (
+                /* ── Autres pays (Philippines avec logos, reste avec Zap) ── */
+                <div className="grid gap-2 grid-cols-2">
+                  {operatorList.map((op) => {
+                    const logo = WITHDRAWAL_OPERATOR_LOGOS[op.name];
+                    const sel = !withdrawalsDisabled && selectedOperator === op.name;
+                    return (
+                      <div
+                        key={op.id}
+                        onClick={() => { if (!withdrawalsDisabled) setSelectedOperator(op.name); }}
+                        className="rounded-xl p-3 transition-all flex items-center gap-2"
+                        style={{
+                          background: withdrawalsDisabled ? "#f5f6f8" : sel ? "#1e88e5" : "#f5f6f8",
+                          border: `2px solid ${withdrawalsDisabled ? "#e8ecf0" : sel ? "#1e88e5" : "#e8ecf0"}`,
+                          cursor: withdrawalsDisabled ? "not-allowed" : "pointer",
+                          opacity: withdrawalsDisabled ? 0.6 : 1,
+                        }}
+                        data-testid={`operator-card-${op.id}`}
+                      >
+                        <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 overflow-hidden" style={{ background: sel ? "rgba(255,255,255,0.15)" : "#e8ecf0" }}>
+                          {logo
+                            ? <img src={logo} alt={op.name} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} />
+                            : <Zap className="w-4 h-4" style={{ color: sel ? "#fff" : "#00b050" }} />
+                          }
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold truncate" style={{ color: sel ? "#fff" : "#1a1a1a" }}>{op.name}</p>
+                          <p className="text-xs" style={{ color: sel ? "rgba(255,255,255,0.7)" : "#aaa" }}>{op.type}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
               {withdrawalsDisabled && operatorList.length > 0 && (
