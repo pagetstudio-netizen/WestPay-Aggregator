@@ -12,6 +12,8 @@ import bankCardIcon  from "@assets/mine-mod-bankcard-CLOhqwHj_1779636875827.png"
 import phoneHandIcon from "@assets/file_00000000d2f47246aaf6fa11ae0a4003_1779726190358.png";
 import mixxIcon      from "@assets/mixxByYas-web-page_1763835083140-t9C-E95C_1780044772406.png";
 import mpesaIcon     from "@assets/M-pesa-logo_1780044772360.png";
+import gcashIcon     from "@assets/images_(24)_1783333287160.png";
+import paymayaIcon   from "@assets/images_(25)_1783333287133.png";
 
 /* ── types ─────────────────────────────────────────────────────────────── */
 type MerchantInfo = { name: string; slug: string; countries: string[] };
@@ -61,6 +63,8 @@ const OPERATOR_IMAGES: Record<string, string> = {
   "Orange Money":     orangeIcon,
   "Mixx by Yas":      mixxIcon,
   "M-Pesa":           mpesaIcon,
+  "GCash":            gcashIcon,
+  "Maya (PayMaya)":   paymayaIcon,
 };
 const OPERATOR_META: Record<string, { bg: string; abbr: string }> = {
   "Orange Money":        { bg: "#FF6600", abbr: "OM" },

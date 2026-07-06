@@ -309,10 +309,19 @@ function toMerchantSafeMessage(msg: string | null | undefined): string {
 const COLLECTION_FEE_RATE = 0.055;
 const WITHDRAWAL_FEE_RATE = 0.045;
 const EXTRA_FEE_COUNTRIES = new Set(["Congo Brazzaville", "Congo RDC"]);
+/* SeaPay countries: India, Pakistan, Nigeria, Philippines use a dedicated 15% payin / 5% payout fee schedule */
+const COUNTRY_FEE_OVERRIDES: Record<string, { payin: number; payout: number }> = {
+  "India":       { payin: 0.15, payout: 0.05 },
+  "Pakistan":    { payin: 0.15, payout: 0.05 },
+  "Nigeria":     { payin: 0.15, payout: 0.05 },
+  "Philippines": { payin: 0.15, payout: 0.05 },
+};
 function getCollectionFeeRate(country?: string | null): number {
+  if (country && COUNTRY_FEE_OVERRIDES[country]) return COUNTRY_FEE_OVERRIDES[country].payin;
   return country && EXTRA_FEE_COUNTRIES.has(country) ? COLLECTION_FEE_RATE + 0.01 : COLLECTION_FEE_RATE;
 }
 function getWithdrawalFeeRate(country?: string | null): number {
+  if (country && COUNTRY_FEE_OVERRIDES[country]) return COUNTRY_FEE_OVERRIDES[country].payout;
   return country && EXTRA_FEE_COUNTRIES.has(country) ? WITHDRAWAL_FEE_RATE + 0.01 : WITHDRAWAL_FEE_RATE;
 }
 function calcMerchantCredit(grossAmount: number, country?: string | null): number {
