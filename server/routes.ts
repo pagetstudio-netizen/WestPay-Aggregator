@@ -324,8 +324,14 @@ function getWithdrawalFeeRate(country?: string | null): number {
   if (country && COUNTRY_FEE_OVERRIDES[country]) return COUNTRY_FEE_OVERRIDES[country].payout;
   return country && EXTRA_FEE_COUNTRIES.has(country) ? WITHDRAWAL_FEE_RATE + 0.01 : WITHDRAWAL_FEE_RATE;
 }
+/* India payin: 10 INR frais fixe prélevés en plus des 15% (cf. COUNTRY_FEE_OVERRIDES) */
+const FLAT_PAYIN_FEE_OVERRIDES: Record<string, number> = {
+  "India": 10,
+};
 function calcMerchantCredit(grossAmount: number, country?: string | null): number {
-  return Math.floor(grossAmount * (1 - getCollectionFeeRate(country)));
+  const flatFee = country && FLAT_PAYIN_FEE_OVERRIDES[country] ? FLAT_PAYIN_FEE_OVERRIDES[country] : 0;
+  const afterPercentFee = grossAmount * (1 - getCollectionFeeRate(country));
+  return Math.max(0, Math.floor(afterPercentFee - flatFee));
 }
 function calcWithdrawalFee(amount: number, country?: string | null): number {
   return Math.floor(amount * getWithdrawalFeeRate(country));
