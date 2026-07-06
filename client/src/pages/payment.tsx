@@ -30,6 +30,10 @@ const PAYMENT_METHODS: Record<string, string[]> = {
   "Senegal":            ["Wave", "Mixx by Yas", "Orange Money"],
   "Guinee":             ["MTN Mobile Money", "Orange Money"],
   "Gambie":             ["Africell Money"],
+  "Philippines":        ["GCash", "Maya (PayMaya)", "ShopeePay", "GrabPay"],
+  "Pakistan":           ["EasyPaisa", "JazzCash", "NayaPay", "SadaPay"],
+  "India":              ["UPI / IMPS", "NEFT / RTGS", "PhonePe", "Google Pay", "Paytm"],
+  "Nigeria":            ["MTN MoMo Nigeria", "Airtel Money Nigeria", "OPay", "PalmPay", "Kuda Bank"],
 };
 
 const DIAL_CODES: Record<string, string> = {
@@ -37,6 +41,7 @@ const DIAL_CODES: Record<string, string> = {
   "Congo Brazzaville": "+242", "Congo RDC": "+243", "Gabon": "+241",
   "Cote d'Ivoire": "+225", "Mali": "+223", "Senegal": "+221",
   "Guinee": "+224", "Gambie": "+220",
+  "Philippines": "+63", "Pakistan": "+92", "India": "+91", "Nigeria": "+234",
 };
 
 const COUNTRY_FLAGS: Record<string, string> = {
@@ -44,6 +49,7 @@ const COUNTRY_FLAGS: Record<string, string> = {
   "Congo Brazzaville": "🇨🇬", "Congo RDC": "🇨🇩", "Gabon": "🇬🇦",
   "Cote d'Ivoire": "🇨🇮", "Mali": "🇲🇱", "Senegal": "🇸🇳",
   "Guinee": "🇬🇳", "Gambie": "🇬🇲",
+  "Philippines": "🇵🇭", "Pakistan": "🇵🇰", "India": "🇮🇳", "Nigeria": "🇳🇬",
 };
 
 /* operator icon (real image or color+abbr fallback) */
@@ -57,21 +63,43 @@ const OPERATOR_IMAGES: Record<string, string> = {
   "M-Pesa":           mpesaIcon,
 };
 const OPERATOR_META: Record<string, { bg: string; abbr: string }> = {
-  "Orange Money":  { bg: "#FF6600", abbr: "OM" },
-  "Airtel Money":  { bg: "#E8001D", abbr: "AT" },
-  "M-Pesa":        { bg: "#60BB44", abbr: "MP" },
-  "Coris Money":   { bg: "#7C2020", abbr: "CM" },
-  "Mixx by Yas":   { bg: "#7C3AED", abbr: "MX" },
-  "Africell":      { bg: "#0066B3", abbr: "AF" },
-  "Africell Money":{ bg: "#0066B3", abbr: "AF" },
-  "Celtiis":       { bg: "#E05A00", abbr: "CT" },
+  "Orange Money":        { bg: "#FF6600", abbr: "OM" },
+  "Airtel Money":        { bg: "#E8001D", abbr: "AT" },
+  "M-Pesa":              { bg: "#60BB44", abbr: "MP" },
+  "Coris Money":         { bg: "#7C2020", abbr: "CM" },
+  "Mixx by Yas":         { bg: "#7C3AED", abbr: "MX" },
+  "Africell":            { bg: "#0066B3", abbr: "AF" },
+  "Africell Money":      { bg: "#0066B3", abbr: "AF" },
+  "Celtiis":             { bg: "#E05A00", abbr: "CT" },
+  "GCash":               { bg: "#007DFF", abbr: "GC" },
+  "Maya (PayMaya)":      { bg: "#00B14F", abbr: "MY" },
+  "ShopeePay":           { bg: "#EE4D2D", abbr: "SP" },
+  "GrabPay":             { bg: "#00B14F", abbr: "GP" },
+  "EasyPaisa":           { bg: "#3AB54A", abbr: "EP" },
+  "JazzCash":            { bg: "#D71920", abbr: "JC" },
+  "NayaPay":             { bg: "#5C2D91", abbr: "NP" },
+  "SadaPay":             { bg: "#1A1A1A", abbr: "SD" },
+  "UPI / IMPS":          { bg: "#FF7F00", abbr: "UP" },
+  "NEFT / RTGS":         { bg: "#1B4FA6", abbr: "NE" },
+  "PhonePe":             { bg: "#6739B7", abbr: "PP" },
+  "Google Pay":          { bg: "#4285F4", abbr: "GP" },
+  "Paytm":               { bg: "#00BAF2", abbr: "PT" },
+  "MTN MoMo Nigeria":    { bg: "#FFCB05", abbr: "MN" },
+  "Airtel Money Nigeria":{ bg: "#E8001D", abbr: "AN" },
+  "OPay":                { bg: "#2B7A10", abbr: "OP" },
+  "PalmPay":             { bg: "#06C167", abbr: "PL" },
+  "Kuda Bank":           { bg: "#4B1B73", abbr: "KB" },
 };
 
 function currencyForCountry(c: string) {
   if (["Cameroun","Congo Brazzaville","Gabon"].includes(c)) return "XAF";
-  if (c === "Congo RDC") return "CDF";
-  if (c === "Guinee")    return "GNF";
-  if (c === "Gambie")    return "GMD";
+  if (c === "Congo RDC")   return "CDF";
+  if (c === "Guinee")      return "GNF";
+  if (c === "Gambie")      return "GMD";
+  if (c === "Pakistan")    return "PKR";
+  if (c === "Philippines") return "PHP";
+  if (c === "India")       return "INR";
+  if (c === "Nigeria")     return "NGN";
   return "XOF";
 }
 
@@ -167,6 +195,8 @@ export default function PaymentPage() {
   const needsOtp         = method === "Orange Money" && (country === "Burkina Faso" || country === "Cote d'Ivoire");
   const otpUssd          = country === "Burkina Faso" ? "*144*4*6*montant#" : "#144*82#";
   const maliOrange       = method === "Orange Money" && country === "Mali";
+  const isSeapayCountry  = ["Philippines","Pakistan","India","Nigeria"].includes(country);
+  const isSeapayRedirect = isSeapayCountry && !!method && !isCrypto;
   const dialCode         = DIAL_CODES[country] || "+";
 
   /* ── fetch merchant ─────────────────────────────────────────────────── */
@@ -643,6 +673,14 @@ export default function PaymentPage() {
               {isCrypto && (
                 <div style={{ background:"#fffbeb", border:"1.5px solid #fde68a", borderRadius:12, padding:"10px 14px" }}>
                   <p style={{ fontSize:12, color:"#92400e" }}>Vous serez redirigé vers une page sécurisée avec QR code.</p>
+                </div>
+              )}
+
+              {/* SeaPay redirect note (Philippines / Pakistan / India / Nigeria) */}
+              {isSeapayRedirect && (
+                <div style={{ background:"#eff6ff", border:"1.5px solid #bfdbfe", borderRadius:12, padding:"10px 14px" }}>
+                  <p style={{ fontSize:12, fontWeight:600, color:"#1d4ed8", marginBottom:3 }}>{method} — Paiement sécurisé</p>
+                  <p style={{ fontSize:12, color:"#1e40af" }}>Vous serez redirigé vers la page de paiement {method} pour valider votre transaction.</p>
                 </div>
               )}
 

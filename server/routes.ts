@@ -49,6 +49,16 @@ import {
   type MbiyoPayoutWebhookPayload,
 } from "./mbiyo";
 import {
+  seapayPayin,
+  seapayPayout,
+  seapayBalance as seapayGetBalance,
+  seapayQuery,
+  buildSeapaySign,
+  verifySeapaySign,
+  seapayGenerateRef,
+  SEAPAY_CURRENCY_COUNTRY,
+} from "./seapay";
+import {
   createPayment as sendavaCreatePayment,
   getPaymentStatus as sendavaGetPaymentStatus,
   verifyPayment as sendavaVerifyPayment,
@@ -268,6 +278,18 @@ async function getSendavaApiKey(): Promise<string | undefined> {
 
 async function getSendavaWebhookSecret(): Promise<string | undefined> {
   return process.env.SENDAVA_WEBHOOK_SECRET || process.env.SENDAVAPAY_WEBHOOK_SECRET || await storage.getSetting("sendavapay_webhook_secret");
+}
+
+async function getSeapayMerchantId(): Promise<string | undefined> {
+  return process.env.SEAPAY_MERCHANT_ID || await storage.getSetting("seapay_merchant_id");
+}
+
+async function getSeapayApiKey(): Promise<string | undefined> {
+  return process.env.SEAPAY_API_KEY || await storage.getSetting("seapay_api_key");
+}
+
+async function getSeapayApiSecret(): Promise<string | undefined> {
+  return process.env.SEAPAY_API_SECRET || await storage.getSetting("seapay_api_secret");
 }
 
 // Nettoie tout message avant qu'il soit visible par un marchand/client (adminNote,
@@ -3733,6 +3755,7 @@ export async function registerRoutes(
         "Senegal": "221", "Mali": "223", "Burkina Faso": "226",
         "Cameroun": "237", "Congo Brazzaville": "242", "Gabon": "241",
         "Congo RDC": "243", "Guinee": "224", "Gambie": "220",
+        "Pakistan": "92", "Philippines": "63", "India": "91", "Nigeria": "234",
       };
       const dialCode = dialCodes[country] || "";
       const cleanPhone = payerPhone.replace(/[\s\-\(\)\+]/g, "");
@@ -3747,6 +3770,7 @@ export async function registerRoutes(
       const gatewayLower = operatorRecord?.gateway?.toLowerCase();
       const useMbiyo = gatewayLower === "mbiyo";
       const useSendava = gatewayLower === "sendavapay";
+      const useSeapay = gatewayLower === "seapay";
 
       if (useSendava) {
         const sendavaApiKey = await getSendavaApiKey();
@@ -3925,6 +3949,83 @@ export async function registerRoutes(
           });
         } catch (mbiyoErr: any) {
           console.error("[MBIYO] Erreur initiation:", mbiyoErr.message);
+          return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
+        }
+      } else if (useSeapay) {
+        /* ── SeaPay : GCash / Maya / UPI / EasyPaisa / JazzCash ─────────── */
+        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(), getSeapayApiKey()]);
+        if (!spMerchantId || !spApiKey) {
+          return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
+        }
+
+        const reference = seapayGenerateRef();
+        const currency = SEAPAY_CURRENCY_COUNTRY[country] || "USD";
+        const callbackUrl = `${callbackBaseUrl}/api/seapay/callback`;
+        const returnUrl = redirectUrl
+          ? `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`
+          : `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
+        const channelCode = (operatorRecord as any)?.seapay_code || undefined;
+
+        try {
+          const spResult = await seapayPayin({
+            merchantId: spMerchantId,
+            currency,
+            amount: parsedAmount,
+            orderId: reference,
+            notifyUrl: callbackUrl,
+            channelCode,
+            returnUrl,
+            customerPhone: payerPhone || undefined,
+            customerName: payerName || undefined,
+          }, spApiKey);
+
+          if (spResult.code !== 200 || !spResult.data) {
+            const errorMsg = spResult.msg || "Erreur de paiement. Veuillez reessayer.";
+            storage.createTransaction({
+              merchantId: merchant.id, country,
+              txId: reference, amount: parsedAmount,
+              payerNumber: msisdn || null, payerName: payerName || null,
+              status: "failed", provider: "seapay",
+              omnipayTxId: null, operator: paymentMethod || null,
+              omnipayReference: reference, errorMessage: errorMsg,
+            }).catch(() => {});
+            return res.status(400).json({ message: "Paiement non abouti. Veuillez reessayer." });
+          }
+
+          const paymentUrl = spResult.data.payment_url || null;
+          const pending = await storage.createPendingPayment({
+            merchantId: merchant.id, country,
+            amount: parsedAmount,
+            payerPhone: payerPhone || null,
+            payerName: payerName || null,
+            paymentMethod,
+            txId: null,
+            status: "omnipay_pending",
+            redirectUrl: redirectUrl || null,
+            omnipayReference: reference,
+            omnipayTxId: spResult.data.trade_no || null,
+            omnipayPaymentUrl: paymentUrl,
+            gateway: "seapay",
+            expiresAt,
+          });
+
+          await storage.createApiLog({
+            merchantId: merchant.id,
+            action: "seapay_payment_initiated",
+            ip: req.ip || "",
+            description: `Paiement SeaPay initie - Ref: ${reference} - Montant: ${parsedAmount} ${currency} - Operateur: ${paymentMethod}`,
+          });
+
+          return res.json({
+            success: true,
+            paymentId: pending.id,
+            seapay: true,
+            omnipayReference: reference,
+            paymentUrl,
+            fees: 0,
+          });
+        } catch (spErr: any) {
+          console.error("[SEAPAY] Erreur initiation:", spErr.message);
           return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
         }
       } else {
@@ -4881,6 +4982,52 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== SEAPAY ADMIN SETTINGS ====================
+
+  app.get("/api/admin/seapay/settings", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const merchantId = await storage.getSetting("seapay_merchant_id");
+      const apiKey     = await storage.getSetting("seapay_api_key");
+      const apiSecret  = await storage.getSetting("seapay_api_secret");
+      const envOverride = !!(process.env.SEAPAY_MERCHANT_ID || process.env.SEAPAY_API_KEY);
+      res.json({
+        merchantId: merchantId || "",
+        apiKey:     apiKey     || "",
+        apiSecret:  apiSecret  || "",
+        envOverride,
+        configured: !!(merchantId && apiKey),
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/seapay/settings", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { merchantId, apiKey, apiSecret } = req.body;
+      if (merchantId !== undefined) await storage.setSetting("seapay_merchant_id", merchantId);
+      if (apiKey    !== undefined) await storage.setSetting("seapay_api_key", apiKey);
+      if (apiSecret !== undefined) await storage.setSetting("seapay_api_secret", apiSecret);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/seapay/balance", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { currency } = req.query;
+      const [merchantId, apiSecret] = await Promise.all([getSeapayMerchantId(), getSeapayApiSecret()]);
+      if (!merchantId || !apiSecret) {
+        return res.status(400).json({ message: "SeaPay non configuré" });
+      }
+      const result = await seapayGetBalance(merchantId, String(currency || "PKR"), apiSecret);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // ==================== SENDAVAPAY ROUTES ====================
 
   // ── Proxy routes (évite les blocages CORS depuis le navigateur) ──────────
@@ -4943,6 +5090,92 @@ export async function registerRoutes(
     } catch (err: any) {
       console.error("[SENDAVAPAY PROXY] /verify erreur:", err.message);
       res.status(502).json({ success: false, message: "Erreur vérification OTP" });
+    }
+  });
+
+  // ==================== SEAPAY CALLBACK ====================
+  app.post("/api/seapay/callback", async (req, res) => {
+    try {
+      const body = req.body as Record<string, any>;
+      console.log(`[SEAPAY CALLBACK] Body: ${JSON.stringify(body)}`);
+
+      const apiKey = await getSeapayApiKey();
+      if (!apiKey) {
+        console.error("[SEAPAY CALLBACK] API Key non configurée");
+        return res.status(200).send("ok");
+      }
+
+      const receivedSign = body.sign || "";
+      if (!verifySeapaySign(body, apiKey, receivedSign)) {
+        console.error("[SEAPAY CALLBACK] Signature invalide");
+        return res.status(200).send("ok");
+      }
+
+      const orderId = body.order_id || body.out_trade_no || "";
+      const status  = (body.status || "").toLowerCase();
+      const tradeNo = body.trade_no || "";
+      const amount  = parseInt(body.amount || "0", 10);
+
+      if (!orderId) { return res.status(200).send("ok"); }
+
+      const pending = await storage.getPendingPaymentByReference(orderId);
+      if (!pending) {
+        console.warn(`[SEAPAY CALLBACK] Paiement en attente introuvable: ${orderId}`);
+        return res.status(200).send("ok");
+      }
+      if (pending.status === "confirmed") { return res.status(200).send("ok"); }
+
+      if (status === "success" || status === "paid" || status === "completed") {
+        const merchant = await storage.getMerchantById(pending.merchantId);
+        if (!merchant) { return res.status(200).send("ok"); }
+
+        const txId = `SP-${orderId}`;
+        const tx = await storage.createTransaction({
+          merchantId: pending.merchantId,
+          country:    pending.country,
+          txId,
+          amount:     pending.amount,
+          payerNumber: pending.payerPhone || null,
+          payerName:  pending.payerName  || null,
+          status:     "confirmed",
+          provider:   "seapay",
+          omnipayTxId: tradeNo || null,
+          operator:   pending.paymentMethod || null,
+          omnipayReference: orderId,
+          errorMessage: null,
+        });
+
+        await storage.updateMerchantCountryBalance(pending.merchantId, pending.country, pending.amount);
+        await storage.updatePendingPaymentStatus(pending.id, "confirmed");
+
+        // Webhook marchand
+        const webhookUrl = merchant.webhookUrl;
+        if (webhookUrl) {
+          const webhookSecret = merchant.webhookSecret || "";
+          const payload = {
+            event: "payment.confirmed",
+            txId: tx.id, amount: pending.amount, currency: pending.country,
+            payer: pending.payerPhone || "", country: pending.country,
+            merchantSlug: merchant.slug, provider: "seapay", timestamp: new Date().toISOString(),
+          };
+          const sig = require("crypto").createHmac("sha256", webhookSecret).update(JSON.stringify(payload)).digest("hex");
+          fetch(webhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-WestPay-Signature": sig, "X-WestPay-Event": "payment.confirmed" },
+            body: JSON.stringify(payload),
+          }).catch(() => {});
+        }
+
+        console.log(`[SEAPAY CALLBACK] Paiement confirmé: ${orderId} — ${pending.amount} (${pending.country})`);
+      } else if (status === "failed" || status === "expired" || status === "cancelled") {
+        await storage.updatePendingPaymentStatus(pending.id, "failed");
+        console.log(`[SEAPAY CALLBACK] Paiement échoué: ${orderId} — status: ${status}`);
+      }
+
+      return res.status(200).send("ok");
+    } catch (err: any) {
+      console.error("[SEAPAY CALLBACK] Erreur:", err.message);
+      return res.status(200).send("ok");
     }
   });
 

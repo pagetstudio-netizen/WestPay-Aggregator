@@ -37,7 +37,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
 
-type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "sendavapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge" | "actionlogs";
+type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "sendavapay" | "seapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge" | "actionlogs";
 
 function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: { staleTime?: number; refetchOnWindowFocus?: boolean }) {
   const { token, logout } = useAuth();
@@ -3038,6 +3038,170 @@ function MbiyoPanel() {
       </Card>
 
       <MbiyoManualConfirmCard token={token} />
+    </div>
+  );
+}
+
+function SeaPayPanel() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const [merchantId, setMerchantId] = useState("");
+  const [apiKey, setApiKey]         = useState("");
+  const [apiSecret, setApiSecret]   = useState("");
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  const { data: spSettings, isLoading } = useAdminFetch("/api/admin/seapay/settings", ["/api/admin/seapay/settings"]);
+
+  useEffect(() => {
+    if (spSettings && !isInitialized) {
+      setMerchantId(spSettings.merchantId || "");
+      setApiKey(spSettings.apiKey       || "");
+      setApiSecret(spSettings.apiSecret || "");
+      setIsInitialized(true);
+    }
+  }, [spSettings, isInitialized]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/seapay/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ merchantId, apiKey, apiSecret }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/seapay/settings"] });
+      toast({ title: "Configuration SeaPay sauvegardee" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  const callbackUrl = "https://westpay.cfd/api/seapay/callback";
+
+  const countries = [
+    { flag: "🇵🇰", name: "Pakistan",    currency: "PKR" },
+    { flag: "🇵🇭", name: "Philippines", currency: "PHP" },
+    { flag: "🇮🇳", name: "India",       currency: "INR" },
+    { flag: "🇳🇬", name: "Nigeria",     currency: "NGN" },
+  ];
+
+  if (isLoading) return <LoadingSkeleton />;
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold text-foreground">Configuration SeaPay</h2>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Globe className="w-4 h-4" />Statut
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-sm text-muted-foreground">Configuration</span>
+              <Badge variant={spSettings?.configured ? "default" : "destructive"} data-testid="badge-seapay-status">
+                {spSettings?.configured ? "Configure" : "Non configure"}
+              </Badge>
+            </div>
+            {spSettings?.envOverride && (
+              <Badge variant="outline" className="text-xs">Variables d'environnement actives</Badge>
+            )}
+            <p className="text-xs text-muted-foreground">
+              SeaPay (api.seaglb.xyz) — paiements mobiles : Pakistan (PKR), Philippines (PHP), Inde (INR), Nigeria (NGN).
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Link2 className="w-4 h-4" />Callback URL
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">URL a renseigner dans votre dashboard SeaPay pour les notifications de paiement.</p>
+            <div className="flex items-center gap-2">
+              <code className="text-xs bg-muted px-3 py-2 rounded-md font-mono flex-1 break-all text-foreground" data-testid="text-seapay-callback-url">
+                {callbackUrl}
+              </code>
+              <Button variant="ghost" size="icon" onClick={() => { navigator.clipboard.writeText(callbackUrl); toast({ title: "URL copiee" }); }} data-testid="button-copy-seapay-callback-url">
+                <Copy className="w-3 h-3" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Globe className="w-4 h-4" />Pays supportes
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {countries.map(c => (
+              <div key={c.name} className="flex items-center gap-2">
+                <span>{c.flag}</span>
+                <span className="text-sm">{c.name}</span>
+                <Badge variant="outline" className="ml-auto text-xs">{c.currency}</Badge>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Key className="w-4 h-4" />Cles API SeaPay
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={(e) => { e.preventDefault(); saveMutation.mutate(); }} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Merchant ID (identifiant marchand)</Label>
+              <Input value={merchantId} onChange={(e) => setMerchantId(e.target.value)} placeholder="Votre Merchant ID SeaPay" data-testid="input-seapay-merchant-id" />
+              <p className="text-xs text-muted-foreground">Identifiant unique de votre compte marchand SeaPay.</p>
+            </div>
+            <div className="space-y-2">
+              <Label>API Key (signature Pay-in)</Label>
+              <Input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Votre cle API SeaPay" data-testid="input-seapay-api-key" />
+              <p className="text-xs text-muted-foreground">Cle utilisee pour signer les requetes de collecte (Pay-in). Signature MD5.</p>
+            </div>
+            <div className="space-y-2">
+              <Label>API Secret (signature Pay-out & Balance)</Label>
+              <Input value={apiSecret} onChange={(e) => setApiSecret(e.target.value)} placeholder="Votre secret API SeaPay" data-testid="input-seapay-api-secret" />
+              <p className="text-xs text-muted-foreground">Secret utilise pour les requetes de reversement (Pay-out) et verification de solde.</p>
+            </div>
+            <Button type="submit" disabled={saveMutation.isPending} data-testid="button-save-seapay">
+              {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Globe className="w-4 h-4 mr-2" />}
+              Sauvegarder la configuration
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Documentation de signature</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            SeaPay utilise une signature MD5 generee a partir des parametres de la requete, tries par ordre alphabetique.
+          </p>
+          <ol className="text-xs space-y-1 text-muted-foreground list-decimal list-inside">
+            <li>Recuperer tous les parametres de la requete JSON</li>
+            <li>Supprimer les cles <code className="bg-muted px-1 rounded">sign</code> et les valeurs vides/null</li>
+            <li>Trier les cles par ordre ASCII alphabetique</li>
+            <li>Formater : <code className="bg-muted px-1 rounded">cle1=valeur1&amp;cle2=valeur2&amp;...</code></li>
+            <li>Ajouter <code className="bg-muted px-1 rounded">&amp;key=VOTRE_CLE_API</code> a la fin</li>
+            <li>Calculer MD5 en minuscules → c'est votre signature</li>
+          </ol>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -9261,6 +9425,7 @@ export default function AdminDashboard() {
         { title: "OmniPay", icon: Zap, tab: "omnipay" },
         { title: "Mbiyo", icon: Globe, tab: "mbiyo" },
         { title: "SendavaPay", icon: Zap, tab: "sendavapay" },
+        { title: "SeaPay", icon: Globe, tab: "seapay" },
         { title: "Crypto", icon: Bitcoin, tab: "cryptoagg" },
         { title: "Retraits Crypto", icon: Download, tab: "cryptowithdrawals" },
       ],
@@ -9392,6 +9557,7 @@ export default function AdminDashboard() {
             {activeTab === "omnipay" && <OmniPayPanel />}
             {activeTab === "mbiyo" && <MbiyoPanel />}
             {activeTab === "sendavapay" && <SendavaPayPanel />}
+            {activeTab === "seapay" && <SeaPayPanel />}
             {activeTab === "cryptoagg" && <CryptoAggPanel />}
             {activeTab === "cryptowithdrawals" && <CryptoWithdrawalsAdminPanel />}
             {activeTab === "virements" && <AdminWalletTransfersPanel />}
