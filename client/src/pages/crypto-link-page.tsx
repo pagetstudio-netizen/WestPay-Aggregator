@@ -3,6 +3,8 @@ import { useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Check, Copy, CheckCircle2, XCircle, Clock, RefreshCw, AlertTriangle } from "lucide-react";
 import QRCode from "react-qr-code";
+import { useLanguage } from "@/lib/language";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 
 type LinkInfo = {
   uniqueId: string;
@@ -32,18 +34,8 @@ type StatusData = {
   payCurrency?: string;
 };
 
-const STATUS_CFG: Record<string, { label: string; color: string; icon: any; spin?: boolean }> = {
-  new:        { label: "En attente de paiement", color: "#1976d2", icon: Clock, spin: true },
-  waiting:    { label: "En attente de paiement", color: "#1976d2", icon: Clock, spin: true },
-  confirming: { label: "Confirmation en cours",  color: "#fb8c00", icon: RefreshCw, spin: true },
-  paying:     { label: "Paiement reçu",          color: "#43a047", icon: RefreshCw, spin: true },
-  paid:       { label: "Paiement confirmé ✓",    color: "#2e7d32", icon: CheckCircle2 },
-  expired:    { label: "Lien expiré",             color: "#757575", icon: XCircle },
-  failed:     { label: "Paiement échoué",         color: "#c62828", icon: XCircle },
-  refunded:   { label: "Remboursé",               color: "#6d4c41", icon: AlertTriangle },
-};
-
 function CopyBtn({ value }: { value: string }) {
+  const { t } = useLanguage();
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -52,12 +44,13 @@ function CopyBtn({ value }: { value: string }) {
       style={{ background: copied ? "#dcfce7" : "#f0f4f8", color: copied ? "#166534" : "#1976d2", border: `1px solid ${copied ? "#bbf7d0" : "#bbdefb"}` }}
     >
       {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-      {copied ? "Copié !" : "Copier"}
+      {copied ? t("copied") : t("copy")}
     </button>
   );
 }
 
 function Countdown({ expiredAt }: { expiredAt: string }) {
+  const { t } = useLanguage();
   const [remaining, setRemaining] = useState(0);
   useEffect(() => {
     const upd = () => setRemaining(Math.max(0, Math.floor((new Date(expiredAt).getTime() - Date.now()) / 1000)));
@@ -67,12 +60,18 @@ function Countdown({ expiredAt }: { expiredAt: string }) {
   const urgent = remaining < 300;
   return (
     <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: urgent ? "#ffebee" : "#e3f2fd", color: urgent ? "#c62828" : "#1976d2" }}>
-      {remaining === 0 ? "Expiré" : `${m}m ${s.toString().padStart(2, "0")}s`}
+      {remaining === 0 ? t("expired") : `${m}m ${s.toString().padStart(2, "0")}s`}
     </span>
   );
 }
 
 export default function CryptoLinkPage() {
+  const { t, autoSetLangFromBrowser } = useLanguage();
+
+  useEffect(() => {
+    autoSetLangFromBrowser();
+  }, [autoSetLangFromBrowser]);
+
   const [, params] = useRoute("/c/:uniqueId");
   const uniqueId = params?.uniqueId || "";
 
@@ -84,11 +83,22 @@ export default function CryptoLinkPage() {
   const [statusData, setStatusData] = useState<StatusData | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const STATUS_CFG: Record<string, { label: string; color: string; icon: any; spin?: boolean }> = {
+    new:        { label: t("cryptoStatusWaiting"), color: "#1976d2", icon: Clock, spin: true },
+    waiting:    { label: t("cryptoStatusWaiting"), color: "#1976d2", icon: Clock, spin: true },
+    confirming: { label: t("cryptoStatusConfirming"),  color: "#fb8c00", icon: RefreshCw, spin: true },
+    paying:     { label: t("cryptoStatusPaying"),          color: "#43a047", icon: RefreshCw, spin: true },
+    paid:       { label: t("cryptoStatusPaid"),    color: "#2e7d32", icon: CheckCircle2 },
+    expired:    { label: t("cryptoStatusExpired"),             color: "#757575", icon: XCircle },
+    failed:     { label: t("cryptoStatusFailed"),         color: "#c62828", icon: XCircle },
+    refunded:   { label: t("cryptoStatusRefunded"),               color: "#6d4c41", icon: AlertTriangle },
+  };
+
   const { data: link, isLoading, isError } = useQuery<LinkInfo>({
     queryKey: ["/api/crypto-link", uniqueId],
     queryFn: async () => {
       const res = await fetch(`/api/crypto-link/${uniqueId}`);
-      if (!res.ok) throw new Error("Lien introuvable");
+      if (!res.ok) throw new Error(t("cryptoLinkNotFound"));
       return res.json();
     },
     enabled: !!uniqueId,
@@ -96,8 +106,8 @@ export default function CryptoLinkPage() {
   });
 
   useEffect(() => {
-    document.title = link ? `Payer ${link.merchantName} — RobotPay` : "Paiement — RobotPay";
-  }, [link]);
+    document.title = link ? `${t("payTitle")} ${link.merchantName} — RobotPay` : `${t("payTitle")} — RobotPay`;
+  }, [link, t]);
 
   const pollStatus = useCallback(async (trackId: string) => {
     try {
@@ -125,7 +135,7 @@ export default function CryptoLinkPage() {
 
   const handlePay = async () => {
     if (isLibre && (!customAmount || parseFloat(customAmount) <= 0)) {
-      setError("Veuillez saisir un montant valide"); return;
+      setError(t("payInvalidAmount")); return;
     }
     setError(""); setSubmitting(true);
     try {
@@ -137,11 +147,11 @@ export default function CryptoLinkPage() {
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Erreur lors de la création du paiement");
+      if (!res.ok) throw new Error(data.message || t("payErrorGeneric"));
       setPayment(data);
       setStep(3);
     } catch (e: any) {
-      setError(e.message || "Erreur inattendue");
+      setError(e.message || t("payErrorGeneric"));
     } finally {
       setSubmitting(false);
     }
@@ -165,13 +175,13 @@ export default function CryptoLinkPage() {
         <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto">
           <span className="text-red-600 text-xl font-bold">!</span>
         </div>
-        <h2 className="text-lg font-semibold" style={{ color: "#111827" }}>Page introuvable</h2>
-        <p className="text-sm" style={{ color: "#6b7280" }}>Ce lien de paiement n'est pas valide.</p>
+        <h2 className="text-lg font-semibold" style={{ color: "#111827" }}>{t("cryptoLinkNotFound")}</h2>
+        <p className="text-sm" style={{ color: "#6b7280" }}>{t("cryptoLinkInvalid")}</p>
       </div>
     </div>
   );
 
-  const stepLabels = ["Informations", "Paiement"];
+  const stepLabels = [t("cryptoStepInfo"), t("cryptoStepPayment")];
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center" style={{ background: "#00b050" }}>
@@ -191,19 +201,22 @@ export default function CryptoLinkPage() {
       `}</style>
 
       <div className="w-full max-w-[420px] px-4 py-3">
-        <div className="mb-2">
-          <h1 className="text-white font-bold text-lg">RobotPay</h1>
-          <p className="text-white/80 text-sm">Paiement sécurisé</p>
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <h1 className="text-white font-bold text-lg">RobotPay</h1>
+            <p className="text-white/80 text-sm">{t("cryptoSecurePayment")}</p>
+          </div>
+          <LanguageSwitcher className="text-white" />
         </div>
 
         <div className="mb-3">
-          <p className="text-white/80 text-xs">Montant :</p>
+          <p className="text-white/80 text-xs">{t("amount")} :</p>
           {displayAmount !== null ? (
             <p className="text-white font-bold text-3xl">
-              {displayAmount.toLocaleString("fr-FR")}<span className="text-base ml-2">{link.currency}</span>
+              {displayAmount.toLocaleString(t("lang") === "zh" ? "zh-CN" : t("lang") === "fr" ? "fr-FR" : "en-US")}<span className="text-base ml-2">{link.currency}</span>
             </p>
           ) : (
-            <p className="text-white font-bold text-2xl opacity-60">Montant libre</p>
+            <p className="text-white font-bold text-2xl opacity-60">{t("cryptoFreeAmount")}</p>
           )}
         </div>
 
@@ -213,7 +226,7 @@ export default function CryptoLinkPage() {
             <div className="w-full h-2 rounded-full overflow-hidden" style={{ backgroundColor: "#e5e7eb" }}>
               <div className="h-full rounded-full" style={{ width: step === 1 ? "50%" : "100%", backgroundColor: "#00b050", transition: "width 0.5s ease-in-out" }} />
             </div>
-            <p className="text-xs text-right mt-1" style={{ color: "#9ca3af" }}>Étape {step === 1 ? 1 : 2} sur 2</p>
+            <p className="text-xs text-right mt-1" style={{ color: "#9ca3af" }}>{t("cryptoStep")} {step === 1 ? 1 : 2} {t("cryptoOf")} 2</p>
           </div>
 
           {/* Indicateurs d'étapes */}
@@ -240,26 +253,26 @@ export default function CryptoLinkPage() {
           {step === 1 && (
             <div className="space-y-4">
               <div>
-                <p className="text-sm font-semibold mb-0.5" style={{ color: "#374151" }}>Marchand</p>
+                <p className="text-sm font-semibold mb-0.5" style={{ color: "#374151" }}>{t("cryptoMerchant")}</p>
                 <p className="text-base font-bold" style={{ color: "#111827" }}>{link.merchantName}</p>
               </div>
               <div>
-                <p className="text-sm font-semibold mb-0.5" style={{ color: "#374151" }}>Objet du paiement</p>
+                <p className="text-sm font-semibold mb-0.5" style={{ color: "#374151" }}>{t("cryptoPurpose")}</p>
                 <p className="text-sm" style={{ color: "#4b5563" }}>{link.name}</p>
               </div>
               <div>
-                <p className="text-sm font-semibold mb-1" style={{ color: "#374151" }}>Devise de paiement</p>
+                <p className="text-sm font-semibold mb-1" style={{ color: "#374151" }}>{t("cryptoCurrency")}</p>
                 <span className="inline-block px-3 py-1 rounded-full text-sm font-bold" style={{ background: "#fff8e1", color: "#b45309" }}>{link.currency}</span>
               </div>
               {isLibre && (
                 <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: "#374151" }}>Montant à payer ({link.currency})</label>
+                  <label className="block text-sm font-medium mb-1" style={{ color: "#374151" }}>{t("cryptoAmountToPay")} ({link.currency})</label>
                   <input type="number" min="0.01" step="any" placeholder="ex: 10" value={customAmount} onChange={e => setCustomAmount(e.target.value)} className="w-full py-2 px-3 text-sm border rounded-md" data-testid="input-crypto-amount" />
                 </div>
               )}
               {error && <div className="text-xs p-2 rounded-md" style={{ background: "#fef2f2", color: "#b91c1c" }}>{error}</div>}
               <button onClick={handlePay} disabled={submitting || (isLibre && !customAmount)} className="pay-btn pay-btn-green w-full" data-testid="btn-pay-crypto">
-                {submitting ? <><Loader2 className="w-4 h-4 animate-spin" />Préparation du paiement…</> : "Payer maintenant"}
+                {submitting ? <><Loader2 className="w-4 h-4 animate-spin" />{t("cryptoPreparing")}</> : t("cryptoPayNow")}
               </button>
             </div>
           )}
@@ -277,13 +290,13 @@ export default function CryptoLinkPage() {
               {/* Montant à envoyer */}
               {payment.payAmount && payment.payCurrency && !isPaid && (
                 <div className="text-center py-2 rounded-xl" style={{ background: "#f8fafc" }}>
-                  <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: "#9ca3af" }}>Montant exact à envoyer</p>
+                  <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: "#9ca3af" }}>{t("cryptoExactAmount")}</p>
                   <p className="text-2xl font-bold" style={{ color: "#111827" }}>
                     {payment.payAmount} <span className="text-base font-medium" style={{ color: "#6b7280" }}>{payment.payCurrency}</span>
                   </p>
                   {payment.network && (
                     <span className="text-xs font-bold px-2 py-0.5 rounded-full mt-1 inline-block" style={{ background: "#fef3c7", color: "#92400e" }}>
-                      Réseau : {payment.network}
+                      {t("cryptoNetwork")} : {payment.network}
                     </span>
                   )}
                 </div>
@@ -297,12 +310,12 @@ export default function CryptoLinkPage() {
                     <div className="rounded-xl p-3" style={{ background: "#fff", border: "1px solid #e5e7eb" }}>
                       <QRCode value={payment.address} size={150} viewBox="0 0 256 256" />
                     </div>
-                    <p className="text-xs mt-1.5" style={{ color: "#9ca3af" }}>Scannez avec votre wallet crypto</p>
+                    <p className="text-xs mt-1.5" style={{ color: "#9ca3af" }}>{t("cryptoScanWallet")}</p>
                   </div>
 
                   {/* Adresse */}
                   <div className="rounded-xl p-3 space-y-2" style={{ background: "#f8fafc", border: "1px solid #e5e7eb" }}>
-                    <p className="text-xs font-semibold" style={{ color: "#374151" }}>Adresse de dépôt</p>
+                    <p className="text-xs font-semibold" style={{ color: "#374151" }}>{t("cryptoDepositAddress")}</p>
                     <p className="text-xs font-mono break-all rounded-lg p-2" style={{ background: "#f0f9ff", color: "#1d4ed8" }} data-testid="text-wallet-address">
                       {payment.address}
                     </p>
@@ -313,7 +326,7 @@ export default function CryptoLinkPage() {
 
                   {/* Avertissement */}
                   <div className="rounded-xl p-3 text-xs text-center" style={{ background: "#fffbeb", color: "#92400e", border: "1px solid #fde68a" }}>
-                    ⚠️ Envoyez <strong>exactement</strong> le montant indiqué sur le <strong>bon réseau</strong>. Toute erreur peut entraîner une perte définitive des fonds.
+                    {t("cryptoWarning")}
                   </div>
                 </>
               )}
@@ -322,8 +335,8 @@ export default function CryptoLinkPage() {
               {(status === "confirming" || status === "paying") && (
                 <div className="flex flex-col items-center gap-2 py-3 text-center">
                   <RefreshCw className="w-8 h-8 animate-spin" style={{ color: "#00b050" }} />
-                  <p className="text-sm font-semibold" style={{ color: "#111827" }}>Transaction détectée !</p>
-                  <p className="text-xs" style={{ color: "#6b7280" }}>Confirmation en cours sur la blockchain…</p>
+                  <p className="text-sm font-semibold" style={{ color: "#111827" }}>{t("cryptoStatusDetected")}</p>
+                  <p className="text-xs" style={{ color: "#6b7280" }}>{t("cryptoStatusConfirmingBlockchain")}</p>
                 </div>
               )}
 
@@ -334,12 +347,12 @@ export default function CryptoLinkPage() {
                     <CheckCircle2 className="w-10 h-10" style={{ color: "#00b050" }} />
                   </div>
                   <div>
-                    <p className="font-bold text-lg" style={{ color: "#111827" }}>Paiement confirmé !</p>
-                    <p className="text-sm mt-1" style={{ color: "#6b7280" }}>Votre transaction a été confirmée sur la blockchain.</p>
+                    <p className="font-bold text-lg" style={{ color: "#111827" }}>{t("cryptoStatusPaid")}</p>
+                    <p className="text-sm mt-1" style={{ color: "#6b7280" }}>{t("cryptoPaidDesc")}</p>
                   </div>
                   {statusData?.txHash && (
                     <div className="w-full rounded-xl p-3 text-left" style={{ background: "#f8fafc", border: "1px solid #e5e7eb" }}>
-                      <p className="text-xs font-semibold mb-1" style={{ color: "#374151" }}>Hash de transaction</p>
+                      <p className="text-xs font-semibold mb-1" style={{ color: "#374151" }}>{t("cryptoTxHash")}</p>
                       <p className="text-xs font-mono break-all" style={{ color: "#6b7280" }} data-testid="text-tx-hash">{statusData.txHash}</p>
                     </div>
                   )}
@@ -351,9 +364,9 @@ export default function CryptoLinkPage() {
                 <div className="flex flex-col items-center gap-2 py-4 text-center">
                   <XCircle className="w-12 h-12" style={{ color: status === "expired" ? "#9ca3af" : "#ef4444" }} />
                   <p className="text-sm font-semibold" style={{ color: "#374151" }}>
-                    {status === "expired" ? "Ce lien a expiré." : "Le paiement a échoué."}
+                    {status === "expired" ? t("payLinkExpired") : t("payFailed")}
                   </p>
-                  <p className="text-xs" style={{ color: "#9ca3af" }}>Contactez le marchand pour un nouveau lien.</p>
+                  <p className="text-xs" style={{ color: "#9ca3af" }}>{t("payBackToMerchant")}</p>
                 </div>
               )}
 
@@ -365,7 +378,7 @@ export default function CryptoLinkPage() {
                     className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg"
                     style={{ background: "#f0fdf4", color: "#166534", border: "1px solid #bbf7d0" }}
                   >
-                    <RefreshCw className="w-3.5 h-3.5" /> Actualiser
+                    <RefreshCw className="w-3.5 h-3.5" /> {t("refresh")}
                   </button>
                 </div>
               )}
@@ -373,10 +386,11 @@ export default function CryptoLinkPage() {
           )}
 
           <div className="mt-4 pt-3" style={{ borderTop: "1px solid #e5e7eb" }}>
-            <p className="text-xs text-center" style={{ color: "#9ca3af" }}>Paiement sécurisé via RobotPay · {link.currency}</p>
+            <p className="text-xs text-center" style={{ color: "#9ca3af" }}>{t("payTitle")} RobotPay · {link.currency}</p>
           </div>
         </div>
       </div>
     </div>
   );
 }
+

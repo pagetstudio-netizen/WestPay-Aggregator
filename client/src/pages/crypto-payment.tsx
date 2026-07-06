@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Loader2, CheckCircle2, XCircle, Clock, Copy, Check, RefreshCw, AlertTriangle } from "lucide-react";
 import QRCode from "react-qr-code";
+import { useLanguage } from "@/lib/language";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 
 type CryptoPaymentStatus = {
   trackId: string;
@@ -17,18 +19,8 @@ type CryptoPaymentStatus = {
   merchantName?: string;
 };
 
-const STATUS_CFG: Record<string, { label: string; color: string; icon: any; spin?: boolean }> = {
-  new:        { label: "En attente de paiement", color: "#1976d2", icon: Clock,        spin: true },
-  waiting:    { label: "En attente de paiement", color: "#1976d2", icon: Clock,        spin: true },
-  confirming: { label: "Confirmation en cours",  color: "#fb8c00", icon: RefreshCw,    spin: true },
-  paying:     { label: "Paiement reçu",          color: "#43a047", icon: RefreshCw,    spin: true },
-  paid:       { label: "Paiement confirmé ✓",    color: "#2e7d32", icon: CheckCircle2 },
-  expired:    { label: "Lien expiré",             color: "#757575", icon: XCircle },
-  failed:     { label: "Paiement échoué",         color: "#c62828", icon: XCircle },
-  refunded:   { label: "Remboursé",               color: "#6d4c41", icon: AlertTriangle },
-};
-
 function CopyBtn({ value }: { value: string }) {
+  const { t } = useLanguage();
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -38,12 +30,13 @@ function CopyBtn({ value }: { value: string }) {
       data-testid="button-copy-address"
     >
       {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-      {copied ? "Copié !" : "Copier"}
+      {copied ? t("copied") : t("copy")}
     </button>
   );
 }
 
 function Countdown({ expiredAt }: { expiredAt: string }) {
+  const { t } = useLanguage();
   const [remaining, setRemaining] = useState(0);
   useEffect(() => {
     const upd = () => setRemaining(Math.max(0, Math.floor((new Date(expiredAt).getTime() - Date.now()) / 1000)));
@@ -53,12 +46,18 @@ function Countdown({ expiredAt }: { expiredAt: string }) {
   const urgent = remaining < 300;
   return (
     <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: urgent ? "#ffebee" : "#e3f2fd", color: urgent ? "#c62828" : "#1976d2" }}>
-      {remaining === 0 ? "Expiré" : `${m}m ${s.toString().padStart(2, "0")}s`}
+      {remaining === 0 ? t("expired") : `${m}m ${s.toString().padStart(2, "0")}s`}
     </span>
   );
 }
 
 export default function CryptoPaymentPage() {
+  const { t, autoSetLangFromBrowser } = useLanguage();
+
+  useEffect(() => {
+    autoSetLangFromBrowser();
+  }, [autoSetLangFromBrowser]);
+
   const pathParts = window.location.pathname.split("/");
   const trackId = pathParts[pathParts.length - 1] || "";
 
@@ -66,6 +65,17 @@ export default function CryptoPaymentPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const STATUS_CFG: Record<string, { label: string; color: string; icon: any; spin?: boolean }> = {
+    new:        { label: t("cryptoStatusWaiting"), color: "#1976d2", icon: Clock,        spin: true },
+    waiting:    { label: t("cryptoStatusWaiting"), color: "#1976d2", icon: Clock,        spin: true },
+    confirming: { label: t("cryptoStatusConfirming"),  color: "#fb8c00", icon: RefreshCw,    spin: true },
+    paying:     { label: t("cryptoStatusPaying"),          color: "#43a047", icon: RefreshCw,    spin: true },
+    paid:       { label: t("cryptoStatusPaid"),    color: "#2e7d32", icon: CheckCircle2 },
+    expired:    { label: t("cryptoStatusExpired"),             color: "#757575", icon: XCircle },
+    failed:     { label: t("cryptoStatusFailed"),         color: "#c62828", icon: XCircle },
+    refunded:   { label: t("cryptoStatusRefunded"),               color: "#6d4c41", icon: AlertTriangle },
+  };
 
   const fetchStatus = useCallback(async () => {
     if (!trackId) return;
@@ -76,7 +86,7 @@ export default function CryptoPaymentPage() {
       ]);
       if (!statusRes.ok) {
         const json = await statusRes.json();
-        throw new Error(json.message || "Erreur de chargement");
+        throw new Error(json.message || t("payErrorGeneric"));
       }
       const statusJson = await statusRes.json();
       const infoJson = infoRes.ok ? await infoRes.json() : {};
@@ -91,18 +101,18 @@ export default function CryptoPaymentPage() {
     } finally {
       setLoading(false);
     }
-  }, [trackId]);
+  }, [trackId, t]);
 
   useEffect(() => {
-    if (!trackId) { setError("Identifiant de transaction manquant."); setLoading(false); return; }
+    if (!trackId) { setError(t("payInvalidLink")); setLoading(false); return; }
     fetchStatus();
     pollingRef.current = setInterval(fetchStatus, 5000);
     return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
-  }, [fetchStatus, trackId]);
+  }, [fetchStatus, trackId, t]);
 
   useEffect(() => {
-    document.title = data?.merchantName ? `Payer ${data.merchantName} — RobotPay` : "Paiement Crypto — RobotPay";
-  }, [data?.merchantName]);
+    document.title = data?.merchantName ? `${t("payTitle")} ${data.merchantName} — RobotPay` : `${t("cryptoPayTitle")} — RobotPay`;
+  }, [data?.merchantName, t]);
 
   const status = data?.status || "new";
   const cfg = STATUS_CFG[status] || STATUS_CFG["new"];
@@ -120,14 +130,17 @@ export default function CryptoPaymentPage() {
 
       <div className="w-full max-w-[420px] px-4 py-3">
         {/* En-tête */}
-        <div className="mb-2">
-          <h1 className="text-white font-bold text-lg">RobotPay</h1>
-          <p className="text-white/80 text-sm">Paiement sécurisé</p>
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <h1 className="text-white font-bold text-lg">RobotPay</h1>
+            <p className="text-white/80 text-sm">{t("cryptoSecurePayment")}</p>
+          </div>
+          <LanguageSwitcher className="text-white" />
         </div>
 
         {/* Montant */}
         <div className="mb-3">
-          <p className="text-white/80 text-xs">Montant :</p>
+          <p className="text-white/80 text-xs">{t("amount")} :</p>
           {data ? (
             data.payAmount && data.payCurrency ? (
               <div>
@@ -160,7 +173,7 @@ export default function CryptoPaymentPage() {
           {loading && (
             <div className="flex flex-col items-center gap-3 py-10">
               <Loader2 className="w-10 h-10 animate-spin" style={{ color: "#00b050" }} />
-              <p className="text-sm" style={{ color: "#6b7280" }}>Chargement...</p>
+              <p className="text-sm" style={{ color: "#6b7280" }}>{t("loading")}</p>
             </div>
           )}
 
@@ -170,7 +183,7 @@ export default function CryptoPaymentPage() {
               <XCircle className="w-12 h-12" style={{ color: "#ef4444" }} />
               <p className="text-sm font-semibold" style={{ color: "#374151" }}>{error}</p>
               <button onClick={fetchStatus} className="px-4 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "#00b050" }}>
-                Réessayer
+                {t("payTryAgain")}
               </button>
             </div>
           )}
@@ -182,7 +195,7 @@ export default function CryptoPaymentPage() {
               {/* Infos réseau (si en attente) */}
               {data.network && isPending && (
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold" style={{ color: "#374151" }}>Réseau</span>
+                  <span className="text-sm font-semibold" style={{ color: "#374151" }}>{t("cryptoNetwork")}</span>
                   <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{ background: "#fef3c7", color: "#92400e" }}>
                     {data.network}
                   </span>
@@ -196,11 +209,11 @@ export default function CryptoPaymentPage() {
                     <div className="rounded-xl p-3" style={{ background: "#fff", border: "1px solid #e5e7eb" }}>
                       <QRCode value={data.address} size={150} viewBox="0 0 256 256" />
                     </div>
-                    <p className="text-xs mt-1.5" style={{ color: "#9ca3af" }}>Scannez avec votre wallet crypto</p>
+                    <p className="text-xs mt-1.5" style={{ color: "#9ca3af" }}>{t("cryptoScanWallet")}</p>
                   </div>
 
                   <div className="rounded-xl p-3 space-y-2" style={{ background: "#f8fafc", border: "1px solid #e5e7eb" }}>
-                    <p className="text-xs font-semibold" style={{ color: "#374151" }}>Adresse de dépôt</p>
+                    <p className="text-xs font-semibold" style={{ color: "#374151" }}>{t("cryptoDepositAddress")}</p>
                     <p className="text-xs font-mono break-all rounded-lg p-2" style={{ background: "#f0f9ff", color: "#1d4ed8" }} data-testid="text-wallet-address">
                       {data.address}
                     </p>
@@ -210,7 +223,7 @@ export default function CryptoPaymentPage() {
                   </div>
 
                   <div className="rounded-xl p-3 text-xs text-center" style={{ background: "#fffbeb", color: "#92400e", border: "1px solid #fde68a" }}>
-                    ⚠️ Envoyez <strong>exactement</strong> le montant indiqué sur le <strong>bon réseau</strong>. Toute erreur peut entraîner une perte définitive des fonds.
+                    {t("cryptoWarning")}
                   </div>
                 </>
               )}
@@ -219,8 +232,8 @@ export default function CryptoPaymentPage() {
               {(status === "confirming" || status === "paying") && (
                 <div className="flex flex-col items-center gap-2 py-3 text-center">
                   <RefreshCw className="w-8 h-8 animate-spin" style={{ color: "#00b050" }} />
-                  <p className="text-sm font-semibold" style={{ color: "#111827" }}>Transaction détectée !</p>
-                  <p className="text-xs" style={{ color: "#6b7280" }}>Confirmation en cours sur la blockchain…</p>
+                  <p className="text-sm font-semibold" style={{ color: "#111827" }}>{t("cryptoStatusDetected")}</p>
+                  <p className="text-xs" style={{ color: "#6b7280" }}>{t("cryptoStatusConfirmingBlockchain")}</p>
                 </div>
               )}
 
@@ -231,12 +244,12 @@ export default function CryptoPaymentPage() {
                     <CheckCircle2 className="w-10 h-10" style={{ color: "#00b050" }} />
                   </div>
                   <div>
-                    <p className="font-bold text-lg" style={{ color: "#111827" }}>Paiement confirmé !</p>
-                    <p className="text-sm mt-1" style={{ color: "#6b7280" }}>Votre transaction a été confirmée sur la blockchain.</p>
+                    <p className="font-bold text-lg" style={{ color: "#111827" }}>{t("cryptoStatusPaid")}</p>
+                    <p className="text-sm mt-1" style={{ color: "#6b7280" }}>{t("cryptoPaidDesc")}</p>
                   </div>
                   {data.txHash && (
                     <div className="w-full rounded-xl p-3 text-left" style={{ background: "#f8fafc", border: "1px solid #e5e7eb" }}>
-                      <p className="text-xs font-semibold mb-1" style={{ color: "#374151" }}>Hash de transaction</p>
+                      <p className="text-xs font-semibold mb-1" style={{ color: "#374151" }}>{t("cryptoTxHash")}</p>
                       <p className="text-xs font-mono break-all" style={{ color: "#6b7280" }} data-testid="text-tx-hash">{data.txHash}</p>
                     </div>
                   )}
@@ -248,9 +261,9 @@ export default function CryptoPaymentPage() {
                 <div className="flex flex-col items-center gap-2 py-4 text-center">
                   <XCircle className="w-12 h-12" style={{ color: status === "expired" ? "#9ca3af" : "#ef4444" }} />
                   <p className="text-sm font-semibold" style={{ color: "#374151" }}>
-                    {status === "expired" ? "Ce lien a expiré." : "Le paiement a échoué."}
+                    {status === "expired" ? t("payLinkExpired") : t("payFailed")}
                   </p>
-                  <p className="text-xs" style={{ color: "#9ca3af" }}>Contactez le marchand pour un nouveau lien.</p>
+                  <p className="text-xs" style={{ color: "#9ca3af" }}>{t("payBackToMerchant")}</p>
                 </div>
               )}
 
@@ -263,7 +276,7 @@ export default function CryptoPaymentPage() {
                     style={{ background: "#f0fdf4", color: "#166534", border: "1px solid #bbf7d0" }}
                     data-testid="button-refresh-status"
                   >
-                    <RefreshCw className="w-3.5 h-3.5" /> Actualiser
+                    <RefreshCw className="w-3.5 h-3.5" /> {t("refresh")}
                   </button>
                 </div>
               )}
@@ -272,7 +285,7 @@ export default function CryptoPaymentPage() {
 
           <div className="mt-4 pt-3" style={{ borderTop: "1px solid #e5e7eb" }}>
             <p className="text-xs text-center" style={{ color: "#9ca3af" }}>
-              Paiement sécurisé via RobotPay{data?.merchantName ? ` · ${data.merchantName}` : ""}
+              {t("payTitle")} RobotPay{data?.merchantName ? ` · ${data.merchantName}` : ""}
             </p>
           </div>
         </div>
@@ -280,3 +293,4 @@ export default function CryptoPaymentPage() {
     </div>
   );
 }
+

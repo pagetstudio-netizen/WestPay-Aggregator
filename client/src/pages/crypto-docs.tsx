@@ -5,6 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
+import { useLanguage } from "@/lib/language";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 import {
   Shield, Lock, Loader2, BookOpen, Code, Server, Key,
   ArrowRight, CheckCircle, AlertTriangle, Globe, Bell, Menu, X,
@@ -16,6 +18,7 @@ const BASE_URL = "https://westpay.cfd";
 // ─── Composant copie ─────────────────────────────────────────────────────────
 
 function CopyButton({ text }: { text: string }) {
+  const { t } = useLanguage();
   const [copied, setCopied] = useState(false);
   const { toast } = useToast();
   const handleCopy = useCallback(async () => {
@@ -28,10 +31,10 @@ function CopyButton({ text }: { text: string }) {
         document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta);
       }
       setCopied(true);
-      toast({ title: "Copié !" });
+      toast({ title: t("copied") });
       setTimeout(() => setCopied(false), 2000);
-    } catch { toast({ title: "Impossible de copier", variant: "destructive" }); }
-  }, [text, toast]);
+    } catch { toast({ title: t("error"), variant: "destructive" }); }
+  }, [text, toast, t]);
   return (
     <Button size="icon" variant="ghost" onClick={handleCopy} className="shrink-0 h-7 w-7" data-testid="button-copy-code">
       {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
@@ -102,6 +105,7 @@ function CredentialBox({ label, value, mono = true }: { label: string; value: st
 // ─── Porte PIN ───────────────────────────────────────────────────────────────
 
 function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { name: string; email: string } }) => void }) {
+  const { t } = useLanguage();
   const [email, setEmail] = useState("");
   const [pin, setPin] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -117,17 +121,20 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
         body: JSON.stringify({ email, pin }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Accès refusé");
+      if (!res.ok) throw new Error(data.message || t("docsInvalidPin"));
       onAccess(data);
     } catch (err: any) {
-      toast({ title: "Accès refusé", description: err.message, variant: "destructive" });
+      toast({ title: t("docsInvalidPin"), description: err.message, variant: "destructive" });
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <div className="min-h-screen bg-background flex items-center justify-center p-4 relative">
+      <div className="absolute top-4 right-4 z-50">
+        <LanguageSwitcher />
+      </div>
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center space-y-3 pb-2">
           <div className="flex justify-center">
@@ -136,30 +143,30 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
             </div>
           </div>
           <div>
-            <h1 className="text-xl font-bold" data-testid="text-crypto-docs-title">Documentation API Crypto</h1>
-            <p className="text-xs text-muted-foreground mt-1">RobotPay — Paiements cryptomonnaies</p>
+            <h1 className="text-xl font-bold" data-testid="text-crypto-docs-title">{t("cryptoDocsTitle")}</h1>
+            <p className="text-xs text-muted-foreground mt-1">{t("cryptoDocsSubtitle")}</p>
           </div>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4 pt-2">
             <div className="space-y-1.5">
-              <Label htmlFor="doc-email">Email du marchand</Label>
+              <Label htmlFor="doc-email">{t("merchant")} Email</Label>
               <Input id="doc-email" type="email" value={email} onChange={e => setEmail(e.target.value)}
                 placeholder="contact@votreboite.com" required data-testid="input-crypto-docs-email" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="doc-pin">Code PIN (6 chiffres)</Label>
+              <Label htmlFor="doc-pin">{t("docsPinLabel")}</Label>
               <Input id="doc-pin" type="password" value={pin}
                 onChange={e => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
                 placeholder="••••••" maxLength={6} required data-testid="input-crypto-docs-pin" />
             </div>
             <Button type="submit" className="w-full" disabled={isLoading || pin.length !== 6} data-testid="button-crypto-docs-access">
               {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Shield className="w-4 h-4 mr-2" />}
-              Accéder à la documentation
+              {t("docsAccessBtn")}
             </Button>
           </form>
           <p className="text-xs text-center text-muted-foreground mt-4">
-            Le code PIN est fourni par votre administrateur
+            {t("docsPinConfigured")}
           </p>
         </CardContent>
       </Card>
@@ -169,24 +176,23 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
 
 // ─── Navigation ──────────────────────────────────────────────────────────────
 
-const SECTIONS = [
-  { id: "intro",       label: "Introduction",      icon: BookOpen },
-  { id: "credentials", label: "Mes identifiants",  icon: Key },
-  { id: "slug",        label: "Lien de paiement",  icon: Globe },
-  { id: "invoice",     label: "Créer une invoice", icon: Zap },
-  { id: "status",      label: "Vérifier le statut",icon: Server },
-  { id: "webhook",     label: "Webhooks",           icon: Bell },
-  { id: "withdraw",    label: "Retraits",           icon: ArrowDownCircle },
-  { id: "examples",    label: "Exemples de code",   icon: Code },
-  { id: "security",    label: "Sécurité",           icon: ShieldCheck },
-];
-
-// ─── Documentation principale ─────────────────────────────────────────────────
-
 function CryptoDocumentation({ token, merchantName }: { token: string; merchantName: string }) {
+  const { t } = useLanguage();
   const [activeSection, setActiveSection] = useState("intro");
   const [navOpen, setNavOpen] = useState(false);
   const [info, setInfo] = useState<{ slug: string; cryptoApiKey: string | null; webhookUrl: string | null; cryptoEnabled: boolean } | null>(null);
+
+  const sections = [
+    { id: "intro",       label: t("intro"),      icon: BookOpen },
+    { id: "credentials", label: t("cryptoDocsCredentialsTitle"),  icon: Key },
+    { id: "slug",        label: t("cryptoDocsSlugTitle"),  icon: Globe },
+    { id: "invoice",     label: t("cryptoDocsInvoiceTitle"), icon: Zap },
+    { id: "status",      label: t("status"), icon: Server },
+    { id: "webhook",     label: t("webhook"),           icon: Bell },
+    { id: "withdraw",    label: t("withdrawals"),           icon: ArrowDownCircle },
+    { id: "examples",    label: t("example"),   icon: Code },
+    { id: "security",    label: t("security"),           icon: ShieldCheck },
+  ];
 
   useEffect(() => {
     fetch("/api/docs/crypto-merchant-info", { headers: { Authorization: `Bearer ${token}` } })
@@ -217,12 +223,13 @@ function CryptoDocumentation({ token, merchantName }: { token: string; merchantN
               <Bitcoin className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h1 className="text-xs sm:text-sm font-bold">RobotPay — Documentation Crypto API</h1>
-              <p className="text-xs text-muted-foreground">v1.0 — Accès restreint</p>
+              <h1 className="text-xs sm:text-sm font-bold">RobotPay — {t("cryptoDocsTitle")}</h1>
+              <p className="text-xs text-muted-foreground">v1.0 — {t("docsRestricted")}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Badge variant="secondary" data-testid="text-crypto-docs-merchant">{merchantName}</Badge>
+            <LanguageSwitcher />
+            <Badge variant="secondary" className="hidden sm:inline-flex" data-testid="text-crypto-docs-merchant">{merchantName}</Badge>
             <button
               className="sm:hidden flex items-center justify-center w-9 h-9 rounded-lg border bg-background shadow-sm"
               onClick={() => setNavOpen(!navOpen)} data-testid="button-mobile-nav">
@@ -232,7 +239,7 @@ function CryptoDocumentation({ token, merchantName }: { token: string; merchantN
         </div>
         {navOpen && (
           <div className="sm:hidden border-t bg-background px-3 py-2 space-y-0.5 shadow-md">
-            {SECTIONS.map(s => (
+            {sections.map(s => (
               <button key={s.id} onClick={() => scrollTo(s.id)}
                 className={`w-full text-left px-3 py-2.5 rounded-lg text-sm flex items-center gap-2.5 transition-colors ${activeSection === s.id ? "bg-primary/10 text-primary font-semibold" : "text-foreground hover:bg-muted"}`}>
                 <s.icon className="w-4 h-4 shrink-0" />{s.label}
@@ -246,7 +253,7 @@ function CryptoDocumentation({ token, merchantName }: { token: string; merchantN
         {/* Sidebar */}
         <aside className="hidden sm:block w-52 shrink-0">
           <nav className="sticky top-20 space-y-0.5">
-            {SECTIONS.map(s => (
+            {sections.map(s => (
               <button key={s.id} onClick={() => scrollTo(s.id)}
                 className={`w-full text-left px-3 py-2 rounded text-sm flex items-center gap-2 transition-colors ${activeSection === s.id ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-muted"}`}
                 data-testid={`nav-crypto-${s.id}`}>
@@ -266,20 +273,20 @@ function CryptoDocumentation({ token, merchantName }: { token: string; merchantN
                 <BookOpen className="w-5 h-5 text-primary" />
               </div>
               <div>
-                <h2 className="text-xl font-bold">Introduction</h2>
-                <p className="text-xs text-muted-foreground">RobotPay Crypto API — Acceptez des paiements en cryptomonnaies</p>
+                <h2 className="text-xl font-bold">{t("intro")}</h2>
+                <p className="text-xs text-muted-foreground">{t("cryptoDocsIntroSubtitle")}</p>
               </div>
             </div>
             <Card>
               <CardContent className="p-5 space-y-4">
                 <p className="text-sm text-muted-foreground leading-relaxed">
-                  L'API RobotPay Crypto vous permet d'accepter des paiements en cryptomonnaies (USDT, BTC, ETH, LTC, TRX et plus) de manière simple et sécurisée. Vos clients peuvent payer en crypto depuis n'importe quel pays, sans restriction géographique.
+                  {t("cryptoDocsIntroDesc")}
                 </p>
                 <div className="grid sm:grid-cols-3 gap-3">
                   {[
-                    { icon: Globe, title: "Mondial", desc: "Paiements sans frontières depuis n'importe quel pays" },
-                    { icon: Zap, title: "Instantané", desc: "Confirmations automatiques via notre système temps réel" },
-                    { icon: ShieldCheck, title: "Sécurisé", desc: "Chiffrement HMAC-SHA256, aucun stockage de clés privées" },
+                    { icon: Globe, title: t("cryptoDocsGlobalTitle"), desc: t("cryptoDocsGlobalDesc") },
+                    { icon: Zap, title: t("cryptoDocsInstantTitle"), desc: t("cryptoDocsInstantDesc") },
+                    { icon: ShieldCheck, title: t("cryptoDocsSecureTitle"), desc: t("cryptoDocsSecureDesc") },
                   ].map(f => (
                     <div key={f.title} className="rounded-lg p-3 border space-y-1.5">
                       <div className="flex items-center gap-2">
@@ -291,15 +298,15 @@ function CryptoDocumentation({ token, merchantName }: { token: string; merchantN
                   ))}
                 </div>
                 <div className="rounded-lg p-3 border-l-4 border-amber-500 bg-amber-500/5 space-y-1">
-                  <p className="text-xs font-semibold text-amber-600">Frais de service</p>
-                  <p className="text-xs text-muted-foreground">5% sur chaque dépôt reçu · 5% sur chaque retrait effectué</p>
+                  <p className="text-xs font-semibold text-amber-600">{t("cryptoDocsFeesTitle")}</p>
+                  <p className="text-xs text-muted-foreground">{t("cryptoDocsFeesDesc")}</p>
                 </div>
                 <div className="space-y-2">
                   <p className="text-xs font-semibold text-muted-foreground">URL de base</p>
                   <CodeBlock code={BASE_URL} label="Base URL" />
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold text-muted-foreground">Cryptomonnaies supportées</p>
+                  <p className="text-xs font-semibold text-muted-foreground">{t("cryptoDocsSupportedTitle")}</p>
                   <div className="flex flex-wrap gap-2">
                     {["USDT", "BTC", "ETH", "LTC", "TRX", "MATIC", "BNB", "DOGE"].map(c => (
                       <span key={c} className="px-2.5 py-1 rounded-full text-xs font-bold" style={{ background: "#fff8e1", color: "#f59e0b", border: "1px solid #fde68a" }}>{c}</span>
@@ -316,35 +323,35 @@ function CryptoDocumentation({ token, merchantName }: { token: string; merchantN
               <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
                 <Key className="w-5 h-5 text-primary" />
               </div>
-              <h2 className="text-xl font-bold">Mes identifiants</h2>
+              <h2 className="text-xl font-bold">{t("cryptoDocsCredentialsTitle")}</h2>
             </div>
             <Card>
               <CardContent className="p-5 space-y-4">
                 {info?.cryptoEnabled ? (
                   <div className="flex items-center gap-2 rounded-lg p-2.5 bg-green-500/10 border border-green-500/20">
                     <CheckCircle className="w-4 h-4 text-green-600 shrink-0" />
-                    <span className="text-xs font-medium text-green-700">Paiements crypto activés sur votre compte</span>
+                    <span className="text-xs font-medium text-green-700">{t("cryptoDocsEnabled")}</span>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 rounded-lg p-2.5 bg-amber-500/10 border border-amber-500/20">
                     <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                    <span className="text-xs font-medium text-amber-700">Paiements crypto non activés — contactez l'administrateur</span>
+                    <span className="text-xs font-medium text-amber-700">{t("cryptoDocsDisabled")}</span>
                   </div>
                 )}
                 <div className="space-y-3">
-                  <CredentialBox label="Votre slug (identifiant public)" value={slug} />
+                  <CredentialBox label={t("cryptoDocsSlugLabel")} value={slug} />
                   {apiKey !== "WP-CRYPTO-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" ? (
-                    <CredentialBox label="Votre clé API crypto" value={apiKey} />
+                    <CredentialBox label={t("cryptoDocsApiKeyLabel")} value={apiKey} />
                   ) : (
                     <div className="rounded-lg px-3 py-2.5 border border-dashed">
-                      <p className="text-xs text-muted-foreground">Clé API non encore générée — rendez-vous dans votre tableau de bord → Crypto → API</p>
+                      <p className="text-xs text-muted-foreground">{t("cryptoDocsNoApiKey")}</p>
                     </div>
                   )}
-                  <CredentialBox label="URL de paiement (votre page)" value={`${BASE_URL}/pay/${slug}`} />
+                  <CredentialBox label={t("cryptoDocsPaymentPageLabel")} value={`${BASE_URL}/pay/${slug}`} />
                 </div>
                 <div className="rounded-lg p-3 border bg-muted/30 space-y-2">
-                  <p className="text-xs font-semibold">Comment utiliser la clé API</p>
-                  <p className="text-xs text-muted-foreground">Ajoutez le header suivant à chaque requête API protégée :</p>
+                  <p className="text-xs font-semibold">{t("cryptoDocsHowToUseApiKey")}</p>
+                  <p className="text-xs text-muted-foreground">{t("cryptoDocsAddHeader")}</p>
                   <CodeBlock code={`X-API-KEY: ${apiKey}`} label="Header d'authentification" />
                 </div>
               </CardContent>
@@ -358,46 +365,46 @@ function CryptoDocumentation({ token, merchantName }: { token: string; merchantN
                 <Globe className="w-5 h-5 text-primary" />
               </div>
               <div>
-                <h2 className="text-xl font-bold">Lien de paiement (sans code)</h2>
-                <p className="text-xs text-muted-foreground">Solution simple — redirigez vos clients sans appeler l'API</p>
+                <h2 className="text-xl font-bold">{t("cryptoDocsSlugTitle")}</h2>
+                <p className="text-xs text-muted-foreground">{t("cryptoDocsSlugSubtitle")}</p>
               </div>
             </div>
             <Card>
               <CardContent className="p-5 space-y-5">
                 <p className="text-sm text-muted-foreground leading-relaxed">
-                  La méthode la plus simple : construisez une URL avec votre slug et les paramètres du paiement. RobotPay crée automatiquement l'invoice et affiche la page de paiement crypto à votre client.
+                  {t("cryptoDocsSlugDesc")}
                 </p>
 
                 <div className="space-y-3">
-                  <p className="text-xs font-semibold text-muted-foreground">Structure de l'URL</p>
+                  <p className="text-xs font-semibold text-muted-foreground">{t("cryptoDocsUrlStructure")}</p>
                   <CodeBlock
                     code={`${BASE_URL}/pay/VOTRE_SLUG?amount=MONTANT&currency=CRYPTO&description=PRODUIT&returnUrl=URL_RETOUR`}
                     label="URL de paiement" />
                 </div>
 
                 <div className="space-y-3">
-                  <p className="text-xs font-semibold text-muted-foreground">Paramètres</p>
+                  <p className="text-xs font-semibold text-muted-foreground">{t("cryptoDocsParameters")}</p>
                   <div className="rounded-lg border overflow-hidden">
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="bg-muted/50">
-                          <th className="text-left px-3 py-2 font-semibold">Paramètre</th>
-                          <th className="text-left px-3 py-2 font-semibold">Requis</th>
-                          <th className="text-left px-3 py-2 font-semibold">Description</th>
+                          <th className="text-left px-3 py-2 font-semibold">{t("cryptoDocsParamName")}</th>
+                          <th className="text-left px-3 py-2 font-semibold">{t("cryptoDocsParamRequired")}</th>
+                          <th className="text-left px-3 py-2 font-semibold">{t("cryptoDocsParamDesc")}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
                         {[
-                          { p: "amount", r: "Oui*", d: "Montant à payer. Mettre 0 pour laisser le client choisir (prix libre)" },
-                          { p: "currency", r: "Oui", d: "Cryptomonnaie : USDT, BTC, ETH, LTC, TRX, MATIC, BNB, DOGE" },
-                          { p: "description", r: "Non", d: "Nom du produit / description visible sur la page de paiement" },
-                          { p: "orderId", r: "Non", d: "Votre référence interne (commande, abonnement, etc.)" },
-                          { p: "returnUrl", r: "Non", d: "URL de redirection après paiement (ex: https://monsite.com/merci)" },
+                          { p: "amount", r: t("yes") + "*", d: "Montant à payer. Mettre 0 pour laisser le client choisir (prix libre)" },
+                          { p: "currency", r: t("yes"), d: "Cryptomonnaie : USDT, BTC, ETH, LTC, TRX, MATIC, BNB, DOGE" },
+                          { p: "description", r: t("no"), d: "Nom du produit / description visible sur la page de paiement" },
+                          { p: "orderId", r: t("no"), d: "Votre référence interne (commande, abonnement, etc.)" },
+                          { p: "returnUrl", r: t("no"), d: "URL de redirection après paiement (ex: https://monsite.com/merci)" },
                         ].map(row => (
                           <tr key={row.p} className="bg-background">
                             <td className="px-3 py-2 font-mono font-semibold text-primary">{row.p}</td>
                             <td className="px-3 py-2">
-                              <InfoBadge color={row.r === "Oui" || row.r === "Oui*" ? "green" : "blue"}>{row.r}</InfoBadge>
+                              <InfoBadge color={row.r.startsWith(t("yes")) ? "green" : "blue"}>{row.r}</InfoBadge>
                             </td>
                             <td className="px-3 py-2 text-muted-foreground">{row.d}</td>
                           </tr>
@@ -408,7 +415,7 @@ function CryptoDocumentation({ token, merchantName }: { token: string; merchantN
                 </div>
 
                 <div className="space-y-3">
-                  <p className="text-xs font-semibold text-muted-foreground">Exemples concrets</p>
+                  <p className="text-xs font-semibold text-muted-foreground">{t("cryptoDocsExamples")}</p>
                   <CodeBlock
                     code={`${BASE_URL}/pay/${slug}?amount=10.00&currency=USDT&description=Abonnement%20Premium&returnUrl=https://monsite.com/merci`}
                     label="Paiement de 10 USDT" />
@@ -421,7 +428,7 @@ function CryptoDocumentation({ token, merchantName }: { token: string; merchantN
                 </div>
 
                 <div className="rounded-lg p-3 bg-green-500/5 border border-green-500/20">
-                  <p className="text-xs font-semibold text-green-700 mb-1">Bouton HTML à intégrer sur votre site</p>
+                  <p className="text-xs font-semibold text-green-700 mb-1">{t("cryptoDocsHtmlButton")}</p>
                   <CodeBlock
                     lang="JavaScript"
                     code={`<a href="${BASE_URL}/pay/${slug}?amount=10&currency=USDT&description=Produit" target="_blank">\n  <button>Payer en crypto</button>\n</a>`}
@@ -438,8 +445,8 @@ function CryptoDocumentation({ token, merchantName }: { token: string; merchantN
                 <Zap className="w-5 h-5 text-primary" />
               </div>
               <div>
-                <h2 className="text-xl font-bold">Créer une invoice (API)</h2>
-                <p className="text-xs text-muted-foreground">Pour les intégrations avancées — contrôle total depuis votre backend</p>
+                <h2 className="text-xl font-bold">{t("cryptoDocsInvoiceTitle")}</h2>
+                <p className="text-xs text-muted-foreground">{t("cryptoDocsInvoiceSubtitle")}</p>
               </div>
             </div>
             <Card>
@@ -450,10 +457,10 @@ function CryptoDocumentation({ token, merchantName }: { token: string; merchantN
                   <Lock className="w-3.5 h-3.5 text-amber-500" />
                   <InfoBadge color="amber">X-API-KEY requis</InfoBadge>
                 </div>
-                <p className="text-sm text-muted-foreground">Crée un lien de paiement crypto et retourne l'URL à partager avec votre client.</p>
+                <p className="text-sm text-muted-foreground">{t("cryptoDocsInvoiceDesc")}</p>
 
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1"><ArrowRight className="w-3 h-3" />Corps de la requête</p>
+                  <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1"><ArrowRight className="w-3 h-3" />{t("cryptoDocsPayload")}</p>
                   <CodeBlock code={`{
   "amount": 10.00,         // Montant (0 = prix libre)
   "currency": "USDT",     // Crypto : USDT, BTC, ETH, LTC, TRX...
@@ -464,7 +471,7 @@ function CryptoDocumentation({ token, merchantName }: { token: string; merchantN
                 </div>
 
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1"><CheckCircle className="w-3 h-3 text-green-500" />Réponse (200 OK)</p>
+                  <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1"><CheckCircle className="w-3 h-3 text-green-500" />{t("cryptoDocsResponse")} (200 OK)</p>
                   <CodeBlock code={`{
   "success": true,
   "trackId": "TP-XXXXXXXXXXXXXXXX",
@@ -474,12 +481,12 @@ function CryptoDocumentation({ token, merchantName }: { token: string; merchantN
                 </div>
 
                 <div className="rounded-lg p-3 bg-blue-500/5 border border-blue-500/20 space-y-1">
-                  <p className="text-xs font-semibold text-blue-700">Flux recommandé</p>
+                  <p className="text-xs font-semibold text-blue-700">{t("cryptoDocsFlowTitle")}</p>
                   <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
-                    <li>Votre backend appelle <code className="bg-muted px-1 rounded">POST /api/merchant/crypto/invoice</code></li>
-                    <li>Vous récupérez le <code className="bg-muted px-1 rounded">paymentUrl</code></li>
-                    <li>Vous redirigez votre client vers ce <code className="bg-muted px-1 rounded">paymentUrl</code></li>
-                    <li>Le client paie — RobotPay notifie votre webhook quand c'est confirmé</li>
+                    <li>{t("cryptoDocsFlowStep1")}</li>
+                    <li>{t("cryptoDocsFlowStep2")}</li>
+                    <li>{t("cryptoDocsFlowStep3")}</li>
+                    <li>{t("cryptoDocsFlowStep4")}</li>
                   </ol>
                 </div>
               </CardContent>
@@ -492,19 +499,19 @@ function CryptoDocumentation({ token, merchantName }: { token: string; merchantN
               <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
                 <Server className="w-5 h-5 text-primary" />
               </div>
-              <h2 className="text-xl font-bold">Vérifier le statut</h2>
+              <h2 className="text-xl font-bold">{t("status")}</h2>
             </div>
             <Card>
               <CardContent className="p-5 space-y-5">
                 <div className="flex items-center gap-3">
                   <span className="bg-blue-500 text-white text-xs font-bold px-2.5 py-1 rounded">GET</span>
                   <code className="text-sm font-mono">/api/payment/crypto/{"{trackId}"}/status</code>
-                  <InfoBadge color="blue">Public</InfoBadge>
+                  <InfoBadge color="blue">{t("public")}</InfoBadge>
                 </div>
-                <p className="text-sm text-muted-foreground">Vérifiez l'état d'un paiement à tout moment à partir du <code className="bg-muted px-1 rounded text-xs font-mono">trackId</code>.</p>
+                <p className="text-sm text-muted-foreground">{t("cryptoDocsStatusDesc")}</p>
 
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1"><CheckCircle className="w-3 h-3 text-green-500" />Réponse</p>
+                  <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1"><CheckCircle className="w-3 h-3 text-green-500" />{t("cryptoDocsResponse")}</p>
                   <CodeBlock code={`{
   "trackId": "TP-XXXXXXXXXXXXXXXX",
   "status": "paid",         // pending | paid | expired | failed
@@ -520,14 +527,14 @@ function CryptoDocumentation({ token, merchantName }: { token: string; merchantN
 
                 <div className="rounded-lg border overflow-hidden">
                   <table className="w-full text-xs">
-                    <thead><tr className="bg-muted/50"><th className="text-left px-3 py-2 font-semibold">Statut</th><th className="text-left px-3 py-2 font-semibold">Signification</th></tr></thead>
+                    <thead><tr className="bg-muted/50"><th className="text-left px-3 py-2 font-semibold">{t("status")}</th><th className="text-left px-3 py-2 font-semibold">{t("cryptoDocsParamDesc")}</th></tr></thead>
                     <tbody className="divide-y">
                       {[
-                        { s: "pending", c: "blue", d: "En attente — le client n'a pas encore payé" },
-                        { s: "confirming", c: "amber", d: "Paiement détecté — en attente de confirmations blockchain" },
-                        { s: "paid", c: "green", d: "Paiement confirmé — fonds crédités sur votre solde (net 95%)" },
-                        { s: "expired", c: "red", d: "Invoice expirée (30 minutes sans paiement)" },
-                        { s: "failed", c: "red", d: "Échec ou annulation du paiement" },
+                        { s: "pending", c: "blue", d: t("cryptoDocsStatusPending") },
+                        { s: "confirming", c: "amber", d: t("cryptoDocsStatusConfirming") },
+                        { s: "paid", c: "green", d: t("cryptoDocsStatusPaid") },
+                        { s: "expired", c: "red", d: t("cryptoDocsStatusExpired") },
+                        { s: "failed", c: "red", d: t("cryptoDocsStatusFailed") },
                       ].map(row => (
                         <tr key={row.s} className="bg-background">
                           <td className="px-3 py-2"><InfoBadge color={row.c as any}>{row.s}</InfoBadge></td>
@@ -548,33 +555,33 @@ function CryptoDocumentation({ token, merchantName }: { token: string; merchantN
                 <Bell className="w-5 h-5 text-primary" />
               </div>
               <div>
-                <h2 className="text-xl font-bold">Webhooks</h2>
-                <p className="text-xs text-muted-foreground">Notifications automatiques à la confirmation d'un paiement</p>
+                <h2 className="text-xl font-bold">{t("webhook")}</h2>
+                <p className="text-xs text-muted-foreground">{t("cryptoDocsWebhookSubtitle")}</p>
               </div>
             </div>
             <Card>
               <CardContent className="p-5 space-y-5">
                 <p className="text-sm text-muted-foreground leading-relaxed">
-                  Dès qu'un paiement est confirmé, RobotPay envoie une requête <code className="bg-muted px-1 rounded text-xs font-mono">POST</code> vers votre URL webhook. Configurez cette URL dans votre tableau de bord → <strong>Webhook</strong>.
+                  {t("cryptoDocsWebhookDesc")}
                 </p>
 
                 {info?.webhookUrl ? (
                   <div className="flex items-center gap-2 rounded-lg p-2.5 bg-green-500/10 border border-green-500/20">
                     <CheckCircle className="w-4 h-4 text-green-600 shrink-0" />
                     <div className="min-w-0">
-                      <p className="text-xs font-semibold text-green-700">Webhook configuré</p>
+                      <p className="text-xs font-semibold text-green-700">{t("cryptoDocsWebhookConfigured")}</p>
                       <p className="text-xs font-mono text-green-600 truncate">{info.webhookUrl}</p>
                     </div>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 rounded-lg p-2.5 bg-amber-500/10 border border-amber-500/20">
                     <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                    <p className="text-xs text-amber-700">Aucun webhook configuré — rendez-vous dans votre tableau de bord → Webhook</p>
+                    <p className="text-xs text-amber-700">{t("cryptoDocsNoWebhook")}</p>
                   </div>
                 )}
 
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold text-muted-foreground">Payload reçu sur votre URL</p>
+                  <p className="text-xs font-semibold text-muted-foreground">{t("cryptoDocsWebhookPayload")}</p>
                   <CodeBlock code={`{
   "event": "crypto.payment.confirmed",
   "trackId": "TP-XXXXXXXXXXXXXXXX",
@@ -590,13 +597,13 @@ function CryptoDocumentation({ token, merchantName }: { token: string; merchantN
                 </div>
 
                 <div className="space-y-3">
-                  <p className="text-xs font-semibold text-muted-foreground">Vérifier la signature (recommandé)</p>
+                  <p className="text-xs font-semibold text-muted-foreground">{t("cryptoDocsWebhookSecurity")}</p>
                   <p className="text-xs text-muted-foreground">
-                    Chaque requête webhook inclut un header <code className="bg-muted px-1 rounded font-mono">X-RobotPay-Signature</code> : c'est un HMAC-SHA256 du corps de la requête signé avec votre secret webhook (visible dans le tableau de bord → Webhook).
+                    {t("cryptoDocsWebhookSecurityDesc")}
                   </p>
                   <LangTabs tabs={[
                     {
-                      lang: "PHP", label: "Vérification signature",
+                      lang: "PHP", label: t("cryptoDocsWebhookVerify"),
                       code: `<?php
 $payload = file_get_contents('php://input');
 $signature = $_SERVER['HTTP_X_ROBOTPAY_SIGNATURE'] ?? '';
@@ -621,7 +628,7 @@ http_response_code(200);
 echo json_encode(['ok' => true]);`,
                     },
                     {
-                      lang: "JavaScript", label: "Vérification signature (Node.js)",
+                      lang: "JavaScript", label: t("cryptoDocsWebhookVerify") + " (Node.js)",
                       code: `const crypto = require('crypto');
 
 app.post('/webhook/robotpay', express.raw({ type: 'application/json' }), (req, res) => {
@@ -650,12 +657,12 @@ app.post('/webhook/robotpay', express.raw({ type: 'application/json' }), (req, r
                 </div>
 
                 <div className="rounded-lg p-3 bg-blue-500/5 border border-blue-500/20">
-                  <p className="text-xs font-semibold text-blue-700 mb-1">Bonnes pratiques</p>
+                  <p className="text-xs font-semibold text-blue-700 mb-1">{t("cryptoDocsWebhookBestPractices")}</p>
                   <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
-                    <li>Toujours vérifier la signature avant de traiter le webhook</li>
-                    <li>Répondre avec HTTP 200 rapidement — le traitement peut se faire en arrière-plan</li>
-                    <li>Utiliser le <code className="bg-muted px-0.5 rounded font-mono">trackId</code> comme identifiant unique du paiement</li>
-                    <li>Ne jamais faire confiance aux données non signées</li>
+                    <li>{t("cryptoDocsWebhookBestPractices1")}</li>
+                    <li>{t("cryptoDocsWebhookBestPractices2")}</li>
+                    <li>{t("cryptoDocsWebhookBestPractices3")}</li>
+                    <li>{t("cryptoDocsWebhookBestPractices4")}</li>
                   </ul>
                 </div>
               </CardContent>
@@ -668,11 +675,11 @@ app.post('/webhook/robotpay', express.raw({ type: 'application/json' }), (req, r
               <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
                 <ArrowDownCircle className="w-5 h-5 text-primary" />
               </div>
-              <h2 className="text-xl font-bold">Retraits</h2>
+              <h2 className="text-xl font-bold">{t("withdrawals")}</h2>
             </div>
             <Card>
               <CardContent className="p-5 space-y-5">
-                <p className="text-sm text-muted-foreground">Demandez un retrait de votre solde crypto vers votre adresse wallet. Chaque retrait est soumis à l'approbation de l'administrateur.</p>
+                <p className="text-sm text-muted-foreground">{t("cryptoDocsWithdrawDesc")}</p>
 
                 <div className="flex items-center gap-3">
                   <span className="bg-green-500 text-white text-xs font-bold px-2.5 py-1 rounded">POST</span>
@@ -681,7 +688,7 @@ app.post('/webhook/robotpay', express.raw({ type: 'application/json' }), (req, r
                 </div>
 
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1"><ArrowRight className="w-3 h-3" />Corps de la requête</p>
+                  <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1"><ArrowRight className="w-3 h-3" />{t("cryptoDocsPayload")}</p>
                   <CodeBlock code={`{
   "currency": "USDT",
   "amount": 50.00,          // Montant brut à retirer de votre solde
@@ -691,7 +698,7 @@ app.post('/webhook/robotpay', express.raw({ type: 'application/json' }), (req, r
                 </div>
 
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1"><CheckCircle className="w-3 h-3 text-green-500" />Réponse</p>
+                  <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1"><CheckCircle className="w-3 h-3 text-green-500" />{t("cryptoDocsResponse")}</p>
                   <CodeBlock code={`{
   "id": 42,
   "message": "Demande de retrait soumise avec succès",
@@ -708,11 +715,11 @@ app.post('/webhook/robotpay', express.raw({ type: 'application/json' }), (req, r
                   <code className="text-sm font-mono">/api/merchant/crypto/withdrawals</code>
                   <Lock className="w-3.5 h-3.5 text-amber-500" />
                 </div>
-                <p className="text-xs text-muted-foreground">Retourne la liste de toutes vos demandes de retrait avec leur statut.</p>
+                <p className="text-xs text-muted-foreground">{t("cryptoDocsWithdrawListDesc")}</p>
 
                 <div className="rounded-lg p-3 bg-amber-500/5 border border-amber-500/20">
-                  <p className="text-xs font-semibold text-amber-700 mb-1">Frais de retrait</p>
-                  <p className="text-xs text-muted-foreground">5% déduits du montant demandé. Exemple : vous demandez 100 USDT → vous recevez 95 USDT.</p>
+                  <p className="text-xs font-semibold text-amber-700 mb-1">{t("cryptoDocsFeesTitle")}</p>
+                  <p className="text-xs text-muted-foreground">{t("cryptoDocsWithdrawFeesDesc")}</p>
                 </div>
               </CardContent>
             </Card>
@@ -724,16 +731,16 @@ app.post('/webhook/robotpay', express.raw({ type: 'application/json' }), (req, r
               <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
                 <Code className="w-5 h-5 text-primary" />
               </div>
-              <h2 className="text-xl font-bold">Exemples de code</h2>
+              <h2 className="text-xl font-bold">{t("example")}</h2>
             </div>
 
             <Card>
               <CardContent className="p-5 space-y-6">
                 <div className="space-y-3">
-                  <p className="text-sm font-semibold">Créer un lien de paiement</p>
+                  <p className="text-sm font-semibold">{t("cryptoDocsInvoiceTitle")}</p>
                   <LangTabs tabs={[
                     {
-                      lang: "cURL", label: "Créer une invoice",
+                      lang: "cURL", label: t("cryptoDocsInvoiceTitle"),
                       code: `curl -X POST ${BASE_URL}/api/merchant/crypto/invoice \\
   -H "Content-Type: application/json" \\
   -H "X-API-KEY: ${apiKey}" \\
@@ -746,7 +753,7 @@ app.post('/webhook/robotpay', express.raw({ type: 'application/json' }), (req, r
   }'`,
                     },
                     {
-                      lang: "PHP", label: "Créer une invoice",
+                      lang: "PHP", label: t("cryptoDocsInvoiceTitle"),
                       code: `<?php
 $apiKey = '${apiKey}';
 $data = [
@@ -778,7 +785,7 @@ if ($response['success']) {
 }`,
                     },
                     {
-                      lang: "JavaScript", label: "Créer une invoice (Node.js/fetch)",
+                      lang: "JavaScript", label: t("cryptoDocsInvoiceTitle") + " (Node.js/fetch)",
                       code: `const API_KEY = '${apiKey}';
 const BASE = '${BASE_URL}';
 
@@ -813,14 +820,14 @@ window.location.href = invoice.paymentUrl;`,
                 </div>
 
                 <div className="space-y-3">
-                  <p className="text-sm font-semibold">Vérifier le statut d'un paiement</p>
+                  <p className="text-sm font-semibold">{t("cryptoDocsStatusTitle")}</p>
                   <LangTabs tabs={[
                     {
-                      lang: "cURL", label: "Vérifier le statut",
+                      lang: "cURL", label: t("cryptoDocsStatusTitle"),
                       code: `curl ${BASE_URL}/api/payment/crypto/TP-XXXXXXXXXXXXXXXX/status`,
                     },
                     {
-                      lang: "PHP", label: "Vérifier le statut",
+                      lang: "PHP", label: t("cryptoDocsStatusTitle"),
                       code: `<?php
 $trackId = 'TP-XXXXXXXXXXXXXXXX';
 $response = json_decode(
@@ -833,7 +840,7 @@ if ($response['status'] === 'paid') {
 }`,
                     },
                     {
-                      lang: "JavaScript", label: "Vérifier le statut",
+                      lang: "JavaScript", label: t("cryptoDocsStatusTitle"),
                       code: `async function checkPaymentStatus(trackId) {
   const res = await fetch(\`${BASE_URL}/api/payment/crypto/\${trackId}/status\`);
   const data = await res.json();
@@ -864,16 +871,16 @@ const interval = setInterval(async () => {
               <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
                 <ShieldCheck className="w-5 h-5 text-primary" />
               </div>
-              <h2 className="text-xl font-bold">Sécurité</h2>
+              <h2 className="text-xl font-bold">{t("security")}</h2>
             </div>
             <Card>
               <CardContent className="p-5 space-y-4">
                 {[
-                  { icon: Lock, title: "Ne jamais exposer votre clé API", desc: "La clé API (X-API-KEY) doit rester côté serveur. Ne l'incluez jamais dans du code JavaScript côté client ou dans des dépôts git publics." },
-                  { icon: ShieldCheck, title: "Vérifier les signatures webhook", desc: "Validez toujours le header X-RobotPay-Signature avant de traiter une notification webhook pour éviter les fausses notifications." },
-                  { icon: Globe, title: "Utiliser HTTPS uniquement", desc: "Votre URL webhook doit utiliser HTTPS. Les URL HTTP ne seront pas acceptées." },
-                  { icon: CheckCircle, title: "Idempotence", desc: "Utilisez le trackId comme identifiant unique pour éviter de traiter deux fois le même paiement (en cas de renvoi du webhook)." },
-                  { icon: AlertTriangle, title: "Régénérer la clé en cas de compromission", desc: "Si vous pensez que votre clé API a été compromise, régénérez-la immédiatement depuis votre tableau de bord → Crypto → API." },
+                  { icon: Lock, title: t("cryptoDocsSecurityApiKey"), desc: t("cryptoDocsSecurityApiKeyDesc") },
+                  { icon: ShieldCheck, title: t("cryptoDocsSecurityWebhook"), desc: t("cryptoDocsSecurityWebhookDesc") },
+                  { icon: Globe, title: t("cryptoDocsSecurityHttps"), desc: t("cryptoDocsSecurityHttpsDesc") },
+                  { icon: CheckCircle, title: t("cryptoDocsSecurityIdempotence"), desc: t("cryptoDocsSecurityIdempotenceDesc") },
+                  { icon: AlertTriangle, title: t("cryptoDocsSecurityRegenerate"), desc: t("cryptoDocsSecurityRegenerateDesc") },
                 ].map(item => (
                   <div key={item.title} className="flex gap-3 p-3 rounded-lg border">
                     <item.icon className="w-4 h-4 text-primary shrink-0 mt-0.5" />
@@ -896,7 +903,13 @@ const interval = setInterval(async () => {
 // ─── Page principale ──────────────────────────────────────────────────────────
 
 export default function CryptoDocsPage() {
+  const { lang, setLang, setDefaultLang } = useLanguage();
   const [session, setSession] = useState<{ token: string; merchant: { name: string; email: string } } | null>(null);
+
+  useEffect(() => {
+    // Default to English for Crypto docs if not explicitly set
+    setDefaultLang("en");
+  }, [setDefaultLang]);
 
   if (!session) {
     return <PinGate onAccess={setSession} />;

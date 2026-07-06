@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { useLanguage } from "@/lib/language";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 import {
   Shield, Lock, Loader2, BookOpen, Code, Server, Key,
   ArrowRight, CheckCircle, AlertTriangle, Globe, Zap, Copy, Check,
@@ -17,6 +19,7 @@ import Captcha, { generateCaptchaCode } from "@/components/Captcha";
 const BASE_URL = "https://westpay.cfd";
 
 function CopyButton({ text }: { text: string }) {
+  const { t } = useLanguage();
   const [copied, setCopied] = useState(false);
   const { toast } = useToast();
   const handleCopy = useCallback(async () => {
@@ -29,10 +32,10 @@ function CopyButton({ text }: { text: string }) {
         document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta);
       }
       setCopied(true);
-      toast({ title: "Code copie !" });
+      toast({ title: t("copied") });
       setTimeout(() => setCopied(false), 2000);
-    } catch { toast({ title: "Impossible de copier", variant: "destructive" }); }
-  }, [text, toast]);
+    } catch { toast({ title: t("error"), variant: "destructive" }); }
+  }, [text, toast, t]);
   return (
     <Button size="icon" variant="ghost" onClick={handleCopy} className="shrink-0 h-7 w-7" data-testid="button-copy-code">
       {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
@@ -79,14 +82,8 @@ function LangTabs({ tabs }: { tabs: { lang: string; label: string; code: string 
   );
 }
 
-const DOC_FEATURES = [
-  { icon: BookOpen, label: "Documentation complète de l'API RobotPay" },
-  { icon: Code, label: "Exemples de code prêts à intégrer" },
-  { icon: Key, label: "Gestion de vos clés API par pays" },
-  { icon: Shield, label: "Accès sécurisé par PIN personnel" },
-];
-
 function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { name: string; email: string } }) => void }) {
+  const { t } = useLanguage();
   const [email, setEmail] = useState("");
   const [pin, setPin] = useState("");
   const [showPin, setShowPin] = useState(false);
@@ -95,6 +92,13 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
   const [captchaInput, setCaptchaInput] = useState("");
   const [captchaError, setCaptchaError] = useState(false);
   const { toast } = useToast();
+
+  const docFeatures = [
+    { icon: BookOpen, label: t("docsFeature1") },
+    { icon: Code, label: t("docsFeature2") },
+    { icon: Key, label: t("docsFeature3") },
+    { icon: Shield, label: t("docsFeature4") },
+  ];
 
   const refreshCaptcha = useCallback(() => {
     setCaptchaCode(generateCaptchaCode());
@@ -117,10 +121,10 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
         body: JSON.stringify({ email, pin }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Accès refusé");
+      if (!res.ok) throw new Error(data.message || t("docsInvalidPin"));
       onAccess(data);
     } catch (err: any) {
-      toast({ title: "Accès refusé", description: err.message, variant: "destructive" });
+      toast({ title: t("docsInvalidPin"), description: err.message, variant: "destructive" });
       refreshCaptcha();
     } finally {
       setIsLoading(false);
@@ -128,7 +132,11 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
   };
 
   return (
-    <div className="min-h-screen flex bg-white">
+    <div className="min-h-screen flex bg-white relative">
+      {/* Absolute positioned switcher for PinGate */}
+      <div className="absolute top-4 right-4 z-50">
+        <LanguageSwitcher />
+      </div>
       <style>{`
         .pg-input {
           width:100%;padding:0.7rem 0.9rem;font-size:0.9rem;
@@ -167,7 +175,7 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
             </div>
             <div>
               <span className="text-3xl font-black text-white tracking-tight leading-none block">WestPay</span>
-              <p className="text-white/60 text-sm mt-1">Documentation API</p>
+              <p className="text-white/60 text-sm mt-1">{t("apiDocumentation")}</p>
             </div>
           </div>
         </div>
@@ -175,15 +183,15 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
         <div className="relative z-10 space-y-6">
           <div>
             <h2 className="text-3xl xl:text-4xl font-black text-white leading-tight mb-3">
-              Intégrez RobotPay dans vos applications
+              {t("docsIntegrationTitle")}
             </h2>
             <p className="text-white/70 text-base leading-relaxed">
-              Accédez à la documentation complète de notre API de paiement Mobile Money pour l'Afrique de l'Ouest et du Centre.
+              {t("docsIntegrationDesc")}
             </p>
           </div>
 
           <div className="space-y-3">
-            {DOC_FEATURES.map(({ icon: Icon, label }) => (
+            {docFeatures.map(({ icon: Icon, label }) => (
               <div key={label} className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center flex-shrink-0">
                   <Icon className="w-4 h-4 text-white" />
@@ -194,14 +202,14 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
           </div>
 
           <div className="bg-white/10 backdrop-blur rounded-2xl p-5 border border-white/15">
-            <p className="text-white/70 text-xs font-medium uppercase tracking-widest mb-2">Accès sécurisé</p>
-            <p className="text-white text-sm font-semibold">Votre PIN est configuré par l'administrateur. Chaque accès est journalisé.</p>
+            <p className="text-white/70 text-xs font-medium uppercase tracking-widest mb-2">{t("docsSecuredAccess")}</p>
+            <p className="text-white text-sm font-semibold">{t("docsPinConfigured")}</p>
           </div>
         </div>
 
         <div className="relative z-10 flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse" />
-          <span className="text-white/50 text-xs">Documentation sécurisée</span>
+          <span className="text-white/50 text-xs">{t("docsSecuredDocs")}</span>
         </div>
       </div>
 
@@ -215,19 +223,19 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
             </div>
             <div className="text-center">
               <span className="text-2xl font-black text-slate-900 block">WestPay</span>
-              <span className="text-sm text-slate-400">Documentation API</span>
+              <span className="text-sm text-slate-400">{t("apiDocumentation")}</span>
             </div>
           </div>
 
           <div className="mb-8">
-            <h1 className="text-2xl font-black text-slate-900 mb-1" data-testid="text-docs-title">Accès Documentation</h1>
-            <p className="text-slate-500 text-sm">Entrez vos identifiants marchands pour accéder à la documentation API.</p>
+            <h1 className="text-2xl font-black text-slate-900 mb-1" data-testid="text-docs-title">{t("docsAccessTitle")}</h1>
+            <p className="text-slate-500 text-sm">{t("docsAccessDesc")}</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Email */}
             <div className="space-y-1.5">
-              <label className="block text-sm font-semibold text-slate-700">Adresse email</label>
+              <label className="block text-sm font-semibold text-slate-700">{t("docsEmailLabel")}</label>
               <input
                 type="email"
                 className="pg-input"
@@ -242,7 +250,7 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
 
             {/* PIN */}
             <div className="space-y-1.5">
-              <label className="block text-sm font-semibold text-slate-700">Code PIN (6 chiffres)</label>
+              <label className="block text-sm font-semibold text-slate-700">{t("docsPinLabel")}</label>
               <div className="relative">
                 <input
                   type={showPin ? "text" : "password"}
@@ -262,6 +270,7 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
                   style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
                   data-testid="button-toggle-pin-visibility"
+                  title={showPin ? t("docsHidePin") : t("docsShowPin")}
                 >
                   {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -270,14 +279,14 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
 
             {/* CAPTCHA */}
             <div className="space-y-2">
-              <label className="block text-sm font-semibold text-slate-700">Code de sécurité</label>
+              <label className="block text-sm font-semibold text-slate-700">{t("docsSecurityCode")}</label>
               <Captcha code={captchaCode} onRefresh={refreshCaptcha} />
               <input
                 type="text"
                 className={`pg-input ${captchaError ? "pg-input-error" : ""}`}
                 value={captchaInput}
                 onChange={(e) => { setCaptchaInput(e.target.value.toUpperCase()); setCaptchaError(false); }}
-                placeholder="Entrez le code ci-dessus"
+                placeholder={t("docsCaptchaPlaceholder")}
                 maxLength={5}
                 autoComplete="off"
                 spellCheck={false}
@@ -285,7 +294,7 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
                 data-testid="input-docs-captcha"
               />
               {captchaError && (
-                <p className="text-xs text-red-500 font-medium">Code incorrect, un nouveau code a été généré.</p>
+                <p className="text-xs text-red-500 font-medium">{t("docsCaptchaError")}</p>
               )}
             </div>
 
@@ -297,7 +306,7 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
               data-testid="button-docs-access"
             >
               {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
-              {isLoading ? "Vérification..." : "Accéder à la documentation"}
+              {isLoading ? t("docsVerifying") : t("docsAccessBtn")}
             </button>
           </form>
 
@@ -305,7 +314,7 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
             <div className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-100">
               <Lock className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
               <p className="text-xs text-slate-500 leading-relaxed">
-                Votre PIN d'accès est fourni par l'administrateur RobotPay. Chaque connexion est enregistrée à des fins de sécurité.
+                {t("docsPinConfigured")}
               </p>
             </div>
           </div>
@@ -354,21 +363,22 @@ function EndpointCard({ method, path, description, requestBody, responseBody, au
   );
 }
 
-const SECTIONS = [
-  { id: "intro", label: "Introduction", icon: BookOpen },
-  { id: "auth", label: "Authentification", icon: Key },
-  { id: "endpoints", label: "Endpoints", icon: Server },
-  { id: "payment", label: "Paiement", icon: Globe },
-  { id: "transfer", label: "Transferts", icon: ArrowDownCircle },
-  { id: "webhook", label: "Webhooks", icon: Bell },
-  { id: "examples", label: "Exemples de code", icon: Code },
-  { id: "errors", label: "Gestion des erreurs", icon: AlertTriangle },
-  { id: "security", label: "Securite", icon: ShieldCheck },
-];
-
 function ApiDocumentation({ merchantName }: { merchantName: string }) {
+  const { t } = useLanguage();
   const [activeSection, setActiveSection] = useState("intro");
   const [navOpen, setNavOpen] = useState(false);
+
+  const sections = [
+    { id: "intro", label: t("intro"), icon: BookOpen },
+    { id: "auth", label: t("authentication"), icon: Key },
+    { id: "endpoints", label: t("docsEndpoints"), icon: Server },
+    { id: "payment", label: t("payTitle"), icon: Globe },
+    { id: "transfer", label: t("transfers"), icon: ArrowDownCircle },
+    { id: "webhook", label: t("webhook"), icon: Bell },
+    { id: "examples", label: t("example"), icon: Code },
+    { id: "errors", label: t("error"), icon: AlertTriangle },
+    { id: "security", label: t("security"), icon: ShieldCheck },
+  ];
 
   const scrollTo = (id: string) => {
     setActiveSection(id);
@@ -386,12 +396,13 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
               <BookOpen className="w-4 h-4 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="text-xs sm:text-sm font-bold text-foreground">WestPay API Documentation</h1>
-              <p className="text-xs text-muted-foreground">v2.0 — Usage restreint</p>
+              <h1 className="text-xs sm:text-sm font-bold text-foreground">WestPay {t("apiDocumentation")}</h1>
+              <p className="text-xs text-muted-foreground">v2.0 — {t("docsRestricted")}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Badge variant="secondary" data-testid="text-docs-merchant">{merchantName}</Badge>
+            <LanguageSwitcher />
+            <Badge variant="secondary" className="hidden sm:inline-flex" data-testid="text-docs-merchant">{merchantName}</Badge>
             <button
               className="sm:hidden flex items-center justify-center w-9 h-9 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-700 active:scale-95"
               onClick={() => setNavOpen(!navOpen)}
@@ -409,7 +420,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
         </div>
         {navOpen && (
           <div className="sm:hidden border-t bg-background px-3 py-2 space-y-0.5 shadow-md">
-            {SECTIONS.map(s => (
+            {sections.map(s => (
               <button key={s.id} onClick={() => scrollTo(s.id)}
                 className={`w-full text-left px-3 py-2.5 rounded-lg text-sm flex items-center gap-2.5 transition-colors ${activeSection === s.id ? "bg-primary/10 text-primary font-semibold" : "text-foreground hover:bg-muted"}`}>
                 <s.icon className="w-4 h-4 shrink-0" />{s.label}
@@ -422,7 +433,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
       <div className="max-w-6xl mx-auto flex gap-6 px-3 sm:px-4 py-6">
         <aside className="hidden sm:block w-52 shrink-0">
           <nav className="sticky top-20 space-y-0.5">
-            {SECTIONS.map(s => (
+            {sections.map(s => (
               <button key={s.id} onClick={() => scrollTo(s.id)}
                 className={`w-full text-left px-3 py-2 rounded text-sm flex items-center gap-2 transition-colors ${activeSection === s.id ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-muted"}`}
                 data-testid={`nav-${s.id}`}>
@@ -437,12 +448,10 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
           {/* ── INTRODUCTION ── */}
           <section id="intro" className="space-y-4 scroll-mt-20">
             <h2 className="text-xl sm:text-2xl font-bold text-foreground flex items-center gap-2">
-              <BookOpen className="w-5 h-5 text-primary shrink-0" />Introduction
+              <BookOpen className="w-5 h-5 text-primary shrink-0" />{t("intro")}
             </h2>
             <p className="text-sm sm:text-base text-muted-foreground leading-relaxed">
-              WestPay est une plateforme d'aggregation de paiements Mobile Money en Afrique de l'Ouest et du Centre.
-              L'API REST permet d'integrer les paiements, les retraits automatiques, la consultation des soldes et les
-              notifications en temps reel dans n'importe quelle application web ou mobile.
+              {t("docsIntro")}
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <Card><CardContent className="p-3 space-y-2">
@@ -454,12 +463,12 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
                 <p className="text-sm text-foreground">JSON (application/json)</p>
               </CardContent></Card>
               <Card><CardContent className="p-3 space-y-2">
-                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Methodes HTTP</p>
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">{t("docsParameters")}</p>
                 <p className="text-sm text-foreground">GET · POST · PUT · PATCH · DELETE</p>
               </CardContent></Card>
               <Card><CardContent className="p-3 space-y-2">
                 <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Auth</p>
-                <p className="text-sm text-foreground">JWT Bearer Token + Cle API</p>
+                <p className="text-sm text-foreground">JWT Bearer Token + {t("apiKey")}</p>
               </CardContent></Card>
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
@@ -495,7 +504,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
           {/* ── AUTHENTIFICATION ── */}
           <section id="auth" className="space-y-4 scroll-mt-20">
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-              <Key className="w-5 h-5 text-primary shrink-0" />Authentification
+              <Key className="w-5 h-5 text-primary shrink-0" />{t("authentication")}
             </h2>
             <p className="text-sm text-muted-foreground">
               L'API utilise deux niveaux d'authentification : un <strong>token JWT</strong> obtenu apres connexion,
@@ -548,7 +557,7 @@ Content-Type: application/json`} />
           {/* ── ENDPOINTS ── */}
           <section id="endpoints" className="space-y-4 scroll-mt-20">
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-              <Server className="w-5 h-5 text-primary shrink-0" />Endpoints — Consultation
+              <Server className="w-5 h-5 text-primary shrink-0" />{t("docsEndpoints")} — Consultation
             </h2>
             <p className="text-xs text-muted-foreground mb-2">Cliquez sur un endpoint pour voir les details.</p>
             <div className="space-y-2">
@@ -633,7 +642,7 @@ Content-Type: application/json`} />
           {/* ── PAIEMENT ── */}
           <section id="payment" className="space-y-4 scroll-mt-20">
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-              <Globe className="w-5 h-5 text-primary shrink-0" />Paiements (Depot)
+              <Globe className="w-5 h-5 text-primary shrink-0" />{t("payTitle")} (Depot)
             </h2>
             <p className="text-sm text-muted-foreground">
               WestPay fourni une page de paiement hebergee et securisee. Redirigez simplement vos utilisateurs vers cette URL — ils entrent leur numero Mobile Money et valident le paiement directement sur leur telephone via USSD.
@@ -660,14 +669,14 @@ Content-Type: application/json`} />
                   <table className="w-full text-sm">
                     <thead><tr className="border-b">
                       <th className="text-left p-2 text-foreground font-semibold">Parametre</th>
-                      <th className="text-left p-2 text-foreground font-semibold">Requis</th>
+                      <th className="text-left p-2 text-foreground font-semibold">{t("docsRequired")}</th>
                       <th className="text-left p-2 text-foreground font-semibold">Description</th>
                     </tr></thead>
                     <tbody className="text-muted-foreground text-xs sm:text-sm">
-                      <tr className="border-b"><td className="p-2 font-mono">merchant</td><td className="p-2 text-green-500">Oui</td><td className="p-2">Votre slug marchand (ex: ecomat)</td></tr>
-                      <tr className="border-b"><td className="p-2 font-mono">amount</td><td className="p-2 text-green-500">Oui</td><td className="p-2">Montant en F CFA (entier positif)</td></tr>
-                      <tr className="border-b"><td className="p-2 font-mono">country</td><td className="p-2 text-muted-foreground">Non</td><td className="p-2">Pays (ex: Togo). Premier pays actif si omis</td></tr>
-                      <tr><td className="p-2 font-mono">redirect</td><td className="p-2 text-muted-foreground">Non</td><td className="p-2">URL de retour apres paiement (encoder avec encodeURIComponent)</td></tr>
+                      <tr className="border-b"><td className="p-2 font-mono">merchant</td><td className="p-2 text-green-500">{t("yes")}</td><td className="p-2">Votre slug marchand (ex: ecomat)</td></tr>
+                      <tr className="border-b"><td className="p-2 font-mono">amount</td><td className="p-2 text-green-500">{t("yes")}</td><td className="p-2">Montant en F CFA (entier positif)</td></tr>
+                      <tr className="border-b"><td className="p-2 font-mono">country</td><td className="p-2 text-muted-foreground">{t("no")}</td><td className="p-2">Pays (ex: Togo). Premier pays actif si omis</td></tr>
+                      <tr><td className="p-2 font-mono">redirect</td><td className="p-2 text-muted-foreground">{t("no")}</td><td className="p-2">URL de retour apres paiement (encoder avec encodeURIComponent)</td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -729,7 +738,7 @@ Content-Type: application/json`} />
           {/* ── TRANSFERTS ── */}
           <section id="transfer" className="space-y-4 scroll-mt-20">
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-              <ArrowDownCircle className="w-5 h-5 text-primary shrink-0" />Retraits automatiques (Transferts)
+              <ArrowDownCircle className="w-5 h-5 text-primary shrink-0" />{t("transfers")} (Transferts)
             </h2>
             <p className="text-sm text-muted-foreground">
               Envoyez de l'argent directement vers n'importe quel portefeuille Mobile Money. Le montant est debite
@@ -787,7 +796,7 @@ Content-Type: application/json`} />
           {/* ── WEBHOOKS ── */}
           <section id="webhook" className="space-y-4 scroll-mt-20">
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-              <Bell className="w-5 h-5 text-primary shrink-0" />Webhooks & Notifications
+              <Bell className="w-5 h-5 text-primary shrink-0" />{t("webhook")} & Notifications
             </h2>
             <p className="text-sm text-muted-foreground">
               Configurez une URL webhook pour recevoir des notifications en temps reel a chaque paiement confirme.
@@ -858,7 +867,7 @@ Content-Type: application/json
           {/* ── EXEMPLES DE CODE ── */}
           <section id="examples" className="space-y-6 scroll-mt-20">
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-              <Code className="w-5 h-5 text-primary shrink-0" />Exemples de code
+              <Code className="w-5 h-5 text-primary shrink-0" />{t("example")}
             </h2>
 
             <div className="space-y-2">
@@ -1278,7 +1287,7 @@ if __name__ == "__main__":
           {/* ── ERREURS ── */}
           <section id="errors" className="space-y-4 scroll-mt-20">
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-primary shrink-0" />Gestion des erreurs
+              <AlertTriangle className="w-5 h-5 text-primary shrink-0" />{t("error")}
             </h2>
             <p className="text-sm text-muted-foreground">
               L'API retourne toujours un objet JSON avec un champ <code className="bg-muted px-1 rounded">message</code> en cas d'erreur.
@@ -1445,7 +1454,7 @@ def appel_api(endpoint, method="GET", data=None, token=None, retry=3):
           {/* ── SECURITE ── */}
           <section id="security" className="space-y-4 scroll-mt-20">
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-primary shrink-0" />Bonnes pratiques de securite
+              <ShieldCheck className="w-5 h-5 text-primary shrink-0" />{t("security")}
             </h2>
 
             <div className="space-y-3">
@@ -1581,7 +1590,14 @@ if not API_KEY or not WEBHOOK_SECRET:
 }
 
 export default function ApiDocsPage() {
+  const { lang, setLang, setDefaultLang } = useLanguage();
   const [accessData, setAccessData] = useState<{ token: string; merchant: { name: string; email: string } } | null>(null);
+
+  useEffect(() => {
+    // Default to English for API docs if not explicitly set
+    setDefaultLang("en");
+  }, [setDefaultLang]);
+
   if (!accessData) return <PinGate onAccess={setAccessData} />;
   return <ApiDocumentation merchantName={accessData.merchant.name} />;
 }
