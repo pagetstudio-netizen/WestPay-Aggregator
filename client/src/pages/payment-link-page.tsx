@@ -228,6 +228,8 @@ export default function PaymentLinkPage() {
   }, [country]);
 
   /* ── Auto-sélection méthode pour l'Inde (redirect direct SeaPay) ──── */
+  // Déclaré ici (avant le useEffect) pour éviter la zone morte temporelle (TDZ) des const
+  const isIndia = country === "India";
   useEffect(() => {
     if (isIndia) setMethod("UPI");
   }, [isIndia]);
@@ -273,7 +275,7 @@ export default function PaymentLinkPage() {
   const maliOrange = method === "Orange Money" && country === "Mali";
   const dialCode = DIAL_CODES[country] || "+";
   const isSeapayCountry = ["Philippines", "Pakistan", "India", "Nigeria"].includes(country);
-  const isIndia = country === "India";
+  // isIndia déclaré plus haut (avant le useEffect qui en dépend)
   const isSeapayRedirect = isSeapayCountry && (isIndia || !!method) && !isCrypto;
 
   const effectiveAmount = data?.link.amountType === "fixed"
