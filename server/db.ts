@@ -426,6 +426,9 @@ export async function runMigrations() {
       ALTER TABLE admins ADD COLUMN IF NOT EXISTS totp_secret text;
       ALTER TABLE admins ADD COLUMN IF NOT EXISTS totp_enabled boolean NOT NULL DEFAULT false;
       ALTER TABLE merchants ADD COLUMN IF NOT EXISTS withdrawals_disabled boolean NOT NULL DEFAULT false;
+      ALTER TABLE merchants ADD COLUMN IF NOT EXISTS token_invalidated_at timestamp;
+      ALTER TABLE admins ADD COLUMN IF NOT EXISTS token_invalidated_at timestamp;
+      ALTER TABLE merchant_countries ADD COLUMN IF NOT EXISTS admin_credits_total integer NOT NULL DEFAULT 0;
     `);
 
     // ── Merchant login OTP table ────────────────────────────────────────────────
@@ -442,6 +445,24 @@ export async function runMigrations() {
       );
       CREATE INDEX IF NOT EXISTS merchant_login_otps_email_idx ON merchant_login_otps(email);
     `);
+
+    // ── Knowledge chunks (RAG) — requires pgvector extension ─────────────────────
+    try {
+      await client.query(`CREATE EXTENSION IF NOT EXISTS vector;`);
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS knowledge_chunks (
+          id serial PRIMARY KEY,
+          category text NOT NULL,
+          title text NOT NULL,
+          content text NOT NULL,
+          embedding vector(1536),
+          active boolean NOT NULL DEFAULT true,
+          updated_at timestamp DEFAULT now() NOT NULL
+        );
+      `);
+    } catch (e: any) {
+      console.log("[KNOWLEDGE] pgvector not available, skipping knowledge_chunks table:", e.message);
+    }
 
     // ── Index uniques ──────────────────────────────────────────────────────────────
     await client.query(`
