@@ -283,20 +283,20 @@ function seapayCountryEnvPrefix(country: string): string {
 }
 async function getSeapayMerchantId(country: string): Promise<string | undefined> {
   const envPrefix = seapayCountryEnvPrefix(country);
+  // Uniquement la variable pays-spécifique (ex: SEAPAY_PAKISTAN_MERCHANT_ID)
+  // Les variables génériques sans pays (SEAPAY_MERCHANT_ID) ne sont plus acceptées
+  // pour éviter qu'un mauvais compte s'applique à un autre pays.
   return process.env[`${envPrefix}_MERCHANT_ID`]
-    || (country === "Pakistan" ? process.env.SEAPAY_MERCHANT_ID : undefined)
     || await storage.getSetting(`seapay_merchant_id_${seapayCountrySlug(country)}`);
 }
 async function getSeapayApiKey(country: string): Promise<string | undefined> {
   const envPrefix = seapayCountryEnvPrefix(country);
   return process.env[`${envPrefix}_API_KEY`]
-    || (country === "Pakistan" ? process.env.SEAPAY_API_KEY : undefined)
     || await storage.getSetting(`seapay_api_key_${seapayCountrySlug(country)}`);
 }
 async function getSeapayApiSecret(country: string): Promise<string | undefined> {
   const envPrefix = seapayCountryEnvPrefix(country);
   return process.env[`${envPrefix}_API_SECRET`]
-    || (country === "Pakistan" ? process.env.SEAPAY_API_SECRET : undefined)
     || await storage.getSetting(`seapay_api_secret_${seapayCountrySlug(country)}`);
 }
 
@@ -5060,19 +5060,10 @@ export async function registerRoutes(
           getSeapayApiSecret(c),
         ]);
         const envPrefix = seapayCountryEnvPrefix(c);
-        // Détecte si chaque champ vient d'une variable d'env (country-specific ou legacy Pakistan)
-        const midFromEnv = !!(
-          process.env[`${envPrefix}_MERCHANT_ID`] ||
-          (c === "Pakistan" && process.env.SEAPAY_MERCHANT_ID)
-        );
-        const akFromEnv = !!(
-          process.env[`${envPrefix}_API_KEY`] ||
-          (c === "Pakistan" && process.env.SEAPAY_API_KEY)
-        );
-        const asFromEnv = !!(
-          process.env[`${envPrefix}_API_SECRET`] ||
-          (c === "Pakistan" && process.env.SEAPAY_API_SECRET)
-        );
+        // Uniquement les variables pays-spécifiques (ex: SEAPAY_PAKISTAN_MERCHANT_ID)
+        const midFromEnv = !!process.env[`${envPrefix}_MERCHANT_ID`];
+        const akFromEnv  = !!process.env[`${envPrefix}_API_KEY`];
+        const asFromEnv  = !!process.env[`${envPrefix}_API_SECRET`];
         countries[c] = {
           // Ne pas renvoyer les valeurs réelles des clés au navigateur pour la sécurité
           // — on indique juste si chaque champ est renseigné
@@ -5088,16 +5079,11 @@ export async function registerRoutes(
           configured: !!(mid && ak),
         };
         envOverrides[c] = midFromEnv || akFromEnv || asFromEnv;
-        // Noms exacts des variables d'environnement attendues
+        // Noms exacts des variables d'environnement attendues (une par pays)
         envVarNames[c] = {
           merchantId: `${envPrefix}_MERCHANT_ID`,
           apiKey:     `${envPrefix}_API_KEY`,
           apiSecret:  `${envPrefix}_API_SECRET`,
-          ...(c === "Pakistan" ? {
-            legacyMerchantId: "SEAPAY_MERCHANT_ID",
-            legacyApiKey:     "SEAPAY_API_KEY",
-            legacyApiSecret:  "SEAPAY_API_SECRET",
-          } : {}),
         };
       }
       // Rétrocompatibilité — indique si au moins un pays est configuré
