@@ -280,16 +280,31 @@ async function getSendavaWebhookSecret(): Promise<string | undefined> {
   return process.env.SENDAVA_WEBHOOK_SECRET || process.env.SENDAVAPAY_WEBHOOK_SECRET || await storage.getSetting("sendavapay_webhook_secret");
 }
 
-async function getSeapayMerchantId(): Promise<string | undefined> {
-  return process.env.SEAPAY_MERCHANT_ID || await storage.getSetting("seapay_merchant_id");
+/* SeaPay : chaque pays possede son propre compte marchand (merchant_id/api_key/api_secret distincts) */
+const SEAPAY_COUNTRIES = ["Pakistan", "Philippines", "India", "Nigeria"] as const;
+function seapayCountrySlug(country: string): string {
+  return country.trim().toLowerCase().replace(/[^a-z]/g, "");
 }
-
-async function getSeapayApiKey(): Promise<string | undefined> {
-  return process.env.SEAPAY_API_KEY || await storage.getSetting("seapay_api_key");
+function seapayCountryEnvPrefix(country: string): string {
+  return `SEAPAY_${country.trim().toUpperCase().replace(/[^A-Z]/g, "")}`;
 }
-
-async function getSeapayApiSecret(): Promise<string | undefined> {
-  return process.env.SEAPAY_API_SECRET || await storage.getSetting("seapay_api_secret");
+async function getSeapayMerchantId(country: string): Promise<string | undefined> {
+  const envPrefix = seapayCountryEnvPrefix(country);
+  return process.env[`${envPrefix}_MERCHANT_ID`]
+    || (country === "Pakistan" ? process.env.SEAPAY_MERCHANT_ID : undefined)
+    || await storage.getSetting(`seapay_merchant_id_${seapayCountrySlug(country)}`);
+}
+async function getSeapayApiKey(country: string): Promise<string | undefined> {
+  const envPrefix = seapayCountryEnvPrefix(country);
+  return process.env[`${envPrefix}_API_KEY`]
+    || (country === "Pakistan" ? process.env.SEAPAY_API_KEY : undefined)
+    || await storage.getSetting(`seapay_api_key_${seapayCountrySlug(country)}`);
+}
+async function getSeapayApiSecret(country: string): Promise<string | undefined> {
+  const envPrefix = seapayCountryEnvPrefix(country);
+  return process.env[`${envPrefix}_API_SECRET`]
+    || (country === "Pakistan" ? process.env.SEAPAY_API_SECRET : undefined)
+    || await storage.getSetting(`seapay_api_secret_${seapayCountrySlug(country)}`);
 }
 
 // Nettoie tout message avant qu'il soit visible par un marchand/client (adminNote,
