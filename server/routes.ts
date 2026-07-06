@@ -5052,6 +5052,7 @@ export async function registerRoutes(
       const countriesList = ["Pakistan", "Philippines", "India", "Nigeria"];
       const countries: Record<string, any> = {};
       const envOverrides: Record<string, boolean> = {};
+      const envVarNames: Record<string, { merchantId: string; apiKey: string; apiSecret: string; legacyMerchantId?: string; legacyApiKey?: string; legacyApiSecret?: string }> = {};
       for (const c of countriesList) {
         const [mid, ak, as_] = await Promise.all([
           getSeapayMerchantId(c),
@@ -5059,17 +5060,49 @@ export async function registerRoutes(
           getSeapayApiSecret(c),
         ]);
         const envPrefix = seapayCountryEnvPrefix(c);
+        // Détecte si chaque champ vient d'une variable d'env (country-specific ou legacy Pakistan)
+        const midFromEnv = !!(
+          process.env[`${envPrefix}_MERCHANT_ID`] ||
+          (c === "Pakistan" && process.env.SEAPAY_MERCHANT_ID)
+        );
+        const akFromEnv = !!(
+          process.env[`${envPrefix}_API_KEY`] ||
+          (c === "Pakistan" && process.env.SEAPAY_API_KEY)
+        );
+        const asFromEnv = !!(
+          process.env[`${envPrefix}_API_SECRET`] ||
+          (c === "Pakistan" && process.env.SEAPAY_API_SECRET)
+        );
         countries[c] = {
-          merchantId: mid || "",
-          apiKey:     ak  || "",
-          apiSecret:  as_ || "",
+          // Ne pas renvoyer les valeurs réelles des clés au navigateur pour la sécurité
+          // — on indique juste si chaque champ est renseigné
+          merchantId: mid ? (midFromEnv ? "••••••••[ENV]" : "••••••••[DB]") : "",
+          apiKey:     ak  ? (akFromEnv  ? "••••••••[ENV]" : "••••••••[DB]") : "",
+          apiSecret:  as_ ? (asFromEnv  ? "••••••••[ENV]" : "••••••••[DB]") : "",
+          hasMerchantId: !!mid,
+          hasApiKey:     !!ak,
+          hasApiSecret:  !!as_,
+          midFromEnv,
+          akFromEnv,
+          asFromEnv,
           configured: !!(mid && ak),
         };
-        envOverrides[c] = !!(process.env[`${envPrefix}_MERCHANT_ID`] || process.env[`${envPrefix}_API_KEY`]);
+        envOverrides[c] = midFromEnv || akFromEnv || asFromEnv;
+        // Noms exacts des variables d'environnement attendues
+        envVarNames[c] = {
+          merchantId: `${envPrefix}_MERCHANT_ID`,
+          apiKey:     `${envPrefix}_API_KEY`,
+          apiSecret:  `${envPrefix}_API_SECRET`,
+          ...(c === "Pakistan" ? {
+            legacyMerchantId: "SEAPAY_MERCHANT_ID",
+            legacyApiKey:     "SEAPAY_API_KEY",
+            legacyApiSecret:  "SEAPAY_API_SECRET",
+          } : {}),
+        };
       }
       // Rétrocompatibilité — indique si au moins un pays est configuré
       const configured = countriesList.some(c => countries[c].configured);
-      res.json({ countries, envOverrides, configured });
+      res.json({ countries, envOverrides, envVarNames, configured });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

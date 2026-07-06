@@ -3045,22 +3045,43 @@ function MbiyoPanel() {
 
 type SeapayCountryForm = { merchantId: string; apiKey: string; apiSecret: string };
 
-function SeaPayCountryCard({ countryName, flag, currency, initialData, envOverride, onSave }: {
+function SeaPayCountryCard({ countryName, flag, currency, cfg, envVars, onSave }: {
   countryName: string; flag: string; currency: string;
-  initialData: SeapayCountryForm; envOverride: boolean;
+  cfg: any; envVars: any;
   onSave: (country: string, data: SeapayCountryForm) => Promise<void>;
 }) {
   const { toast } = useToast();
-  const [form, setForm] = useState<SeapayCountryForm>(initialData);
+  const [form, setForm] = useState<SeapayCountryForm>({ merchantId: "", apiKey: "", apiSecret: "" });
   const [saving, setSaving] = useState(false);
+  const [showEnvVars, setShowEnvVars] = useState(false);
 
-  useEffect(() => { setForm(initialData); }, [initialData.merchantId, initialData.apiKey, initialData.apiSecret]);
+  const isConfigured = !!(cfg?.hasMerchantId && cfg?.hasApiKey);
+  const fromEnv = !!(cfg?.midFromEnv || cfg?.akFromEnv || cfg?.asFromEnv);
+
+  const FieldStatus = ({ has, fromEnv: fe, label, envVarName }: { has: boolean; fromEnv: boolean; label: string; envVarName: string }) => (
+    <div className="flex items-center gap-2 text-xs py-1 border-b border-border/40 last:border-0">
+      <span className={has ? "text-green-500" : "text-red-400"}>
+        {has ? "✓" : "✗"}
+      </span>
+      <span className="text-muted-foreground flex-1">{label}</span>
+      {has && fe && <Badge variant="outline" className="text-xs py-0 h-4">ENV</Badge>}
+      {has && !fe && <Badge variant="secondary" className="text-xs py-0 h-4">DB</Badge>}
+      {!has && (
+        <code className="text-xs text-amber-500 font-mono truncate max-w-[160px]" title={envVarName}>{envVarName}</code>
+      )}
+    </div>
+  );
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!form.merchantId && !form.apiKey && !form.apiSecret) {
+      toast({ title: "Aucune valeur saisie", variant: "destructive" });
+      return;
+    }
     setSaving(true);
     try {
       await onSave(countryName, form);
+      setForm({ merchantId: "", apiKey: "", apiSecret: "" });
       toast({ title: `${countryName} — configuration sauvegardée` });
     } catch (err: any) {
       toast({ title: "Erreur", description: err.message, variant: "destructive" });
@@ -3069,58 +3090,99 @@ function SeaPayCountryCard({ countryName, flag, currency, initialData, envOverri
     }
   };
 
-  const isConfigured = !!(form.merchantId && form.apiKey);
-
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base flex items-center gap-2">
+        <CardTitle className="text-base flex items-center gap-2 flex-wrap">
           <span>{flag}</span>
           <span>{countryName}</span>
           <Badge variant="outline" className="ml-1 text-xs">{currency}</Badge>
           <Badge variant={isConfigured ? "default" : "destructive"} className="ml-auto text-xs">
             {isConfigured ? "Configuré" : "Non configuré"}
           </Badge>
-          {envOverride && <Badge variant="outline" className="text-xs">ENV</Badge>}
+          {fromEnv && <Badge variant="outline" className="text-xs border-blue-500 text-blue-400">ENV</Badge>}
         </CardTitle>
       </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSave} className="space-y-3">
-          <div className="space-y-1">
-            <Label className="text-xs">Merchant ID</Label>
-            <Input
-              value={form.merchantId}
-              onChange={e => setForm(f => ({ ...f, merchantId: e.target.value }))}
-              placeholder={`Merchant ID SeaPay ${countryName}`}
-              data-testid={`input-seapay-merchant-id-${countryName.toLowerCase()}`}
-              className="text-sm h-8"
-            />
+      <CardContent className="space-y-3">
+        {/* Statut par champ */}
+        <div className="bg-muted/40 rounded-md px-3 py-2 space-y-0">
+          <FieldStatus
+            has={!!cfg?.hasMerchantId}
+            fromEnv={!!cfg?.midFromEnv}
+            label="Merchant ID"
+            envVarName={envVars?.merchantId || `SEAPAY_${countryName.toUpperCase()}_MERCHANT_ID`}
+          />
+          <FieldStatus
+            has={!!cfg?.hasApiKey}
+            fromEnv={!!cfg?.akFromEnv}
+            label="API Key"
+            envVarName={envVars?.apiKey || `SEAPAY_${countryName.toUpperCase()}_API_KEY`}
+          />
+          <FieldStatus
+            has={!!cfg?.hasApiSecret}
+            fromEnv={!!cfg?.asFromEnv}
+            label="API Secret"
+            envVarName={envVars?.apiSecret || `SEAPAY_${countryName.toUpperCase()}_API_SECRET`}
+          />
+        </div>
+
+        {/* Variables d'env attendues (Pakistan : affiche aussi les noms legacy) */}
+        {envVars?.legacyMerchantId && (
+          <button
+            type="button"
+            className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            onClick={() => setShowEnvVars(v => !v)}
+            data-testid={`button-toggle-envvars-${countryName.toLowerCase()}`}
+          >
+            {showEnvVars ? "Masquer" : "Voir"} les noms de variables acceptés
+          </button>
+        )}
+        {showEnvVars && envVars?.legacyMerchantId && (
+          <div className="bg-muted/60 rounded-md px-3 py-2 text-xs space-y-1 font-mono">
+            <p className="text-muted-foreground font-sans font-medium mb-1">Noms acceptés (Pakistan) :</p>
+            <div><span className="text-blue-400">{envVars.merchantId}</span> <span className="text-muted-foreground">ou</span> <span className="text-blue-400">{envVars.legacyMerchantId}</span></div>
+            <div><span className="text-blue-400">{envVars.apiKey}</span> <span className="text-muted-foreground">ou</span> <span className="text-blue-400">{envVars.legacyApiKey}</span></div>
+            <div><span className="text-blue-400">{envVars.apiSecret}</span> <span className="text-muted-foreground">ou</span> <span className="text-blue-400">{envVars.legacyApiSecret}</span></div>
           </div>
-          <div className="space-y-1">
-            <Label className="text-xs">API Key (Pay-in / signature MD5)</Label>
-            <Input
-              value={form.apiKey}
-              onChange={e => setForm(f => ({ ...f, apiKey: e.target.value }))}
-              placeholder="API Key"
-              data-testid={`input-seapay-api-key-${countryName.toLowerCase()}`}
-              className="text-sm h-8"
-            />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">API Secret (Pay-out & Balance)</Label>
-            <Input
-              value={form.apiSecret}
-              onChange={e => setForm(f => ({ ...f, apiSecret: e.target.value }))}
-              placeholder="API Secret"
-              data-testid={`input-seapay-api-secret-${countryName.toLowerCase()}`}
-              className="text-sm h-8"
-            />
-          </div>
-          <Button type="submit" size="sm" disabled={saving} data-testid={`button-save-seapay-${countryName.toLowerCase()}`}>
-            {saving ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Globe className="w-3 h-3 mr-1" />}
-            Sauvegarder
-          </Button>
-        </form>
+        )}
+
+        {/* Formulaire de saisie DB — uniquement si les champs ne viennent pas tous de l'env */}
+        {!isConfigured && (
+          <form onSubmit={handleSave} className="space-y-2 pt-1 border-t border-border/40">
+            <p className="text-xs text-muted-foreground">Ou saisir manuellement (stocké en base) :</p>
+            {!cfg?.hasMerchantId && (
+              <Input
+                value={form.merchantId}
+                onChange={e => setForm(f => ({ ...f, merchantId: e.target.value }))}
+                placeholder="Merchant ID"
+                data-testid={`input-seapay-merchant-id-${countryName.toLowerCase()}`}
+                className="text-sm h-8"
+              />
+            )}
+            {!cfg?.hasApiKey && (
+              <Input
+                value={form.apiKey}
+                onChange={e => setForm(f => ({ ...f, apiKey: e.target.value }))}
+                placeholder="API Key"
+                data-testid={`input-seapay-api-key-${countryName.toLowerCase()}`}
+                className="text-sm h-8"
+              />
+            )}
+            {!cfg?.hasApiSecret && (
+              <Input
+                value={form.apiSecret}
+                onChange={e => setForm(f => ({ ...f, apiSecret: e.target.value }))}
+                placeholder="API Secret"
+                data-testid={`input-seapay-api-secret-${countryName.toLowerCase()}`}
+                className="text-sm h-8"
+              />
+            )}
+            <Button type="submit" size="sm" disabled={saving} data-testid={`button-save-seapay-${countryName.toLowerCase()}`}>
+              {saving ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Globe className="w-3 h-3 mr-1" />}
+              Sauvegarder
+            </Button>
+          </form>
+        )}
       </CardContent>
     </Card>
   );
@@ -3173,7 +3235,7 @@ function SeaPayPanel() {
               </Badge>
             </div>
             <p className="text-xs text-muted-foreground">
-              SeaPay (api.seaglb.xyz) — chaque pays dispose d'un compte marchand distinct. Configurez les clés API pour chaque pays ci-dessous.
+              SeaPay (api.seaglb.xyz) — chaque pays dispose d'un compte marchand distinct. Les clés sont lues depuis les variables d'environnement du serveur (priorité) ou la base de données.
             </p>
             <div className="space-y-2">
               {SEAPAY_COUNTRIES_META.map(c => {
@@ -3186,7 +3248,9 @@ function SeaPayPanel() {
                     <Badge variant={cfg?.configured ? "default" : "secondary"} className="ml-auto text-xs">
                       {cfg?.configured ? "✓" : "—"}
                     </Badge>
-                    {spSettings?.envOverrides?.[c.name] && <Badge variant="outline" className="text-xs">ENV</Badge>}
+                    {spSettings?.envOverrides?.[c.name] && (
+                      <Badge variant="outline" className="text-xs border-blue-500 text-blue-400">ENV</Badge>
+                    )}
                   </div>
                 );
               })}
@@ -3233,8 +3297,8 @@ function SeaPayPanel() {
               countryName={c.name}
               flag={c.flag}
               currency={c.currency}
-              initialData={spSettings?.countries?.[c.name] || { merchantId: "", apiKey: "", apiSecret: "" }}
-              envOverride={!!spSettings?.envOverrides?.[c.name]}
+              cfg={spSettings?.countries?.[c.name]}
+              envVars={spSettings?.envVarNames?.[c.name]}
               onSave={handleSave}
             />
           ))}
