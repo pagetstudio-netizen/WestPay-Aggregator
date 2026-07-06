@@ -69,7 +69,23 @@ app.use((req, res, next) => {
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+        // Redact sensitive fields before logging
+        const SENSITIVE_KEYS = new Set([
+          "token", "accessToken", "refreshToken", "apiKey", "api_key",
+          "secret", "webhookSecret", "password", "hash", "privateKey",
+        ]);
+        const redacted = JSON.parse(JSON.stringify(capturedJsonResponse));
+        const redactObj = (obj: Record<string, any>) => {
+          for (const key of Object.keys(obj)) {
+            if (SENSITIVE_KEYS.has(key)) {
+              obj[key] = "[REDACTED]";
+            } else if (obj[key] && typeof obj[key] === "object") {
+              redactObj(obj[key]);
+            }
+          }
+        };
+        if (typeof redacted === "object" && redacted !== null) redactObj(redacted);
+        logLine += ` :: ${JSON.stringify(redacted)}`;
       }
 
       log(logLine);
@@ -86,7 +102,8 @@ app.use((req, res, next) => {
   try {
     await runMigrations();
   } catch (err) {
-    console.log("Migration skipped:", (err as any).message);
+    console.error("[FATAL] Migration failed — cannot start with incomplete schema:", (err as any).message);
+    process.exit(1);
   }
 
   try {

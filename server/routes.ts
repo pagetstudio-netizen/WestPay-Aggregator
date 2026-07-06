@@ -577,9 +577,48 @@ async function cryptoApiKeyAuthMiddleware(req: Request, res: Response, next: Nex
 
 const CRYPTO_FEE_RATE = 0.05;
 
+/**
+ * SSRF guard: validates that a webhook URL is a public HTTP(S) address.
+ * Blocks loopback, link-local, private RFC-1918, and cloud metadata addresses.
+ */
+function assertPublicWebhookUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`URL webhook invalide: ${url}`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`Protocole webhook non autorise: ${parsed.protocol}`);
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  // Block private / loopback / link-local / metadata ranges
+  const BLOCKED = [
+    /^localhost$/,
+    /^127\./,
+    /^0\.0\.0\.0$/,
+    /^::1$/,
+    /^10\./,
+    /^172\.(1[6-9]|2\d|3[01])\./,
+    /^192\.168\./,
+    /^169\.254\./,
+    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
+    /^fc00:/i,
+    /^fe80:/i,
+    /^metadata\.google\.internal$/,
+    /^169\.254\.169\.254$/,
+  ];
+  for (const re of BLOCKED) {
+    if (re.test(hostname)) {
+      throw new Error(`URL webhook pointe vers une adresse privee/interne: ${hostname}`);
+    }
+  }
+}
+
 async function notifyCryptoWebhook(merchant: { id: number; webhookUrl?: string | null; webhookSecret?: string | null }, payload: Record<string, any>): Promise<void> {
   if (!merchant.webhookUrl) return;
   try {
+    assertPublicWebhookUrl(merchant.webhookUrl);
     const payloadStr = JSON.stringify(payload);
     const signature = merchant.webhookSecret
       ? crypto.createHmac("sha256", merchant.webhookSecret).update(payloadStr).digest("hex")
@@ -3022,8 +3061,10 @@ export async function registerRoutes(
       const merchant = await storage.getMerchantById(merchantId);
       if (!merchant) return res.status(404).json({ message: "Marchand non trouve" });
 
-      if (webhookUrl && !/^https?:\/\/.+/.test(webhookUrl)) {
-        return res.status(400).json({ message: "URL invalide" });
+      if (webhookUrl) {
+        try { assertPublicWebhookUrl(webhookUrl); } catch (e: any) {
+          return res.status(400).json({ message: e.message });
+        }
       }
 
       const webhookSecret = webhookUrl ? (merchant.webhookSecret || crypto.randomBytes(32).toString("hex")) : null;
@@ -3196,6 +3237,8 @@ export async function registerRoutes(
       const merchant = await storage.getMerchantById(merchantId);
       if (!merchant?.webhookUrl) return { success: false, error: "Aucune URL webhook configuree" };
 
+      assertPublicWebhookUrl(merchant.webhookUrl);
+
       const payloadStr = JSON.stringify(payload);
       const signature = merchant.webhookSecret
         ? crypto.createHmac("sha256", merchant.webhookSecret).update(payloadStr).digest("hex")
@@ -3272,8 +3315,10 @@ export async function registerRoutes(
       const { webhookUrl } = req.body;
       const merchantId = (req as any).user.id;
 
-      if (webhookUrl && !/^https?:\/\/.+/.test(webhookUrl)) {
-        return res.status(400).json({ message: "URL invalide. Elle doit commencer par http:// ou https://" });
+      if (webhookUrl) {
+        try { assertPublicWebhookUrl(webhookUrl); } catch (e: any) {
+          return res.status(400).json({ message: e.message });
+        }
       }
 
       const webhookSecret = webhookUrl ? crypto.randomBytes(32).toString("hex") : null;
