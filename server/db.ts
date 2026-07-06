@@ -619,6 +619,7 @@ export async function runMigrations() {
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     console.error("[DB] Erreur migration:", err);
+    throw err; // fail-fast: server must not boot with incomplete schema
   } finally {
     client.release();
   }
