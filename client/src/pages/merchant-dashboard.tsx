@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { showConfirm } from "@/components/ui/modal-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -993,7 +994,7 @@ function ApiKeysPanel({ token }: { token: string | null }) {
                     </div>
                   </div>
                   <button
-                    onClick={() => { if (confirm(t("confirm"))) regenerateMutation.mutate(key.id); }}
+                    onClick={async () => { if (await showConfirm(t("confirm"))) regenerateMutation.mutate(key.id); }}
                     disabled={regenerateMutation.isPending}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95"
                     style={{ background: "#f0f4ff", color: "#3949ab", border: "1.5px solid #c5cae9" }}
@@ -3664,7 +3665,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
   };
 
   const handleRegenerateKey = async () => {
-    if (!confirm("Régénérer la clé API crypto ? L'ancienne clé sera immédiatement invalidée.")) return;
+    if (!(await showConfirm("Régénérer la clé API crypto ?", { variant: "destructive", confirmLabel: "Régénérer", message: "L'ancienne clé sera immédiatement invalidée." }))) return;
     setIsRegenerating(true);
     try {
       const res = await fetch("/api/merchant/crypto/regenerate-api-key", {
@@ -3674,7 +3675,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
       if (!res.ok) throw new Error("Échec de la régénération");
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/crypto/api-key"] });
     } catch (e: any) {
-      alert(e.message);
+      toast({ title: "Erreur", description: e.message, variant: "destructive" });
     } finally {
       setIsRegenerating(false);
     }

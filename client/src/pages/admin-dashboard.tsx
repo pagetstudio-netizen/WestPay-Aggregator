@@ -8,6 +8,7 @@ import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { showConfirm } from "@/components/ui/modal-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -224,7 +225,7 @@ function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string
               <Button
                 variant="destructive"
                 className="w-full"
-                onClick={() => { if (confirm("Supprimer la configuration Telegram de ce marchand ?")) revokeMutation.mutate(); }}
+                onClick={async () => { if (await showConfirm("Supprimer la config Telegram ?", { variant: "destructive", confirmLabel: "Supprimer", message: "La liaison Telegram de ce marchand sera retirée." })) revokeMutation.mutate(); }}
                 disabled={revokeMutation.isPending}
                 data-testid={`button-revoke-telegram-${merchant.id}`}
               >
@@ -1192,7 +1193,7 @@ function AdminPaymentLinksPanel() {
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <Switch checked={link.active} onCheckedChange={() => toggleMutation.mutate(link.id)} data-testid={`switch-admin-link-${link.id}`} />
-                      <Button variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10 h-8 w-8" onClick={() => { if (confirm("Supprimer ce lien ?")) deleteMutation.mutate(link.id); }} data-testid={`button-admin-delete-link-${link.id}`}>
+                      <Button variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10 h-8 w-8" onClick={async () => { if (await showConfirm("Supprimer ce lien ?", { variant: "destructive", confirmLabel: "Supprimer" })) deleteMutation.mutate(link.id); }} data-testid={`button-admin-delete-link-${link.id}`}>
                         <Trash2 className="w-4 h-4" />
                       </Button>
                     </div>
@@ -1415,7 +1416,7 @@ function MerchantsPanel() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => { if (confirm("Supprimer ce marchand ?")) deleteMutation.mutate(merchant.id); }}
+                      onClick={async () => { if (await showConfirm("Supprimer ce marchand ?", { variant: "destructive", confirmLabel: "Supprimer", message: "Cette action est irréversible." })) deleteMutation.mutate(merchant.id); }}
                       data-testid={`button-delete-${merchant.id}`}
                     >
                       <Trash2 className="w-4 h-4 text-destructive" />
@@ -1791,13 +1792,13 @@ function TransactionsPanel() {
                             {(tx.type === "pending" || ["omnipay_pending", "submitted"].includes(tx.status)) && (
                               <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
                                 disabled={retryTxMutation.isPending}
-                                onPick={(provider) => { if (confirm(`Déclencher le paiement chez ${provider} ?\nUne nouvelle invite USSD sera envoyée au client.`)) retryTxMutation.mutate({ tx, provider }); }}
+                                onPick={async (provider) => { if (await showConfirm(`Déclencher le paiement chez ${provider} ?\nUne nouvelle invite USSD sera envoyée au client.`)) retryTxMutation.mutate({ tx, provider }); }}
                                 testId={`button-trigger-tx-${tx.id}`} />
                             )}
                             {tx.status !== "confirmed" && tx.status !== "completed" && tx.status !== "success" && (
                               <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white gap-1"
                                 disabled={validateTxMutation.isPending}
-                                onClick={() => { if (confirm("Valider cette transaction manuellement ? (à utiliser si l'argent est bien arrivé au client)")) validateTxMutation.mutate(tx.id); }}
+                                onClick={async () => { if (await showConfirm("Valider cette transaction manuellement ? (à utiliser si l'argent est bien arrivé au client)")) validateTxMutation.mutate(tx.id); }}
                                 data-testid={`button-validate-tx-${tx.id}`}>
                                 <CheckCircle className="w-3 h-3" />Valider manuellement
                               </Button>
@@ -1805,7 +1806,7 @@ function TransactionsPanel() {
                             {tx.status !== "rejected" && tx.status !== "failed" && (
                               <Button size="sm" variant="destructive" className="h-7 text-xs gap-1"
                                 disabled={rejectTxMutation.isPending}
-                                onClick={() => { if (confirm("Rejeter cette transaction manuellement ?")) rejectTxMutation.mutate(tx.id); }}
+                                onClick={async () => { if (await showConfirm("Rejeter cette transaction manuellement ?")) rejectTxMutation.mutate(tx.id); }}
                                 data-testid={`button-reject-tx-${tx.id}`}>
                                 <XCircle className="w-3 h-3" />Rejeter
                               </Button>
@@ -2167,7 +2168,7 @@ function CountriesPanel() {
                         variant="ghost"
                         size="sm"
                         className="text-destructive hover:text-destructive"
-                        onClick={() => { if (confirm(`Supprimer ${mc.country} pour ${mc.merchantName || "ce marchand"} ?`)) deleteCountryMutation.mutate(mc.id); }}
+                        onClick={async () => { if (await showConfirm(`Supprimer ${mc.country} pour ${mc.merchantName || "ce marchand"} ?`)) deleteCountryMutation.mutate(mc.id); }}
                         disabled={deleteCountryMutation.isPending}
                         data-testid={`button-delete-country-${mc.id}`}
                       >
@@ -2375,7 +2376,7 @@ function NumbersPanel() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => { if (confirm("Supprimer ce numero ?")) deleteNumberMutation.mutate(num.id); }}
+                      onClick={async () => { if (await showConfirm("Supprimer ce numero ?")) deleteNumberMutation.mutate(num.id); }}
                       data-testid={`button-delete-number-${num.id}`}
                     >
                       <Trash2 className="w-4 h-4 text-destructive" />
@@ -2670,8 +2671,7 @@ function ApiKeysManagementPanel() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => {
-                        if (confirm("Regenerer cette cle API ? L'ancienne sera invalidee.")) {
+                      onClick={async () => { if (await showConfirm("Regenerer cette cle API ? L'ancienne sera invalidee.")) {
                           regenerateMutation.mutate(c.id);
                         }
                       }}
@@ -3822,7 +3822,7 @@ function AdminWalletTransfersPanel() {
                             size="icon"
                             className="text-destructive hover:text-destructive h-7 w-7"
                             onClick={async () => {
-                              if (!confirm(`Supprimer ${c.country} ?`)) return;
+                              if (!(await showConfirm(`Supprimer ${c.country} ?`))) return;
                               await fetch(`/api/admin/wallet-transfer-countries/${c.id}`, {
                                 method: "DELETE",
                                 headers: { Authorization: `Bearer ${token}` },
@@ -4083,8 +4083,7 @@ function AdminsPanel() {
                       variant="ghost"
                       className="text-destructive hover:text-destructive hover:bg-destructive/10"
                       disabled={deleteMutation.isPending}
-                      onClick={() => {
-                        if (confirm(`Supprimer le compte admin ${a.email} ?`)) deleteMutation.mutate(a.id);
+                      onClick={async () => { if (await showConfirm(`Supprimer le compte admin ${a.email} ?`)) deleteMutation.mutate(a.id);
                       }}
                       data-testid={`button-delete-admin-${a.id}`}
                     >
@@ -4836,7 +4835,7 @@ function AdminWithdrawalsPanel() {
                                 disabled={syncStatusMutation.isPending} onPick={(provider) => syncStatusMutation.mutate({ id: wd.id, provider })} testId={`button-sync-status-${wd.id}`} />
                             )}
                             <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="h-8 border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
-                              disabled={retryMutation.isPending} onPick={(provider) => { if (confirm(`Déclencher le paiement de ce reversement chez ${provider} ?`)) retryMutation.mutate({ id: wd.id, provider }); }} testId={`button-retry-wd-${wd.id}`} />
+                              disabled={retryMutation.isPending} onPick={async (provider) => { if (await showConfirm(`Déclencher le paiement de ce reversement chez ${provider} ?`)) retryMutation.mutate({ id: wd.id, provider }); }} testId={`button-retry-wd-${wd.id}`} />
                             {wd.omnipayRef ? (
                               <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-8 text-xs"
                                 onClick={() => openAction(wd, "force-validate")} data-testid={`button-force-validate-wd-${wd.id}`}>
@@ -4972,7 +4971,7 @@ function AdminWithdrawalsPanel() {
                                   disabled={syncStatusMutation.isPending} onPick={(provider) => syncStatusMutation.mutate({ id: wd.id, provider })} testId={`button-sync-status-inline-${wd.id}`} />
                               )}
                               <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="h-7 border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
-                                disabled={retryMutation.isPending} onPick={(provider) => { if (confirm(`Déclencher le paiement de ce reversement chez ${provider} ?`)) retryMutation.mutate({ id: wd.id, provider }); }} testId={`button-retry-inline-${wd.id}`} />
+                                disabled={retryMutation.isPending} onPick={async (provider) => { if (await showConfirm(`Déclencher le paiement de ce reversement chez ${provider} ?`)) retryMutation.mutate({ id: wd.id, provider }); }} testId={`button-retry-inline-${wd.id}`} />
                               {wd.omnipayRef ? (
                                 <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-7 text-xs"
                                   onClick={() => openAction(wd, "force-validate")} data-testid={`button-force-validate-inline-${wd.id}`}>
@@ -5001,7 +5000,7 @@ function AdminWithdrawalsPanel() {
                                   disabled={syncStatusMutation.isPending} onPick={(provider) => syncStatusMutation.mutate({ id: wd.id, provider })} testId={`button-sync-status-approved-${wd.id}`} />
                               )}
                               <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="h-7 border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
-                                disabled={retryMutation.isPending} onPick={(provider) => { if (confirm(`Déclencher le paiement chez ${provider} ?`)) retryMutation.mutate({ id: wd.id, provider }); }} testId={`button-retry-approved-${wd.id}`} />
+                                disabled={retryMutation.isPending} onPick={async (provider) => { if (await showConfirm(`Déclencher le paiement chez ${provider} ?`)) retryMutation.mutate({ id: wd.id, provider }); }} testId={`button-retry-approved-${wd.id}`} />
                               <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-7 text-xs"
                                 onClick={() => openAction(wd, "force-validate")} data-testid={`button-force-validate-approved-${wd.id}`}>
                                 <CheckCircle className="w-3 h-3" />Valider manuellement
@@ -5084,7 +5083,7 @@ function AdminWithdrawalsPanel() {
                       disabled={syncStatusMutation.isPending} onPick={(provider) => syncStatusMutation.mutate({ id: selectedWd.id, provider })} testId="button-sync-status-dialog" />
                   )}
                   <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50 text-xs"
-                    disabled={retryMutation.isPending} onPick={(provider) => { setDetailDialogOpen(false); if (confirm(`Déclencher le paiement de ce reversement chez ${provider} ?`)) retryMutation.mutate({ id: selectedWd.id, provider }); }} testId="button-retry-dialog" />
+                    disabled={retryMutation.isPending} onPick={async (provider) => { setDetailDialogOpen(false); if (await showConfirm(`Déclencher le paiement de ce reversement chez ${provider} ?`)) retryMutation.mutate({ id: selectedWd.id, provider }); }} testId="button-retry-dialog" />
                   {selectedWd.status !== "approved" && (
                     selectedWd.omnipayRef ? (
                       <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 flex-1"
@@ -5988,7 +5987,7 @@ function AdminAccountsCard({ token, currentUserId }: { token: string | null; cur
                   <Badge variant="default" className="text-xs">Vous</Badge>
                 ) : (
                   <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                    onClick={() => { if (confirm(`Supprimer le compte ${admin.email} ?`)) deleteMutation.mutate(admin.id); }}
+                    onClick={async () => { if (await showConfirm(`Supprimer le compte ${admin.email} ?`)) deleteMutation.mutate(admin.id); }}
                     data-testid={`button-delete-admin-${admin.id}`}>
                     <Trash2 className="w-4 h-4" />
                   </Button>
@@ -6502,8 +6501,7 @@ function CryptoAggPanel() {
                       variant="ghost"
                       size="icon"
                       className="text-destructive hover:text-destructive"
-                      onClick={() => {
-                        if (confirm(`Supprimer l'agrégateur "${agg.name}" ?`)) deleteMutation.mutate(agg.id);
+                      onClick={async () => { if (await showConfirm(`Supprimer l'agrégateur "${agg.name}" ?`)) deleteMutation.mutate(agg.id);
                       }}
                       data-testid={`button-delete-agg-${agg.id}`}
                     >
@@ -8180,7 +8178,7 @@ function KnowledgePanel() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm("Supprimer ce chunk ?")) return;
+    if (!(await showConfirm("Supprimer ce chunk ?"))) return;
     await fetch(`/api/admin/knowledge/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
     toast({ title: "Supprimé" }); refetch();
   };

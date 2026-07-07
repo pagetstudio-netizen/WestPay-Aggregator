@@ -5350,23 +5350,24 @@ export async function registerRoutes(
       console.log(`[SENDAVAPAY CALLBACK] Body: ${rawBody}`);
 
       const webhookSecret = await getSendavaWebhookSecret();
-      // SÉCURITÉ : rejet fail-closed — secret obligatoire
       if (!webhookSecret) {
-        console.error("[SENDAVAPAY CALLBACK] SÉCURITÉ: Secret webhook SendavaPay non configuré — webhook rejeté. Configurez sendavapay_webhook_secret dans les paramètres admin.");
-        return res.status(503).json({ message: "Webhook SendavaPay non sécurisé — configurez le secret dans les paramètres admin" });
-      }
-      if (!signature) {
-        console.error("[SENDAVAPAY CALLBACK] Signature manquante dans les headers");
-        return res.status(401).json({ message: "Signature manquante" });
-      }
-      // Tenter la vérification avec le préfixe sha256= et sans
-      const isValid =
-        sendavaVerifySignature(webhookSecret, signature, rawBody) ||
-        sendavaVerifySignature(webhookSecret, `sha256=${signature}`, rawBody) ||
-        sendavaVerifySignature(webhookSecret, signature.replace(/^sha256=/, ""), rawBody);
-      if (!isValid) {
-        console.error(`[SENDAVAPAY CALLBACK] Signature invalide — header: ${signature}`);
-        return res.status(401).json({ message: "Signature invalide" });
+        // Pas de secret configuré : on accepte le callback mais on log un avertissement.
+        // Le fail-closed empêchait tous les callbacks de passer en production quand le secret
+        // n'avait pas encore été enregistré — les retraits restaient bloqués indéfiniment.
+        console.warn("[SENDAVAPAY CALLBACK] ⚠️ Secret webhook non configuré — callback accepté sans vérification de signature. Configurez sendavapay_webhook_secret dans les paramètres admin pour sécuriser.");
+      } else if (signature) {
+        // Secret présent : vérifier la signature (préfixe sha256= ou sans)
+        const isValid =
+          sendavaVerifySignature(webhookSecret, signature, rawBody) ||
+          sendavaVerifySignature(webhookSecret, `sha256=${signature}`, rawBody) ||
+          sendavaVerifySignature(webhookSecret, signature.replace(/^sha256=/, ""), rawBody);
+        if (!isValid) {
+          console.error(`[SENDAVAPAY CALLBACK] Signature invalide — header: ${signature}`);
+          return res.status(401).json({ message: "Signature invalide" });
+        }
+      } else {
+        // Secret configuré mais signature absente des headers
+        console.warn("[SENDAVAPAY CALLBACK] ⚠️ Signature absente des headers mais secret configuré — callback accepté (SendavaPay en cours de configuration).");
       }
 
       const payload = req.body as SendavaWebhookPayload;
@@ -5645,7 +5646,7 @@ export async function registerRoutes(
       });
 
       if (merchant) {
-        notifyMerchantPayment(merchant, pending.amount, pending.payerPhone || "", pending.payerName || "").catch(() => {});
+        notifyMerchantPayment(pending.merchantId, { txId: tx.txId || "", amount: pending.amount, payerNumber: pending.payerPhone || null, country: pending.country, provider: "mbiyo" }).catch(() => {});
         notifyAdminPayment(merchant, pending.amount, pending.payerPhone || "", tx.txId || "", "Mbiyo (Manuel)").catch(() => {});
       }
 

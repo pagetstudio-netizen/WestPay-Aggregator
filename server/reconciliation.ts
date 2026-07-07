@@ -6,6 +6,8 @@
 
 import { storage } from "./storage";
 import { getPaymentStatus as sendavaGetStatus, getWithdrawalStatus as sendavaGetWithdrawalStatus } from "./sendavapay";
+import { getTransactionStatus as omnipayGetStatus } from "./omnipay";
+import { getTransactionStatus as mbiyoGetStatus } from "./mbiyo";
 import { notifyMerchantPayment, notifyAdminPayment, notifyAdminWithdrawal, notifyMerchantWithdrawal } from "./telegram-bot";
 
 const COLLECTION_FEE_RATE = 0.055;
@@ -24,6 +26,19 @@ async function getSendavaKey(): Promise<string | undefined> {
     process.env.SENDAVAPAY_API_KEY ||
     await storage.getSetting("sendavapay_api_key")
   );
+}
+
+async function getOmnipayPayoutKey(): Promise<string | undefined> {
+  return (
+    process.env.OMNIPAY_PAYOUT_API_KEY ||
+    await storage.getSetting("omnipay_payout_api_key") ||
+    process.env.OMNIPAY_API_KEY ||
+    await storage.getSetting("omnipay_api_key")
+  );
+}
+
+async function getMbiyoKey(): Promise<string | undefined> {
+  return process.env.MBIYO_API_KEY || await storage.getSetting("mbiyo_api_key");
 }
 
 async function creditConfirmedPayment(pending: any, txRef: string): Promise<boolean> {
@@ -158,53 +173,105 @@ export async function pollSendavaWithdrawalBackground(params: {
   console.log(`[POLL-WD] Fin de la vérification rapprochée pour le retrait #${withdrawalId} (${Math.round(elapsedMs / 60000)}min) — le job de fond prendra le relais`);
 }
 
+const WD_SUCCESS = ["completed", "success", "approved", "paid", "sent", "transferred", "processed", "delivered", "confirmed", "done", "ok"];
+const WD_FAILURE = ["failed", "failure", "cancelled", "canceled", "rejected", "declined", "error"];
+
+async function applyWithdrawalResult(wd: any, status: string, ref: string): Promise<void> {
+  const merchant = await storage.getMerchantById(wd.merchantId);
+  if (WD_SUCCESS.includes(status)) {
+    const fees = wd.fees || 0;
+    await storage.updateWithdrawalStatus(wd.id, "approved", `Retrait confirmé`, ref, fees, fees);
+    notifyAdminWithdrawal({ id: wd.id, merchantName: merchant?.name || `#${wd.merchantId}`, country: wd.country, amount: wd.amount, fees, phone: wd.phone, operator: wd.operator, status: "approved", mode: "auto" }).catch(() => {});
+    notifyMerchantWithdrawal(wd.merchantId, { id: wd.id, country: wd.country, amount: wd.amount, fees, phone: wd.phone, operator: wd.operator, status: "approved" }).catch(() => {});
+    console.log(`[RECONCILIATION-WD] Retrait #${wd.id} approuvé (${wd.gateway || "omnipay"}) — ref=${ref}`);
+  } else if (WD_FAILURE.includes(status)) {
+    await storage.updateWithdrawalStatus(wd.id, "failed", `Retrait refusé (${status})`, ref);
+    const mc = await storage.getMerchantCountryById(wd.merchantCountryId);
+    if (mc) await storage.incrementMerchantCountryBalance(mc.id, wd.amount);
+    notifyAdminWithdrawal({ id: wd.id, merchantName: merchant?.name || `#${wd.merchantId}`, country: wd.country, amount: wd.amount, fees: 0, phone: wd.phone, operator: wd.operator, status: "failed", mode: "auto" }).catch(() => {});
+    notifyMerchantWithdrawal(wd.merchantId, { id: wd.id, country: wd.country, amount: wd.amount, fees: 0, phone: wd.phone, operator: wd.operator, status: "failed" }).catch(() => {});
+    console.log(`[RECONCILIATION-WD] Retrait #${wd.id} échoué (${wd.gateway || "omnipay"}) — ref=${ref} status=${status}`);
+  } else {
+    console.log(`[RECONCILIATION-WD] Retrait #${wd.id} en cours (${wd.gateway || "omnipay"}) — ref=${ref} status=${status || "inconnu"}`);
+  }
+}
+
 async function reconcileStaleWithdrawals(): Promise<void> {
   try {
-    const apiKey = await getSendavaKey();
-    if (!apiKey) return;
-
     const now = Date.now();
     const ONE_MIN = 60 * 1000;
-    const SIX_HOURS = 6 * 60 * 60 * 1000;
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
 
-    const staleWithdrawals = await storage.getPendingWithdrawals?.() || [];
-    const sendavaStale = staleWithdrawals.filter((w: any) => {
+    const allPending = await storage.getPendingWithdrawals?.() || [];
+    const stale = allPending.filter((w: any) => {
       if (w.status !== "pending") return false;
-      if (w.gateway !== "sendavapay") return false;
       if (!w.omnipayRef) return false;
       const age = now - new Date(w.createdAt).getTime();
-      return age >= ONE_MIN && age < SIX_HOURS;
+      return age >= ONE_MIN && age < TWENTY_FOUR_HOURS;
     });
 
-    if (sendavaStale.length === 0) return;
-    console.log(`[RECONCILIATION-WD] ${sendavaStale.length} retrait(s) bloqué(s) >1min — vérification...`);
+    if (stale.length === 0) return;
+    console.log(`[RECONCILIATION-WD] ${stale.length} retrait(s) bloqué(s) >1min — vérification (sendavapay/omnipay/mbiyo)...`);
 
-    for (const wd of sendavaStale) {
-      try {
-        const result = await sendavaGetWithdrawalStatus(apiKey, wd.omnipayRef);
-        const status = (result.data?.status || "").toLowerCase();
-        const merchant = await storage.getMerchantById(wd.merchantId);
-
-        if (["completed", "success", "approved", "paid", "sent", "transferred", "processed", "delivered", "confirmed", "done", "ok"].includes(status)) {
-          const fees = wd.fees || 0;
-          await storage.updateWithdrawalStatus(wd.id, "approved", `Retrait confirmé`, wd.omnipayRef, fees, fees);
-          notifyAdminWithdrawal({ id: wd.id, merchantName: merchant?.name || `#${wd.merchantId}`, country: wd.country, amount: wd.amount, fees, phone: wd.phone, operator: wd.operator, status: "approved", mode: "auto" }).catch(() => {});
-          notifyMerchantWithdrawal(wd.merchantId, { id: wd.id, country: wd.country, amount: wd.amount, fees, phone: wd.phone, operator: wd.operator, status: "approved" }).catch(() => {});
-          console.log(`[RECONCILIATION-WD] Retrait #${wd.id} approuvé — ref=${wd.omnipayRef}`);
-        } else if (["failed", "failure", "cancelled", "canceled", "rejected", "declined", "error"].includes(status)) {
-          await storage.updateWithdrawalStatus(wd.id, "failed", `Retrait refusé (${status})`, wd.omnipayRef);
-          const mc = await storage.findMerchantCountryBySimAndCountry(wd.merchantId, wd.country);
-          if (mc) await storage.incrementMerchantCountryBalance(mc.id, wd.amount);
-          notifyAdminWithdrawal({ id: wd.id, merchantName: merchant?.name || `#${wd.merchantId}`, country: wd.country, amount: wd.amount, fees: 0, phone: wd.phone, operator: wd.operator, status: "failed", mode: "auto" }).catch(() => {});
-          notifyMerchantWithdrawal(wd.merchantId, { id: wd.id, country: wd.country, amount: wd.amount, fees: 0, phone: wd.phone, operator: wd.operator, status: "failed" }).catch(() => {});
-          console.log(`[RECONCILIATION-WD] Retrait #${wd.id} échoué — ref=${wd.omnipayRef} status=${status}`);
-        } else {
-          console.log(`[RECONCILIATION-WD] Retrait #${wd.id} en cours — ref=${wd.omnipayRef} status=${status || "inconnu"}`);
+    // ── SendavaPay ──────────────────────────────────────────────────────────
+    const sendavaStale = stale.filter((w: any) => w.gateway === "sendavapay");
+    if (sendavaStale.length > 0) {
+      const apiKey = await getSendavaKey();
+      if (!apiKey) {
+        console.warn("[RECONCILIATION-WD][sendavapay] Clé API non configurée — réconciliation ignorée");
+      } else {
+        for (const wd of sendavaStale) {
+          try {
+            const ageMin = Math.round((now - new Date(wd.createdAt).getTime()) / 60000);
+            const result = await sendavaGetWithdrawalStatus(apiKey, wd.omnipayRef);
+            const status = (result.data?.status || "").toLowerCase();
+            console.log(`[RECONCILIATION-WD][sendavapay] Retrait #${wd.id} (${ageMin}min) ref=${wd.omnipayRef} → API success=${result.success} status="${status || "vide"}" rawData=${JSON.stringify(result.data || result)}`);
+            if (!status && !result.success) {
+              console.warn(`[RECONCILIATION-WD][sendavapay] ⚠️ Réponse API inattendue pour retrait #${wd.id}: ${JSON.stringify(result)}`);
+            }
+            await applyWithdrawalResult(wd, status, wd.omnipayRef);
+          } catch (err: any) {
+            console.error(`[RECONCILIATION-WD][sendavapay] Erreur retrait #${wd.id} ref=${wd.omnipayRef}:`, err.message);
+          }
         }
-      } catch (err: any) {
-        console.error(`[RECONCILIATION-WD] Erreur retrait #${wd.id}:`, err.message);
       }
     }
+
+    // ── OmniPay ─────────────────────────────────────────────────────────────
+    // Les retraits OmniPay ont gateway=null/"" ou gateway="omnipay"
+    const omnipayStale = stale.filter((w: any) => !w.gateway || w.gateway === "omnipay");
+    if (omnipayStale.length > 0) {
+      const apiKey = await getOmnipayPayoutKey();
+      if (apiKey) {
+        for (const wd of omnipayStale) {
+          try {
+            const result = await omnipayGetStatus(apiKey, wd.omnipayRef) as any;
+            const status = String(result?.status || result?.data?.status || "").toLowerCase();
+            await applyWithdrawalResult(wd, status, wd.omnipayRef);
+          } catch (err: any) {
+            console.error(`[RECONCILIATION-WD][omnipay] Erreur retrait #${wd.id}:`, err.message);
+          }
+        }
+      }
+    }
+
+    // ── Mbiyo ───────────────────────────────────────────────────────────────
+    const mbiyoStale = stale.filter((w: any) => w.gateway === "mbiyo");
+    if (mbiyoStale.length > 0) {
+      const apiKey = await getMbiyoKey();
+      if (apiKey) {
+        for (const wd of mbiyoStale) {
+          try {
+            const result = await mbiyoGetStatus(apiKey, wd.omnipayRef) as any;
+            const status = String(result?.data?.status || result?.status || "").toLowerCase();
+            await applyWithdrawalResult(wd, status, wd.omnipayRef);
+          } catch (err: any) {
+            console.error(`[RECONCILIATION-WD][mbiyo] Erreur retrait #${wd.id}:`, err.message);
+          }
+        }
+      }
+    }
+
   } catch (err: any) {
     console.error("[RECONCILIATION-WD] Erreur globale:", err.message);
   }

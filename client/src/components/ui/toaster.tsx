@@ -1,44 +1,28 @@
 import { useToast } from "@/hooks/use-toast"
-import {
-  Toast,
-  ToastClose,
-  ToastDescription,
-  ToastProvider,
-  ToastTitle,
-  ToastViewport,
-} from "@/components/ui/toast"
-import { AlertCircle, CheckCircle2, Info } from "lucide-react"
+import { ModalToast } from "@/components/ui/modal-toast"
+import { ConfirmModal } from "@/components/ui/modal-toast"
 
 export function Toaster() {
-  const { toasts } = useToast()
+  const { toasts, dismiss } = useToast()
+
+  // Affiche uniquement le toast le plus récent sous forme de modal centré
+  const current = toasts.find((t) => t.open)
 
   return (
-    <ToastProvider>
-      {toasts.map(function ({ id, title, description, action, variant, ...props }) {
-        const icon =
-          variant === "destructive" ? (
-            <AlertCircle className="h-5 w-5 text-red-500 shrink-0 mt-0.5" />
-          ) : variant === "success" ? (
-            <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0 mt-0.5" />
-          ) : (
-            <Info className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
-          )
+    <>
+      {/* Modal de confirmation (showConfirm) */}
+      <ConfirmModal />
 
-        return (
-          <Toast key={id} variant={variant} {...props}>
-            {icon}
-            <div className="grid gap-0.5 flex-1 min-w-0">
-              {title && <ToastTitle>{title}</ToastTitle>}
-              {description && (
-                <ToastDescription>{description}</ToastDescription>
-              )}
-            </div>
-            {action}
-            <ToastClose />
-          </Toast>
-        )
-      })}
-      <ToastViewport />
-    </ToastProvider>
+      {/* Modal de notification (toast) */}
+      {current && (
+        <ModalToast
+          open={true}
+          variant={current.variant as "default" | "destructive" | "success" | undefined}
+          title={current.title}
+          description={current.description}
+          onDismiss={() => dismiss(current.id)}
+        />
+      )}
+    </>
   )
 }
