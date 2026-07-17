@@ -85,6 +85,7 @@ import {
   clapayCountryCode,
   clapayCurrency,
   clapayLocalPhone,
+  clapaySelectTunnel,
   type ClapayWebhookPayload,
 } from "./clapay";
 
@@ -4133,9 +4134,10 @@ export async function registerRoutes(
           const clapayOpCode = (operatorRecord as any)?.clapayCode || paymentMethod || "";
           const rawPhone = msisdn || payerPhone || "";
           const localPhone = rawPhone ? clapayLocalPhone(rawPhone, countryCode) : "";
-          // Tunnel API = push direct sur le téléphone (pas de redirection)
-          // Tunnel CHECKOUTPAGE = fallback si pas de numéro fourni
-          const clapayTunnel = localPhone ? "API" : "CHECKOUTPAGE";
+          // Tunnel : API direct (push téléphone) pour tous les opérateurs sauf Wave
+          // Wave requiert un QR code → CHECKOUTPAGE obligatoire
+          // Fallback CHECKOUTPAGE si aucun numéro fourni
+          const clapayTunnel = clapaySelectTunnel(clapayOpCode, localPhone);
           const cpResult = await clapayInitiatePayin(clapayToken, {
             transaction_id: reference,
             amount: parsedAmount,
@@ -4145,7 +4147,9 @@ export async function registerRoutes(
             tunnel: clapayTunnel,
             callback_url: callbackUrl,
             return_url: returnUrl,
-            ...(localPhone ? { additional_infos: { customer_phone: localPhone } } : {}),
+            // En mode API : numéro local (sans indicatif) dans additional_infos
+            // En mode CHECKOUTPAGE (Wave) : pas de customer_phone, saisi sur la page hébergée
+            ...(clapayTunnel === "API" && localPhone ? { additional_infos: { customer_phone: localPhone } } : {}),
           });
 
           if (!cpResult.success) {
@@ -8430,16 +8434,19 @@ export async function registerRoutes(
         const currency = clapayCurrency(pp.country);
         const operatorRecord = pp.paymentMethod ? await storage.getWithdrawalOperatorByNameAndCountry(pp.paymentMethod, pp.country) : null;
         const clapayAdminOpCode = (operatorRecord as any)?.clapayCode || pp.paymentMethod || "";
+        const adminRawPhone = pp.payerPhone || "";
+        const adminLocalPhone = adminRawPhone ? clapayLocalPhone(adminRawPhone, countryCode) : "";
+        const adminTunnel = clapaySelectTunnel(clapayAdminOpCode, adminLocalPhone);
         const result = await clapayInitiatePayin(cpToken, {
           transaction_id: reference,
           amount: pp.amount,
           country_code: countryCode,
           operators_code: clapayAdminOpCode ? [clapayAdminOpCode] : [],
           method: "MERCHANT",
-          tunnel: "CHECKOUTPAGE",
+          tunnel: adminTunnel,
           callback_url: `${callbackBaseUrl}/api/clapay/callback`,
           return_url: `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
-          // En mode CHECKOUTPAGE, le client saisit son numéro sur la page hébergée ClaPay
+          ...(adminTunnel === "API" && adminLocalPhone ? { additional_infos: { customer_phone: adminLocalPhone } } : {}),
         });
         if (!result.success) {
           return res.status(502).json({ success: false, message: result.message || "Échec ClaPay" });

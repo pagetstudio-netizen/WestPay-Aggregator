@@ -132,25 +132,48 @@ export function generateReference(): string {
 }
 
 // Indicatifs pays NoWallet → longueur du numéro local
+// Vérifiés via GET /operators/data?country=XX (préfixes startwith = longueur locale)
 const CLAPAY_DIAL_CODES: Record<string, { dialCode: string; localLen: number }> = {
-  TG: { dialCode: "228", localLen: 8 },
-  BJ: { dialCode: "229", localLen: 8 },
-  CI: { dialCode: "225", localLen: 8 },
-  SN: { dialCode: "221", localLen: 9 },
-  ML: { dialCode: "223", localLen: 8 },
-  BF: { dialCode: "226", localLen: 8 },
-  GN: { dialCode: "224", localLen: 9 },
-  CM: { dialCode: "237", localLen: 9 },
-  CG: { dialCode: "242", localLen: 9 },
+  TG: { dialCode: "228", localLen: 8 },   // startwith 2 chiffres → 8 digits
+  BJ: { dialCode: "229", localLen: 10 },  // confirmé API : format 10 chiffres (ex: 5012345678)
+  CI: { dialCode: "225", localLen: 10 },  // startwith 2 chiffres, format 07XXXXXXXX → 10 digits
+  SN: { dialCode: "221", localLen: 9 },   // startwith 2 chiffres → 9 digits
+  ML: { dialCode: "223", localLen: 8 },   // startwith 2 chiffres → 8 digits
+  BF: { dialCode: "226", localLen: 8 },   // startwith 2 chiffres → 8 digits
+  GN: { dialCode: "224", localLen: 9 },   // startwith 2 chiffres → 9 digits
+  CM: { dialCode: "237", localLen: 9 },   // startwith 2-3 chiffres, ex 650XXXXXXX → 9 digits
+  CG: { dialCode: "242", localLen: 9 },   // startwith 2 chiffres → 9 digits
   CD: { dialCode: "243", localLen: 9 },
-  GA: { dialCode: "241", localLen: 8 },
+  GA: { dialCode: "241", localLen: 8 },   // startwith 2 chiffres → 8 digits
   TD: { dialCode: "235", localLen: 8 },
   CF: { dialCode: "236", localLen: 8 },
   GQ: { dialCode: "240", localLen: 9 },
   GW: { dialCode: "245", localLen: 9 },
-  NE: { dialCode: "227", localLen: 8 },
-  NG: { dialCode: "234", localLen: 10 },
+  NE: { dialCode: "227", localLen: 8 },   // startwith 2 chiffres → 8 digits
+  NG: { dialCode: "234", localLen: 10 },  // 07X/08X/09X + 7 → 10 digits
 };
+
+/**
+ * Vérifie si le code opérateur correspond à Wave.
+ * Wave requiert un QR code (tunnel CHECKOUTPAGE obligatoire).
+ */
+export function isWaveOperator(operatorCode?: string | null): boolean {
+  if (!operatorCode) return false;
+  return operatorCode.toUpperCase().includes("WAVE");
+}
+
+/**
+ * Détermine le tunnel à utiliser selon l'opérateur et la disponibilité du numéro.
+ * Règle : API direct pour tout, CHECKOUTPAGE uniquement pour Wave ou si pas de numéro.
+ */
+export function clapaySelectTunnel(
+  operatorCode?: string | null,
+  localPhone?: string | null,
+): "API" | "CHECKOUTPAGE" {
+  if (isWaveOperator(operatorCode)) return "CHECKOUTPAGE";
+  if (!localPhone) return "CHECKOUTPAGE";
+  return "API";
+}
 
 /**
  * Extrait le numéro local (sans indicatif pays) attendu par l'API NoWallet en mode tunnel API.
