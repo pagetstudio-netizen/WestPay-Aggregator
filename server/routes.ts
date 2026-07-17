@@ -4139,9 +4139,8 @@ export async function registerRoutes(
             tunnel: "CHECKOUTPAGE",
             callback_url: callbackUrl,
             return_url: returnUrl,
-            additional_infos: {
-              customer_phone: msisdn || payerPhone || undefined,
-            },
+            // En mode CHECKOUTPAGE, le client saisit son numéro sur la page hébergée ClaPay
+            // customer_phone n'est pas envoyé pour éviter l'erreur de validation
           });
 
           if (!cpResult.success) {
@@ -8431,9 +8430,7 @@ export async function registerRoutes(
           tunnel: "CHECKOUTPAGE",
           callback_url: `${callbackBaseUrl}/api/clapay/callback`,
           return_url: `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
-          additional_infos: {
-            customer_phone: pp.payerPhone || undefined,
-          },
+          // En mode CHECKOUTPAGE, le client saisit son numéro sur la page hébergée ClaPay
         });
         if (!result.success) {
           return res.status(502).json({ success: false, message: result.message || "Échec ClaPay" });
