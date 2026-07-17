@@ -227,6 +227,7 @@ export const withdrawalOperators = pgTable("withdrawal_operators", {
   omnipayCode: text("omnipay_code"),
   mbiyoCode: text("mbiyo_code"),
   seapayCode: text("seapay_code"),
+  clapayCode: text("clapay_code"),
   logo: text("logo"),
   sortOrder: integer("sort_order").notNull().default(0),
   active: boolean("active").default(true).notNull(),

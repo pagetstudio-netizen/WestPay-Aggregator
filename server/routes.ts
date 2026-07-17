@@ -75,6 +75,17 @@ import {
   type SendavaWebhookPayload,
 } from "./sendavapay";
 import { pollSendavaWithdrawalBackground } from "./reconciliation";
+import {
+  clapayInitiatePayin,
+  clapayInitiatePayout,
+  clapayGetBalance,
+  clapayGetTransactionStatus,
+  verifyClapaySignature,
+  generateReference as clapayGenerateRef,
+  clapayCountryCode,
+  clapayCurrency,
+  type ClapayWebhookPayload,
+} from "./clapay";
 
 // ── Multer — logo opérateur ───────────────────────────────────────────────────
 const LOGOS_DIR = path.resolve(process.cwd(), "uploads", "operator-logos");
@@ -262,6 +273,18 @@ async function getSendavaApiKey(): Promise<string | undefined> {
 
 async function getSendavaWebhookSecret(): Promise<string | undefined> {
   return process.env.SENDAVA_WEBHOOK_SECRET || process.env.SENDAVAPAY_WEBHOOK_SECRET || await storage.getSetting("sendavapay_webhook_secret");
+}
+
+async function getClapayApiKey(): Promise<string | undefined> {
+  return process.env.CLAPAY_API_KEY || await storage.getSetting("clapay_api_key");
+}
+
+async function getClapayWebhookSecret(): Promise<string | undefined> {
+  return process.env.CLAPAY_WEBHOOK_SECRET || await storage.getSetting("clapay_webhook_secret");
+}
+
+async function getClapayWebhookUniqueKey(): Promise<string | undefined> {
+  return process.env.CLAPAY_WEBHOOK_UNIQUE_KEY || await storage.getSetting("clapay_webhook_unique_key");
 }
 
 /* SeaPay : chaque pays possede son propre compte marchand (merchant_id/api_key/api_secret distincts) */
@@ -3834,6 +3857,7 @@ export async function registerRoutes(
       const useMbiyo = gatewayLower === "mbiyo";
       const useSendava = gatewayLower === "sendavapay";
       const useSeapay = gatewayLower === "seapay";
+      const useClapay = gatewayLower === "clapay";
 
       if (useSendava) {
         const sendavaApiKey = await getSendavaApiKey();
@@ -4089,6 +4113,87 @@ export async function registerRoutes(
           });
         } catch (spErr: any) {
           console.error("[SEAPAY] Erreur initiation:", spErr.message);
+          return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
+        }
+      } else if (useClapay) {
+        /* ── ClaPay : paiement mobile money multi-pays ────────────────── */
+        const clapayToken = await getClapayApiKey();
+        if (!clapayToken) {
+          return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
+        }
+
+        const reference = clapayGenerateRef();
+        const countryCode = clapayCountryCode(country);
+        const currency = clapayCurrency(country);
+        const callbackUrl = `${callbackBaseUrl}/api/clapay/callback`;
+        const returnUrl = `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
+
+        try {
+          const clapayOpCode = (operatorRecord as any)?.clapayCode || paymentMethod || "";
+          const cpResult = await clapayInitiatePayin(clapayToken, {
+            transaction_id: reference,
+            amount: parsedAmount,
+            country_code: countryCode,
+            operators_code: clapayOpCode ? [clapayOpCode] : [],
+            method: "MERCHANT",
+            tunnel: "CHECKOUTPAGE",
+            callback_url: callbackUrl,
+            return_url: returnUrl,
+            additional_infos: {
+              customer_phone: msisdn || payerPhone || undefined,
+            },
+          });
+
+          if (!cpResult.success) {
+            const errorMsg = cpResult.message || "Erreur de paiement. Veuillez reessayer.";
+            console.error(`[CLAPAY] Erreur initiation: ${errorMsg}`);
+            storage.createTransaction({
+              merchantId: merchant.id, country,
+              txId: reference, amount: parsedAmount,
+              payerNumber: msisdn || null, payerName: payerName || null,
+              status: "failed", provider: "clapay",
+              omnipayTxId: null, operator: paymentMethod || null,
+              omnipayReference: reference, errorMessage: errorMsg,
+            }).catch(() => {});
+            return res.status(400).json({ message: "Paiement non abouti. Veuillez reessayer." });
+          }
+
+          const paymentUrl = cpResult.data?.payment_url || null;
+          // La signature NoWallet est utilisée pour les checks de statut (/check/status/payment)
+          const cpTxId = cpResult.data?.signature || null;
+          const pending = await storage.createPendingPayment({
+            merchantId: merchant.id, country,
+            amount: parsedAmount,
+            payerPhone: payerPhone || null,
+            payerName: payerName || null,
+            paymentMethod,
+            txId: null,
+            status: "omnipay_pending",
+            redirectUrl: redirectUrl || null,
+            omnipayReference: reference,
+            omnipayTxId: cpTxId,
+            omnipayPaymentUrl: paymentUrl,
+            gateway: "clapay",
+            expiresAt,
+          });
+
+          await storage.createApiLog({
+            merchantId: merchant.id,
+            action: "clapay_payment_initiated",
+            ip: req.ip || "",
+            description: `Paiement ClaPay initie - Ref: ${reference} - Montant: ${parsedAmount} ${currency} - Operateur: ${paymentMethod}`,
+          });
+
+          return res.json({
+            success: true,
+            paymentId: pending.id,
+            clapay: true,
+            omnipayReference: reference,
+            paymentUrl,
+            fees: 0,
+          });
+        } catch (cpErr: any) {
+          console.error("[CLAPAY] Erreur initiation:", cpErr.message);
           return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
         }
       } else {
@@ -4697,6 +4802,57 @@ export async function registerRoutes(
                 return res.json({ status: "failed", paymentId: pending.id });
               }
 
+              return res.json({ status: "pending", paymentId: pending.id });
+            } catch {}
+          }
+        } else if (pending.gateway === "clapay") {
+          const cpToken = await getClapayApiKey();
+          // omnipayTxId contient la signature NoWallet (clé pour /check/status/payment)
+          // fallback sur omnipayReference si la signature n'a pas été stockée
+          const clapaySignature = pending.omnipayTxId || pending.omnipayReference;
+          if (cpToken && clapaySignature) {
+            try {
+              const cpStatus = await clapayGetTransactionStatus(cpToken, clapaySignature);
+              const s = (cpStatus.status || "").toUpperCase();
+              const cpSuccess = ["SUCCESSFUL", "SUCCESS", "COMPLETED", "PAID", "APPROVED"].includes(s);
+              const cpFailed = ["FAILED", "FAILURE", "CANCELLED", "CANCELED", "REJECTED", "EXPIRED"].includes(s);
+
+              if (cpSuccess) {
+                const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
+                const merchant = await storage.getMerchantById(pending.merchantId);
+                if (mc) {
+                  const credit = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount, pending.country);
+                  const westpayFee = pending.amount - credit;
+                  await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
+                  const txRef = `CP-${pending.omnipayReference}`;
+                  const existingTx = await storage.getTransactionByTxId(txRef);
+                  if (!existingTx) {
+                    await storage.incrementMerchantCountryBalance(mc.id, credit);
+                    await storage.createTransaction({
+                      merchantId: pending.merchantId,
+                      country: pending.country,
+                      txId: txRef,
+                      amount: pending.amount,
+                      payerNumber: pending.payerPhone || null,
+                      payerName: pending.payerName || null,
+                      status: "confirmed",
+                      provider: "clapay",
+                      omnipayTxId: null,
+                      operator: pending.paymentMethod || null,
+                      omnipayReference: pending.omnipayReference,
+                      errorMessage: null,
+                      providerFee: westpayFee,
+                    });
+                    notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "clapay" }).catch(() => {});
+                    notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "clapay", status: "confirmed" }).catch(() => {});
+                  }
+                }
+                return res.json({ status: "confirmed", paymentId: pending.id });
+              }
+              if (cpFailed) {
+                await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+                return res.json({ status: "failed", paymentId: pending.id });
+              }
               return res.json({ status: "pending", paymentId: pending.id });
             } catch {}
           }
@@ -5341,6 +5497,158 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== CLAPAY CALLBACKS ====================
+
+  app.post("/api/clapay/callback", async (req, res) => {
+    try {
+      const nowalletSig = (req.headers["nowallet-signature"] || "") as string;
+      const rawBody = (req.rawBody as Buffer)?.toString() || JSON.stringify(req.body);
+      const payload = req.body as ClapayWebhookPayload;
+
+      console.log(`[CLAPAY CALLBACK] Status: ${payload.status} — TxId: ${payload.transaction_id} — Ref: ${payload.reference || payload.external_reference}`);
+
+      const [webhookSecret, webhookUniqueKey] = await Promise.all([getClapayWebhookSecret(), getClapayWebhookUniqueKey()]);
+      if (webhookSecret && webhookUniqueKey && nowalletSig) {
+        const valid = verifyClapaySignature(nowalletSig, rawBody, webhookSecret, webhookUniqueKey);
+        if (!valid) {
+          console.warn("[CLAPAY CALLBACK] Signature invalide — requête rejetée");
+          return res.status(401).json({ message: "Signature invalide" });
+        }
+      }
+
+      // v3 : transaction_id = notre référence marchande (envoyée dans transaction_id à l'init)
+      const reference = payload.transaction_id || payload.reference || payload.external_reference || payload.signature;
+      if (!reference) return res.status(400).json({ message: "reference manquante" });
+
+      const statusUpper = (payload.status || "").toUpperCase();
+      const isSuccess = ["SUCCESSFUL", "SUCCESS", "COMPLETED", "PAID", "APPROVED"].includes(statusUpper);
+      const isFailed  = ["FAILED", "FAILURE", "CANCELLED", "CANCELED", "REJECTED", "EXPIRED"].includes(statusUpper);
+
+      const pending = await storage.getPendingPaymentByOmnipayReference(reference);
+      if (!pending || pending.gateway !== "clapay") {
+        console.log(`[CLAPAY CALLBACK] Paiement non trouvé pour ref=${reference}`);
+        return res.json({ received: true });
+      }
+      if (pending.status === "omnipay_confirmed") {
+        return res.json({ received: true, alreadyConfirmed: true });
+      }
+
+      if (isSuccess) {
+        const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
+        const merchant = await storage.getMerchantById(pending.merchantId);
+        if (!mc) return res.json({ received: true });
+
+        const credit = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount, pending.country);
+        const westpayFee = pending.amount - credit;
+        await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
+        const txRef = `CP-${reference}`;
+        const existingTx = await storage.getTransactionByTxId(txRef);
+        if (!existingTx) {
+          await storage.incrementMerchantCountryBalance(mc.id, credit);
+          await storage.createTransaction({
+            merchantId: pending.merchantId,
+            country: pending.country,
+            txId: txRef,
+            amount: pending.amount,
+            payerNumber: pending.payerPhone || payload.transaction_phone_number || null,
+            payerName: pending.payerName || null,
+            status: "confirmed",
+            provider: "clapay",
+            omnipayTxId: payload.transaction_id || null,
+            operator: pending.paymentMethod || payload.transaction_service_name || null,
+            omnipayReference: reference,
+            errorMessage: null,
+            providerFee: westpayFee,
+          });
+          notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "clapay" }).catch(() => {});
+          notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "clapay", status: "confirmed" }).catch(() => {});
+        }
+        if (pending.redirectUrl) {
+          try {
+            const webhookMerchant = await storage.getMerchantById(pending.merchantId);
+            if (webhookMerchant?.webhookUrl) {
+              const { triggerWebhook } = await import("./routes");
+              triggerWebhook && triggerWebhook(webhookMerchant, { txId: txRef, amount: pending.amount, payerPhone: pending.payerPhone, country: pending.country }).catch(() => {});
+            }
+          } catch {}
+        }
+        console.log(`[CLAPAY CALLBACK] Paiement confirmé — ref=${reference} montant=${pending.amount} crédit=${credit}`);
+      } else if (isFailed) {
+        await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+        const failTxRef = `CP-${reference}`;
+        const existFail = await storage.getTransactionByTxId(failTxRef);
+        if (!existFail) {
+          storage.createTransaction({
+            merchantId: pending.merchantId,
+            country: pending.country,
+            txId: failTxRef,
+            amount: pending.amount,
+            payerNumber: pending.payerPhone || null,
+            payerName: pending.payerName || null,
+            status: "failed",
+            provider: "clapay",
+            omnipayTxId: payload.transaction_id || null,
+            operator: pending.paymentMethod || null,
+            omnipayReference: reference,
+            errorMessage: `Paiement ${statusUpper}`,
+            providerFee: 0,
+          }).catch(() => {});
+        }
+        console.log(`[CLAPAY CALLBACK] Paiement échoué — ref=${reference}`);
+      }
+
+      res.json({ received: true });
+    } catch (err: any) {
+      console.error("[CLAPAY CALLBACK] Erreur:", err.message);
+      res.status(200).json({ received: true });
+    }
+  });
+
+  app.post("/api/clapay/payout-callback", async (req, res) => {
+    try {
+      const nowalletSig = (req.headers["nowallet-signature"] || "") as string;
+      const rawBody = (req.rawBody as Buffer)?.toString() || JSON.stringify(req.body);
+      const payload = req.body as ClapayWebhookPayload;
+
+      console.log(`[CLAPAY PAYOUT CALLBACK] Status: ${payload.status} — Ref: ${payload.reference || payload.external_reference}`);
+
+      const [webhookSecret, webhookUniqueKey] = await Promise.all([getClapayWebhookSecret(), getClapayWebhookUniqueKey()]);
+      if (webhookSecret && webhookUniqueKey && nowalletSig) {
+        if (!verifyClapaySignature(nowalletSig, rawBody, webhookSecret, webhookUniqueKey)) {
+          console.warn("[CLAPAY PAYOUT CALLBACK] Signature invalide");
+          return res.status(401).json({ message: "Signature invalide" });
+        }
+      }
+
+      // v3 : transaction_id = notre référence marchande du retrait
+      const orderId = payload.transaction_id || payload.reference || payload.external_reference || "";
+      if (!orderId) return res.status(200).json({ received: true });
+
+      const withdrawal = await storage.getWithdrawalByRef(orderId);
+      if (!withdrawal) return res.json({ received: true });
+
+      const statusUpper = (payload.status || "").toUpperCase();
+      const isSuccess = ["SUCCESSFUL", "SUCCESS", "COMPLETED", "PAID", "APPROVED"].includes(statusUpper);
+      if (isSuccess) {
+        if (withdrawal.status !== "approved") {
+          await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Approuvé par ClaPay — ref=${orderId}`, orderId);
+        }
+        console.log(`[CLAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} approuvé`);
+      } else {
+        if (withdrawal.status === "pending") {
+          await storage.updateWithdrawalStatus(withdrawal.id, "failed", `Rejeté par ClaPay — statut ${statusUpper}`, orderId);
+          const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
+          if (mc) await storage.incrementMerchantCountryBalance(mc.id, withdrawal.amount);
+        }
+        console.log(`[CLAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} échoué`);
+      }
+      res.json({ received: true });
+    } catch (err: any) {
+      console.error("[CLAPAY PAYOUT CALLBACK] Erreur:", err.message);
+      res.status(200).json({ received: true });
+    }
+  });
+
   app.post("/api/sendavapay/callback", async (req, res) => {
     try {
       const rawBody = (req.rawBody as Buffer)?.toString() || JSON.stringify(req.body);
@@ -5603,6 +5911,54 @@ export async function registerRoutes(
         await storage.setSetting("sendavapay_webhook_secret", result.data.webhookSecret);
       }
       res.json({ success: result.success, data: result.data, message: result.message });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ==================== CLAPAY ADMIN SETTINGS ====================
+
+  app.get("/api/admin/clapay/settings", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const [dbApiKey, dbWebhookSecret, dbWebhookUniqueKey] = await Promise.all([
+        storage.getSetting("clapay_api_key"),
+        storage.getSetting("clapay_webhook_secret"),
+        storage.getSetting("clapay_webhook_unique_key"),
+      ]);
+      const activeKey = await getClapayApiKey();
+      const envOverride = !!process.env.CLAPAY_API_KEY;
+      res.json({
+        apiKey: dbApiKey ? "••••••••[DB]" : "",
+        webhookSecret: dbWebhookSecret ? "••••••••[DB]" : "",
+        webhookUniqueKey: dbWebhookUniqueKey ? "••••••••[DB]" : "",
+        configured: !!activeKey,
+        envOverride,
+        callbackUrl: `${process.env.APP_URL || "https://westpay.cfd"}/api/clapay/callback`,
+        payoutCallbackUrl: `${process.env.APP_URL || "https://westpay.cfd"}/api/clapay/payout-callback`,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/clapay/settings", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { apiKey, webhookSecret, webhookUniqueKey } = req.body;
+      if (apiKey !== undefined && apiKey !== "") await storage.setSetting("clapay_api_key", apiKey);
+      if (webhookSecret !== undefined && webhookSecret !== "") await storage.setSetting("clapay_webhook_secret", webhookSecret);
+      if (webhookUniqueKey !== undefined && webhookUniqueKey !== "") await storage.setSetting("clapay_webhook_unique_key", webhookUniqueKey);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/admin/clapay/balance", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const token = await getClapayApiKey();
+      if (!token) return res.status(400).json({ message: "Clé API ClaPay non configurée" });
+      const result = await clapayGetBalance(token);
+      res.json(result);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -6850,10 +7206,11 @@ export async function registerRoutes(
       const payoutGatewayLower = payoutOpRecord?.gateway?.toLowerCase();
       const useMbiyoPayout = payoutGatewayLower === "mbiyo";
       const useSendavaPayout = payoutGatewayLower === "sendavapay";
+      const useClapayPayout = payoutGatewayLower === "clapay";
 
       const minAmountRaw = await storage.getSetting("withdrawal_min_amount");
       const withdrawalMinAmount = minAmountRaw ? parseInt(minAmountRaw) || 200 : 200;
-      if ((useMbiyoPayout || useSendavaPayout) && amount < withdrawalMinAmount) {
+      if ((useMbiyoPayout || useSendavaPayout || useClapayPayout) && amount < withdrawalMinAmount) {
         return res.status(400).json({ message: `Le montant minimum de retrait est de ${withdrawalMinAmount} FCFA.` });
       }
 
@@ -6915,7 +7272,7 @@ export async function registerRoutes(
         status: "pending",
         withdrawalMode: "auto",
         adminNote: null,
-        gateway: useMbiyoPayout ? "mbiyo" : useSendavaPayout ? "sendavapay" : "omnipay",
+        gateway: useMbiyoPayout ? "mbiyo" : useSendavaPayout ? "sendavapay" : useClapayPayout ? "clapay" : "omnipay",
       });
 
       const wdRawIp = (req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "").split(",")[0].trim();
@@ -7122,6 +7479,51 @@ export async function registerRoutes(
             providerMessage: techMsg,
           });
         }
+      } else if (useClapayPayout) {
+        const cpToken = await getClapayApiKey();
+        if (!cpToken) {
+          await storage.updateWithdrawalStatus(w.id, "failed", "Clé API ClaPay non configurée", reference);
+          await storage.incrementMerchantCountryBalance(mc.id, amount);
+          return res.status(500).json({ message: "Service de retrait non configure. Contactez l'administrateur." });
+        }
+        try {
+          const countryCode = clapayCountryCode(mc.country);
+          const currency = clapayCurrency(mc.country);
+          const wdOpRecord = await storage.getWithdrawalOperatorByNameAndCountry(operator || "", mc.country).catch(() => null);
+          const serviceName = (wdOpRecord as any)?.clapayCode || wdOpRecord?.name || operator || undefined;
+          const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+          const cpCallbackUrl = `${callbackBaseUrl}/api/clapay/payout-callback`;
+          const msisdnFull = "+" + prependDialCode(phone, mc.country);
+          console.log(`[WITHDRAWAL CLAPAY] Virement: ${netAmount} ${currency} → ${msisdnFull}, service: ${serviceName}, ref: ${reference}`);
+          const result = await clapayInitiatePayout(cpToken, {
+            transaction_id: reference,
+            amount: netAmount,
+            country_code: countryCode,
+            operators_code: serviceName ? [serviceName] : [],
+            method: "CASHIN",
+            tunnel: "API",
+            callback_url: cpCallbackUrl,
+            additional_infos: {
+              customer_phone: msisdnFull,
+              customer_firstname: merchant.name,
+            },
+          });
+          if (result.success) {
+            const cpRef = result.data?.reference || reference;
+            await storage.updateWithdrawalStatus(w.id, "pending", `En cours ClaPay — Ref: ${cpRef}`, cpRef, 0, 0);
+            notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "pending" }).catch(() => {});
+            return res.json({ ...w, status: "pending", omnipayRef: cpRef, fees: 0, netAmount, autoProcessed: true, gateway: "clapay" });
+          } else {
+            const rawErrMsg = result.message || "Échec ClaPay";
+            await storage.updateWithdrawalStatus(w.id, "failed", rawErrMsg, reference);
+            await storage.incrementMerchantCountryBalance(mc.id, amount);
+            return res.status(400).json({ message: `Retrait refusé : ${rawErrMsg}. Votre solde a été restitué.` });
+          }
+        } catch (cpErr: any) {
+          await storage.updateWithdrawalStatus(w.id, "failed", `Erreur technique ClaPay`, reference);
+          await storage.incrementMerchantCountryBalance(mc.id, amount);
+          return res.status(500).json({ message: "Erreur technique lors du traitement. Votre solde a été restitué." });
+        }
       } else {
         const apiKeyToUse = await getOmnipayPayoutApiKey();
         if (!apiKeyToUse) {
@@ -7213,8 +7615,48 @@ export async function registerRoutes(
       let sentToProvider = false;
       const useMbiyoPayout = w.gateway === "mbiyo";
       const useSeapayPayout = w.gateway === "seapay";
+      const useClapayPayoutApprove = w.gateway === "clapay";
 
-      if (useSeapayPayout) {
+      if (useClapayPayoutApprove) {
+        const cpToken = await getClapayApiKey();
+        if (mc && cpToken && merchant) {
+          try {
+            const reference = clapayGenerateRef();
+            const countryCode = clapayCountryCode(w.country);
+            const currency = clapayCurrency(w.country);
+            const wdOpRecord = w.operator ? await storage.getWithdrawalOperatorByNameAndCountry(w.operator, w.country) : null;
+            const serviceName = (wdOpRecord as any)?.clapayCode || wdOpRecord?.name || w.operator || undefined;
+            const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+            const callbackUrl = `${callbackBaseUrl}/api/clapay/payout-callback`;
+            console.log(`[ADMIN APPROVE WD CLAPAY] Virement: ${w.amount} ${currency} → ${w.phone}, service: ${serviceName}, ref: ${reference}`);
+            const result = await clapayInitiatePayout(cpToken, {
+              transaction_id: reference,
+              amount: w.amount,
+              country_code: countryCode,
+              operators_code: serviceName ? [serviceName] : [],
+              method: "CASHIN",
+              tunnel: "API",
+              callback_url: callbackUrl,
+              additional_infos: {
+                customer_phone: w.phone,
+                customer_firstname: w.recipientName || merchant.name,
+              },
+            });
+            if (result.success) {
+              omnipayRef = reference;
+              fees = 0;
+              sentToProvider = true;
+              console.log(`[ADMIN APPROVE WD CLAPAY] Initié - Ref: ${reference}`);
+            } else {
+              console.error(`[ADMIN APPROVE WD CLAPAY] Échec: ${result.message}`);
+            }
+          } catch (cpErr: any) {
+            console.error("[ADMIN APPROVE WD CLAPAY] Erreur:", cpErr.message);
+          }
+        } else {
+          console.error("[ADMIN APPROVE WD CLAPAY] Token ClaPay non configuré");
+        }
+      } else if (useSeapayPayout) {
         const [spMerchantId, spApiSecret] = await Promise.all([getSeapayMerchantId(w.country), getSeapayApiSecret(w.country)]);
         if (mc && spMerchantId && spApiSecret && merchant) {
           try {
@@ -7366,11 +7808,17 @@ export async function registerRoutes(
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
       const effectiveProvider = provider || w.gateway || "";
-      if (!["sendavapay", "mbiyo", "omnipay", "seapay"].includes(effectiveProvider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay ou SeaPay)" });
+      if (!["sendavapay", "mbiyo", "omnipay", "seapay", "clapay"].includes(effectiveProvider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay, SeaPay ou ClaPay)" });
       }
       if (!w.omnipayRef) return res.status(400).json({ message: "Aucune référence fournisseur pour ce reversement" });
 
+      if (effectiveProvider === "clapay") {
+        const cpToken = await getClapayApiKey();
+        if (!cpToken) return res.status(500).json({ message: "Clé API ClaPay non configurée" });
+        const result = await clapayGetTransactionStatus(cpToken, w.omnipayRef);
+        return res.json({ provider: "clapay", success: result.success, status: result.status, data: result.data, error: result.message });
+      }
       if (effectiveProvider === "sendavapay") {
         const sendavaApiKey = await getSendavaApiKey();
         if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
@@ -7407,14 +7855,20 @@ export async function registerRoutes(
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
       const effectiveProvider = provider || w.gateway || "";
-      if (!["sendavapay", "mbiyo", "omnipay", "seapay"].includes(effectiveProvider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay ou SeaPay)" });
+      if (!["sendavapay", "mbiyo", "omnipay", "seapay", "clapay"].includes(effectiveProvider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay, SeaPay ou ClaPay)" });
       }
       if (!w.omnipayRef) return res.status(400).json({ message: "Aucune référence fournisseur pour ce reversement" });
 
       let providerStatus = "";
       let raw: any = null;
-      if (effectiveProvider === "sendavapay") {
+      if (effectiveProvider === "clapay") {
+        const cpToken = await getClapayApiKey();
+        if (!cpToken) return res.status(500).json({ message: "Clé API ClaPay non configurée" });
+        const result = await clapayGetTransactionStatus(cpToken, w.omnipayRef);
+        providerStatus = (result.status || "").toLowerCase();
+        raw = result.data;
+      } else if (effectiveProvider === "sendavapay") {
         const sendavaApiKey = await getSendavaApiKey();
         if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
         const result = await sendavaGetWithdrawalStatus(sendavaApiKey, w.omnipayRef);
@@ -7471,8 +7925,8 @@ export async function registerRoutes(
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
       const provider = requestedProvider || w.gateway || "sendavapay";
-      if (!["sendavapay", "mbiyo", "omnipay", "seapay"].includes(provider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay ou SeaPay)" });
+      if (!["sendavapay", "mbiyo", "omnipay", "seapay", "clapay"].includes(provider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay, SeaPay ou ClaPay)" });
       }
       if (w.status === "pending" && w.omnipayRef && provider === w.gateway) {
         return res.status(400).json({ message: `Ce retrait est déjà en cours de traitement chez ${provider} (réf: ${w.omnipayRef}). Attendez la confirmation ou choisissez un autre fournisseur.` });
@@ -7697,10 +8151,16 @@ export async function registerRoutes(
         txCountry = tx.country;
       }
       if (!ref) return res.status(400).json({ message: "Aucune référence fournisseur pour ce paiement" });
-      if (!["sendavapay", "mbiyo", "omnipay", "seapay"].includes(provider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay ou SeaPay)" });
+      if (!["sendavapay", "mbiyo", "omnipay", "seapay", "clapay"].includes(provider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay, SeaPay ou ClaPay)" });
       }
 
+      if (provider === "clapay") {
+        const cpToken = await getClapayApiKey();
+        if (!cpToken) return res.status(500).json({ message: "Clé API ClaPay non configurée" });
+        const result = await clapayGetTransactionStatus(cpToken, ref);
+        return res.json({ provider: "clapay", success: result.success, status: result.status, data: result.data, error: result.message });
+      }
       if (provider === "sendavapay") {
         const sendavaApiKey = await getSendavaApiKey();
         if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
@@ -7755,7 +8215,12 @@ export async function registerRoutes(
       if (!ref) return res.status(400).json({ message: "Aucune référence fournisseur pour ce paiement" });
 
       let providerStatus = "";
-      if (provider === "sendavapay") {
+      if (provider === "clapay") {
+        const cpToken = await getClapayApiKey();
+        if (!cpToken) return res.status(500).json({ message: "Clé API ClaPay non configurée" });
+        const result = await clapayGetTransactionStatus(cpToken, ref);
+        providerStatus = (result.status || "").toLowerCase();
+      } else if (provider === "sendavapay") {
         const sendavaApiKey = await getSendavaApiKey();
         if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
         const result = await sendavaGetPaymentStatus(sendavaApiKey, ref);
@@ -7948,6 +8413,41 @@ export async function registerRoutes(
         console.log(`[ADMIN TRIGGER TX] Paiement #${id} re-déclenché chez SeaPay — ref=${reference}`);
         return res.json({ success: true, provider: "seapay", reference, paymentUrl: result.data.payment_url });
       }
+
+      if (provider === "clapay") {
+        const cpToken = await getClapayApiKey();
+        if (!cpToken) return res.status(500).json({ message: "Clé API ClaPay non configurée" });
+        const reference = clapayGenerateRef();
+        const countryCode = clapayCountryCode(pp.country);
+        const currency = clapayCurrency(pp.country);
+        const operatorRecord = pp.paymentMethod ? await storage.getWithdrawalOperatorByNameAndCountry(pp.paymentMethod, pp.country) : null;
+        const clapayAdminOpCode = (operatorRecord as any)?.clapayCode || pp.paymentMethod || "";
+        const result = await clapayInitiatePayin(cpToken, {
+          transaction_id: reference,
+          amount: pp.amount,
+          country_code: countryCode,
+          operators_code: clapayAdminOpCode ? [clapayAdminOpCode] : [],
+          method: "MERCHANT",
+          tunnel: "CHECKOUTPAGE",
+          callback_url: `${callbackBaseUrl}/api/clapay/callback`,
+          return_url: `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
+          additional_infos: {
+            customer_phone: pp.payerPhone || undefined,
+          },
+        });
+        if (!result.success) {
+          return res.status(502).json({ success: false, message: result.message || "Échec ClaPay" });
+        }
+        await db.update(pendingPayments).set({
+          status: "omnipay_pending",
+          omnipayReference: reference,
+          omnipayTxId: result.data?.signature || null,
+          omnipayPaymentUrl: result.data?.payment_url || null,
+          gateway: "clapay",
+        }).where(eq(pendingPayments.id, id));
+        console.log(`[ADMIN TRIGGER TX] Paiement #${id} re-déclenché chez ClaPay — ref=${reference}`);
+        return res.json({ success: true, provider: "clapay", reference, paymentUrl: result.data?.payment_url });
+      }
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -8067,6 +8567,7 @@ export async function registerRoutes(
         gateway: "westpay",
         omnipayCode: omnipayCode?.trim() || null,
         mbiyoCode: mbiyoCode?.trim() || null,
+        clapayCode: (req.body.clapayCode || "")?.trim() || null,
         active: active !== false,
         maintenanceAll: false,
         maintenanceDeposits: false,
@@ -8092,6 +8593,7 @@ export async function registerRoutes(
         ...(gateway !== undefined && { gateway }),
         ...(omnipayCode !== undefined && { omnipayCode: omnipayCode?.trim() || null }),
         ...(mbiyoCode !== undefined && { mbiyoCode: mbiyoCode?.trim() || null }),
+        ...(req.body.clapayCode !== undefined && { clapayCode: (req.body.clapayCode || "")?.trim() || null }),
         ...(logo !== undefined && { logo: logo || null }),
         ...(sortOrder !== undefined && { sortOrder: Number(sortOrder) }),
         ...(active !== undefined && { active }),
