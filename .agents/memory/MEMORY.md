@@ -1,2 +1,3 @@
 - [SendavaPay SDK integration](sendavapay-integration.md) — CORS endpoints blocked by Cloudflare; use official JS SDK from browser, not server-side proxy.
 - [SeaPay operator seeding](seapay-operator-seeding.md) — new-country withdrawal operators are seeded idempotently on every server start, not one-time; India has no fixed bank list (IFSC is per-transaction).
+- [NoWallet (ClaPay) API v3](nowallet-v3-integration.md) — payloads, phone format, tunnel modes, and status check endpoint differ significantly from older API.

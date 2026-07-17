@@ -131,6 +131,55 @@ export function generateReference(): string {
   return ref;
 }
 
+// Indicatifs pays NoWallet → longueur du numéro local
+const CLAPAY_DIAL_CODES: Record<string, { dialCode: string; localLen: number }> = {
+  TG: { dialCode: "228", localLen: 8 },
+  BJ: { dialCode: "229", localLen: 8 },
+  CI: { dialCode: "225", localLen: 8 },
+  SN: { dialCode: "221", localLen: 9 },
+  ML: { dialCode: "223", localLen: 8 },
+  BF: { dialCode: "226", localLen: 8 },
+  GN: { dialCode: "224", localLen: 9 },
+  CM: { dialCode: "237", localLen: 9 },
+  CG: { dialCode: "242", localLen: 9 },
+  CD: { dialCode: "243", localLen: 9 },
+  GA: { dialCode: "241", localLen: 8 },
+  TD: { dialCode: "235", localLen: 8 },
+  CF: { dialCode: "236", localLen: 8 },
+  GQ: { dialCode: "240", localLen: 9 },
+  GW: { dialCode: "245", localLen: 9 },
+  NE: { dialCode: "227", localLen: 8 },
+  NG: { dialCode: "234", localLen: 10 },
+};
+
+/**
+ * Extrait le numéro local (sans indicatif pays) attendu par l'API NoWallet en mode tunnel API.
+ * Ex: "+22899935673" / "22899935673" → "99935673" pour TG
+ * Si le format n'est pas reconnu, retourne le numéro tel quel.
+ */
+export function clapayLocalPhone(phone: string, countryCode: string): string {
+  const info = CLAPAY_DIAL_CODES[countryCode.toUpperCase()];
+  if (!info) return phone;
+
+  // Supprimer espaces et tirets
+  let clean = phone.replace(/[\s\-().]/g, "");
+
+  // Supprimer le + initial
+  if (clean.startsWith("+")) clean = clean.slice(1);
+
+  // Supprimer l'indicatif si présent
+  if (clean.startsWith(info.dialCode)) {
+    clean = clean.slice(info.dialCode.length);
+  }
+
+  // Supprimer un éventuel 0 initial (format 0XXXXXXXX)
+  if (clean.startsWith("0") && clean.length === info.localLen + 1) {
+    clean = clean.slice(1);
+  }
+
+  return clean;
+}
+
 // ── Internal HTTP helper ──────────────────────────────────────────────────────
 
 async function clapayRequest(

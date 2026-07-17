@@ -84,6 +84,7 @@ import {
   generateReference as clapayGenerateRef,
   clapayCountryCode,
   clapayCurrency,
+  clapayLocalPhone,
   type ClapayWebhookPayload,
 } from "./clapay";
 
@@ -4130,17 +4131,21 @@ export async function registerRoutes(
 
         try {
           const clapayOpCode = (operatorRecord as any)?.clapayCode || paymentMethod || "";
+          const rawPhone = msisdn || payerPhone || "";
+          const localPhone = rawPhone ? clapayLocalPhone(rawPhone, countryCode) : "";
+          // Tunnel API = push direct sur le téléphone (pas de redirection)
+          // Tunnel CHECKOUTPAGE = fallback si pas de numéro fourni
+          const clapayTunnel = localPhone ? "API" : "CHECKOUTPAGE";
           const cpResult = await clapayInitiatePayin(clapayToken, {
             transaction_id: reference,
             amount: parsedAmount,
             country_code: countryCode,
             operators_code: clapayOpCode ? [clapayOpCode] : [],
             method: "MERCHANT",
-            tunnel: "CHECKOUTPAGE",
+            tunnel: clapayTunnel,
             callback_url: callbackUrl,
             return_url: returnUrl,
-            // En mode CHECKOUTPAGE, le client saisit son numéro sur la page hébergée ClaPay
-            // customer_phone n'est pas envoyé pour éviter l'erreur de validation
+            ...(localPhone ? { additional_infos: { customer_phone: localPhone } } : {}),
           });
 
           if (!cpResult.success) {
@@ -7493,7 +7498,8 @@ export async function registerRoutes(
           const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
           const cpCallbackUrl = `${callbackBaseUrl}/api/clapay/payout-callback`;
           const msisdnFull = "+" + prependDialCode(phone, mc.country);
-          console.log(`[WITHDRAWAL CLAPAY] Virement: ${netAmount} ${currency} → ${msisdnFull}, service: ${serviceName}, ref: ${reference}`);
+          const cpLocalPhone = clapayLocalPhone(msisdnFull, countryCode);
+          console.log(`[WITHDRAWAL CLAPAY] Virement: ${netAmount} ${currency} → ${cpLocalPhone}, service: ${serviceName}, ref: ${reference}`);
           const result = await clapayInitiatePayout(cpToken, {
             transaction_id: reference,
             amount: netAmount,
@@ -7502,8 +7508,9 @@ export async function registerRoutes(
             method: "CASHIN",
             tunnel: "API",
             callback_url: cpCallbackUrl,
+            return_url: `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
             additional_infos: {
-              customer_phone: msisdnFull,
+              customer_phone: cpLocalPhone,
               customer_firstname: merchant.name,
             },
           });
@@ -7627,7 +7634,8 @@ export async function registerRoutes(
             const serviceName = (wdOpRecord as any)?.clapayCode || wdOpRecord?.name || w.operator || undefined;
             const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
             const callbackUrl = `${callbackBaseUrl}/api/clapay/payout-callback`;
-            console.log(`[ADMIN APPROVE WD CLAPAY] Virement: ${w.amount} ${currency} → ${w.phone}, service: ${serviceName}, ref: ${reference}`);
+            const cpAdminLocalPhone = clapayLocalPhone(w.phone || "", countryCode);
+            console.log(`[ADMIN APPROVE WD CLAPAY] Virement: ${w.amount} ${currency} → ${cpAdminLocalPhone}, service: ${serviceName}, ref: ${reference}`);
             const result = await clapayInitiatePayout(cpToken, {
               transaction_id: reference,
               amount: w.amount,
@@ -7636,8 +7644,9 @@ export async function registerRoutes(
               method: "CASHIN",
               tunnel: "API",
               callback_url: callbackUrl,
+              return_url: `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
               additional_infos: {
-                customer_phone: w.phone,
+                customer_phone: cpAdminLocalPhone,
                 customer_firstname: w.recipientName || merchant.name,
               },
             });
