@@ -86,6 +86,7 @@ export interface ClapayWebhookPayload {
 // ── Country / currency helpers ────────────────────────────────────────────────
 
 const CLAPAY_COUNTRY_CODES: Record<string, string> = {
+  "Kenya": "KE",
   "Togo": "TG",
   "Benin": "BJ",
   "Burkina Faso": "BF",
@@ -113,6 +114,7 @@ const CLAPAY_CURRENCY_MAP: Record<string, string> = {
   "CD": "CDF",
   "GN": "GNF",
   "NG": "NGN",
+  "KE": "KES",
 };
 
 export function clapayCountryCode(country: string): string {
@@ -151,6 +153,7 @@ const CLAPAY_DIAL_CODES: Record<string, { dialCode: string; localLen: number }> 
   GW: { dialCode: "245", localLen: 9 },
   NE: { dialCode: "227", localLen: 8 },   // startwith 2 chiffres → 8 digits
   NG: { dialCode: "234", localLen: 10 },  // 07X/08X/09X + 7 → 10 digits
+  KE: { dialCode: "254", localLen: 9 },   // confirmé API : 712345678 (9 chiffres, ex: 7X-XXXXXXX)
 };
 
 /**

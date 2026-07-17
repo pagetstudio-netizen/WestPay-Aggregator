@@ -96,6 +96,88 @@ const SEAPAY_PAKISTAN_BANKS: [string, string][] = [
   ["PKRBARCLAYS", "Barclays Bank"],
 ];
 
+// ── ClaPay — opérateurs mobile money par pays ────────────────────────────────
+// Codes vérifiés via GET /operators/data?country=XX (nw-api.clapay.app)
+// Chaque opérateur est créé idempotently (lookup par nom+pays avant création)
+const CLAPAY_OPERATORS: Array<{ country: string; name: string; clapayCode: string; wave?: boolean }> = [
+  // Togo
+  { country: "Togo",              name: "Moov Money",        clapayCode: "MOOV" },
+  { country: "Togo",              name: "TMoney",            clapayCode: "TMONEY" },
+  // Benin — 10 chiffres locaux (ex: 5012345678)
+  { country: "Benin",             name: "MTN Mobile Money",  clapayCode: "MTN" },
+  { country: "Benin",             name: "Moov Money",        clapayCode: "MOOV" },
+  // Cote d'Ivoire
+  { country: "Cote d'Ivoire",     name: "Orange Money",      clapayCode: "OM" },
+  { country: "Cote d'Ivoire",     name: "MTN Mobile Money",  clapayCode: "MTN" },
+  { country: "Cote d'Ivoire",     name: "Moov Money",        clapayCode: "MOOV" },
+  { country: "Cote d'Ivoire",     name: "Wave",              clapayCode: "WAVE", wave: true },
+  // Senegal
+  { country: "Senegal",           name: "Orange Money",      clapayCode: "OM" },
+  { country: "Senegal",           name: "Wave",              clapayCode: "WAVE", wave: true },
+  // Mali
+  { country: "Mali",              name: "Orange Money",      clapayCode: "OM" },
+  { country: "Mali",              name: "Moov Money",        clapayCode: "MOOV" },
+  { country: "Mali",              name: "Wave",              clapayCode: "WAVE", wave: true },
+  // Burkina Faso
+  { country: "Burkina Faso",      name: "Orange Money",      clapayCode: "OM" },
+  { country: "Burkina Faso",      name: "Moov Money",        clapayCode: "MOOV" },
+  { country: "Burkina Faso",      name: "Wave",              clapayCode: "WAVE", wave: true },
+  // Cameroun
+  { country: "Cameroun",          name: "MTN Mobile Money",  clapayCode: "MTN" },
+  { country: "Cameroun",          name: "Orange Money",      clapayCode: "OM" },
+  // Congo Brazzaville
+  { country: "Congo Brazzaville", name: "MTN Mobile Money",  clapayCode: "MTN" },
+  { country: "Congo Brazzaville", name: "Airtel Money",      clapayCode: "AIRTEL" },
+  // Gabon
+  { country: "Gabon",             name: "Airtel Money",      clapayCode: "AIRTEL" },
+  { country: "Gabon",             name: "Moov Money",        clapayCode: "MOOV" },
+  // Guinee
+  { country: "Guinee",            name: "Orange Money",      clapayCode: "OM" },
+  { country: "Guinee",            name: "MTN Mobile Money",  clapayCode: "MTN" },
+  // Niger — 8 chiffres locaux, 5 opérateurs confirmés API direct
+  { country: "Niger",             name: "Airtel Money",      clapayCode: "AIRTEL" },
+  { country: "Niger",             name: "Moov Money",        clapayCode: "MOOV" },
+  { country: "Niger",             name: "Zamani",            clapayCode: "ZAMANI" },
+  { country: "Niger",             name: "Amana",             clapayCode: "AMANATA" },  // code API = AMANATA
+  { country: "Niger",             name: "Mynita",            clapayCode: "MYNITA" },
+  // Kenya — 9 chiffres locaux (712345678), currency KES
+  { country: "Kenya",             name: "Airtel Money",      clapayCode: "AIRTEL" },
+  { country: "Kenya",             name: "Safaricom M-Pesa",  clapayCode: "SAFARICOM" },
+  { country: "Kenya",             name: "M-Pesa",            clapayCode: "MPESA" },
+];
+
+async function ensureClapayOperatorsExist() {
+  try {
+    let created = 0;
+    for (let i = 0; i < CLAPAY_OPERATORS.length; i++) {
+      const op = CLAPAY_OPERATORS[i];
+      const existing = await storage.getWithdrawalOperatorByNameAndCountry(op.name, op.country);
+      if (!existing) {
+        await storage.createWithdrawalOperator({
+          name: op.name,
+          type: "Mobile Money",
+          country: op.country,
+          dailyLimit: 10000000,
+          gateway: "ClaPay",
+          clapayCode: op.clapayCode,
+          sortOrder: i,
+          active: true,
+        } as any);
+        created++;
+      } else if (!(existing as any).clapayCode && op.clapayCode) {
+        // Mettre à jour le clapayCode si manquant sur un opérateur existant
+        const { db } = await import("./db");
+        const { withdrawalOperators } = await import("@shared/schema");
+        const { eq } = await import("drizzle-orm");
+        await db.update(withdrawalOperators).set({ clapayCode: op.clapayCode } as any).where(eq(withdrawalOperators.id, existing.id));
+      }
+    }
+    console.log(`[SEED] Opérateurs ClaPay vérifiés/créés (${created} nouveaux)`);
+  } catch (err: any) {
+    console.error("[SEED] Erreur seed opérateurs ClaPay:", err.message);
+  }
+}
+
 async function ensureSeaPayOperatorsExist() {
   try {
     // Pakistan — 46 banques + 5 portefeuilles/cartes (SeaPay)
@@ -166,6 +248,9 @@ export async function seedDatabase() {
 
   // SeaPay : créer les opérateurs de retrait Pakistan/Philippines/India s'ils n'existent pas encore
   await ensureSeaPayOperatorsExist();
+
+  // ClaPay : créer les opérateurs mobile money pour tous les pays supportés
+  await ensureClapayOperatorsExist();
 
   // Compte test : uniquement en développement OU si le flag d'activation est posé en DB
   // En production (Plesk), ce compte n'est pas recréé automatiquement après suppression

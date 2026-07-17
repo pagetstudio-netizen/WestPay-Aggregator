@@ -6061,7 +6061,7 @@ export async function registerRoutes(
     try {
       const id = parseInt(req.params.id);
       const { payinGateway } = req.body;
-      if (!["omnipay", "mbiyo", "sendavapay"].includes(payinGateway)) {
+      if (!["omnipay", "mbiyo", "sendavapay", "seapay", "clapay", "oxapay"].includes(payinGateway)) {
         return res.status(400).json({ message: "Methode de paiement invalide." });
       }
       await storage.updateMerchantCountryPayinGateway(id, payinGateway);

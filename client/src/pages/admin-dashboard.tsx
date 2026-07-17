@@ -1947,7 +1947,7 @@ function CountriesPanel() {
 
   if (isLoading) return <LoadingSkeleton />;
 
-  const availableCountries = ["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon", "Guinee", "Gambie", "Niger", "Guinee-Bissau", "Tchad", "Centrafrique", "Guinee Equatoriale", "Nigeria", "Pakistan", "Philippines", "India"];
+  const availableCountries = ["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon", "Guinee", "Niger", "Kenya", "Gambie", "Guinee-Bissau", "Tchad", "Centrafrique", "Guinee Equatoriale", "Nigeria", "Pakistan", "Philippines", "India"];
   const selectedMerchantName = (merchants as Merchant[]).find(m => m.id.toString() === merchantId)?.name;
   const filteredCountries = filterSearch.trim()
     ? (countries as any[]).filter((mc: any) =>
@@ -2310,7 +2310,7 @@ function NumbersPanel() {
                 <Select value={country} onValueChange={setCountry}>
                   <SelectTrigger data-testid="select-number-country"><SelectValue placeholder="Selectionner" /></SelectTrigger>
                   <SelectContent>
-                    {["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Gabon"].map((c) => (
+                    {["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Gabon", "Guinee", "Niger", "Kenya"].map((c) => (
                       <SelectItem key={c} value={c}>{c}</SelectItem>
                     ))}
                   </SelectContent>
@@ -3527,12 +3527,12 @@ function SendavaPayPanel() {
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-1.5">
-              {["Togo", "Benin", "Cameroun", "Burkina Faso", "Cote d'Ivoire", "Mali", "Senegal", "Congo RDC", "Congo Brazzaville"].map(c => (
+              {["Togo", "Benin", "Cote d'Ivoire", "Burkina Faso", "Senegal", "Mali", "Cameroun", "Niger", "Kenya", "Congo Brazzaville", "Gabon", "Guinee"].map(c => (
                 <Badge key={c} variant="secondary" className="text-xs">{c}</Badge>
               ))}
             </div>
             <p className="text-xs text-muted-foreground mt-2">
-              OTP requis pour Orange Money en Burkina Faso, Cote d'Ivoire, Mali et Senegal.
+              OTP requis pour Orange Money (CI, BF, ML, SN). Wave nécessite un QR code (CHECKOUTPAGE). Kenya : AIRTEL, SAFARICOM, MPESA en API direct (KES).
             </p>
           </CardContent>
         </Card>
@@ -4155,12 +4155,12 @@ function AdminsPanel() {
 
 const COUNTRIES_LIST = [
   "Togo", "Benin", "Burkina Faso", "Cote d'Ivoire", "Senegal", "Mali",
-  "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon", "Guinee", "Niger", "Guinee-Bissau",
-  "Tchad", "Centrafrique", "Guinee Equatoriale",
+  "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon", "Guinee", "Niger", "Kenya",
+  "Guinee-Bissau", "Tchad", "Centrafrique", "Guinee Equatoriale",
   "Pakistan", "Philippines", "India", "Nigeria",
 ];
 const OPERATOR_TYPES = ["Mobile Money", "Virement bancaire", "Carte bancaire", "Cryptomonnaie", "Autre"];
-const GATEWAYS = ["OmniPay", "Mbiyo", "SendavaPay", "SeaPay", "Manuel"];
+const GATEWAYS = ["OmniPay", "Mbiyo", "SendavaPay", "SeaPay", "ClaPay", "Manuel"];
 
 function SortableOpRow({
   op, onEdit, onDelete, onToggle, onUploadLogo, onRemoveLogo, uploadingFor,
@@ -4279,13 +4279,13 @@ function WithdrawalOperatorsPanel() {
 
   useEffect(() => { setLocalOps(opList as WithdrawalOperator[]); }, [opList]);
 
-  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "OmniPay", omnipayCode: "", mbiyoCode: "", seapayCode: "", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false };
+  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "OmniPay", omnipayCode: "", mbiyoCode: "", seapayCode: "", clapayCode: "", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false };
   const [form, setForm] = useState(emptyForm);
 
   const openCreate = () => { setEditingOp(null); setForm(emptyForm); setOpDialogOpen(true); };
   const openEdit = (op: WithdrawalOperator) => {
     setEditingOp(op);
-    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, omnipayCode: op.omnipayCode || "", mbiyoCode: op.mbiyoCode || "", seapayCode: (op as any).seapayCode || "", active: op.active, maintenanceAll: op.maintenanceAll, maintenanceDeposits: op.maintenanceDeposits, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment });
+    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, omnipayCode: op.omnipayCode || "", mbiyoCode: op.mbiyoCode || "", seapayCode: (op as any).seapayCode || "", clapayCode: (op as any).clapayCode || "", active: op.active, maintenanceAll: op.maintenanceAll, maintenanceDeposits: op.maintenanceDeposits, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment });
     setOpDialogOpen(true);
   };
 
@@ -4481,6 +4481,16 @@ function WithdrawalOperatorsPanel() {
                 <Label>Code canal SeaPay</Label>
                 <Input value={form.seapayCode} onChange={e => setForm(f => ({ ...f, seapayCode: e.target.value }))} placeholder="Ex: GCASH, PHPPAYMAYA, PKR1, PKREASYPAISA..." data-testid="input-op-seapay-code" />
                 <p className="text-xs text-muted-foreground">Code de canal (channel_code) exact fourni par SeaPay pour ce moyen de paiement/opérateur. Obligatoire si la passerelle est SeaPay.</p>
+              </div>
+            )}
+            {form.gateway?.toLowerCase() === "clapay" && (
+              <div className="space-y-2">
+                <Label>Code opérateur ClaPay</Label>
+                <Input value={form.clapayCode} onChange={e => setForm(f => ({ ...f, clapayCode: e.target.value }))} placeholder="Ex: MOOV, MTN, OM, WAVE, AIRTEL, SAFARICOM, MPESA..." data-testid="input-op-clapay-code" />
+                <p className="text-xs text-muted-foreground">
+                  Code opérateur exact de l'API NoWallet ClaPay (<code>operators_code</code>). Vérifiable via le dashboard ClaPay ou GET /operators/data?country=XX.
+                  Tunnel API direct (push téléphone) pour tous sauf Wave (QR code → CHECKOUTPAGE).
+                </p>
               </div>
             )}
             <div className="flex items-center gap-3">
@@ -6004,6 +6014,7 @@ function AdminAccountsCard({ token, currentUserId }: { token: string | null; cur
 const SUPPORTED_COUNTRIES = [
   "Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali",
   "Burkina Faso", "Cameroun", "Congo Brazzaville", "Gabon", "Congo RDC", "Guinee",
+  "Niger", "Kenya",
 ];
 
 const CRYPTO_WD_STATUS_LABELS: Record<string, { bg: string; color: string; label: string }> = {

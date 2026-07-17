@@ -8,15 +8,17 @@ description: Key quirks discovered while integrating the NoWallet v3 API — pho
 - Must send **local digits only** (e.g. `99935673` for Togo) in `additional_infos.customer_phone`
 - Helper `clapayLocalPhone(phone, countryCode)` in `server/clapay.ts` strips dial code automatically
 
-**Why:** NoWallet validates length against a per-country local digit count (TG=8, CM=9, SN=9, etc.), not international E.164 length.
+**Why:** NoWallet validates length against a per-country local digit count (TG=8, BJ=10, CI=10, SN=9, CM=9, etc.), not international E.164 length.
 
 **How to apply:** Always call `clapayLocalPhone()` before passing phone to `additional_infos.customer_phone`.
 
 ## Tunnel modes
 - `tunnel: "API"` — direct push to user's phone (no redirection). Use when phone number is available. Response has `signature` + `status_payment: "PENDING"`, no `payment_url`.
-- `tunnel: "CHECKOUTPAGE"` — returns a `payment_url`; user enters phone on hosted page. Use as fallback when no phone provided.
+- `tunnel: "CHECKOUTPAGE"` — returns a `payment_url`; user enters phone on hosted page. Use as fallback when no phone provided, OR when operator is Wave.
 
-**Why:** API tunnel is preferred (no redirect UX), but requires a phone number upfront.
+**Why:** API tunnel is preferred (no redirect UX), but requires a phone number upfront. Wave operators require a QR code flow — CHECKOUTPAGE is mandatory for Wave regardless of phone availability.
+
+**Helper:** `clapaySelectTunnel(operatorCode, localPhone)` in `server/clapay.ts` encapsulates the logic: returns `"CHECKOUTPAGE"` if operator name contains "WAVE" (case-insensitive) or if no local phone; otherwise `"API"`. Use it everywhere instead of inline ternaries.
 
 ## Endpoints (v3 vs old)
 | Function | Old endpoint | v3 endpoint |
