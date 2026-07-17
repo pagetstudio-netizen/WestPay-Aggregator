@@ -40,6 +40,8 @@ const PAYMENT_METHODS: Record<string, string[]> = {
   "Pakistan":           ["EasyPaisa", "JazzCash"],
   "Nigeria":            ["MTN MoMo Nigeria", "Airtel Money Nigeria", "OPay", "PalmPay", "Kuda Bank"],
   "Ghana":              ["MTN Mobile Money", "AirtelTigo Money", "Vodafone Cash"],
+  "Niger":              ["Airtel Money", "Moov Money", "Zamani", "Amana", "Mynita"],
+  "Kenya":              ["Safaricom M-Pesa", "Airtel Money", "M-Pesa"],
 };
 
 const DIAL_CODES: Record<string, string> = {
@@ -48,7 +50,30 @@ const DIAL_CODES: Record<string, string> = {
   "Cote d'Ivoire": "+225", "Mali": "+223", "Senegal": "+221",
   "Guinee": "+224", "Gambie": "+220",
   "Philippines": "+63", "India": "+91", "Pakistan": "+92", "Nigeria": "+234",
-  "Ghana": "+233",
+  "Ghana": "+233", "Niger": "+227", "Kenya": "+254",
+};
+
+/** Exemple de numéro local affiché en placeholder selon le pays */
+const PHONE_PLACEHOLDERS: Record<string, string> = {
+  "Togo":               "Ex: 90000000",
+  "Benin":              "Ex: 50123456",
+  "Burkina Faso":       "Ex: 65123456",
+  "Cameroun":           "Ex: 650123456",
+  "Congo Brazzaville":  "Ex: 061234567",
+  "Congo RDC":          "Ex: 812345678",
+  "Gabon":              "Ex: 07123456",
+  "Cote d'Ivoire":      "Ex: 0712345678",
+  "Mali":               "Ex: 65123456",
+  "Senegal":            "Ex: 771234567",
+  "Guinee":             "Ex: 621234567",
+  "Gambie":             "Ex: 3012345",
+  "Philippines":        "Ex: 9171234567",
+  "Pakistan":           "Ex: 3001234567",
+  "India":              "Ex: 9000000000",
+  "Nigeria":            "Ex: 8012345678",
+  "Ghana":              "Ex: 244123456",
+  "Niger":              "Ex: 90123456",
+  "Kenya":              "Ex: 712345678",
 };
 
 const COUNTRY_FLAGS: Record<string, string> = {
@@ -57,7 +82,7 @@ const COUNTRY_FLAGS: Record<string, string> = {
   "Cote d'Ivoire": "🇨🇮", "Mali": "🇲🇱", "Senegal": "🇸🇳",
   "Guinee": "🇬🇳", "Gambie": "🇬🇲",
   "Philippines": "🇵🇭", "India": "🇮🇳", "Pakistan": "🇵🇰", "Nigeria": "🇳🇬",
-  "Ghana": "🇬🇭",
+  "Ghana": "🇬🇭", "Niger": "🇳🇪", "Kenya": "🇰🇪",
 };
 
 const OPERATOR_IMAGES: Record<string, string> = {
@@ -86,6 +111,10 @@ const OPERATOR_META: Record<string, { bg: string; abbr: string }> = {
   "Celtiis":          { bg: "#E05A00", abbr: "CT" },
   "AirtelTigo Money": { bg: "#E8001D", abbr: "AT" },
   "Vodafone Cash":    { bg: "#E60000", abbr: "VC" },
+  "Safaricom M-Pesa": { bg: "#60BB44", abbr: "MP" },
+  "Zamani":           { bg: "#1B4FA6", abbr: "ZA" },
+  "Amana":            { bg: "#0D7C3D", abbr: "AM" },
+  "Mynita":           { bg: "#8B4513", abbr: "MY" },
 };
 
 function currencyForCountry(c: string) {
@@ -619,7 +648,7 @@ export default function PaymentLinkPage() {
                       <span style={{ fontSize: 14, fontWeight: 700, color: "#374151" }}>{dialCode}</span>
                     </div>
                     <input type="tel" value={payerPhone} onChange={e => setPayerPhone(e.target.value)}
-                      placeholder={t("payPhoneNumberPlaceholder")} data-testid="input-payer-phone"
+                      placeholder={PHONE_PLACEHOLDERS[country] || t("payPhoneNumberPlaceholder")} data-testid="input-payer-phone"
                       style={{ flex: 1, padding: "12px 14px", fontSize: 15, border: "none", outline: "none", background: "transparent", color: "#111" }} />
                   </div>
                 </div>

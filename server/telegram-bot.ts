@@ -110,6 +110,27 @@ function formatAmountPlain(n: number): string {
   return n.toFixed(2);
 }
 
+/** Retourne la devise ISO pour un pays donné */
+function currencyForCountry(country: string): string {
+  if (["Cameroun","Congo Brazzaville","Gabon","Tchad","Centrafrique","Guinee Equatoriale"].includes(country)) return "XAF";
+  if (country === "Congo RDC")   return "CDF";
+  if (country === "Guinee")      return "GNF";
+  if (country === "Gambie")      return "GMD";
+  if (country === "Pakistan")    return "PKR";
+  if (country === "Philippines") return "PHP";
+  if (country === "India")       return "INR";
+  if (country === "Nigeria")     return "NGN";
+  if (country === "Kenya")       return "KES";
+  if (country === "Ghana")       return "GHS";
+  return "XOF";
+}
+
+/** Formate un montant avec la bonne devise selon le pays */
+function formatAmountC(n: number, country?: string | null): string {
+  const cur = country ? currencyForCountry(country) : "XOF";
+  return n.toLocaleString("fr-FR") + " " + cur;
+}
+
 // ─── Rate Limiter ────────────────────────────────────────────────────────────
 const MAX_FAILED = 5;
 const LOCK_DURATION_MS = 60 * 60 * 1000;
@@ -354,8 +375,8 @@ async function buildMerchantSoldeMessage(merchantId: number, merchantName: strin
     parts.push(
       `🌍 *Pays :* ${countryLabel(mc.country)}\n` +
       `📌 *Clé :* \`${mc.apiKey.slice(-12)}\`\n` +
-      `💰 *Solde compte :* ${formatAmountPlain(mc.balance)} F CFA\n` +
-      `💳 *Solde reversement :* ${formatAmountPlain(mc.balance)} F CFA\n` +
+      `💰 *Solde compte :* ${formatAmountPlain(mc.balance)} ${currencyForCountry(mc.country)}\n` +
+      `💳 *Solde reversement :* ${formatAmountPlain(mc.balance)} ${currencyForCountry(mc.country)}\n` +
       `📊 *Dépôts réussis aujourd'hui :* ${stats.success}\n` +
       `📈 *Taux de réussite aujourd'hui :* ${successRate(stats.success, stats.total)}`
     );
@@ -750,7 +771,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         const lines = recent.map((t, i) => {
           const date = new Date(t.createdAt).toLocaleDateString("fr-FR");
           const statusIcon = t.status === "confirmed" ? "✅" : "⏳";
-          return `${i + 1}. ${statusIcon} *${formatAmount(t.amount)}*\n   ${countryLabel(t.country)} — ${date}${t.payerNumber ? `\n   📞 ${t.payerNumber}` : ""}\n   🔖 \`${t.txId}\``;
+          return `${i + 1}. ${statusIcon} *${formatAmountC(t.amount, t.country)}*\n   ${countryLabel(t.country)} — ${date}${t.payerNumber ? `\n   📞 ${t.payerNumber}` : ""}\n   🔖 \`${t.txId}\``;
         });
         await ctx.reply(`📋 *5 dernières transactions — ${merchant.name}*\n\n${lines.join("\n\n")}`, { parse_mode: "Markdown" });
       } catch { await ctx.reply("❌ Erreur."); }
@@ -766,7 +787,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       const lines = recent.map((t, i) => {
         const date = new Date(t.createdAt).toLocaleDateString("fr-FR");
         const statusIcon = t.status === "confirmed" ? "✅" : "⏳";
-        return `${i + 1}. ${statusIcon} *${formatAmount(t.amount)}*\n   ${countryLabel(t.country)} — ${date}${t.payerNumber ? `\n   📞 ${t.payerNumber}` : ""}\n   🔖 \`${t.txId}\``;
+        return `${i + 1}. ${statusIcon} *${formatAmountC(t.amount, t.country)}*\n   ${countryLabel(t.country)} — ${date}${t.payerNumber ? `\n   📞 ${t.payerNumber}` : ""}\n   🔖 \`${t.txId}\``;
       });
       await ctx.reply(`📋 *Vos 5 dernières transactions*\n\n${lines.join("\n\n")}`, { parse_mode: "Markdown" });
     } catch { await ctx.reply("❌ Erreur."); }
@@ -2200,18 +2221,18 @@ export async function notifyMerchantPayment(merchantId: number, data: {
     const netCredited = grossAmount - westpayFee;
 
     const feeLinesFr = feeRate > 0 ? [
-      `💳 *Brut reçu :* ${formatAmount(grossAmount)}`,
-      `📉 *Frais WestPay (5,5%) :* -${formatAmount(westpayFee)}`,
-      `✅ *Net crédité :* ${formatAmount(netCredited)}`,
+      `💳 *Brut reçu :* ${formatAmountC(grossAmount, data.country)}`,
+      `📉 *Frais WestPay (5,5%) :* -${formatAmountC(westpayFee, data.country)}`,
+      `✅ *Net crédité :* ${formatAmountC(netCredited, data.country)}`,
     ] : [
-      `💳 *Montant crédité :* ${formatAmount(grossAmount)} *(sans frais)*`,
+      `💳 *Montant crédité :* ${formatAmountC(grossAmount, data.country)} *(sans frais)*`,
     ];
     const feeLinesEn = feeRate > 0 ? [
-      `💳 *Gross received:* ${formatAmount(grossAmount)}`,
-      `📉 *WestPay fee (5.5%):* -${formatAmount(westpayFee)}`,
-      `✅ *Net credited:* ${formatAmount(netCredited)}`,
+      `💳 *Gross received:* ${formatAmountC(grossAmount, data.country)}`,
+      `📉 *WestPay fee (5.5%):* -${formatAmountC(westpayFee, data.country)}`,
+      `✅ *Net credited:* ${formatAmountC(netCredited, data.country)}`,
     ] : [
-      `💳 *Amount credited:* ${formatAmount(grossAmount)} *(no fee)*`,
+      `💳 *Amount credited:* ${formatAmountC(grossAmount, data.country)} *(no fee)*`,
     ];
     const feeLines = lang === "fr" ? feeLinesFr : feeLinesEn;
 
@@ -2227,9 +2248,9 @@ export async function notifyMerchantPayment(merchantId: number, data: {
       ``,
       t.balanceHeader,
       ``,
-      `${t.totalBalance} ${formatAmountPlain(newBalance)} ${t.currency}`,
-      `${t.payoutBalance} ${formatAmountPlain(newBalance)} ${t.currency}`,
-      t.successfulDeposits(todayStats.success, formatAmountPlain(todayStats.amount), t.currency),
+      `${t.totalBalance} ${formatAmountPlain(newBalance)} ${currencyForCountry(data.country)}`,
+      `${t.payoutBalance} ${formatAmountPlain(newBalance)} ${currencyForCountry(data.country)}`,
+      t.successfulDeposits(todayStats.success, formatAmountPlain(todayStats.amount), currencyForCountry(data.country)),
       `${t.successRate} ${successRate(todayStats.success, todayStats.total)}`,
     ].join("\n");
 
@@ -2416,9 +2437,9 @@ export async function notifyAdminPayment(data: {
     `🏪 *Marchand :* ${data.merchantName}`,
     `📞 *Numéro client :* ${data.payerNumber || "N/A"}`,
     `🌍 *Pays :* ${countryLabel(data.country)}`,
-    `💰 *Montant total :* ${formatAmount(data.amount)}`,
-    `💵 *Frais plateforme :* 0 F CFA`,
-    `✅ *Montant reçu :* ${formatAmount(data.amount)}`,
+    `💰 *Montant total :* ${formatAmountC(data.amount, data.country)}`,
+    `💵 *Frais plateforme :* 0 ${currencyForCountry(data.country)}`,
+    `✅ *Montant reçu :* ${formatAmountC(data.amount, data.country)}`,
     `📱 *Méthode :* ${methodLabel}`,
     `📊 *Statut :* ${statusLabel}`,
     `📅 *Date :* ${dateStr}`,
@@ -2469,9 +2490,9 @@ export async function notifyAdminWithdrawal(data: {
     ``,
     `📞 *Numéro réception :* ${data.phone}`,
     `🌍 *Pays :* ${countryLabel(data.country)}`,
-    `💰 *Montant demandé :* ${formatAmount(data.amount)}`,
-    `💵 *Frais plateforme :* ${formatAmount(data.fees)}`,
-    `✅ *Montant envoyé :* ${formatAmount(net)}`,
+    `💰 *Montant demandé :* ${formatAmountC(data.amount, data.country)}`,
+    `💵 *Frais plateforme :* ${formatAmountC(data.fees, data.country)}`,
+    `✅ *Montant envoyé :* ${formatAmountC(net, data.country)}`,
     data.operator ? `📱 *Opérateur :* ${data.operator}` : null,
     `⚙️ *Mode :* ${data.mode === "auto" ? "Automatique" : "Manuel"}`,
     `📊 *Statut :* ${statusLabel}`,
@@ -2742,9 +2763,9 @@ export async function notifyMerchantWithdrawal(merchantId: number, data: {
       `${icon} *${tw.title}*`,
       ``,
       `🔖 *${tw.reference} :* \`WD-${data.id}\``,
-      `💰 *${tw.amountRequested} :* ${formatAmount(data.amount)}`,
-      data.fees > 0 ? `💵 *${tw.fees} :* ${formatAmount(data.fees)}` : null,
-      data.fees > 0 ? `✅ *${tw.amountSent} :* ${formatAmount(net)}` : null,
+      `💰 *${tw.amountRequested} :* ${formatAmountC(data.amount, data.country)}`,
+      data.fees > 0 ? `💵 *${tw.fees} :* ${formatAmountC(data.fees, data.country)}` : null,
+      data.fees > 0 ? `✅ *${tw.amountSent} :* ${formatAmountC(net, data.country)}` : null,
       `📞 *${tw.phone} :* ${data.phone}`,
       `🌍 *${tw.country} :* ${countryLabel(data.country)}`,
       data.operator ? `📱 *${tw.operator} :* ${data.operator}` : null,
@@ -2833,7 +2854,7 @@ export async function notifyAdminBalanceUpdate(data: {
     `🏪 *Marchand :* ${data.merchantName}`,
     data.merchantEmail ? `📧 *Email marchand :* \`${data.merchantEmail}\`` : null,
     `🌍 *Pays wallet :* ${countryLabel(data.country)}`,
-    `💰 *Nouveau solde :* ${formatAmount(data.newBalance)}`,
+    `💰 *Nouveau solde :* ${formatAmountC(data.newBalance, data.country)}`,
     `📊 *Statut :* Effectué`,
     `📅 *Date :* ${dateStr} UTC`,
   ].filter(Boolean).join("\n");
