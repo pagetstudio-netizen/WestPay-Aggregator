@@ -104,6 +104,7 @@ const CLAPAY_COUNTRY_CODES: Record<string, string> = {
   "Centrafrique": "CF",
   "Guinee Equatoriale": "GQ",
   "Nigeria": "NG",
+  "Ghana": "GH",
 };
 
 const CLAPAY_CURRENCY_MAP: Record<string, string> = {
@@ -115,6 +116,7 @@ const CLAPAY_CURRENCY_MAP: Record<string, string> = {
   "GN": "GNF",
   "NG": "NGN",
   "KE": "KES",
+  "GH": "GHS",
 };
 
 export function clapayCountryCode(country: string): string {
@@ -154,6 +156,7 @@ const CLAPAY_DIAL_CODES: Record<string, { dialCode: string; localLen: number }> 
   NE: { dialCode: "227", localLen: 8 },   // startwith 2 chiffres → 8 digits
   NG: { dialCode: "234", localLen: 10 },  // 07X/08X/09X + 7 → 10 digits
   KE: { dialCode: "254", localLen: 9 },   // confirmé API : 712345678 (9 chiffres, ex: 7X-XXXXXXX)
+  GH: { dialCode: "233", localLen: 9 },   // confirmé API : 3 opérateurs (MTN, AIRTELTIGO, VODAFONE) — format 0XXXXXXXXX → local 9 chiffres
 };
 
 /**

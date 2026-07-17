@@ -144,6 +144,10 @@ const CLAPAY_OPERATORS: Array<{ country: string; name: string; clapayCode: strin
   { country: "Kenya",             name: "Airtel Money",      clapayCode: "AIRTEL" },
   { country: "Kenya",             name: "Safaricom M-Pesa",  clapayCode: "SAFARICOM" },
   { country: "Kenya",             name: "M-Pesa",            clapayCode: "MPESA" },
+  // Ghana — 9 chiffres locaux (ex: 244123456), currency GHS — 3 opérateurs confirmés API live
+  { country: "Ghana",             name: "MTN Mobile Money",  clapayCode: "MTN" },
+  { country: "Ghana",             name: "AirtelTigo Money",  clapayCode: "AIRTELTIGO" },
+  { country: "Ghana",             name: "Vodafone Cash",     clapayCode: "VODAFONE" },
 ];
 
 async function ensureClapayOperatorsExist() {
