@@ -70,13 +70,14 @@ function useMerchantFetch(url: string, key: string[], token: string | null) {
 }
 
 function countryToCurrency(country: string): string {
-  if (country === "Congo RDC") return "CDF";
-  if (country === "Guinee") return "GNF";
-  if (country === "Gambie") return "GMD";
-  if (country === "Nigeria") return "NGN";
-  if (country === "Pakistan") return "PKR";
+  if (country === "Congo RDC")  return "CDF";
+  if (country === "Guinee")     return "GNF";
+  if (country === "Gambie")     return "GMD";
+  if (country === "Nigeria")    return "NGN";
+  if (country === "Pakistan")   return "PKR";
   if (country === "Philippines") return "PHP";
-  if (country === "India") return "INR";
+  if (country === "India")      return "INR";
+  if (country === "Kenya")      return "KES";
   return "FCFA";
 }
 
@@ -2810,7 +2811,8 @@ const LINK_COUNTRY_FLAGS: Record<string, { flag: string; currency: string; label
   "Gambie": { flag: "🇬🇲", currency: "GMD", label: "Gambie" },
   "Ghana": { flag: "🇬🇭", currency: "GHS", label: "Ghana" },
   "Nigeria": { flag: "🇳🇬", currency: "NGN", label: "Nigeria" },
-  "Niger": { flag: "🇳🇪", currency: "XOF", label: "Niger" },
+  "Niger": { flag: "🇳🇪", currency: "XOF",  label: "Niger" },
+  "Kenya": { flag: "🇰🇪", currency: "KES",  label: "Kenya" },
 };
 
 function PaymentLinksPanel({ token }: { token: string | null }) {

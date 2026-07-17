@@ -1798,7 +1798,7 @@ function TransactionsPanel() {
                             {tx.status !== "confirmed" && tx.status !== "completed" && tx.status !== "success" && (
                               <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white gap-1"
                                 disabled={validateTxMutation.isPending}
-                                onClick={async () => { if (await showConfirm("Valider cette transaction manuellement ? (à utiliser si l'argent est bien arrivé au client)")) validateTxMutation.mutate(tx.id); }}
+                                onClick={async () => { if (await showConfirm("Valider cette transaction manuellement ? (à utiliser si l'argent est bien arrivé au client)")) validateTxMutation.mutate(tx.rowId); }}
                                 data-testid={`button-validate-tx-${tx.id}`}>
                                 <CheckCircle className="w-3 h-3" />Valider manuellement
                               </Button>
@@ -1806,7 +1806,7 @@ function TransactionsPanel() {
                             {tx.status !== "rejected" && tx.status !== "failed" && (
                               <Button size="sm" variant="destructive" className="h-7 text-xs gap-1"
                                 disabled={rejectTxMutation.isPending}
-                                onClick={async () => { if (await showConfirm("Rejeter cette transaction manuellement ?")) rejectTxMutation.mutate(tx.id); }}
+                                onClick={async () => { if (await showConfirm("Rejeter cette transaction manuellement ?")) rejectTxMutation.mutate(tx.rowId); }}
                                 data-testid={`button-reject-tx-${tx.id}`}>
                                 <XCircle className="w-3 h-3" />Rejeter
                               </Button>

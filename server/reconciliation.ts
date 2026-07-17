@@ -8,12 +8,20 @@ import { storage } from "./storage";
 import { getPaymentStatus as sendavaGetStatus, getWithdrawalStatus as sendavaGetWithdrawalStatus } from "./sendavapay";
 import { getTransactionStatus as omnipayGetStatus } from "./omnipay";
 import { getTransactionStatus as mbiyoGetStatus } from "./mbiyo";
+import { clapayGetTransactionStatus as clapayGetStatus } from "./clapay";
 import { notifyMerchantPayment, notifyAdminPayment, notifyAdminWithdrawal, notifyMerchantWithdrawal } from "./telegram-bot";
 
 const COLLECTION_FEE_RATE = 0.055;
 const EXTRA_FEE_COUNTRIES = new Set(["Congo Brazzaville", "Congo RDC"]);
+const COUNTRY_FEE_OVERRIDES_RECON: Record<string, number> = {
+  "India": 0.15, "Pakistan": 0.15, "Nigeria": 0.15, "Philippines": 0.15,
+  "Niger": 0.06, "Kenya": 0.06,
+};
 
 function calcCredit(amount: number, country?: string | null): number {
+  if (country && COUNTRY_FEE_OVERRIDES_RECON[country] !== undefined) {
+    return Math.floor(amount * (1 - COUNTRY_FEE_OVERRIDES_RECON[country]));
+  }
   const rate = country && EXTRA_FEE_COUNTRIES.has(country)
     ? COLLECTION_FEE_RATE + 0.01
     : COLLECTION_FEE_RATE;
@@ -39,6 +47,10 @@ async function getOmnipayPayoutKey(): Promise<string | undefined> {
 
 async function getMbiyoKey(): Promise<string | undefined> {
   return process.env.MBIYO_API_KEY || await storage.getSetting("mbiyo_api_key");
+}
+
+async function getClapayKey(): Promise<string | undefined> {
+  return process.env.CLAPAY_API_KEY || await storage.getSetting("clapay_api_key");
 }
 
 async function creditConfirmedPayment(pending: any, txRef: string): Promise<boolean> {
@@ -337,6 +349,82 @@ export async function runReconciliation(): Promise<void> {
             console.log(`[RECONCILIATION] SendavaPay ECHEC — ref=${pending.omnipayReference} status=${status}`);
           } else {
             console.log(`[RECONCILIATION] SendavaPay EN COURS — ref=${pending.omnipayReference} status=${status || "inconnu"}`);
+          }
+        } else if (pending.gateway === "clapay") {
+          // ClaPay ne pousse pas de webhook — polling obligatoire
+          const cpToken = await getClapayKey();
+          if (!cpToken) continue;
+
+          // La signature NoWallet est stockée dans omnipayTxId ; fallback sur omnipayReference
+          const clapaySignature = pending.omnipayTxId || pending.omnipayReference;
+          if (!clapaySignature) continue;
+
+          const result = await clapayGetStatus(cpToken, clapaySignature);
+          const s = (result.status || "").toUpperCase();
+          const cpSuccess = ["SUCCESSFUL", "SUCCESS", "COMPLETED", "PAID", "APPROVED", "CONFIRMED"].includes(s);
+          const cpFailed  = ["FAILED", "FAILURE", "CANCELLED", "CANCELED", "REJECTED", "EXPIRED"].includes(s);
+
+          if (cpSuccess) {
+            const txRef = `CP-${pending.omnipayReference}`;
+            const existing = await storage.getTransactionByTxId(txRef);
+            if (!existing) {
+              const merchant = await storage.getMerchantById(pending.merchantId);
+              const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
+              if (mc) {
+                const credit = merchant?.feeExempt ? pending.amount : calcCredit(pending.amount, pending.country);
+                const fee = pending.amount - credit;
+                await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
+                await storage.incrementMerchantCountryBalance(mc.id, credit);
+                await storage.createTransaction({
+                  merchantId: pending.merchantId,
+                  country: pending.country,
+                  txId: txRef,
+                  amount: pending.amount,
+                  payerNumber: pending.payerPhone || null,
+                  payerName: pending.payerName || null,
+                  status: "confirmed",
+                  provider: "clapay",
+                  omnipayTxId: clapaySignature,
+                  operator: pending.paymentMethod || null,
+                  omnipayReference: pending.omnipayReference || null,
+                  errorMessage: null,
+                  providerFee: fee,
+                });
+                notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "clapay" }).catch(() => {});
+                notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "clapay", status: "confirmed" }).catch(() => {});
+                console.log(`[RECONCILIATION] ClaPay OK — ref=${pending.omnipayReference} montant=${pending.amount} — crédité`);
+              } else {
+                console.error(`[RECONCILIATION] ClaPay — MerchantCountry introuvable paiement #${pending.id}`);
+              }
+            } else {
+              // Transaction déjà créée (ex. par le callback ou un polling précédent), juste fermer le pending
+              await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
+              console.log(`[RECONCILIATION] ClaPay OK — ref=${pending.omnipayReference} — déjà traité`);
+            }
+          } else if (cpFailed) {
+            await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+            const failTxId = `CP-${pending.omnipayReference}`;
+            const existing = await storage.getTransactionByTxId(failTxId);
+            if (!existing) {
+              storage.createTransaction({
+                merchantId: pending.merchantId,
+                country: pending.country,
+                txId: failTxId,
+                amount: pending.amount,
+                payerNumber: pending.payerPhone || null,
+                payerName: pending.payerName || null,
+                status: "failed",
+                provider: "clapay",
+                omnipayTxId: clapaySignature,
+                operator: pending.paymentMethod || null,
+                omnipayReference: pending.omnipayReference || null,
+                errorMessage: `Paiement ${s} (réconciliation ClaPay)`,
+                providerFee: 0,
+              }).catch(() => {});
+            }
+            console.log(`[RECONCILIATION] ClaPay ECHEC — ref=${pending.omnipayReference} status=${s}`);
+          } else {
+            console.log(`[RECONCILIATION] ClaPay EN COURS — ref=${pending.omnipayReference} status=${s || "inconnu"}`);
           }
         }
       } catch (err: any) {

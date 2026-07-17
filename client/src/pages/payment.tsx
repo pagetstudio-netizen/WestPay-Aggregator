@@ -106,6 +106,7 @@ function currencyForCountry(c: string) {
   if (c === "Philippines") return "PHP";
   if (c === "India")       return "INR";
   if (c === "Nigeria")     return "NGN";
+  if (c === "Kenya")       return "KES";
   return "XOF";
 }
 

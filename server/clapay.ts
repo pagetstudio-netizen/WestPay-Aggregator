@@ -157,25 +157,52 @@ const CLAPAY_DIAL_CODES: Record<string, { dialCode: string; localLen: number }> 
 };
 
 /**
- * Vérifie si le code opérateur correspond à Wave.
- * Wave requiert un QR code (tunnel CHECKOUTPAGE obligatoire).
+ * Opérateurs qui utilisent obligatoirement le tunnel CHECKOUTPAGE (page hébergée / QR code).
+ * Wave : QR code Wave
+ * Mynita : pas de push USSD direct, nécessite la page hébergée
  */
-export function isWaveOperator(operatorCode?: string | null): boolean {
+export function isClapayCheckoutOperator(operatorCode?: string | null): boolean {
   if (!operatorCode) return false;
-  return operatorCode.toUpperCase().includes("WAVE");
+  const code = operatorCode.toUpperCase();
+  return code.includes("WAVE") || code.includes("MYNITA");
+}
+
+/** @deprecated Use isClapayCheckoutOperator */
+export const isWaveOperator = isClapayCheckoutOperator;
+
+/**
+ * Détermine le tunnel à utiliser selon l'opérateur UNIQUEMENT.
+ * Ne fallback JAMAIS en CHECKOUTPAGE à cause d'un numéro manquant —
+ * c'est la responsabilité de l'appelant de valider le numéro avant.
+ */
+export function clapaySelectTunnel(operatorCode?: string | null): "API" | "CHECKOUTPAGE" {
+  return isClapayCheckoutOperator(operatorCode) ? "CHECKOUTPAGE" : "API";
 }
 
 /**
- * Détermine le tunnel à utiliser selon l'opérateur et la disponibilité du numéro.
- * Règle : API direct pour tout, CHECKOUTPAGE uniquement pour Wave ou si pas de numéro.
+ * Valide et extrait le numéro local ClaPay.
+ * Retourne { ok: true, localPhone } si valide,
+ *          { ok: false, error } si invalide ou manquant.
  */
-export function clapaySelectTunnel(
-  operatorCode?: string | null,
-  localPhone?: string | null,
-): "API" | "CHECKOUTPAGE" {
-  if (isWaveOperator(operatorCode)) return "CHECKOUTPAGE";
-  if (!localPhone) return "CHECKOUTPAGE";
-  return "API";
+export function clapayValidatePhone(
+  rawPhone: string | null | undefined,
+  countryCode: string,
+): { ok: true; localPhone: string } | { ok: false; error: string } {
+  if (!rawPhone || !rawPhone.trim()) {
+    return { ok: false, error: "Numéro de téléphone requis pour ce mode de paiement." };
+  }
+  const local = clapayLocalPhone(rawPhone, countryCode);
+  const info = CLAPAY_DIAL_CODES[countryCode.toUpperCase()];
+  if (info && local.length !== info.localLen) {
+    return {
+      ok: false,
+      error: `Numéro incorrect — ${info.localLen} chiffres attendus pour ce pays (reçu : ${local.length}).`,
+    };
+  }
+  if (!/^\d+$/.test(local)) {
+    return { ok: false, error: "Numéro incorrect — chiffres uniquement." };
+  }
+  return { ok: true, localPhone: local };
 }
 
 /**

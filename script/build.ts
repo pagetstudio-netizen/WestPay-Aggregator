@@ -1,6 +1,6 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
-import { rm, readFile } from "fs/promises";
+import { rm, readFile, cp, mkdir } from "fs/promises";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -44,6 +44,18 @@ async function buildAll() {
 
   console.log("building client...");
   await viteBuild();
+
+  // Copier uploads/ → dist/uploads/ pour que les logos et fichiers uploadés
+  // soient disponibles en production (Plesk cwd = dist/)
+  console.log("copying uploads...");
+  try {
+    await mkdir("dist/uploads", { recursive: true });
+    await cp("uploads", "dist/uploads", { recursive: true, force: true });
+    console.log("uploads copied to dist/uploads");
+  } catch (err: any) {
+    if (err.code !== "ENOENT") throw err;
+    console.log("no uploads/ folder found — skipping");
+  }
 
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));

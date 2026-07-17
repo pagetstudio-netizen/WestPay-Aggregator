@@ -13,12 +13,17 @@ description: Key quirks discovered while integrating the NoWallet v3 API — pho
 **How to apply:** Always call `clapayLocalPhone()` before passing phone to `additional_infos.customer_phone`.
 
 ## Tunnel modes
-- `tunnel: "API"` — direct push to user's phone (no redirection). Use when phone number is available. Response has `signature` + `status_payment: "PENDING"`, no `payment_url`.
-- `tunnel: "CHECKOUTPAGE"` — returns a `payment_url`; user enters phone on hosted page. Use as fallback when no phone provided, OR when operator is Wave.
+- `tunnel: "API"` — direct push to user's phone (no redirection). Requires a valid local phone number.
+- `tunnel: "CHECKOUTPAGE"` — returns a `payment_url`; user enters phone on hosted page. **Only** for Wave and Mynita operators.
 
-**Why:** API tunnel is preferred (no redirect UX), but requires a phone number upfront. Wave operators require a QR code flow — CHECKOUTPAGE is mandatory for Wave regardless of phone availability.
+**NEVER** fallback automatically to CHECKOUTPAGE when phone is missing — return an explicit error instead.
 
-**Helper:** `clapaySelectTunnel(operatorCode, localPhone)` in `server/clapay.ts` encapsulates the logic: returns `"CHECKOUTPAGE"` if operator name contains "WAVE" (case-insensitive) or if no local phone; otherwise `"API"`. Use it everywhere instead of inline ternaries.
+**Why:** Wave requires QR code flow; Mynita has no USSD push support. All other operators use API direct. Silently falling back to CHECKOUTPAGE was hiding phone validation errors from the user.
+
+**Helpers in `server/clapay.ts`:**
+- `isClapayCheckoutOperator(code)` — returns true for WAVE and MYNITA codes
+- `clapaySelectTunnel(operatorCode)` — returns tunnel based on operator only (no phone param)
+- `clapayValidatePhone(rawPhone, countryCode)` — returns `{ ok, localPhone }` or `{ ok: false, error }` with a user-facing message; call this before initiating API tunnel payments
 
 ## Endpoints (v3 vs old)
 | Function | Old endpoint | v3 endpoint |

@@ -86,6 +86,8 @@ import {
   clapayCurrency,
   clapayLocalPhone,
   clapaySelectTunnel,
+  clapayValidatePhone,
+  isClapayCheckoutOperator,
   type ClapayWebhookPayload,
 } from "./clapay";
 
@@ -342,13 +344,19 @@ function toMerchantSafeMessage(msg: string | null | undefined): string {
 const COLLECTION_FEE_RATE = 0.055;
 const WITHDRAWAL_FEE_RATE = 0.045;
 const EXTRA_FEE_COUNTRIES = new Set(["Congo Brazzaville", "Congo RDC"]);
-/* SeaPay countries: India, Pakistan, Nigeria, Philippines use a dedicated 15% payin / 5% payout fee schedule */
+/* Frais spécifiques par pays (payin + payout) */
 const COUNTRY_FEE_OVERRIDES: Record<string, { payin: number; payout: number }> = {
+  /* SeaPay countries */
   "India":       { payin: 0.15, payout: 0.05 },
   "Pakistan":    { payin: 0.15, payout: 0.05 },
   "Nigeria":     { payin: 0.15, payout: 0.05 },
   "Philippines": { payin: 0.15, payout: 0.05 },
+  /* ClaPay countries : devise propre (XOF isolé / KES), pas d'échange inter-pays */
+  "Niger":       { payin: 0.06, payout: 0.06 },
+  "Kenya":       { payin: 0.06, payout: 0.06 },
 };
+/* Pays fermés aux transferts inter-pays (wallet transfer interdit) */
+const NO_WALLET_TRANSFER_COUNTRIES = new Set(["Niger", "Kenya"]);
 function getCollectionFeeRate(country?: string | null): number {
   if (country && COUNTRY_FEE_OVERRIDES[country]) return COUNTRY_FEE_OVERRIDES[country].payin;
   return country && EXTRA_FEE_COUNTRIES.has(country) ? COLLECTION_FEE_RATE + 0.01 : COLLECTION_FEE_RATE;
@@ -4132,12 +4140,19 @@ export async function registerRoutes(
 
         try {
           const clapayOpCode = (operatorRecord as any)?.clapayCode || paymentMethod || "";
-          const rawPhone = msisdn || payerPhone || "";
-          const localPhone = rawPhone ? clapayLocalPhone(rawPhone, countryCode) : "";
-          // Tunnel : API direct (push téléphone) pour tous les opérateurs sauf Wave
-          // Wave requiert un QR code → CHECKOUTPAGE obligatoire
-          // Fallback CHECKOUTPAGE si aucun numéro fourni
-          const clapayTunnel = clapaySelectTunnel(clapayOpCode, localPhone);
+          const clapayTunnel = clapaySelectTunnel(clapayOpCode);
+
+          // Valider le numéro uniquement pour les opérateurs API direct
+          let clapayLocalPhoneVal = "";
+          if (clapayTunnel === "API") {
+            const rawPhone = msisdn || payerPhone || "";
+            const phoneCheck = clapayValidatePhone(rawPhone, countryCode);
+            if (!phoneCheck.ok) {
+              return res.status(400).json({ message: phoneCheck.error });
+            }
+            clapayLocalPhoneVal = phoneCheck.localPhone;
+          }
+
           const cpResult = await clapayInitiatePayin(clapayToken, {
             transaction_id: reference,
             amount: parsedAmount,
@@ -4147,9 +4162,8 @@ export async function registerRoutes(
             tunnel: clapayTunnel,
             callback_url: callbackUrl,
             return_url: returnUrl,
-            // En mode API : numéro local (sans indicatif) dans additional_infos
-            // En mode CHECKOUTPAGE (Wave) : pas de customer_phone, saisi sur la page hébergée
-            ...(clapayTunnel === "API" && localPhone ? { additional_infos: { customer_phone: localPhone } } : {}),
+            // API direct : numéro local obligatoire | CHECKOUTPAGE (Wave/Mynita) : saisi sur page hébergée
+            ...(clapayTunnel === "API" ? { additional_infos: { customer_phone: clapayLocalPhoneVal } } : {}),
           });
 
           if (!cpResult.success) {
@@ -6877,6 +6891,13 @@ export async function registerRoutes(
       if (fromMC.id === toMC.id) {
         return res.status(400).json({ message: "Pays source et destination identiques" });
       }
+      // Bloquer Niger et Kenya : devise propre, pas d'échange inter-pays autorisé
+      if (NO_WALLET_TRANSFER_COUNTRIES.has(fromMC.country)) {
+        return res.status(400).json({ message: `Les transferts inter-pays ne sont pas autorisés depuis le ${fromMC.country}. Les fonds reçus au ${fromMC.country} doivent être retirés localement.` });
+      }
+      if (NO_WALLET_TRANSFER_COUNTRIES.has(toMC.country)) {
+        return res.status(400).json({ message: `Les transferts inter-pays ne sont pas autorisés vers le ${toMC.country}.` });
+      }
       const fromZone = await getCurrencyZone(fromMC.country);
       const toZone = await getCurrencyZone(toMC.country);
       if (!fromZone || !toZone || fromZone !== toZone) {
@@ -8123,8 +8144,22 @@ export async function registerRoutes(
   app.post("/api/admin/transactions/:id/validate", authMiddleware("admin"), async (req, res) => {
     try {
       const id = Number(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ message: "ID de transaction invalide" });
+      const [tx] = await db.select().from(transactions).where(eq(transactions.id, id));
+      if (!tx) return res.status(404).json({ message: "Transaction introuvable" });
+      if (tx.status === "confirmed") return res.json({ success: true, alreadyConfirmed: true });
+
+      // Créditer le marchand si la transaction n'était pas déjà confirmée
+      const mc = await storage.findMerchantCountryBySimAndCountry(tx.merchantId, tx.country || "");
+      const merchant = await storage.getMerchantById(tx.merchantId);
+      if (mc) {
+        const credit = merchant?.feeExempt ? tx.amount : calcMerchantCredit(tx.amount, tx.country);
+        await storage.incrementMerchantCountryBalance(mc.id, credit);
+      }
       await db.update(transactions).set({ status: "confirmed" }).where(eq(transactions.id, id));
-      console.log(`[ADMIN FORCE-VALIDATE TX] Transaction #${id} validée manuellement`);
+      notifyAdminPayment({ txId: tx.txId || `TX-${id}`, merchantName: merchant?.name || `#${tx.merchantId}`, payerNumber: tx.payerNumber, country: tx.country || "", amount: tx.amount, provider: tx.provider || "manual", status: "confirmed" }).catch(() => {});
+      notifyMerchantPayment(tx.merchantId, { txId: tx.txId || `TX-${id}`, amount: tx.amount, payerNumber: tx.payerNumber, country: tx.country || "", provider: tx.provider || "manual" }).catch(() => {});
+      console.log(`[ADMIN FORCE-VALIDATE TX] Transaction #${id} validée manuellement — crédit: ${mc ? "oui" : "pays non trouvé"}`);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -8134,6 +8169,7 @@ export async function registerRoutes(
   app.post("/api/admin/transactions/:id/reject", authMiddleware("admin"), async (req, res) => {
     try {
       const id = Number(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ message: "ID de transaction invalide" });
       await db.update(transactions).set({ status: "rejected" }).where(eq(transactions.id, id));
       console.log(`[ADMIN FORCE-REJECT TX] Transaction #${id} rejetée manuellement`);
       res.json({ success: true });
@@ -8205,27 +8241,33 @@ export async function registerRoutes(
   app.post("/api/admin/transactions/:id/sync-status", authMiddleware("admin"), async (req, res) => {
     try {
       const id = Number(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ message: "ID invalide" });
       const source = String(req.body.source || "payment");
       const provider = String(req.body.provider || "").toLowerCase();
-      if (!["sendavapay", "mbiyo", "omnipay", "seapay"].includes(provider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay ou SeaPay)" });
+      if (!["sendavapay", "mbiyo", "omnipay", "seapay", "clapay"].includes(provider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay, SeaPay ou ClaPay)" });
       }
 
       let ref: string | null | undefined;
       let txCountry: string | null | undefined;
+      let pendingRecord: any = null;
+      let txRecord: any = null;
+
       if (source === "pending") {
-        const pp = await storage.getPendingPaymentById(id);
-        if (!pp) return res.status(404).json({ message: "Paiement en cours introuvable" });
-        ref = pp.omnipayReference;
-        txCountry = pp.country;
+        pendingRecord = await storage.getPendingPaymentById(id);
+        if (!pendingRecord) return res.status(404).json({ message: "Paiement en cours introuvable" });
+        ref = pendingRecord.omnipayReference;
+        txCountry = pendingRecord.country;
       } else {
         const [tx] = await db.select().from(transactions).where(eq(transactions.id, id));
         if (!tx) return res.status(404).json({ message: "Transaction introuvable" });
+        txRecord = tx;
         ref = tx.omnipayReference;
         txCountry = tx.country;
       }
       if (!ref) return res.status(400).json({ message: "Aucune référence fournisseur pour ce paiement" });
 
+      // ── Interroger le fournisseur ──────────────────────────────────────────
       let providerStatus = "";
       if (provider === "clapay") {
         const cpToken = await getClapayApiKey();
@@ -8258,24 +8300,72 @@ export async function registerRoutes(
       const successStatuses = ["success", "successful", "completed", "complete", "confirmed", "approved", "paid"];
       const failureStatuses = ["failed", "failure", "cancelled", "canceled", "rejected", "expired"];
 
+      // ── Statut final SUCCÈS ───────────────────────────────────────────────
       if (successStatuses.includes(providerStatus)) {
-        if (source === "pending") {
+        if (source === "pending" && pendingRecord) {
+          // Paiement en attente → crédit complet comme un callback
+          const pp = pendingRecord;
+          const merchant = await storage.getMerchantById(pp.merchantId);
+          const mc = await storage.findMerchantCountryBySimAndCountry(pp.merchantId, pp.country || "");
+          const providerLabel = provider === "clapay" ? "clapay" : provider === "sendavapay" ? "sendavapay" : provider === "seapay" ? "seapay" : provider === "mbiyo" ? "mbiyo" : "westpay";
+          const txRef = `SYNC-${ref}`;
+          const existingTx = await storage.getTransactionByTxId(txRef);
+          if (!existingTx && mc) {
+            const credit = merchant?.feeExempt ? pp.amount : calcMerchantCredit(pp.amount, pp.country);
+            const fee = pp.amount - credit;
+            await storage.incrementMerchantCountryBalance(mc.id, credit);
+            await storage.createTransaction({
+              merchantId: pp.merchantId,
+              country: pp.country,
+              txId: txRef,
+              amount: pp.amount,
+              payerNumber: pp.payerPhone || null,
+              payerName: pp.payerName || null,
+              status: "confirmed",
+              provider: providerLabel,
+              omnipayTxId: null,
+              operator: pp.paymentMethod || null,
+              omnipayReference: ref,
+              errorMessage: null,
+              providerFee: fee,
+            });
+            // Webhook marchand
+            sendWebhookNotification(pp.merchantId, { event: "payment.confirmed", txId: txRef, amount: pp.amount, country: pp.country, payerNumber: pp.payerPhone, payerName: pp.payerName, status: "confirmed", reference: ref, provider: providerLabel }).catch(() => {});
+            notifyMerchantPayment(pp.merchantId, { txId: txRef, amount: pp.amount, payerNumber: pp.payerPhone, country: pp.country, provider: providerLabel }).catch(() => {});
+            notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pp.merchantId}`, payerNumber: pp.payerPhone, country: pp.country, amount: pp.amount, provider: providerLabel, status: "confirmed" }).catch(() => {});
+          }
           await storage.updatePendingPaymentStatus(id, "confirmed");
-        } else {
-          await db.update(transactions).set({ status: "confirmed" }).where(eq(transactions.id, id));
+          console.log(`[ADMIN SYNC-STATUS TX] pending #${id} confirmé (${provider}/${providerStatus}) — crédit: ${existingTx ? "doublon ignoré" : mc ? "ok" : "pays non trouvé"}`);
+        } else if (source !== "pending" && txRecord) {
+          // Transaction existante → crédit si pas encore confirmée
+          if (txRecord.status !== "confirmed") {
+            const merchant = await storage.getMerchantById(txRecord.merchantId);
+            const mc = await storage.findMerchantCountryBySimAndCountry(txRecord.merchantId, txRecord.country || "");
+            if (mc) {
+              const credit = merchant?.feeExempt ? txRecord.amount : calcMerchantCredit(txRecord.amount, txRecord.country);
+              await storage.incrementMerchantCountryBalance(mc.id, credit);
+            }
+            await db.update(transactions).set({ status: "confirmed" }).where(eq(transactions.id, id));
+            notifyAdminPayment({ txId: txRecord.txId || `TX-${id}`, merchantName: (await storage.getMerchantById(txRecord.merchantId))?.name || `#${txRecord.merchantId}`, payerNumber: txRecord.payerNumber, country: txRecord.country || "", amount: txRecord.amount, provider: txRecord.provider || provider, status: "confirmed" }).catch(() => {});
+            notifyMerchantPayment(txRecord.merchantId, { txId: txRecord.txId || `TX-${id}`, amount: txRecord.amount, payerNumber: txRecord.payerNumber, country: txRecord.country || "", provider: txRecord.provider || provider }).catch(() => {});
+          }
+          console.log(`[ADMIN SYNC-STATUS TX] transaction #${id} confirmée (${provider}/${providerStatus})`);
         }
-        console.log(`[ADMIN SYNC-STATUS TX] ${source} #${id} confirmé suite à ${provider} (statut: ${providerStatus})`);
         return res.json({ success: true, applied: "confirmed", providerStatus });
       }
+
+      // ── Statut final ÉCHEC ────────────────────────────────────────────────
       if (failureStatuses.includes(providerStatus)) {
         if (source === "pending") {
-          await storage.updatePendingPaymentStatus(id, "failed");
+          await storage.updatePendingPaymentStatus(id, "omnipay_failed");
         } else {
           await db.update(transactions).set({ status: "failed" }).where(eq(transactions.id, id));
         }
-        console.log(`[ADMIN SYNC-STATUS TX] ${source} #${id} marqué échoué suite à ${provider} (statut: ${providerStatus})`);
+        console.log(`[ADMIN SYNC-STATUS TX] ${source} #${id} marqué échoué (${provider}/${providerStatus})`);
         return res.json({ success: true, applied: "failed", providerStatus });
       }
+
+      // ── Toujours en attente chez le fournisseur ───────────────────────────
       return res.json({ success: true, applied: "none", providerStatus, message: "Le fournisseur n'a pas encore confirmé le statut final" });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -8434,9 +8524,17 @@ export async function registerRoutes(
         const currency = clapayCurrency(pp.country);
         const operatorRecord = pp.paymentMethod ? await storage.getWithdrawalOperatorByNameAndCountry(pp.paymentMethod, pp.country) : null;
         const clapayAdminOpCode = (operatorRecord as any)?.clapayCode || pp.paymentMethod || "";
-        const adminRawPhone = pp.payerPhone || "";
-        const adminLocalPhone = adminRawPhone ? clapayLocalPhone(adminRawPhone, countryCode) : "";
-        const adminTunnel = clapaySelectTunnel(clapayAdminOpCode, adminLocalPhone);
+        const adminTunnel = clapaySelectTunnel(clapayAdminOpCode);
+
+        let adminLocalPhone = "";
+        if (adminTunnel === "API") {
+          const phoneCheck = clapayValidatePhone(pp.payerPhone || "", countryCode);
+          if (!phoneCheck.ok) {
+            return res.status(400).json({ success: false, message: phoneCheck.error });
+          }
+          adminLocalPhone = phoneCheck.localPhone;
+        }
+
         const result = await clapayInitiatePayin(cpToken, {
           transaction_id: reference,
           amount: pp.amount,
@@ -8446,7 +8544,7 @@ export async function registerRoutes(
           tunnel: adminTunnel,
           callback_url: `${callbackBaseUrl}/api/clapay/callback`,
           return_url: `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
-          ...(adminTunnel === "API" && adminLocalPhone ? { additional_infos: { customer_phone: adminLocalPhone } } : {}),
+          ...(adminTunnel === "API" ? { additional_infos: { customer_phone: adminLocalPhone } } : {}),
         });
         if (!result.success) {
           return res.status(502).json({ success: false, message: result.message || "Échec ClaPay" });
