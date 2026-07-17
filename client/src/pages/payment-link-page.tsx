@@ -36,6 +36,7 @@ const PAYMENT_METHODS: Record<string, string[]> = {
   "India":              [],
   "Pakistan":           ["EasyPaisa", "JazzCash"],
   "Nigeria":            ["MTN MoMo Nigeria", "Airtel Money Nigeria", "OPay", "PalmPay", "Kuda Bank"],
+  "Ghana":              ["MTN Mobile Money", "AirtelTigo Money", "Vodafone Cash"],
 };
 
 const DIAL_CODES: Record<string, string> = {
@@ -44,6 +45,7 @@ const DIAL_CODES: Record<string, string> = {
   "Cote d'Ivoire": "+225", "Mali": "+223", "Senegal": "+221",
   "Guinee": "+224", "Gambie": "+220",
   "Philippines": "+63", "India": "+91", "Pakistan": "+92", "Nigeria": "+234",
+  "Ghana": "+233",
 };
 
 const COUNTRY_FLAGS: Record<string, string> = {
@@ -52,6 +54,7 @@ const COUNTRY_FLAGS: Record<string, string> = {
   "Cote d'Ivoire": "🇨🇮", "Mali": "🇲🇱", "Senegal": "🇸🇳",
   "Guinee": "🇬🇳", "Gambie": "🇬🇲",
   "Philippines": "🇵🇭", "India": "🇮🇳", "Pakistan": "🇵🇰", "Nigeria": "🇳🇬",
+  "Ghana": "🇬🇭",
 };
 
 const OPERATOR_IMAGES: Record<string, string> = {
@@ -73,8 +76,10 @@ const OPERATOR_META: Record<string, { bg: string; abbr: string }> = {
   "Coris Money":    { bg: "#7C2020", abbr: "CM" },
   "Mixx by Yas":    { bg: "#7C3AED", abbr: "MX" },
   "Africell":       { bg: "#0066B3", abbr: "AF" },
-  "Africell Money": { bg: "#0066B3", abbr: "AF" },
-  "Celtiis":        { bg: "#E05A00", abbr: "CT" },
+  "Africell Money":   { bg: "#0066B3", abbr: "AF" },
+  "Celtiis":          { bg: "#E05A00", abbr: "CT" },
+  "AirtelTigo Money": { bg: "#E8001D", abbr: "AT" },
+  "Vodafone Cash":    { bg: "#E60000", abbr: "VC" },
 };
 
 function currencyForCountry(c: string) {
@@ -87,6 +92,7 @@ function currencyForCountry(c: string) {
   if (c === "Pakistan") return "PKR";
   if (c === "Nigeria") return "NGN";
   if (c === "Kenya")   return "KES";
+  if (c === "Ghana")   return "GHS";
   return "XOF";
 }
 

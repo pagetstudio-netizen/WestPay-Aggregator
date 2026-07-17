@@ -15,7 +15,7 @@ const COLLECTION_FEE_RATE = 0.055;
 const EXTRA_FEE_COUNTRIES = new Set(["Congo Brazzaville", "Congo RDC"]);
 const COUNTRY_FEE_OVERRIDES_RECON: Record<string, number> = {
   "India": 0.15, "Pakistan": 0.15, "Nigeria": 0.15, "Philippines": 0.15,
-  "Niger": 0.06, "Kenya": 0.06,
+  "Niger": 0.06, "Kenya": 0.06, "Ghana": 0.15,
 };
 
 function calcCredit(amount: number, country?: string | null): number {

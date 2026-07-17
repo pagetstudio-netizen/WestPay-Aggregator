@@ -709,6 +709,7 @@ Content-Type: application/json`} />
                         ["Guinée", "+224", "GNF", "MTN Mobile Money, Orange Money"],
                         ["Niger", "+227", "XOF", "Airtel Money, Moov Money, Zamani, Amana, Mynita"],
                         ["Kenya", "+254", "KES", "Airtel Money, Safaricom M-Pesa, M-Pesa"],
+                        ["Ghana", "+233", "GHS", "MTN Mobile Money, AirtelTigo Money, Vodafone Cash"],
                         ["Nigeria", "+234", "NGN", "MTN MoMo Nigeria, Airtel Money, OPay, PalmPay"],
                         ["Pakistan", "+92", "PKR", "EasyPaisa, JazzCash, NayaPay, SadaPay"],
                         ["Philippines", "+63", "PHP", "GCash, Maya (PayMaya)"],

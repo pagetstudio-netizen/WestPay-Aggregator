@@ -38,6 +38,7 @@ const PAYMENT_METHODS: Record<string, string[]> = {
   "Pakistan":           ["EasyPaisa", "JazzCash", "NayaPay", "SadaPay"],
   "India":              [],
   "Nigeria":            ["MTN MoMo Nigeria", "Airtel Money Nigeria", "OPay", "PalmPay", "Kuda Bank"],
+  "Ghana":              ["MTN Mobile Money", "AirtelTigo Money", "Vodafone Cash"],
 };
 
 const DIAL_CODES: Record<string, string> = {
@@ -46,6 +47,7 @@ const DIAL_CODES: Record<string, string> = {
   "Cote d'Ivoire": "+225", "Mali": "+223", "Senegal": "+221",
   "Guinee": "+224", "Gambie": "+220",
   "Philippines": "+63", "Pakistan": "+92", "India": "+91", "Nigeria": "+234",
+  "Ghana": "+233",
 };
 
 const COUNTRY_FLAGS: Record<string, string> = {
@@ -54,6 +56,7 @@ const COUNTRY_FLAGS: Record<string, string> = {
   "Cote d'Ivoire": "🇨🇮", "Mali": "🇲🇱", "Senegal": "🇸🇳",
   "Guinee": "🇬🇳", "Gambie": "🇬🇲",
   "Philippines": "🇵🇭", "Pakistan": "🇵🇰", "India": "🇮🇳", "Nigeria": "🇳🇬",
+  "Ghana": "🇬🇭",
 };
 
 /* operator icon (real image or color+abbr fallback) */
@@ -95,6 +98,8 @@ const OPERATOR_META: Record<string, { bg: string; abbr: string }> = {
   "OPay":                { bg: "#2B7A10", abbr: "OP" },
   "PalmPay":             { bg: "#06C167", abbr: "PL" },
   "Kuda Bank":           { bg: "#4B1B73", abbr: "KB" },
+  "AirtelTigo Money":    { bg: "#E8001D", abbr: "AT" },
+  "Vodafone Cash":       { bg: "#E60000", abbr: "VC" },
 };
 
 function currencyForCountry(c: string) {
@@ -107,6 +112,7 @@ function currencyForCountry(c: string) {
   if (c === "India")       return "INR";
   if (c === "Nigeria")     return "NGN";
   if (c === "Kenya")       return "KES";
+  if (c === "Ghana")       return "GHS";
   return "XOF";
 }
 

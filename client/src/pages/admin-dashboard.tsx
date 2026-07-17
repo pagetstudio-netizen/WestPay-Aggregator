@@ -1947,7 +1947,7 @@ function CountriesPanel() {
 
   if (isLoading) return <LoadingSkeleton />;
 
-  const availableCountries = ["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon", "Guinee", "Niger", "Kenya", "Gambie", "Guinee-Bissau", "Tchad", "Centrafrique", "Guinee Equatoriale", "Nigeria", "Pakistan", "Philippines", "India"];
+  const availableCountries = ["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon", "Guinee", "Niger", "Kenya", "Ghana", "Gambie", "Guinee-Bissau", "Tchad", "Centrafrique", "Guinee Equatoriale", "Nigeria", "Pakistan", "Philippines", "India"];
   const selectedMerchantName = (merchants as Merchant[]).find(m => m.id.toString() === merchantId)?.name;
   const filteredCountries = filterSearch.trim()
     ? (countries as any[]).filter((mc: any) =>
@@ -2310,7 +2310,7 @@ function NumbersPanel() {
                 <Select value={country} onValueChange={setCountry}>
                   <SelectTrigger data-testid="select-number-country"><SelectValue placeholder="Selectionner" /></SelectTrigger>
                   <SelectContent>
-                    {["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Gabon", "Guinee", "Niger", "Kenya"].map((c) => (
+                    {["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Gabon", "Guinee", "Niger", "Kenya", "Ghana"].map((c) => (
                       <SelectItem key={c} value={c}>{c}</SelectItem>
                     ))}
                   </SelectContent>
@@ -3527,7 +3527,7 @@ function SendavaPayPanel() {
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-1.5">
-              {["Togo", "Benin", "Cote d'Ivoire", "Burkina Faso", "Senegal", "Mali", "Cameroun", "Niger", "Kenya", "Congo Brazzaville", "Gabon", "Guinee"].map(c => (
+              {["Togo", "Benin", "Cote d'Ivoire", "Burkina Faso", "Senegal", "Mali", "Cameroun", "Niger", "Kenya", "Ghana", "Congo Brazzaville", "Gabon", "Guinee"].map(c => (
                 <Badge key={c} variant="secondary" className="text-xs">{c}</Badge>
               ))}
             </div>
@@ -4155,7 +4155,7 @@ function AdminsPanel() {
 
 const COUNTRIES_LIST = [
   "Togo", "Benin", "Burkina Faso", "Cote d'Ivoire", "Senegal", "Mali",
-  "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon", "Guinee", "Niger", "Kenya",
+  "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon", "Guinee", "Niger", "Kenya", "Ghana",
   "Guinee-Bissau", "Tchad", "Centrafrique", "Guinee Equatoriale",
   "Pakistan", "Philippines", "India", "Nigeria",
 ];
@@ -6014,7 +6014,7 @@ function AdminAccountsCard({ token, currentUserId }: { token: string | null; cur
 const SUPPORTED_COUNTRIES = [
   "Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali",
   "Burkina Faso", "Cameroun", "Congo Brazzaville", "Gabon", "Congo RDC", "Guinee",
-  "Niger", "Kenya",
+  "Niger", "Kenya", "Ghana",
 ];
 
 const CRYPTO_WD_STATUS_LABELS: Record<string, { bg: string; color: string; label: string }> = {
