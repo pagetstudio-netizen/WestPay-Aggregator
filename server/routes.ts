@@ -351,12 +351,13 @@ const COUNTRY_FEE_OVERRIDES: Record<string, { payin: number; payout: number }> =
   "Pakistan":    { payin: 0.15, payout: 0.05 },
   "Nigeria":     { payin: 0.15, payout: 0.05 },
   "Philippines": { payin: 0.15, payout: 0.05 },
-  /* ClaPay countries : devise propre (XOF isolé / KES), pas d'échange inter-pays */
+  /* ClaPay countries : devise propre (XOF isolé / KES / GHS), pas d'échange inter-pays */
   "Niger":       { payin: 0.06, payout: 0.06 },
   "Kenya":       { payin: 0.06, payout: 0.06 },
+  "Ghana":       { payin: 0.06, payout: 0.06 },
 };
 /* Pays fermés aux transferts inter-pays (wallet transfer interdit) */
-const NO_WALLET_TRANSFER_COUNTRIES = new Set(["Niger", "Kenya"]);
+const NO_WALLET_TRANSFER_COUNTRIES = new Set(["Niger", "Kenya", "Ghana"]);
 function getCollectionFeeRate(country?: string | null): number {
   if (country && COUNTRY_FEE_OVERRIDES[country]) return COUNTRY_FEE_OVERRIDES[country].payin;
   return country && EXTRA_FEE_COUNTRIES.has(country) ? COLLECTION_FEE_RATE + 0.01 : COLLECTION_FEE_RATE;

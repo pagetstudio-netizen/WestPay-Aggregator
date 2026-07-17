@@ -16,8 +16,11 @@ import bankCardIcon  from "@assets/mine-mod-bankcard-CLOhqwHj_1779636875827.png"
 import phoneHandIcon from "@assets/file_00000000d2f47246aaf6fa11ae0a4003_1779726190358.png";
 import mixxIcon      from "@assets/mixxByYas-web-page_1763835083140-t9C-E95C_1780044772406.png";
 import mpesaIcon     from "@assets/M-pesa-logo_1780044772360.png";
-import gcashIcon     from "@assets/images_(24)_1783366582605.png";
-import paymayaIcon   from "@assets/images_(25)_1783366582572.png";
+import gcashIcon        from "@assets/images_(24)_1783366582605.png";
+import paymayaIcon      from "@assets/images_(25)_1783366582572.png";
+import airteltigoIcon   from "@assets/images_(24)_1784323232372.png";
+import vodafoneIcon     from "@assets/vodafone-brand-logo-phone-symbol-with-name-white-design-englan_1784323232487.jpg";
+import mtnGhanaIcon     from "@assets/XzQ5b64_1784323232515.png";
 
 const PAYMENT_METHODS: Record<string, string[]> = {
   "Togo":               ["Moov Money", "TMoney"],
@@ -67,6 +70,9 @@ const OPERATOR_IMAGES: Record<string, string> = {
   "M-Pesa":           mpesaIcon,
   "GCash":            gcashIcon,
   "Maya (PayMaya)":   paymayaIcon,
+  "AirtelTigo Money": airteltigoIcon,
+  "Vodafone Cash":    vodafoneIcon,
+  "MTN Mobile Money Ghana": mtnGhanaIcon,
 };
 
 const OPERATOR_META: Record<string, { bg: string; abbr: string }> = {
