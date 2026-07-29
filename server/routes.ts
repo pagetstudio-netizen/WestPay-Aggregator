@@ -486,14 +486,33 @@ function signToken(payload: { id: number; role: string; email: string }) {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
 }
 
+/** Pose le JWT dans un cookie httpOnly (inaccessible au JS) — protection XSS */
+function setAuthCookie(res: Response, token: string) {
+  res.cookie("wp_auth", token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 jours — aligné sur l'expiry JWT
+    path: "/",
+  });
+}
+
 function authMiddleware(role: "admin" | "merchant") {
   return async (req: Request, res: Response, next: NextFunction) => {
+    // Lire le token depuis le cookie httpOnly OU le header Authorization (compat API)
     const auth = req.headers.authorization;
-    if (!auth || !auth.startsWith("Bearer ")) {
+    const cookieToken = (req as any).cookies?.wp_auth as string | undefined;
+    let tokenStr: string | undefined;
+    if (auth && auth.startsWith("Bearer ")) {
+      tokenStr = auth.split(" ")[1];
+    } else if (cookieToken) {
+      tokenStr = cookieToken;
+    }
+    if (!tokenStr) {
       return res.status(401).json({ message: "Non autorise" });
     }
     try {
-      const decoded = jwt.verify(auth.split(" ")[1], JWT_SECRET) as any;
+      const decoded = jwt.verify(tokenStr, JWT_SECRET) as any;
       if (decoded.role !== role) {
         return res.status(403).json({ message: "Acces interdit" });
       }
@@ -1221,6 +1240,7 @@ export async function registerRoutes(
       const token = signToken({ id: admin.id, role: "admin", email: admin.email });
       const clientIp = (req.ip || "").replace(/^::ffff:/, "");
       await storage.createLoginLog({ userId: admin.id, role: "admin", ip: clientIp, device: req.headers["user-agent"] || "", success: true });
+      setAuthCookie(res, token);
       res.json({ token, user: { id: admin.id, email: admin.email } });
     } catch (err: any) {
       res.status(500).json({ message: "Erreur interne" });
@@ -1243,6 +1263,7 @@ export async function registerRoutes(
       const clientIp = (req.ip || "").replace(/^::ffff:/, "");
       await storage.createLoginLog({ userId: admin.id, role: "admin", ip: clientIp, device: req.headers["user-agent"] || "", success: true });
       notifyAdminLogin({ email: admin.email, ip: clientIp, device: req.headers["user-agent"] || "", success: true }).catch(() => {});
+      setAuthCookie(res, jwtToken);
       res.json({ token: jwtToken, user: { id: admin.id, email: admin.email } });
     } catch (err: any) {
       res.status(500).json({ message: "Erreur interne" });
@@ -1274,6 +1295,7 @@ export async function registerRoutes(
       const clientIp = (req.ip || "").replace(/^::ffff:/, "");
       await storage.createLoginLog({ userId: admin.id, role: "admin", ip: clientIp, device: req.headers["user-agent"] || "", success: true });
       notifyAdminLogin({ email: admin.email, ip: clientIp, device: req.headers["user-agent"] || "", success: true }).catch(() => {});
+      setAuthCookie(res, jwtToken);
       res.json({ token: jwtToken, user: { id: admin.id, email: admin.email } });
     } catch (err: any) {
       res.status(500).json({ message: "Erreur interne" });
@@ -1709,13 +1731,14 @@ export async function registerRoutes(
       }
 
       // ── Bypass OTP pour les comptes de test internes ─────────────────────────
-      const OTP_BYPASS_EMAILS = ["test@westpay.dev", "test@testmerchant.com", "demo@westpay.dev"];
+      const OTP_BYPASS_EMAILS = ["test@testmerchant.com", "demo@westpay.dev"];
       if (OTP_BYPASS_EMAILS.includes(merchant.email.toLowerCase())) {
         const token = jwt.sign(
           { merchantId: merchant.id, email: merchant.email, role: "merchant", slug: merchant.slug, name: merchant.name },
           JWT_SECRET,
           { expiresIn: "7d" }
         );
+        setAuthCookie(res, token);
         return res.json({ token, user: { id: merchant.id, email: merchant.email, name: merchant.name, slug: merchant.slug } });
       }
 
@@ -1817,10 +1840,17 @@ export async function registerRoutes(
       await storage.deleteMerchantLoginOtp(email);
 
       const token = signToken({ id: merchantId, role: "merchant", email });
+      setAuthCookie(res, token);
       return res.json({ token, user: { id: merchantId, email, name, slug } });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
+  });
+
+  // ── Logout — efface le cookie httpOnly côté serveur ──────────────────────
+  app.post("/api/auth/logout", (req, res) => {
+    res.clearCookie("wp_auth", { path: "/", httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production" });
+    res.json({ success: true });
   });
 
   // ==================== ADMIN ROUTES ====================

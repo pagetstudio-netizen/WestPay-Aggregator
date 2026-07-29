@@ -10,7 +10,7 @@ interface AuthUser {
 
 interface AuthContextType {
   user: AuthUser | null;
-  token: string | null;
+  token: string | null;        // en mémoire uniquement — jamais dans localStorage
   login: (token: string, user: AuthUser) => void;
   logout: () => void;
   isLoading: boolean;
@@ -20,18 +20,21 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(null);  // session uniquement
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const savedToken = localStorage.getItem("westpay_token");
+    // ── Sécurité : effacer tout ancien JWT stocké dans localStorage ────────
+    // Correctif XSS : les tokens JWT ne doivent plus être accessibles au JS.
+    // Ils sont désormais stockés dans un cookie httpOnly côté serveur.
+    localStorage.removeItem("westpay_token");
+
+    // Récupérer uniquement les infos affichage (pas sensibles)
     const savedUser = localStorage.getItem("westpay_user");
-    if (savedToken && savedUser) {
+    if (savedUser) {
       try {
-        setToken(savedToken);
         setUser(JSON.parse(savedUser));
       } catch {
-        localStorage.removeItem("westpay_token");
         localStorage.removeItem("westpay_user");
       }
     }
@@ -39,17 +42,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = (newToken: string, newUser: AuthUser) => {
+    // Stocker le token en mémoire React seulement (perdu au refresh — le cookie prend le relai)
     setToken(newToken);
     setUser(newUser);
-    localStorage.setItem("westpay_token", newToken);
+    // Stocker uniquement les infos d'affichage non sensibles
     localStorage.setItem("westpay_user", JSON.stringify(newUser));
+    // NE PLUS stocker le token JWT dans localStorage (protection XSS)
   };
 
   const logout = () => {
     setToken(null);
     setUser(null);
-    localStorage.removeItem("westpay_token");
     localStorage.removeItem("westpay_user");
+    // Effacer le cookie httpOnly côté serveur
+    fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
   };
 
   return (
@@ -67,10 +73,17 @@ export function useAuth() {
   return context;
 }
 
+/**
+ * Wrapper fetch authentifié.
+ * - Ajoute credentials: "include" pour envoyer le cookie httpOnly automatiquement.
+ * - Ajoute le header Authorization: Bearer si un token en mémoire est disponible
+ *   (compatibilité avec les clients API externes et la session courante).
+ */
 export function authFetch(token: string | null) {
   return (url: string, options: RequestInit = {}) => {
     return fetch(url, {
       ...options,
+      credentials: "include",   // envoie le cookie httpOnly wp_auth
       headers: {
         ...options.headers,
         "Content-Type": "application/json",

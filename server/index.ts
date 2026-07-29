@@ -1,5 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
 import helmet from "helmet";
+import cookieParser from "cookie-parser";
 import path from "path";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -11,7 +12,22 @@ app.set("trust proxy", true);
 
 // ── Security headers ──────────────────────────────────────────────────────────
 app.use(helmet({
-  contentSecurityPolicy: false,       // Vite handles CSP in dev; Nginx in prod
+  contentSecurityPolicy: process.env.NODE_ENV === "production"
+    ? {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", "data:", "https:"],
+          connectSrc: ["'self'", "https://ip-api.com", "wss:", "https:"],
+          fontSrc: ["'self'", "data:"],
+          objectSrc: ["'none'"],
+          frameSrc: ["'none'"],
+          baseUri: ["'self'"],
+          formAction: ["'self'"],
+        },
+      }
+    : false,
   crossOriginEmbedderPolicy: false,   // Required for canvas/WebGL fingerprinting
   crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
@@ -21,6 +37,9 @@ app.use((_req, res, next) => {
   res.setHeader("Permissions-Policy", "geolocation=(), camera=(), microphone=()");
   next();
 });
+
+// ── Cookie parser (requis pour lire les cookies httpOnly d'authentification) ──
+app.use(cookieParser());
 const httpServer = createServer(app);
 
 declare module "http" {
