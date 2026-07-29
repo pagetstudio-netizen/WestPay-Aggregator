@@ -1129,7 +1129,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
 
     try {
       const platformUrl = await storage.getSetting("platform_url") || "https://westpay.cfd";
-      const adminEmail = await storage.getSetting("admin_email_hint") || "devappmanagement40@gmail.com";
+      const adminEmail = await storage.getSetting("admin_email_hint") || "(email non configuré — définir le paramètre admin_email_hint en base)";
 
       await ctx.reply(
         `🔐 *Identifiants de connexion WestPay*\n\n` +

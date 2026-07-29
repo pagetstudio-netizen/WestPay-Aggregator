@@ -1108,11 +1108,18 @@ export async function registerRoutes(
         }
       }
 
-      // WHITELIST STRICTE — seuls ces comptes peuvent accéder au panel admin
-      const ADMIN_WHITELIST = ["afrinovasolution@gmail.com", "blanchardk377@gmail.com"];
-      if (!ADMIN_WHITELIST.includes(email.toLowerCase().trim())) {
+      // WHITELIST STRICTE — emails autorisés via variable d'environnement ou paramètre DB
+      // Définir ADMIN_EMAIL_WHITELIST="email1@exemple.com,email2@exemple.com" dans les secrets Replit
+      const whitelistEnv = process.env.ADMIN_EMAIL_WHITELIST || "";
+      const whitelistDb = await storage.getSetting("admin_email_whitelist").catch(() => "");
+      const whitelistRaw = whitelistEnv || whitelistDb || "";
+      const ADMIN_WHITELIST = whitelistRaw.split(",").map((e: string) => e.trim().toLowerCase()).filter(Boolean);
+      if (ADMIN_WHITELIST.length > 0 && !ADMIN_WHITELIST.includes(email.toLowerCase().trim())) {
         storage.createSecurityLog({ eventType: "blocked_access", ip: clientIp, userEmail: email, action: "email_not_whitelisted", details: "Email non autorisé — tentative de connexion admin rejetée" }).catch(() => {});
         return res.status(401).json({ message: "Identifiants invalides" });
+      }
+      if (ADMIN_WHITELIST.length === 0) {
+        console.warn("[SECURITY] ADMIN_EMAIL_WHITELIST non défini — tout compte admin en base peut se connecter. Définir cette variable d'environnement pour restreindre l'accès.");
       }
 
       const admin = await storage.getAdminByEmail(email);
@@ -1731,7 +1738,9 @@ export async function registerRoutes(
       }
 
       // ── Bypass OTP pour les comptes de test internes ─────────────────────────
-      const OTP_BYPASS_EMAILS = ["test@testmerchant.com", "demo@westpay.dev"];
+      // Liste gérée via le paramètre DB "otp_bypass_emails" (virgule-séparés) — aucun email hardcodé
+      const otpBypassRaw = await storage.getSetting("otp_bypass_emails").catch(() => "");
+      const OTP_BYPASS_EMAILS = (otpBypassRaw || "").split(",").map((e: string) => e.trim().toLowerCase()).filter(Boolean);
       if (OTP_BYPASS_EMAILS.includes(merchant.email.toLowerCase())) {
         const token = jwt.sign(
           { merchantId: merchant.id, email: merchant.email, role: "merchant", slug: merchant.slug, name: merchant.name },

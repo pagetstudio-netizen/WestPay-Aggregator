@@ -4,8 +4,9 @@ import { db } from "../server/db";
 import { merchants, merchantCountries, paymentLinks } from "../shared/schema";
 import { eq } from "drizzle-orm";
 
-const email = "demo@westpay.dev";
-const password = "Demo@2026!";
+const email = process.env.DEMO_EMAIL || "demo@westpay.dev";
+// Le mot de passe est généré aléatoirement à chaque exécution — aucun credential hardcodé
+const password = process.env.DEMO_PASSWORD || crypto.randomBytes(16).toString("hex");
 const slug = "demo-westpay";
 
 function genKey(country: string): string {
@@ -74,7 +75,12 @@ async function main() {
   console.log("Lien créé:", `/link/${link.uniqueId}`);
   console.log("---");
   console.log("Email:", email);
-  console.log("Mot de passe:", password);
+  // Affiche le mot de passe UNIQUEMENT à la création (usage local/admin uniquement)
+  if (process.env.DEMO_PASSWORD) {
+    console.log("Mot de passe: (défini via DEMO_PASSWORD)");
+  } else {
+    console.log("Mot de passe (généré, noter immédiatement):", password);
+  }
   console.log("Slug:", slug);
   process.exit(0);
 }
