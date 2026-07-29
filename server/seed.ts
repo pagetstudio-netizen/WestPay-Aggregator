@@ -13,16 +13,11 @@ function generateSecureApiKey(country: string): string {
   return `${prefix}-${randomPart}`;
 }
 
-// ── Incident response: Task #12 — 2025-05-13 ────────────────────────────────
-// Three merchant accounts were compromised by an automated bot (Deno/SupabaseEdgeRuntime)
-// that made 4,700+ successful logins using credential stuffing across 60+ AWS IPs.
-// These accounts MUST remain suspended until admin manually re-enables them after
-// verifying merchant identity. API keys were also rotated as part of incident response.
-const COMPROMISED_MERCHANT_EMAILS = [
-  "Alvyqe7@gmail.com",   // teslaplus — confirmed bot credential stuffing
-  "kingobs71@gmail.com", // e-livre   — confirmed bot credential stuffing
-  "kenkorodriguez7@gmail.com", // avenix — confirmed bot credential stuffing
-];
+// ── Incident response: comptes compromis ────────────────────────────────────
+// Les emails des comptes compromis sont stockés en base (paramètre DB
+// "compromised_merchant_emails", virgule-séparés) pour ne pas exposer
+// d'adresses réelles dans le code source.
+const COMPROMISED_MERCHANT_EMAILS: string[] = [];
 
 async function enforceCompromisedAccountSuspensions(): Promise<void> {
   // One-time API key rotation flag — only executed once per environment
@@ -30,7 +25,14 @@ async function enforceCompromisedAccountSuspensions(): Promise<void> {
   // One-time initial suspension flag — after this runs once, admin can freely manage accounts
   const suspensionDone = await storage.getSetting("incident_task12_initial_suspension_done");
 
-  for (const email of COMPROMISED_MERCHANT_EMAILS) {
+  // Charger la liste depuis la DB (paramètre "compromised_merchant_emails", virgule-séparés)
+  const dbList = await storage.getSetting("compromised_merchant_emails").catch(() => "");
+  const emailsToEnforce = [
+    ...COMPROMISED_MERCHANT_EMAILS,
+    ...(dbList || "").split(",").map((e: string) => e.trim().toLowerCase()).filter(Boolean),
+  ];
+
+  for (const email of emailsToEnforce) {
     const merchant = await storage.getMerchantByEmail(email);
     if (!merchant) continue;
 
