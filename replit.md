@@ -33,10 +33,9 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 - `/pay?merchant=slug&amount=3000&country=Togo&redirect=https://...` - 3-step payment wizard
 - `/pay/:slug` - Legacy payment page (backwards compatible)
 
-## Default Credentials (Seeded)
-- **Admin**: devappmanagement40@gmail.com / Admin@2026!
-- **Merchant (EcoMat)**: contact@ecomat.com / Merchant@2026! (PIN: 123456)
-- **Merchant (PayFast)**: info@payfast.bj / Merchant@2026! (PIN: 654321)
+## Default Credentials
+⚠️ Les credentials de démo ont été supprimés de ce fichier pour des raisons de sécurité.
+Les comptes de démonstration sont suspendus. Contactez l'admin pour créer un nouveau compte.
 
 ## API Structure
 - `/api/auth/admin/login` - Admin authentication

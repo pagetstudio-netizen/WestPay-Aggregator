@@ -5,3 +5,14 @@ vite.config.ts.*
 *.tar.gz
 uploads/broadcast
 uploads/operator-logos
+
+# ── Secrets — ne JAMAIS commiter ──────────────────────
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+config/secrets*
