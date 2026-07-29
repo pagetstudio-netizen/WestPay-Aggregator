@@ -291,15 +291,15 @@ export async function seedDatabase() {
   await storage.setSetting("admin_seed_permanently_disabled", "true");
   await ensurePinsExist();
 
-  const merchantHash = await bcrypt.hash("Merchant@2026!", 10);
-  const pinHash = await bcrypt.hash("123456", 10);
+  const merchantHash = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
+  const pinHash = await bcrypt.hash(crypto.randomBytes(16).toString("hex"), 10);
 
   const ecomat = await storage.createMerchant({
     name: "EcoMat Togo",
     email: "contact@ecomat.com",
     slug: "ecomat",
     passwordHash: merchantHash,
-    suspended: false,
+    suspended: true,
   });
 
   await storage.upsertMerchantPin(ecomat.id, pinHash);
@@ -309,10 +309,10 @@ export async function seedDatabase() {
     email: "info@payfast.bj",
     slug: "payfast",
     passwordHash: merchantHash,
-    suspended: false,
+    suspended: true,
   });
 
-  const pinHash2 = await bcrypt.hash("654321", 10);
+  const pinHash2 = await bcrypt.hash(crypto.randomBytes(16).toString("hex"), 10);
   await storage.upsertMerchantPin(payfast.id, pinHash2);
 
   await storage.addMerchantCountry({
@@ -416,7 +416,7 @@ async function ensurePinsExist() {
   for (const merchant of merchants) {
     const existingPin = await storage.getMerchantPin(merchant.id);
     if (!existingPin) {
-      const defaultPin = merchant.email === "contact@ecomat.com" ? "123456" : "654321";
+      const defaultPin = crypto.randomBytes(16).toString("hex");
       const pinHash = await bcrypt.hash(defaultPin, 10);
       await storage.upsertMerchantPin(merchant.id, pinHash);
       console.log(`PIN backfilled for merchant ${merchant.name}`);
@@ -428,8 +428,8 @@ async function ensureTestMerchantExists() {
   const existing = await storage.getMerchantByEmail("test@westpay.dev");
   if (existing) return;
 
-  const passwordHash = await bcrypt.hash("Test@2026!", 10);
-  const pinHash = await bcrypt.hash("123456", 10);
+  const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
+  const pinHash = await bcrypt.hash(crypto.randomBytes(16).toString("hex"), 10);
   const webhookSecret = crypto.randomBytes(20).toString("hex");
 
   const merchant = await storage.createMerchant({
