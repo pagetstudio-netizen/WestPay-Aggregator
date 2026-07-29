@@ -258,17 +258,6 @@ export async function seedDatabase() {
   // ClaPay : créer les opérateurs mobile money pour tous les pays supportés
   await ensureClapayOperatorsExist();
 
-  // Compte test : uniquement en développement OU si le flag d'activation est posé en DB
-  // En production (Plesk), ce compte n'est pas recréé automatiquement après suppression
-  const isDevMode = process.env.NODE_ENV !== "production";
-  const testAccountEnabled = await storage.getSetting("enable_test_merchant_in_production").catch(() => null);
-  const testAccountDisabled = await storage.getSetting("disable_test_merchant").catch(() => null);
-  if ((isDevMode || testAccountEnabled === "true") && testAccountDisabled !== "true") {
-    await ensureTestMerchantExists().catch(err =>
-      console.error("[SEED] Erreur création compte test:", err.message)
-    );
-  }
-
   // Protection permanente : ne JAMAIS recréer de compte admin automatiquement
   // Ce flag est posé une fois en DB et ne peut pas être retiré par un redémarrage
   const adminSeedDisabled = await storage.getSetting("admin_seed_permanently_disabled");
@@ -288,129 +277,10 @@ export async function seedDatabase() {
     return;
   }
 
-  // Aucun admin — première installation uniquement, pas de création automatique
+  // Aucun admin — création manuelle requise via l'interface d'administration
   console.log("[SEED] Aucun admin trouvé — création manuelle requise.");
   await storage.setSetting("admin_seed_permanently_disabled", "true");
   await ensurePinsExist();
-
-  const merchantHash = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
-  const pinHash = await bcrypt.hash(crypto.randomBytes(16).toString("hex"), 10);
-
-  const ecomat = await storage.createMerchant({
-    name: "EcoMat Togo",
-    email: "contact@ecomat.com",
-    slug: "ecomat",
-    passwordHash: merchantHash,
-    suspended: true,
-  });
-
-  await storage.upsertMerchantPin(ecomat.id, pinHash);
-
-  const payfast = await storage.createMerchant({
-    name: "PayFast Benin",
-    email: "info@payfast.bj",
-    slug: "payfast",
-    passwordHash: merchantHash,
-    suspended: true,
-  });
-
-  const pinHash2 = await bcrypt.hash(crypto.randomBytes(16).toString("hex"), 10);
-  await storage.upsertMerchantPin(payfast.id, pinHash2);
-
-  await storage.addMerchantCountry({
-    merchantId: ecomat.id,
-    country: "Togo",
-    apiKey: generateSecureApiKey("Togo"),
-    balance: 12500,
-    active: true,
-  });
-
-  await storage.addMerchantCountry({
-    merchantId: ecomat.id,
-    country: "Benin",
-    apiKey: generateSecureApiKey("Benin"),
-    balance: 18000,
-    active: true,
-  });
-
-  await storage.addMerchantCountry({
-    merchantId: payfast.id,
-    country: "Benin",
-    apiKey: generateSecureApiKey("Benin"),
-    balance: 45000,
-    active: true,
-  });
-
-  await storage.addMerchantCountry({
-    merchantId: payfast.id,
-    country: "Cote d'Ivoire",
-    apiKey: generateSecureApiKey("Cote d'Ivoire"),
-    balance: 22000,
-    active: true,
-  });
-
-  await storage.addNumber({
-    phoneNumber: "+22899935673",
-    country: "Togo",
-    operator: "Moov Money",
-    status: "active",
-    merchantId: ecomat.id,
-  });
-
-  await storage.addNumber({
-    phoneNumber: "+22892299772",
-    country: "Togo",
-    operator: "TMoney",
-    status: "active",
-    merchantId: ecomat.id,
-  });
-
-  await storage.createTransaction({
-    merchantId: ecomat.id,
-    country: "Togo",
-    txId: "TX12345",
-    amount: 2000,
-    payerNumber: "+22898123456",
-    status: "confirmed",
-  });
-
-  await storage.createTransaction({
-    merchantId: ecomat.id,
-    country: "Benin",
-    txId: "TX98765",
-    amount: 5000,
-    payerNumber: "+22967891234",
-    status: "confirmed",
-  });
-
-  await storage.createTransaction({
-    merchantId: payfast.id,
-    country: "Benin",
-    txId: "TX54321",
-    amount: 15000,
-    payerNumber: "+22997654321",
-    status: "confirmed",
-  });
-
-  await storage.createTransaction({
-    merchantId: ecomat.id,
-    country: "Togo",
-    txId: "TX67890",
-    amount: 3500,
-    payerNumber: "+22890456789",
-    status: "confirmed",
-  });
-
-  await storage.createTransaction({
-    merchantId: payfast.id,
-    country: "Cote d'Ivoire",
-    txId: "TX11223",
-    amount: 8000,
-    payerNumber: "+22507891234",
-    status: "confirmed",
-  });
-
-  console.log("Database seeded successfully");
 }
 
 async function ensurePinsExist() {
@@ -426,34 +296,3 @@ async function ensurePinsExist() {
   }
 }
 
-async function ensureTestMerchantExists() {
-  const existing = await storage.getMerchantByEmail("test@westpay.dev");
-  if (existing) return;
-
-  const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
-  const pinHash = await bcrypt.hash(crypto.randomBytes(16).toString("hex"), 10);
-  const webhookSecret = crypto.randomBytes(20).toString("hex");
-
-  const merchant = await storage.createMerchant({
-    name: "Compte Test",
-    email: "test@westpay.dev",
-    slug: "test-merchant",
-    passwordHash,
-    suspended: false,
-    webhookSecret,
-  });
-
-  const testCountries = ["Togo", "Cote d'Ivoire", "Senegal", "Benin", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon", "Guinee", "Gambie"];
-  for (const country of testCountries) {
-    await storage.addMerchantCountry({
-      merchantId: merchant.id,
-      country,
-      apiKey: generateSecureApiKey(country),
-      balance: 0,
-      active: true,
-    });
-  }
-
-  await storage.upsertMerchantPin(merchant.id, pinHash);
-  console.log("[SEED] Compte test créé : test@westpay.dev (slug: test-merchant)");
-}
