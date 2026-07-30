@@ -854,6 +854,16 @@ export async function registerRoutes(
     res.type("text/plain").send("User-agent: *\nDisallow: /\n");
   });
 
+  // ── Admin path discovery — fallback si window.__ADMIN_PATH__ n'est pas injecté ──
+  // Aucune info sensible exposée : retourne juste le chemin (pas de secret).
+  // Un attaquant peut tenter de brute-forcer l'URL de toute façon.
+  app.get("/api/admin-path", (_req, res) => {
+    const slug = process.env.ADMIN_SLUG || "";
+    const path = slug ? `/${slug}` : null;
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ path });
+  });
+
   // ── Route Telegram webhook PERMANENTE ─────────────────────────────────────────────────
   // Enregistrée ici (avant tout autre middleware) pour éviter les fenêtres de 404 pendant
   // les redémarrages Plesk. Le secret est vérifié dynamiquement depuis la DB à chaque appel.

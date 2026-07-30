@@ -21,15 +21,32 @@ import CryptoLinkPage from "@/pages/crypto-link-page";
 import NotFound from "@/pages/not-found";
 import IpVerificationPage from "@/pages/ip-verification";
 import AdminCreateMerchant from "@/pages/admin-create-merchant";
+import { useState, useEffect } from "react";
 
 function Router() {
+  // ADMIN_PATH est injecté dans window.__ADMIN_PATH__ par le serveur.
+  // Si l'injection échoue (env var non transmise par Plesk, cache Cloudflare, etc.),
+  // on récupère le chemin via l'API /api/admin-path comme fallback.
+  const [adminPath, setAdminPath] = useState<string>(ADMIN_PATH);
+
+  useEffect(() => {
+    if (adminPath !== "/__admin_not_configured__") return; // injection OK, rien à faire
+
+    fetch("/api/admin-path", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((data: { path: string | null }) => {
+        if (data.path) setAdminPath(data.path);
+      })
+      .catch(() => {}); // silencieux — le 404 reste affiché en dernier recours
+  }, [adminPath]);
+
   return (
     <Switch>
       <Route path="/" component={RestrictedPage} />
       <Route path="/ip-verify" component={IpVerificationPage} />
-      <Route path={ADMIN_PATH} component={AdminLogin} />
-      <Route path={`${ADMIN_PATH}/dashboard`} component={AdminDashboard} />
-      <Route path={`${ADMIN_PATH}/create-merchant`} component={AdminCreateMerchant} />
+      <Route path={adminPath} component={AdminLogin} />
+      <Route path={`${adminPath}/dashboard`} component={AdminDashboard} />
+      <Route path={`${adminPath}/create-merchant`} component={AdminCreateMerchant} />
       <Route path="/merchant-login" component={MerchantLogin} />
       <Route path="/merchant/:slug" component={MerchantDashboard} />
       <Route path="/api-docs" component={ApiDocsPage} />
