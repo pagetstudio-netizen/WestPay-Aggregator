@@ -19,7 +19,7 @@ export function serveStatic(app: Express) {
   // The client reads window.__ADMIN_PATH__ — no slug is stored in the source code.
   app.get("/{*path}", (_req, res) => {
     const slug = process.env.ADMIN_SLUG || "";
-    const adminPath = slug ? `/admin-access-${slug}` : "/__admin_not_configured__";
+    const adminPath = slug ? `/${slug}` : "/__admin_not_configured__";
 
     const html = fs.readFileSync(indexHtmlPath, "utf-8").replace(
       "</head>",

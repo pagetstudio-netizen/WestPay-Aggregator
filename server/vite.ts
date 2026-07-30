@@ -50,7 +50,7 @@ export async function setupVite(server: Server, app: Express) {
       );
       // Inject ADMIN_SLUG (same logic as production serveStatic)
       const slug = process.env.ADMIN_SLUG || "";
-      const adminPath = slug ? `/admin-access-${slug}` : "/__admin_not_configured__";
+      const adminPath = slug ? `/${slug}` : "/__admin_not_configured__";
       template = template.replace(
         "</head>",
         `<script>window.__ADMIN_PATH__=${JSON.stringify(adminPath)};</script></head>`,
