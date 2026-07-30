@@ -765,7 +765,7 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   // ── Security headers (applied to every response) ─────────────────────────────
-  app.use((_req, res, next) => {
+  app.use((req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("X-XSS-Protection", "1; mode=block");
@@ -775,9 +775,18 @@ export async function registerRoutes(
     if (process.env.NODE_ENV === "production") {
       res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
     }
+
+    // ── CSP ─────────────────────────────────────────────────────────────────
+    // En production : 'unsafe-inline' retiré de script-src — les scripts sont
+    // bundlés par Vite en fichiers séparés, aucun script inline légitime n'existe.
+    // En développement : Vite injecte des scripts inline pour le HMR → toléré.
+    const scriptSrc = process.env.NODE_ENV === "production"
+      ? "script-src 'self'"
+      : "script-src 'self' 'unsafe-inline'";
+
     res.setHeader("Content-Security-Policy", [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline'",
+      scriptSrc,
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "img-src 'self' data: blob: https://api.dicebear.com",
       "connect-src 'self' wss: ws: https:",
@@ -788,6 +797,41 @@ export async function registerRoutes(
       "base-uri 'self'",
       "form-action 'self'",
     ].join("; "));
+
+    // ── CORS pour les routes API sensibles ───────────────────────────────────
+    // Les routes /api/admin/* et /api/merchant/* n'acceptent que les requêtes
+    // same-origin. Les callbacks de paiement sont volontairement exclus (ils
+    // sont appelés par des serveurs tiers et valident une signature HMAC).
+    if (req.path.startsWith("/api/admin/") || req.path.startsWith("/api/merchant/")) {
+      const origin = req.headers["origin"];
+      // Requête sans Origin (curl, serveur→serveur, ou navigateur same-origin GET) : autorisée.
+      if (origin) {
+        // Construire la liste des origines légitimes :
+        // 1. APP_URL (domaine de production défini explicitement)
+        // 2. REPLIT_DEV_DOMAIN (domaine dev Replit)
+        // 3. Fallback : protocole + hostname de la requête entrante (même serveur)
+        const selfOrigin = `${req.protocol}://${req.hostname}`;
+        const allowedOrigins = [
+          process.env.APP_URL,
+          process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : undefined,
+          selfOrigin,
+        ].filter(Boolean) as string[];
+
+        const parseOrigin = (o: string) => { try { return new URL(o).origin; } catch { return null; } };
+        const parsedOrigin  = parseOrigin(origin);
+        const parsedAllowed = allowedOrigins.map(parseOrigin).filter(Boolean);
+
+        if (parsedOrigin && !parsedAllowed.includes(parsedOrigin)) {
+          res.setHeader("Vary", "Origin");
+          // Ne pas bloquer OPTIONS (preflight) — le navigateur renverra la vraie requête
+          // qui sera alors rejetée faute de header Access-Control-Allow-Origin.
+          if (req.method !== "OPTIONS") {
+            return res.status(403).json({ message: "Cross-origin request non autorisé" });
+          }
+        }
+      }
+    }
+
     next();
   });
 
@@ -1526,6 +1570,34 @@ export async function registerRoutes(
   app.use("/api/merchant", blockedIpGuard, botGuard);
   app.use("/api/payment", blockedIpGuard, botGuard);
 
+  // ── Fabrique de rate-limiters en mémoire (par IP) ────────────────────────────
+  // Chaque appel crée un compteur indépendant avec ses propres paramètres.
+  // autoBlock=true : dépasse → IP bannie en DB + security_log (endpoints critiques).
+  function makeRateLimit(opts: {
+    max: number;
+    windowMs: number;
+    label: string;
+    autoBlock?: boolean;
+  }) {
+    const store = new Map<string, { count: number; firstReq: number }>();
+    return (req: Request, res: Response, next: NextFunction) => {
+      const clientIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+      const now = Date.now();
+      const entry = store.get(clientIp) || { count: 0, firstReq: now };
+      if (now - entry.firstReq > opts.windowMs) { entry.count = 0; entry.firstReq = now; }
+      entry.count++;
+      store.set(clientIp, entry);
+      if (entry.count > opts.max) {
+        if (opts.autoBlock) {
+          storage.addBlockedIp({ ipAddress: clientIp, reason: `Rate limit ${opts.label} — ${entry.count} req`, blockedBy: "système" }).catch(() => {});
+          storage.createSecurityLog({ eventType: "rate_limit", ip: clientIp, action: `${opts.label}_autoblock`, details: `${entry.count} req/${opts.windowMs / 1000}s — ${req.path}` }).catch(() => {});
+        }
+        return res.status(429).json({ message: "Trop de requêtes. Réessayez dans un moment." });
+      }
+      next();
+    };
+  }
+
   // ── Rate-limit store pour les endpoints de paiement ──────────────────────────
   const paymentInitiateAttempts = new Map<string, { count: number; firstReq: number }>();
   const PAYMENT_RATE_MAX = 10;
@@ -1539,13 +1611,24 @@ export async function registerRoutes(
     entry.count++;
     paymentInitiateAttempts.set(clientIp, entry);
     if (entry.count > PAYMENT_RATE_MAX) {
-      // Auto-block IP in DB and log the event
       storage.addBlockedIp({ ipAddress: clientIp, reason: `Rate limit paiement — ${entry.count} req/min`, blockedBy: "système" }).catch(() => {});
       storage.createSecurityLog({ eventType: "rate_limit", ip: clientIp, action: "payment_rate_autoblock", details: `${entry.count} req/min — ${req.path}` }).catch(() => {});
       return res.status(429).json({ message: "Trop de requêtes. Réessayez dans un moment." });
     }
     next();
   };
+
+  // ── Rate-limiters pour les autres endpoints publics sensibles ────────────────
+  // docs/access : authentification par PIN — max 5 tentatives/5min (anti brute-force)
+  const docsAccessRateLimit = makeRateLimit({ max: 5, windowMs: 5 * 60 * 1000, label: "docs_access", autoBlock: true });
+  // crypto pay : max 15 req/min par IP (création de factures crypto)
+  const cryptoPayRateLimit  = makeRateLimit({ max: 15, windowMs: 60 * 1000, label: "crypto_pay", autoBlock: true });
+  // validate   : max 20 req/min — polling de statut, mais abus possible
+  const validateRateLimit   = makeRateLimit({ max: 20, windowMs: 60 * 1000, label: "payment_validate" });
+  // verify-tx  : max 10 req/min — vérification de transaction publique
+  const verifyTxRateLimit   = makeRateLimit({ max: 10, windowMs: 60 * 1000, label: "verify_tx", autoBlock: true });
+  // report-failure : max 10 req/min — signalement d'échec de paiement
+  const reportFailureRateLimit = makeRateLimit({ max: 10, windowMs: 60 * 1000, label: "report_failure" });
 
   // Compteur d'alertes bad-origin pour Telegram (évite le spam : 1 alerte par IP/5min)
   const badOriginAlertCache = new Map<string, number>();
@@ -3464,7 +3547,7 @@ export async function registerRoutes(
   });
 
   // ==================== API DOCS ACCESS (PIN protected) ====================
-  app.post("/api/docs/access", async (req, res) => {
+  app.post("/api/docs/access", docsAccessRateLimit, async (req, res) => {
     try {
       const { email, pin } = req.body;
       if (!email || !pin) return res.status(400).json({ message: "Email et code PIN requis" });
@@ -3632,7 +3715,7 @@ export async function registerRoutes(
   });
 
   // ── Public: pay via crypto link uniqueId (white label — no redirect) ────────
-  app.post("/api/crypto-link/:uniqueId/pay", async (req, res) => {
+  app.post("/api/crypto-link/:uniqueId/pay", cryptoPayRateLimit, async (req, res) => {
     try {
       const link = await storage.getCryptoPaymentLinkByUniqueId(req.params.uniqueId);
       if (!link || !link.active) {
@@ -3840,7 +3923,7 @@ export async function registerRoutes(
   });
 
   // ── Signalement d'échec côté frontend (paiement initié mais USSD/OTP raté) ──
-  app.post("/api/payment/report-failure", async (req, res) => {
+  app.post("/api/payment/report-failure", reportFailureRateLimit, async (req, res) => {
     try {
       const { paymentId, errorMessage } = req.body;
       if (!paymentId || !errorMessage) {
@@ -4357,7 +4440,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/payment/validate", async (req, res) => {
+  app.post("/api/payment/validate", validateRateLimit, async (req, res) => {
     try {
       const { paymentId, txId } = req.body;
       if (!paymentId || !txId) {
@@ -4427,7 +4510,7 @@ export async function registerRoutes(
   });
 
   // ==================== VERIFY TRANSACTION (public) ====================
-  app.post("/api/verify-transaction", async (req, res) => {
+  app.post("/api/verify-transaction", verifyTxRateLimit, async (req, res) => {
     try {
       const { txId, merchantSlug, payerPhone, amount } = req.body;
       if (!txId || !merchantSlug) {

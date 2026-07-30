@@ -7,8 +7,10 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 
 const app = express();
-// Trust the first proxy (Replit / reverse proxy) so req.ip returns the real client IP
-app.set("trust proxy", true);
+// Trust exactement 1 niveau de proxy (Replit reverse-proxy).
+// "true" ferait confiance à TOUS les X-Forwarded-For envoyés par le client → spoofing d'IP possible.
+// "1" signifie : seul le dernier proxy connu est fiable — le client ne peut pas forger req.ip.
+app.set("trust proxy", 1);
 
 // ── Security headers — couche Helmet (baseline globale) ──────────────────────
 // La couche complète est dans registerRoutes() (routes.ts) qui s'exécute après
@@ -23,7 +25,10 @@ app.use(helmet({
   // HSTS géré dans routes.ts (production only, pour éviter les boucles en dev HTTP)
   hsts: false,
   crossOriginEmbedderPolicy: false,
-  crossOriginResourcePolicy: { policy: "cross-origin" },
+  // "same-site" au lieu de "cross-origin" — les ressources statiques (JS/CSS/images)
+  // ne doivent pas être embarquables par des sites tiers. Les callbacks de paiement
+  // (qui reçoivent du JSON depuis des serveurs tiers) ne sont pas affectés par ce header.
+  crossOriginResourcePolicy: { policy: "same-site" },
   // Actifs par défaut dans Helmet : noSniff, xssFilter, dnsPrefetchControl, etc.
 }));
 // X-Powered-By supprimé explicitement (double protection)

@@ -3,6 +3,11 @@ import crypto from "crypto";
 const SEAPAY_BASE_URL = "https://api.seaglb.xyz";
 
 /* ── Signature MD5 ─────────────────────────────────────────────────── */
+// NOTE SÉCURITÉ : l'API SeaPay impose MD5 comme algorithme de signature (non modifiable).
+// MD5 est faible pour une utilisation cryptographique générale, mais dans ce contexte :
+// - La clé secrète est longue et aléatoire (non devinable par brute-force)
+// - SeaPay valide également la signature côté serveur
+// - Une migration vers HMAC-SHA256 nécessiterait un accord avec SeaPay (demandé)
 export function buildSeapaySign(params: Record<string, any>, key: string): string {
   const sorted = Object.keys(params)
     .filter(k => k !== "sign" && params[k] !== "" && params[k] !== null && params[k] !== undefined)
