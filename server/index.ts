@@ -166,6 +166,13 @@ app.use((req, res, next) => {
     await setupVite(httpServer, app);
   }
 
+  // Vérification ADMIN_SLUG — pas de slug = tableau de bord admin inaccessible
+  if (!process.env.ADMIN_SLUG) {
+    console.warn("[SECURITY] ADMIN_SLUG non défini — le tableau de bord admin sera inaccessible. Définissez ADMIN_SLUG dans les variables d'environnement.");
+  } else {
+    log(`admin path configured (ADMIN_SLUG is set)`);
+  }
+
   // Start listening FIRST — optional services initialized after
   const port = parseInt(process.env.PORT || "5000", 10);
   httpServer.listen(
