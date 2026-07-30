@@ -749,6 +749,18 @@ async function creditMerchantForCryptoTx(cryptoTx: { id: number; merchantId: num
   }
 }
 
+// ── Sanitizers — strip TOUS les champs sensibles avant envoi au client ──────────
+// Ces fonctions DOIVENT être utilisées sur tout objet admin/merchant renvoyé
+// dans une res.json(). Ne jamais envoyer l'objet brut issu de la DB.
+function sanitizeMerchant(m: Record<string, any>) {
+  const { passwordHash, totpSecret, pinHash, webhookSecret: _ws, ...safe } = m;
+  return safe;
+}
+function sanitizeAdmin(a: Record<string, any>) {
+  const { passwordHash, totpSecret, ...safe } = a;
+  return safe;
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -766,7 +778,7 @@ export async function registerRoutes(
     }
     res.setHeader("Content-Security-Policy", [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      "script-src 'self' 'unsafe-inline'",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "img-src 'self' data: blob: https://api.dicebear.com",
       "connect-src 'self' wss: ws: https:",
@@ -2490,7 +2502,7 @@ export async function registerRoutes(
         storage.getMerchantPin(id),
       ]);
       const totalRevenue = txs.filter(t => t.status === "confirmed").reduce((s, t) => s + t.amount, 0);
-      res.json({ merchant, links, transactions: txs.slice(0, 50), countries, hasPin: !!pin, totalRevenue });
+      res.json({ merchant: sanitizeMerchant(merchant), links, transactions: txs.slice(0, 50), countries, hasPin: !!pin, totalRevenue });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -2571,7 +2583,7 @@ export async function registerRoutes(
         }).catch(() => {});
       });
 
-      res.json(merchant);
+      res.json(sanitizeMerchant(merchant));
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

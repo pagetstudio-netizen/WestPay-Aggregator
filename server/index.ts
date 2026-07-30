@@ -10,33 +10,24 @@ const app = express();
 // Trust the first proxy (Replit / reverse proxy) so req.ip returns the real client IP
 app.set("trust proxy", true);
 
-// ── Security headers ──────────────────────────────────────────────────────────
+// ── Security headers — couche Helmet (baseline globale) ──────────────────────
+// La couche complète est dans registerRoutes() (routes.ts) qui s'exécute après
+// et surchargé les valeurs Helmet avec des directives plus strictes.
 app.use(helmet({
-  contentSecurityPolicy: process.env.NODE_ENV === "production"
-    ? {
-        directives: {
-          defaultSrc: ["'self'"],
-          scriptSrc: ["'self'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
-          imgSrc: ["'self'", "data:", "https:"],
-          connectSrc: ["'self'", "https://ip-api.com", "wss:", "https:"],
-          fontSrc: ["'self'", "data:"],
-          objectSrc: ["'none'"],
-          frameSrc: ["'none'"],
-          baseUri: ["'self'"],
-          formAction: ["'self'"],
-        },
-      }
-    : false,
-  crossOriginEmbedderPolicy: false,   // Required for canvas/WebGL fingerprinting
+  // CSP gérée par le middleware dans routes.ts (plus complète et toujours active)
+  contentSecurityPolicy: false,
+  // X-Frame-Options → DENY (surclasse le défaut SAMEORIGIN de Helmet)
+  frameguard: { action: "deny" },
+  // Supprime X-Powered-By (ne pas révéler Express)
+  hidePoweredBy: true,
+  // HSTS géré dans routes.ts (production only, pour éviter les boucles en dev HTTP)
+  hsts: false,
+  crossOriginEmbedderPolicy: false,
   crossOriginResourcePolicy: { policy: "cross-origin" },
+  // Actifs par défaut dans Helmet : noSniff, xssFilter, dnsPrefetchControl, etc.
 }));
-app.use((_req, res, next) => {
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-  res.setHeader("Permissions-Policy", "geolocation=(), camera=(), microphone=()");
-  next();
-});
+// X-Powered-By supprimé explicitement (double protection)
+app.disable("x-powered-by");
 
 // ── Cookie parser (requis pour lire les cookies httpOnly d'authentification) ──
 app.use(cookieParser());
