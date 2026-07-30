@@ -48,6 +48,13 @@ export async function setupVite(server: Server, app: Express) {
         `src="/src/main.tsx"`,
         `src="/src/main.tsx?v=${nanoid()}"`,
       );
+      // Inject ADMIN_SLUG (same logic as production serveStatic)
+      const slug = process.env.ADMIN_SLUG || "";
+      const adminPath = slug ? `/admin-access-${slug}` : "/__admin_not_configured__";
+      template = template.replace(
+        "</head>",
+        `<script>window.__ADMIN_PATH__=${JSON.stringify(adminPath)};</script></head>`,
+      );
       const page = await vite.transformIndexHtml(url, template);
       res.status(200).set({ "Content-Type": "text/html" }).end(page);
     } catch (e) {
