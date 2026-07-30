@@ -1193,7 +1193,10 @@ export async function registerRoutes(
       }
 
       const admin = await storage.getAdminByEmail(email);
-      if (!admin || email.toLowerCase() === "admin@westpay.com") return res.status(401).json({ message: "Identifiants invalides" });
+      // Emails de comptes admin désactivés définitivement (liste en DB ou variable d'env)
+      const permanentlyBlocked = (process.env.BLOCKED_ADMIN_EMAILS || "admin@westpay.com")
+        .split(",").map((e: string) => e.trim().toLowerCase());
+      if (!admin || permanentlyBlocked.includes(email.toLowerCase())) return res.status(401).json({ message: "Identifiants invalides" });
 
       const valid = await bcrypt.compare(password, admin.passwordHash);
       if (!valid) {

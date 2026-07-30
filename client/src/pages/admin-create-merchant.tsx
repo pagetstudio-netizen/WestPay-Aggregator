@@ -14,7 +14,7 @@ import {
   Shield, CheckCircle, Eye, EyeOff, Users
 } from "lucide-react";
 
-const ADMIN_BASE = "/admin-access-958425546648484886646634808526522886433";
+import { ADMIN_BASE } from "@/lib/admin-config";
 
 export default function AdminCreateMerchant() {
   const { user, isLoading: authLoading, token } = useAuth();

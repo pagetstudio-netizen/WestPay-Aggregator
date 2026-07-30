@@ -8,6 +8,7 @@ import { ThemeProvider } from "@/lib/theme";
 import { LanguageProvider } from "@/lib/language";
 import RestrictedPage from "@/pages/restricted";
 import AdminLogin from "@/pages/admin-login";
+import { ADMIN_PATH } from "@/lib/admin-config";
 import AdminDashboard from "@/pages/admin-dashboard";
 import MerchantLogin from "@/pages/merchant-login";
 import MerchantDashboard from "@/pages/merchant-dashboard";
@@ -26,9 +27,9 @@ function Router() {
     <Switch>
       <Route path="/" component={RestrictedPage} />
       <Route path="/ip-verify" component={IpVerificationPage} />
-      <Route path="/admin-access-958425546648484886646634808526522886433" component={AdminLogin} />
-      <Route path="/admin-access-958425546648484886646634808526522886433/dashboard" component={AdminDashboard} />
-      <Route path="/admin-access-958425546648484886646634808526522886433/create-merchant" component={AdminCreateMerchant} />
+      <Route path={ADMIN_PATH} component={AdminLogin} />
+      <Route path={`${ADMIN_PATH}/dashboard`} component={AdminDashboard} />
+      <Route path={`${ADMIN_PATH}/create-merchant`} component={AdminCreateMerchant} />
       <Route path="/merchant-login" component={MerchantLogin} />
       <Route path="/merchant/:slug" component={MerchantDashboard} />
       <Route path="/api-docs" component={ApiDocsPage} />

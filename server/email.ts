@@ -1,7 +1,8 @@
 import { Resend } from "resend";
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
-const FROM_EMAIL = "RobotPay <noreply@westpay.cfd>";
+// Adresse expéditeur — configurable via FROM_EMAIL dans les secrets Replit
+const FROM_EMAIL = process.env.FROM_EMAIL || "RobotPay <noreply@westpay.cfd>";
 
 export async function sendMerchantOtpEmail(to: string, otp: string, merchantName?: string): Promise<boolean> {
   if (!resend) {
