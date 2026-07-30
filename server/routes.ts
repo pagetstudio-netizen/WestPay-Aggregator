@@ -760,6 +760,21 @@ function sanitizeAdmin(a: Record<string, any>) {
   return safe;
 }
 
+/**
+ * Renvoie un message d'erreur sûr pour le client.
+ * - En production  : message générique pour les 5xx (évite de fuiter des détails internes
+ *   comme les noms de tables, contraintes DB, chemins de fichiers, etc.).
+ *   Les messages métier explicites (4xx) sont toujours retournés tels quels.
+ * - En développement : message complet pour faciliter le debug.
+ */
+function safeErrMsg(err: any): string {
+  if (process.env.NODE_ENV !== "production") return err?.message || "Erreur interne";
+  // Messages métier explicitement définis dans le code (courts, sans détail technique)
+  const msg: string = err?.message || "";
+  const isSafe = msg.length > 0 && msg.length < 120 && !/sql|column|table|relation|constraint|syntax|pool|drizzle|pg\b|Error:/i.test(msg);
+  return isSafe ? msg : "Erreur interne du serveur";
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -1886,7 +1901,7 @@ export async function registerRoutes(
 
       return res.json({ requiresOtp: true, tempToken, otpVia, merchantName: merchant.name });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -1946,7 +1961,7 @@ export async function registerRoutes(
       setAuthCookie(res, token);
       return res.json({ token, user: { id: merchantId, email, name, slug } });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -1964,7 +1979,7 @@ export async function registerRoutes(
       const ips = await storage.getAllowedIps();
       res.json(ips);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -1984,7 +1999,7 @@ export async function registerRoutes(
       });
       res.json(row);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -1993,7 +2008,7 @@ export async function registerRoutes(
       await storage.removeAllowedIp(Number(req.params.id));
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2003,7 +2018,7 @@ export async function registerRoutes(
       const logs = await storage.getRecentLoginLogs(limit);
       res.json(logs);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2028,7 +2043,7 @@ export async function registerRoutes(
         .slice(0, limit);
       res.json(combined);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2037,7 +2052,7 @@ export async function registerRoutes(
     try {
       res.json(await storage.getBlockedIps());
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2056,7 +2071,7 @@ export async function registerRoutes(
       storage.createSecurityLog({ eventType: "ip_blocked", ip: ipAddress, action: "manual_block", details: reason || "Bloqué manuellement", telegramAdmin: (req as any).user?.email }).catch(() => {});
       res.json(row);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2065,7 +2080,7 @@ export async function registerRoutes(
       await storage.removeBlockedIp(Number(req.params.id));
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2077,7 +2092,7 @@ export async function registerRoutes(
       const list: string[] = raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : [];
       res.json(list);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2094,7 +2109,7 @@ export async function registerRoutes(
       blockedLoginEmails.add(clean);
       res.json({ ok: true, list });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2109,7 +2124,7 @@ export async function registerRoutes(
       blockedLoginEmails.delete(clean);
       res.json({ ok: true, list: updated });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2118,7 +2133,7 @@ export async function registerRoutes(
     try {
       res.json(await storage.getBlockedDevices());
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2136,7 +2151,7 @@ export async function registerRoutes(
       storage.createSecurityLog({ eventType: "device_blocked", fingerprint, ip: ipAddress, action: "manual_block", details: reason || "Bloqué manuellement" }).catch(() => {});
       res.json(row);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2145,7 +2160,7 @@ export async function registerRoutes(
       await storage.removeBlockedDevice(Number(req.params.id));
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2155,7 +2170,7 @@ export async function registerRoutes(
       const limit = Math.min(Number(req.query.limit) || 50, 200);
       res.json(await storage.getSecurityLogs(limit));
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2163,7 +2178,7 @@ export async function registerRoutes(
   app.get("/api/admin/security/devices", authMiddleware("admin"), async (_req, res) => {
     try {
       res.json(await storage.getAllDevices(200));
-    } catch (err: any) { res.status(500).json({ message: err.message }); }
+    } catch (err: any) { res.status(500).json({ message: safeErrMsg(err) }); }
   });
 
   app.post("/api/admin/security/devices/:id/trust", authMiddleware("admin"), async (req, res) => {
@@ -2171,7 +2186,7 @@ export async function registerRoutes(
       await storage.trustDevice(Number(req.params.id));
       storage.createSecurityLog({ eventType: "device_trusted", action: "manual_trust", details: `ID ${req.params.id}`, telegramAdmin: (req as any).user?.email }).catch(() => {});
       res.json({ ok: true });
-    } catch (err: any) { res.status(500).json({ message: err.message }); }
+    } catch (err: any) { res.status(500).json({ message: safeErrMsg(err) }); }
   });
 
   app.delete("/api/admin/security/devices/:id", authMiddleware("admin"), async (req, res) => {
@@ -2179,14 +2194,14 @@ export async function registerRoutes(
       await storage.blockDeviceById(Number(req.params.id));
       storage.createSecurityLog({ eventType: "device_blocked", action: "manual_block", details: `ID ${req.params.id}`, telegramAdmin: (req as any).user?.email }).catch(() => {});
       res.json({ ok: true });
-    } catch (err: any) { res.status(500).json({ message: err.message }); }
+    } catch (err: any) { res.status(500).json({ message: safeErrMsg(err) }); }
   });
 
   // ── Security Settings (2FA, Device Check, VPN Block, Country Blacklist) ─────
   app.get("/api/admin/security/config", authMiddleware("admin"), async (_req, res) => {
     try {
       res.json(await getSecuritySettings());
-    } catch (err: any) { res.status(500).json({ message: err.message }); }
+    } catch (err: any) { res.status(500).json({ message: safeErrMsg(err) }); }
   });
 
   app.put("/api/admin/security/config", authMiddleware("admin"), async (req, res) => {
@@ -2198,7 +2213,7 @@ export async function registerRoutes(
       if (Array.isArray(blockedCountries)) await storage.setSetting("security_blocked_countries", JSON.stringify(blockedCountries));
       storage.createSecurityLog({ eventType: "security_config_updated", action: "config_change", details: JSON.stringify({ twoFa, deviceCheck, vpnBlock }), telegramAdmin: (req as any).user?.email }).catch(() => {});
       res.json(await getSecuritySettings());
-    } catch (err: any) { res.status(500).json({ message: err.message }); }
+    } catch (err: any) { res.status(500).json({ message: safeErrMsg(err) }); }
   });
 
   app.get("/api/admin/profile", authMiddleware("admin"), async (req, res) => {
@@ -2207,7 +2222,7 @@ export async function registerRoutes(
       if (!admin) return res.status(404).json({ message: "Admin non trouve" });
       res.json({ email: admin.email, apiKey: admin.apiKey });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2218,7 +2233,7 @@ export async function registerRoutes(
       const knownGroups: string[] = knownGroupsRaw ? JSON.parse(knownGroupsRaw) : [];
       res.json({ groupId: groupId || null, knownGroupsCount: knownGroups.length });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2229,7 +2244,7 @@ export async function registerRoutes(
       const info = await getBotWebhookInfo();
       res.json(info);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2253,7 +2268,7 @@ export async function registerRoutes(
       const info = await getBotWebhookInfo();
       res.json({ success: true, webhookUrl, ...info });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2272,7 +2287,7 @@ export async function registerRoutes(
       );
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2288,7 +2303,7 @@ export async function registerRoutes(
       await storage.createApiLog({ action: "telegram_main_bot_token_updated", description: `Token bot principal mis à jour — @${result.username}`, ip: req.ip || "" });
       res.json({ success: true, username: result.username });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2307,7 +2322,7 @@ export async function registerRoutes(
       await storage.createApiLog({ action: "telegram_group_updated", description: `Groupe admin Telegram mis a jour : ${trimmed}`, ip: req.ip || "" });
       res.json({ success: true, groupId: trimmed });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2326,7 +2341,7 @@ export async function registerRoutes(
         : null;
       res.json({ running: status.running, username: status.username, hasToken, masked });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2343,7 +2358,7 @@ export async function registerRoutes(
       await storage.createApiLog({ action: "otp_bot_token_updated", description: "OTP bot token updated and reloaded", ip: req.ip || "" });
       res.json({ success: true, username: result.username });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2357,7 +2372,7 @@ export async function registerRoutes(
       if (!sent) return res.status(500).json({ message: "Failed to send — check bot token and chat ID" });
       res.json({ success: true, otp: testOtp });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2369,7 +2384,7 @@ export async function registerRoutes(
       const result = await syncAllKnownGroups();
       res.json({ success: true, total: result.total, added: result.added });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2444,7 +2459,7 @@ export async function registerRoutes(
         }));
       res.json(withTelegram);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2479,7 +2494,7 @@ export async function registerRoutes(
         lastStatsReset: baseline?.resetAt || null,
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2490,7 +2505,7 @@ export async function registerRoutes(
       const data = await storage.getCommissionByMerchant(validPeriod);
       res.json(data);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2501,7 +2516,7 @@ export async function registerRoutes(
       const data = await storage.getCommissionByCountry(validPeriod);
       res.json(data);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2511,7 +2526,7 @@ export async function registerRoutes(
       queryClient?.invalidateQueries?.({ queryKey: ["/api/admin/stats"] });
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2534,7 +2549,7 @@ export async function registerRoutes(
       });
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2559,7 +2574,7 @@ export async function registerRoutes(
       });
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2568,7 +2583,7 @@ export async function registerRoutes(
       const result = await (storage as any).getMerchantsWithStats();
       res.json(result);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2586,7 +2601,7 @@ export async function registerRoutes(
       const totalRevenue = txs.filter(t => t.status === "confirmed").reduce((s, t) => s + t.amount, 0);
       res.json({ merchant: sanitizeMerchant(merchant), links, transactions: txs.slice(0, 50), countries, hasPin: !!pin, totalRevenue });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2667,7 +2682,7 @@ export async function registerRoutes(
 
       res.json(sanitizeMerchant(merchant));
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2692,7 +2707,7 @@ export async function registerRoutes(
       });
       res.json({ success: true, slug: trimmed });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2703,7 +2718,7 @@ export async function registerRoutes(
       await storage.updateMerchant(id, data);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2728,7 +2743,7 @@ export async function registerRoutes(
       await storage.updateMerchant(merchantId, updateData);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2738,7 +2753,7 @@ export async function registerRoutes(
       const wallets = await storage.getMerchantCountries(merchantId);
       res.json(wallets);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2749,7 +2764,7 @@ export async function registerRoutes(
       await storage.updateMerchantCountryActive(countryId, !!active);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2758,7 +2773,7 @@ export async function registerRoutes(
       await storage.deleteMerchant(parseInt(req.params.id as string));
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2778,7 +2793,7 @@ export async function registerRoutes(
 
       res.json(mc);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2807,7 +2822,7 @@ export async function registerRoutes(
       });
       res.json({ added: results.length, countries: results, errors });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2818,7 +2833,7 @@ export async function registerRoutes(
       await storage.deleteMerchantCountry(id);
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2833,7 +2848,7 @@ export async function registerRoutes(
       }));
       res.json(enriched);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -2891,7 +2906,7 @@ export async function registerRoutes(
       }
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3037,7 +3052,7 @@ export async function registerRoutes(
 
       res.json(all);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3046,7 +3061,7 @@ export async function registerRoutes(
       const nums = await storage.getNumbers();
       res.json(nums);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3062,7 +3077,7 @@ export async function registerRoutes(
       });
       res.json(num);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3071,7 +3086,7 @@ export async function registerRoutes(
       const updated = await storage.toggleNumberStatus(parseInt(req.params.id as string));
       res.json(updated);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3080,7 +3095,7 @@ export async function registerRoutes(
       await storage.deleteNumber(parseInt(req.params.id as string));
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3089,7 +3104,7 @@ export async function registerRoutes(
       const logs = await storage.getSmsLogs();
       res.json(logs);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3098,7 +3113,7 @@ export async function registerRoutes(
       const allAdmins = await db.select({ id: admins.id, email: admins.email, createdAt: admins.createdAt }).from(admins).orderBy(admins.createdAt);
       res.json(allAdmins);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3124,7 +3139,7 @@ export async function registerRoutes(
       await db.delete(admins).where(eq(admins.id, id));
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3139,7 +3154,7 @@ export async function registerRoutes(
       await storage.updateAdminPassword(admin.id, hash);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3149,7 +3164,7 @@ export async function registerRoutes(
       const countries = await storage.getMerchantCountries(merchantId);
       res.json(countries);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3174,7 +3189,7 @@ export async function registerRoutes(
 
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3198,7 +3213,7 @@ export async function registerRoutes(
 
       res.json({ success: true, apiKey: newKey });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3208,7 +3223,7 @@ export async function registerRoutes(
       const logs = await storage.getApiLogs(merchantId);
       res.json(logs);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3218,7 +3233,7 @@ export async function registerRoutes(
       const logs = await storage.getWebhookLogs(merchantId);
       res.json(logs);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3240,7 +3255,7 @@ export async function registerRoutes(
 
       res.json({ success: true, webhookUrl: webhookUrl || "", webhookSecret: webhookSecret || "" });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3259,7 +3274,7 @@ export async function registerRoutes(
 
       res.json({ success: true, code, expiresAt });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3274,7 +3289,7 @@ export async function registerRoutes(
 
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3287,7 +3302,7 @@ export async function registerRoutes(
       await storage.updateMerchantTelegramBotLanguage(merchantId, language);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3299,7 +3314,7 @@ export async function registerRoutes(
 
       res.json({ linked: !!merchant.telegramChatId, chatId: merchant.telegramChatId || null, language: merchant.telegramBotLanguage || "fr" });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3310,7 +3325,7 @@ export async function registerRoutes(
       if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
       res.json({ id: merchant.id, name: merchant.name, email: merchant.email, slug: merchant.slug, feeExempt: merchant.feeExempt, withdrawalsDisabled: !!merchant.withdrawalsDisabled });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3319,7 +3334,7 @@ export async function registerRoutes(
       const countries = await storage.getMerchantCountries((req as any).user.id);
       res.json(countries);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3336,7 +3351,7 @@ export async function registerRoutes(
       }));
       res.json(sanitized);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3345,7 +3360,7 @@ export async function registerRoutes(
       const countries = await storage.getMerchantCountries((req as any).user.id);
       res.json(countries);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3370,7 +3385,7 @@ export async function registerRoutes(
 
       res.json({ success: true, apiKey: newKey });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3379,7 +3394,7 @@ export async function registerRoutes(
       const stats = await storage.getMerchantStats((req as any).user.id);
       res.json(stats);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3394,7 +3409,7 @@ export async function registerRoutes(
       await storage.updateMerchant(merchant.id, { passwordHash: hash });
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3474,7 +3489,7 @@ export async function registerRoutes(
         hasWebhook: !!merchant.webhookUrl,
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3506,7 +3521,7 @@ export async function registerRoutes(
         hasWebhook: !!webhookUrl,
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3533,7 +3548,7 @@ export async function registerRoutes(
       const result = await sendWebhookNotification(merchantId, testPayload);
       res.json(result);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3542,7 +3557,7 @@ export async function registerRoutes(
       const logs = await storage.getWebhookLogs((req as any).user.id);
       res.json(logs);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3579,7 +3594,7 @@ export async function registerRoutes(
       const docsToken = jwt.sign({ merchantId: merchant.id, purpose: "docs" }, JWT_SECRET, { expiresIn: "1h" });
       res.json({ success: true, token: docsToken, merchant: { name: merchant.name, email: merchant.email } });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3604,7 +3619,7 @@ export async function registerRoutes(
         cryptoEnabled: aggs.length > 0,
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3630,7 +3645,7 @@ export async function registerRoutes(
         currencies: currencies.map(c => c.symbol),
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3652,7 +3667,7 @@ export async function registerRoutes(
       const currencies = await oxapayGetCurrencies(activeAgg.apiKey);
       res.json(currencies);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3670,7 +3685,7 @@ export async function registerRoutes(
       });
       res.json({ methods: activeOps.map(o => ({ name: o.name, logo: o.logo || null })) });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3683,7 +3698,7 @@ export async function registerRoutes(
       }
       res.json({ id: merchant.id, name: merchant.name, slug: merchant.slug });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3710,7 +3725,7 @@ export async function registerRoutes(
         merchantSlug: merchant.slug,
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3786,7 +3801,7 @@ export async function registerRoutes(
         expiredAt: wlResult.expiredAt,
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3815,7 +3830,7 @@ export async function registerRoutes(
       });
       res.json({ success: true, link, url: `${process.env.APP_URL || "http://Westpay.cfd"}/c/${uniqueId}` });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3827,7 +3842,7 @@ export async function registerRoutes(
       const BASE = process.env.APP_URL || "http://Westpay.cfd";
       res.json(links.map(l => ({ ...l, url: `${BASE}/c/${l.uniqueId}` })));
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3838,7 +3853,7 @@ export async function registerRoutes(
       await storage.deleteCryptoPaymentLink(Number(req.params.id), merchantId);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3896,7 +3911,7 @@ export async function registerRoutes(
         paymentUrl: `${process.env.APP_URL || "http://Westpay.cfd"}/pay/crypto/${invoiceResult.trackId}`,
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3918,7 +3933,7 @@ export async function registerRoutes(
         },
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -3945,7 +3960,7 @@ export async function registerRoutes(
       console.log(`[PAYMENT REPORT] Échec signalé pour pending #${id}: ${truncated}`);
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -4436,7 +4451,7 @@ export async function registerRoutes(
         }
       }
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -4505,7 +4520,7 @@ export async function registerRoutes(
         omnipayReference: pending.omnipayReference,
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -4793,7 +4808,7 @@ export async function registerRoutes(
       }
     } catch (err: any) {
       console.error("[OMNIPAY CALLBACK] Erreur:", err.message);
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -5027,7 +5042,7 @@ export async function registerRoutes(
 
       res.json({ status: "pending", paymentId: pending.id });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -5047,7 +5062,7 @@ export async function registerRoutes(
         envOverride,
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -5059,7 +5074,7 @@ export async function registerRoutes(
       if (payoutApiKey !== undefined) await storage.setSetting("omnipay_payout_api_key", payoutApiKey);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -5205,7 +5220,7 @@ export async function registerRoutes(
       res.json({ received: true });
     } catch (err: any) {
       console.error("[MBIYO CALLBACK] Erreur:", err.message);
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -5325,7 +5340,7 @@ export async function registerRoutes(
       res.json({ received: true });
     } catch (err: any) {
       console.error("[MBIYO PAYOUT CALLBACK] Erreur:", err.message);
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -5342,7 +5357,7 @@ export async function registerRoutes(
         envOverride,
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -5353,7 +5368,7 @@ export async function registerRoutes(
       if (webhookSecret !== undefined) await storage.setSetting("mbiyo_webhook_secret", webhookSecret);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -5402,7 +5417,7 @@ export async function registerRoutes(
       const configured = countriesList.some(c => countries[c].configured);
       res.json({ countries, envOverrides, envVarNames, configured });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -5416,7 +5431,7 @@ export async function registerRoutes(
       if (apiSecret !== undefined) await storage.setSetting(`seapay_api_secret_${slug}`, apiSecret);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -5432,7 +5447,7 @@ export async function registerRoutes(
       const result = await seapayGetBalance(merchantId, currStr, apiSecret);
       res.json(result);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -5982,7 +5997,7 @@ export async function registerRoutes(
       }
     } catch (err: any) {
       console.error("[SENDAVAPAY CALLBACK] Erreur:", err.message);
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6020,7 +6035,7 @@ export async function registerRoutes(
         callbackUrl: `${process.env.APP_URL || "http://Westpay.cfd"}/api/sendavapay/callback`,
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6031,7 +6046,7 @@ export async function registerRoutes(
       if (webhookSecret !== undefined && webhookSecret !== "") await storage.setSetting("sendavapay_webhook_secret", webhookSecret);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6043,7 +6058,7 @@ export async function registerRoutes(
       const result = await sendavaGetBalance(apiKey, countryCode);
       res.json({ success: result.success, data: result.data, message: result.message });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6054,7 +6069,7 @@ export async function registerRoutes(
       const result = await sendavaGetTransactions(apiKey);
       res.json({ success: result.success, data: result.data, message: result.message });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6068,7 +6083,7 @@ export async function registerRoutes(
       }
       res.json({ success: result.success, data: result.data, message: result.message });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6093,7 +6108,7 @@ export async function registerRoutes(
         payoutCallbackUrl: `${process.env.APP_URL || "https://westpay.cfd"}/api/clapay/payout-callback`,
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6105,7 +6120,7 @@ export async function registerRoutes(
       if (webhookUniqueKey !== undefined && webhookUniqueKey !== "") await storage.setSetting("clapay_webhook_unique_key", webhookUniqueKey);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6116,7 +6131,7 @@ export async function registerRoutes(
       const result = await clapayGetBalance(token);
       res.json(result);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6166,7 +6181,7 @@ export async function registerRoutes(
       res.json({ success: true, credit, txId: tx.txId, merchantName: merchant?.name });
     } catch (err: any) {
       console.error("[MBIYO ADMIN] Erreur confirmation manuelle:", err.message);
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6200,7 +6215,7 @@ export async function registerRoutes(
       }
       res.json({ success: true, message: `Sessions ${targetType} id=${targetId} révoquées` });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6215,7 +6230,7 @@ export async function registerRoutes(
       await storage.updateMerchantCountryPayinGateway(id, payinGateway);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6229,7 +6244,7 @@ export async function registerRoutes(
       }
       res.json({ balance: result.balance });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6240,7 +6255,7 @@ export async function registerRoutes(
       await storage.updateMerchantCountryOmnipay(countryId, !!omnipayEnabled);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6331,7 +6346,7 @@ export async function registerRoutes(
         amount: parsedAmount,
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6706,7 +6721,7 @@ export async function registerRoutes(
       return res.json({ status: "processed", txId, amount, country: simNumber.country });
     } catch (err: any) {
       console.error("[SMS] Erreur serveur:", err.message);
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6717,7 +6732,7 @@ export async function registerRoutes(
       const links = await storage.getAllPaymentLinks();
       res.json(links);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6730,7 +6745,7 @@ export async function registerRoutes(
       await storage.createApiLog({ merchantId: link.merchantId, action: "admin_toggle_payment_link", ip: req.ip || "", description: `Admin: lien #${id} ${updated.active ? "activé" : "désactivé"}` });
       res.json(updated);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6743,7 +6758,7 @@ export async function registerRoutes(
       await storage.createApiLog({ merchantId: link.merchantId, action: "admin_delete_payment_link", ip: req.ip || "", description: `Admin: lien #${id} "${link.name}" supprimé` });
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6755,7 +6770,7 @@ export async function registerRoutes(
       const links = await storage.getPaymentLinks(merchantId);
       res.json(links);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6785,7 +6800,7 @@ export async function registerRoutes(
       });
       res.json(link);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6813,7 +6828,7 @@ export async function registerRoutes(
       });
       res.json(updated);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6826,7 +6841,7 @@ export async function registerRoutes(
       await storage.deletePaymentLink(id);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6844,7 +6859,7 @@ export async function registerRoutes(
       const activeCountries = countries.filter(c => c.active).map(c => c.country);
       res.json({ link, merchantName: merchant.name, merchantSlug: merchant.slug, countries: activeCountries });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6858,7 +6873,7 @@ export async function registerRoutes(
         feeValue: parseFloat(feeValue?.value || "3"),
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6871,7 +6886,7 @@ export async function registerRoutes(
       const withdrawalMinAmount = minAmountRaw ? parseInt(minAmountRaw) || 200 : 200;
       res.json({ withdrawalsDisabled: withdrawalsDisabled === "true", withdrawalMinAmount });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6889,7 +6904,7 @@ export async function registerRoutes(
       }
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6908,22 +6923,31 @@ export async function registerRoutes(
         telegram4: tg4 || "@astapay",
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
   // ==================== SUPPORT / AIDE ====================
-  app.post("/api/support/help", async (req, res) => {
+  // Rate-limit : 5 messages/5min par IP (anti-spam Telegram)
+  const supportHelpRateLimit = makeRateLimit({ max: 5, windowMs: 5 * 60 * 1000, label: "support_help" });
+  app.post("/api/support/help", supportHelpRateLimit, async (req, res) => {
     try {
       const { name, whatsapp, message, merchantName, merchantSlug } = req.body;
       if (!name || !message) {
         return res.status(400).json({ message: "Nom et message sont requis" });
       }
+      // Sanitize : limiter la taille des champs pour éviter le spam / les injections Telegram Markdown
+      const safeName    = String(name).slice(0, 80).replace(/[*_`[\]]/g, "");
+      const safeWa      = String(whatsapp || "").slice(0, 20).replace(/[^0-9+\s]/g, "");
+      const safeMsg     = String(message).slice(0, 500).replace(/[*_`[\]]/g, "");
+      const safeMerch   = merchantName ? String(merchantName).slice(0, 60).replace(/[*_`[\]]/g, "") : null;
+      const safeSlug    = merchantSlug ? String(merchantSlug).slice(0, 40).replace(/[^a-z0-9-]/g, "") : null;
+
       const now = new Date();
       const date = now.toLocaleDateString("fr-FR");
       const time = now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-      const merchantInfo = merchantName ? `🏪 *Marchand :* ${merchantName}${merchantSlug ? ` (${merchantSlug})` : ""}` : "🏪 *Marchand :* Inconnu";
-      const text = `🆘 *Nouvelle demande d'aide — Page de paiement*\n\n${merchantInfo}\n\n👤 *Nom :* ${name}\n📱 *WhatsApp :* ${whatsapp || "Non renseigné"}\n💬 *Message :*\n${message}\n\n📅 *Date :* ${date}  🕐 *Heure :* ${time}`;
+      const merchantInfo = safeMerch ? `🏪 *Marchand :* ${safeMerch}${safeSlug ? ` (${safeSlug})` : ""}` : "🏪 *Marchand :* Inconnu";
+      const text = `🆘 *Nouvelle demande d'aide — Page de paiement*\n\n${merchantInfo}\n\n👤 *Nom :* ${safeName}\n📱 *WhatsApp :* ${safeWa || "Non renseigné"}\n💬 *Message :*\n${safeMsg}\n\n📅 *Date :* ${date}  🕐 *Heure :* ${time}`;
       const { notifyAdminGroup } = await import("./telegram-bot");
       await notifyAdminGroup(text);
       res.json({ success: true });
@@ -6939,7 +6963,7 @@ export async function registerRoutes(
       const countries = await storage.getWalletTransferCountries(true);
       res.json(countries);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6948,7 +6972,7 @@ export async function registerRoutes(
       const countries = await storage.getWalletTransferCountries(false);
       res.json(countries);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6963,7 +6987,7 @@ export async function registerRoutes(
       const created = await storage.createWalletTransferCountry({ country: country.trim(), currencyZone, active: true });
       res.json(created);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6974,7 +6998,7 @@ export async function registerRoutes(
       await storage.toggleWalletTransferCountry(id, !!active);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6984,7 +7008,7 @@ export async function registerRoutes(
       await storage.deleteWalletTransferCountry(id);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -6999,7 +7023,7 @@ export async function registerRoutes(
       const transfers = await storage.getWalletTransfers(merchantId);
       res.json(transfers);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -7078,7 +7102,7 @@ export async function registerRoutes(
 
       res.json(transfer);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -7087,7 +7111,7 @@ export async function registerRoutes(
       const transfers = await storage.getWalletTransfers();
       res.json(transfers);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -7104,7 +7128,7 @@ export async function registerRoutes(
       notifyMerchantWalletTransfer(transfer.merchantId, { id, fromCountry: transfer.fromCountry, toCountry: transfer.toCountry, amount: transfer.amount, fee: transfer.fee, currency: transfer.currency, status: "approved" }).catch(() => {});
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -7121,7 +7145,7 @@ export async function registerRoutes(
       notifyMerchantWalletTransfer(transfer.merchantId, { id, fromCountry: transfer.fromCountry, toCountry: transfer.toCountry, amount: transfer.amount, fee: transfer.fee, currency: transfer.currency, status: "rejected" }).catch(() => {});
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -7134,7 +7158,7 @@ export async function registerRoutes(
         feeValue: feeValue?.value || "2",
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -7148,7 +7172,7 @@ export async function registerRoutes(
       await storage.setSetting("wallet_transfer_fee_value", String(v));
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -7171,7 +7195,7 @@ export async function registerRoutes(
         geminiConfigured: !!(gemini && gemini.length > 5) || !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.length > 10),
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -7183,7 +7207,7 @@ export async function registerRoutes(
       if (gemini !== undefined) await storage.setSetting("ai_key_gemini", gemini);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -7263,7 +7287,7 @@ export async function registerRoutes(
       if (telegram4 !== undefined) await storage.setSetting("support_telegram_4", telegram4);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -7275,7 +7299,7 @@ export async function registerRoutes(
       const list = await storage.getWithdrawals(merchantId);
       res.json(list);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -7735,7 +7759,7 @@ export async function registerRoutes(
         }
       }
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -7746,7 +7770,7 @@ export async function registerRoutes(
       const available = ops.filter(op => !op.maintenanceAll && !op.maintenanceWithdrawals);
       res.json(available);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -7755,7 +7779,7 @@ export async function registerRoutes(
       const list = await storage.getWithdrawals();
       res.json(list);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -7945,7 +7969,7 @@ export async function registerRoutes(
         res.json({ success: true, omnipayRef, fees });
       }
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -7963,7 +7987,7 @@ export async function registerRoutes(
       notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: 0, phone: w.phone, operator: w.operator, status: "rejected" }).catch(() => {});
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8010,7 +8034,7 @@ export async function registerRoutes(
       const result = await omnipayGetStatus(omnipayApiKey, w.omnipayRef);
       return res.json({ provider: "omnipay", success: result.success === 1, status: (result as any).status || (result as any).data?.status, data: result, error: result.message });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8080,7 +8104,7 @@ export async function registerRoutes(
       }
       return res.json({ success: true, applied: "none", providerStatus, message: "Le fournisseur n'a pas encore confirmé le statut final", data: raw });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8232,7 +8256,7 @@ export async function registerRoutes(
       console.error(`[ADMIN TRIGGER WD] Retrait #${id} échec relance OmniPay (code ${result.code}): ${errMsg}`);
       return res.status(502).json({ success: false, message: errMsg });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8250,7 +8274,7 @@ export async function registerRoutes(
       console.log(`[ADMIN FORCE-VALIDATE WD] Retrait #${id} validé manuellement (précédent: ${w.status})`);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8271,7 +8295,7 @@ export async function registerRoutes(
       console.log(`[ADMIN FORCE-REJECT WD] Retrait #${id} rejeté manuellement (précédent: ${w.status})`);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8296,7 +8320,7 @@ export async function registerRoutes(
       console.log(`[ADMIN FORCE-VALIDATE TX] Transaction #${id} validée manuellement — crédit: ${mc ? "oui" : "pays non trouvé"}`);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8308,7 +8332,7 @@ export async function registerRoutes(
       console.log(`[ADMIN FORCE-REJECT TX] Transaction #${id} rejetée manuellement`);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8367,7 +8391,7 @@ export async function registerRoutes(
       const result = await omnipayGetStatus(omnipayApiKey, ref);
       return res.json({ provider: "omnipay", success: result.success === 1, status: (result as any).status || (result as any).data?.status, data: result, error: result.message });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8502,7 +8526,7 @@ export async function registerRoutes(
       // ── Toujours en attente chez le fournisseur ───────────────────────────
       return res.json({ success: true, applied: "none", providerStatus, message: "Le fournisseur n'a pas encore confirmé le statut final" });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8694,7 +8718,7 @@ export async function registerRoutes(
         return res.json({ success: true, provider: "clapay", reference, paymentUrl: result.data?.payment_url });
       }
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8706,7 +8730,7 @@ export async function registerRoutes(
       await storage.updateMerchant(id, { withdrawalMode: mode });
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8718,7 +8742,7 @@ export async function registerRoutes(
       await storage.updateMerchant(id, { feeExempt });
       res.json({ success: true, feeExempt });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8733,7 +8757,7 @@ export async function registerRoutes(
       }
       res.json({ success: true, withdrawalsDisabled });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8744,7 +8768,7 @@ export async function registerRoutes(
       const ops = await storage.getWithdrawalOperators();
       res.json(ops);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8784,7 +8808,7 @@ export async function registerRoutes(
       const updated = await storage.updateWithdrawalOperator(id, { logo: null });
       res.json(updated);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8796,7 +8820,7 @@ export async function registerRoutes(
       await storage.updateOperatorsSortOrder(updates);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8822,7 +8846,7 @@ export async function registerRoutes(
       });
       res.json(op);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8850,7 +8874,7 @@ export async function registerRoutes(
       });
       res.json(updated);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8860,7 +8884,7 @@ export async function registerRoutes(
       await storage.deleteWithdrawalOperator(id);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8876,7 +8900,7 @@ export async function registerRoutes(
       }));
       res.json(result);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8894,7 +8918,7 @@ export async function registerRoutes(
       });
       res.json(agg);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8911,7 +8935,7 @@ export async function registerRoutes(
       await storage.updateCryptoAggregator(id, updateData);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8921,7 +8945,7 @@ export async function registerRoutes(
       await storage.deleteCryptoAggregator(id);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8933,7 +8957,7 @@ export async function registerRoutes(
       await storage.upsertCryptoAggregatorCountry(id, country, active);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8945,7 +8969,7 @@ export async function registerRoutes(
       await storage.upsertCryptoAggregatorMerchant(id, Number(merchantId), active);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -8962,7 +8986,7 @@ export async function registerRoutes(
         countries: a.countries,
       })));
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9054,7 +9078,7 @@ export async function registerRoutes(
         paymentUrl: `${process.env.APP_URL || "http://Westpay.cfd"}/pay/crypto/${invoiceResult.trackId}`,
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9126,7 +9150,7 @@ export async function registerRoutes(
         });
       }
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9156,7 +9180,7 @@ export async function registerRoutes(
         createdAt: cryptoTx.createdAt,
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9223,7 +9247,7 @@ export async function registerRoutes(
         },
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9235,7 +9259,7 @@ export async function registerRoutes(
       const txs = await storage.getCryptoTransactions(merchantId);
       res.json(txs);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9247,7 +9271,7 @@ export async function registerRoutes(
       const balances = await storage.getCryptoBalances(merchantId);
       res.json(balances);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9263,7 +9287,7 @@ export async function registerRoutes(
       const currencies = await oxapayGetCurrencies(aggs[0].apiKey);
       res.json(currencies);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9276,7 +9300,7 @@ export async function registerRoutes(
       if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
       res.json({ cryptoApiKey: merchant.cryptoApiKey || null });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9291,7 +9315,7 @@ export async function registerRoutes(
       await storage.updateMerchantCryptoApiKey(merchantId, newKey);
       res.json({ cryptoApiKey: newKey, message: "Clé API crypto régénérée avec succès" });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9336,7 +9360,7 @@ export async function registerRoutes(
         fee: { rate: `${(withdrawFeeRate * 100).toFixed(0)}%`, feeAmount: feeAmount.toFixed(8), netAmount: netAmount.toFixed(8) },
       });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9346,7 +9370,7 @@ export async function registerRoutes(
       const reqs = await storage.getCryptoWithdrawalRequestsByMerchant(merchantId);
       res.json(reqs);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9357,7 +9381,7 @@ export async function registerRoutes(
       const reqs = await storage.getAllCryptoWithdrawalRequests();
       res.json(reqs);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9371,7 +9395,7 @@ export async function registerRoutes(
       await storage.updateCryptoWithdrawalRequest(id, status, adminNote);
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9386,7 +9410,7 @@ export async function registerRoutes(
       await storage.updateMerchantCryptoApiKey(merchantId, newKey);
       res.json({ cryptoApiKey: newKey, message: "Clé API crypto régénérée" });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9456,7 +9480,7 @@ export async function registerRoutes(
       res.status(200).json({ ok: true });
     } catch (err: any) {
       console.error("[OXAPAY CALLBACK ERROR]", err.message);
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9467,7 +9491,7 @@ export async function registerRoutes(
       const txs = await storage.getCryptoTransactions();
       res.json(txs);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9498,7 +9522,7 @@ export async function registerRoutes(
       }));
       res.json(list);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9512,7 +9536,7 @@ export async function registerRoutes(
       await storage.enableMerchantSdk(merchantId, sdkKey);
       res.json({ message: "SDK activé", sdkApiKey: sdkKey });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9523,7 +9547,7 @@ export async function registerRoutes(
       await storage.disableMerchantSdk(merchantId);
       res.json({ message: "SDK désactivé" });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9537,7 +9561,7 @@ export async function registerRoutes(
       await storage.enableMerchantSdk(merchantId, sdkKey);
       res.json({ message: "Clé SDK régénérée", sdkApiKey: sdkKey });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9549,7 +9573,7 @@ export async function registerRoutes(
       if (!merchant) return res.status(404).json({ sdkEnabled: false });
       res.json({ sdkEnabled: merchant.sdkEnabled, sdkApiKey: merchant.sdkEnabled ? merchant.sdkApiKey : null });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9876,7 +9900,7 @@ export async function registerRoutes(
       const status = await getUserbotStatus();
       res.json(status);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9909,7 +9933,7 @@ export async function registerRoutes(
       await disconnectUserbot();
       res.json({ success: true, message: "Userbot disconnected" });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9919,7 +9943,7 @@ export async function registerRoutes(
       const value = await getResponseDelaySetting();
       res.json({ value });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9931,7 +9955,7 @@ export async function registerRoutes(
       await setResponseDelay(value);
       res.json({ success: true, value });
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -9940,7 +9964,7 @@ export async function registerRoutes(
     try {
       const { listKnowledge } = await import("./knowledge");
       res.json(await listKnowledge());
-    } catch (err: any) { res.status(500).json({ message: err.message }); }
+    } catch (err: any) { res.status(500).json({ message: safeErrMsg(err) }); }
   });
 
   app.post("/api/admin/knowledge", authMiddleware("admin"), async (req, res) => {
@@ -9950,7 +9974,7 @@ export async function registerRoutes(
       const { addKnowledge } = await import("./knowledge");
       const id = await addKnowledge(category || "general", title.trim(), content.trim());
       res.json({ success: true, id });
-    } catch (err: any) { res.status(500).json({ message: err.message }); }
+    } catch (err: any) { res.status(500).json({ message: safeErrMsg(err) }); }
   });
 
   app.put("/api/admin/knowledge/:id", authMiddleware("admin"), async (req, res) => {
@@ -9965,7 +9989,7 @@ export async function registerRoutes(
         await addKnowledge(category || "general", title.trim(), content.trim(), id);
       }
       res.json({ success: true });
-    } catch (err: any) { res.status(500).json({ message: err.message }); }
+    } catch (err: any) { res.status(500).json({ message: safeErrMsg(err) }); }
   });
 
   app.delete("/api/admin/knowledge/:id", authMiddleware("admin"), async (req, res) => {
@@ -9973,7 +9997,7 @@ export async function registerRoutes(
       const { deleteKnowledge } = await import("./knowledge");
       await deleteKnowledge(parseInt(req.params.id));
       res.json({ success: true });
-    } catch (err: any) { res.status(500).json({ message: err.message }); }
+    } catch (err: any) { res.status(500).json({ message: safeErrMsg(err) }); }
   });
 
   app.post("/api/admin/knowledge/reembed", authMiddleware("admin"), async (_req, res) => {
@@ -9981,7 +10005,7 @@ export async function registerRoutes(
       const { reembedAll } = await import("./knowledge");
       reembedAll().catch(console.error);
       res.json({ success: true, message: "Re-embedding started in background" });
-    } catch (err: any) { res.status(500).json({ message: err.message }); }
+    } catch (err: any) { res.status(500).json({ message: safeErrMsg(err) }); }
   });
 
   return httpServer;

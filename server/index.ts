@@ -138,15 +138,22 @@ app.use((req, res, next) => {
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
 
+    // Toujours logger l'erreur complète côté serveur
     console.error("Internal Server Error:", err);
 
     if (res.headersSent) {
       return next(err);
     }
 
-    return res.status(status).json({ message });
+    // En production : ne jamais renvoyer err.message au client —
+    // il peut contenir des noms de tables, contraintes DB, chemins internes, etc.
+    // En développement : message complet pour faciliter le debug.
+    const clientMessage = process.env.NODE_ENV === "production"
+      ? (status < 500 ? (err.message || "Erreur de requête") : "Erreur interne du serveur")
+      : (err.message || "Internal Server Error");
+
+    return res.status(status).json({ message: clientMessage });
   });
 
   // importantly only setup vite in development and after
