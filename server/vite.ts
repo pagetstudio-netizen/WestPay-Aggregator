@@ -42,18 +42,13 @@ export async function setupVite(server: Server, app: Express) {
         "index.html",
       );
 
-      // always reload the index.html file from disk incase it changes
+      // Recharge index.html depuis le disque à chaque requête (dev HMR)
+      // AUCUNE injection de window.__ADMIN_PATH__ — le slug ne doit jamais
+      // apparaître dans le HTML. Le client utilise POST /api/auth/admin/verify-path.
       let template = await fs.promises.readFile(clientTemplate, "utf-8");
       template = template.replace(
         `src="/src/main.tsx"`,
         `src="/src/main.tsx?v=${nanoid()}"`,
-      );
-      // Inject ADMIN_SLUG (same logic as production serveStatic)
-      const slug = process.env.ADMIN_SLUG || "";
-      const adminPath = slug ? `/${slug}` : "/__admin_not_configured__";
-      template = template.replace(
-        "</head>",
-        `<script>window.__ADMIN_PATH__=${JSON.stringify(adminPath)};</script></head>`,
       );
       const page = await vite.transformIndexHtml(url, template);
       res.status(200).set({ "Content-Type": "text/html" }).end(page);

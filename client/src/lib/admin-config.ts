@@ -1,35 +1,30 @@
 /**
- * Chemin d'accès admin — injecté par le serveur depuis process.env.ADMIN_SLUG.
+ * Chemin d'accès admin — jamais exposé dans le HTML.
  *
- * ⚠️  Aucune valeur n'est stockée dans ce fichier.
- *     Pour changer le slug : modifier la variable d'environnement ADMIN_SLUG
- *     sur le serveur (Plesk) et redémarrer l'application. Aucun rebuild requis.
+ * Le slug n'est PAS injecté dans window.__ADMIN_PATH__ ni dans aucune
+ * réponse HTTP publique. Le client vérifie le chemin via l'endpoint
+ * POST /api/auth/admin/verify-path qui répond uniquement { isAdminPath: bool }
+ * sans jamais révéler le slug.
  *
- * Le serveur injecte window.__ADMIN_PATH__ dans chaque réponse HTML.
- * Si l'injection échoue (Apache sert index.html en statique, bypassant Node.js),
- * App.tsx utilise POST /api/auth/admin/verify-path comme fallback sécurisé —
- * cet endpoint ne révèle jamais le slug, il répond uniquement { isAdminPath: bool }.
+ * Pour changer le slug : modifier ADMIN_SLUG dans les variables d'environnement
+ * Plesk (ou fichier .env) et redémarrer l'application. Aucun rebuild requis.
  */
 
 declare global {
   interface Window {
-    __ADMIN_PATH__?: string;
+    __ADMIN_PATH__?: string; // conservé pour rétrocompatibilité, jamais rempli
   }
 }
 
-const _injected =
-  (typeof window !== "undefined" && window.__ADMIN_PATH__) ||
-  "/__admin_not_configured__";
-
-export const ADMIN_PATH: string = _injected;
+/** Toujours non configuré au chargement — App.tsx fait la vérification via API. */
+export const ADMIN_PATH = "/__admin_not_configured__";
 
 /**
  * Objet mutable partagé entre toutes les pages admin.
- * Initialisé avec la valeur injectée ; mis à jour par App.tsx
- * quand le fallback /api/auth/admin/verify-path confirme le vrai chemin.
+ * Mis à jour par App.tsx une fois que le serveur a confirmé le vrai chemin.
  */
 export const adminConfig = {
-  base: _injected,
+  base: "/__admin_not_configured__",
 };
 
 /** Appelé par App.tsx une fois le chemin vérifié côté serveur. */
@@ -37,5 +32,5 @@ export function updateAdminBase(path: string) {
   adminConfig.base = path;
 }
 
-/** Alias rétrocompatible — égal à adminConfig.base au moment de l'import. */
-export const ADMIN_BASE = _injected;
+/** @deprecated Utiliser adminConfig.base dans les pages admin. */
+export const ADMIN_BASE = "/__admin_not_configured__";

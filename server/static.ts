@@ -11,23 +11,18 @@ export function serveStatic(app: Express) {
   }
 
   const indexHtmlPath = path.resolve(distPath, "index.html");
+  const indexHtml = fs.readFileSync(indexHtmlPath, "utf-8");
 
-  // Serve static assets (JS, CSS, images) — index.html excluded (served below with injection)
+  // Serve static assets (JS, CSS, images) — index.html excluded (served below)
   app.use(express.static(distPath, { index: false }));
 
-  // Inject ADMIN_SLUG env var into the HTML at request time.
-  // The client reads window.__ADMIN_PATH__ — no slug is stored in the source code.
+  // Sert index.html pour toutes les routes SPA — SANS injection de window.__ADMIN_PATH__.
+  // Le chemin admin n'est JAMAIS exposé dans le HTML.
+  // Le client utilise POST /api/auth/admin/verify-path pour vérifier le chemin
+  // sans que le slug soit jamais révélé (réponse : { isAdminPath: true|false } uniquement).
   app.get("/{*path}", (_req, res) => {
-    const slug = process.env.ADMIN_SLUG || "";
-    const adminPath = slug ? `/${slug}` : "/__admin_not_configured__";
-
-    const html = fs.readFileSync(indexHtmlPath, "utf-8").replace(
-      "</head>",
-      `<script>window.__ADMIN_PATH__=${JSON.stringify(adminPath)};</script></head>`,
-    );
-
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.setHeader("Cache-Control", "no-store"); // never cache — value changes with env
-    res.send(html);
+    res.setHeader("Cache-Control", "no-store");
+    res.send(indexHtml);
   });
 }
