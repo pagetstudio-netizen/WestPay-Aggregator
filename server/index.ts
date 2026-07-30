@@ -1,3 +1,15 @@
+// Charge .env en premier — avant toute lecture de process.env.
+// Sur Plesk, les variables peuvent être écrites dans un fichier .env
+// plutôt que passées directement au processus Node.js.
+// override:false → process.env existant a toujours la priorité.
+import { config as loadEnv } from "dotenv";
+import { resolve } from "path";
+// __dirname est disponible en CJS (sortie esbuild) — pas besoin de import.meta.url
+// Essaie d'abord le dossier parent (racine projet quand on tourne depuis dist/)
+loadEnv({ path: resolve(__dirname, "..", ".env"), override: false });
+// Puis le dossier courant (racine projet si lancé directement)
+loadEnv({ override: false });
+
 import express, { type Request, Response, NextFunction } from "express";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
