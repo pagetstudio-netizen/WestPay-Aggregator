@@ -3,7 +3,7 @@
  * pgvector on Supabase + OpenAI embeddings (text-embedding-3-small, 1536 dims)
  */
 
-import { pool } from "./db";
+import { financialPool as pool } from "./db";
 
 // ─── Embed a text string via OpenAI ──────────────────────────────────────────
 export async function embedText(text: string): Promise<number[] | null> {

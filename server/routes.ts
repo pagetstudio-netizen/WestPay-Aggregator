@@ -5,8 +5,7 @@ import path from "path";
 import fs from "fs";
 import { promises as dnsPromises } from "dns";
 import { storage } from "./storage";
-import { db } from "./db";
-import { pool } from "./db";
+import { db, pool, financialDb, financialPool } from "./db";
 import { generateSecret as totpGenerateSecret, generateURI as totpGenerateURI, verifySync as totpVerifySync } from "otplib";
 import QRCode from "qrcode";
 import { admins, merchantCountries, transactions, pendingPayments } from "@shared/schema";
@@ -1932,7 +1931,7 @@ export async function registerRoutes(
       const [loginLogs, secLogs] = await Promise.all([
         storage.getRecentLoginLogs(limit),
         (async () => {
-          const r = await db.execute(
+          const r = await financialDb.execute(
             sql`SELECT id, event_type as "eventType", user_email as "userEmail", ip, action, details, telegram_admin as "telegramAdmin", created_at as "createdAt" FROM security_logs ORDER BY created_at DESC LIMIT ${limit}`
           );
           return r.rows as any[];
@@ -2203,7 +2202,7 @@ export async function registerRoutes(
       const { reloadMainBot } = await import("./telegram-bot");
       const result = await reloadMainBot(token.trim());
       if (!result.ok) return res.status(400).json({ message: result.error || "Token invalide" });
-      await storage.createAuditLog({ adminId: (req as any).user.id, action: "telegram_main_bot_token_updated", details: `Token bot principal mis à jour — @${result.username}`, ip: req.ip || "" });
+      await storage.createApiLog({ action: "telegram_main_bot_token_updated", description: `Token bot principal mis à jour — @${result.username}`, ip: req.ip || "" });
       res.json({ success: true, username: result.username });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -2222,7 +2221,7 @@ export async function registerRoutes(
         knownGroups.push(trimmed);
         await storage.setSetting("telegram_known_groups", JSON.stringify(knownGroups));
       }
-      await storage.createAuditLog({ adminId: (req as any).user.id, action: "telegram_group_updated", details: `Groupe admin Telegram mis a jour : ${trimmed}`, ip: req.ip || "" });
+      await storage.createApiLog({ action: "telegram_group_updated", description: `Groupe admin Telegram mis a jour : ${trimmed}`, ip: req.ip || "" });
       res.json({ success: true, groupId: trimmed });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -2258,7 +2257,7 @@ export async function registerRoutes(
       const { reloadOtpBot } = await import("./telegram-otp-bot");
       const result = await reloadOtpBot();
       if (!result.ok) return res.status(400).json({ message: result.error || "Invalid token" });
-      await storage.createAuditLog({ adminId: (req as any).user.id, action: "otp_bot_token_updated", details: "OTP bot token updated and reloaded", ip: req.ip || "" });
+      await storage.createApiLog({ action: "otp_bot_token_updated", description: "OTP bot token updated and reloaded", ip: req.ip || "" });
       res.json({ success: true, username: result.username });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -4597,7 +4596,7 @@ export async function registerRoutes(
         // ── IDEMPOTENCE ATOMIQUE : Compare-And-Swap sur le statut ─────────────
         // On ne passe à "omnipay_confirmed" QUE si le statut est encore "pending".
         // Si deux callbacks arrivent simultanément, un seul UPDATE réussira.
-        const casResult = await pool.query(
+        const casResult = await financialPool.query(
           `UPDATE pending_payments SET status = 'omnipay_confirmed'
            WHERE id = $1 AND status NOT IN ('confirmed','omnipay_confirmed','omnipay_error')
            RETURNING id`,
@@ -5186,7 +5185,7 @@ export async function registerRoutes(
       // clause WHERE status = 'pending'. L'autre recevra 0 lignes et sera ignoré.
       if (wdIsSuccess || wdIsFailure) {
         const newStatus = wdIsSuccess ? "approved" : "failed";
-        const locked = await pool.query(
+        const locked = await financialPool.query(
           `UPDATE withdrawals SET status = $1 WHERE id = $2 AND status = 'pending' RETURNING id`,
           [newStatus, withdrawal.id]
         );
@@ -5544,7 +5543,7 @@ export async function registerRoutes(
       const isFailure = ["failed", "expired", "cancelled"].includes(status);
       if (!isSuccess && !isFailure) return res.json({ status: "pending" });
 
-      const locked = await pool.query(
+      const locked = await financialPool.query(
         `UPDATE withdrawals SET status = $1 WHERE id = $2 AND status = 'pending' RETURNING id`,
         [isSuccess ? "approved" : "failed", withdrawal.id]
       );
@@ -7296,7 +7295,7 @@ export async function registerRoutes(
       }
 
       // ── ANTI-DOUBLON (vérification avant lock) ────────────────────────────────
-      const recentDuplicate = await pool.query(
+      const recentDuplicate = await financialPool.query(
         `SELECT id, status, created_at FROM withdrawals
          WHERE merchant_id = $1 AND phone = $2 AND amount = $3 AND country = $4
            AND status IN ('pending', 'approved')
@@ -8197,7 +8196,7 @@ export async function registerRoutes(
     try {
       const id = Number(req.params.id);
       if (isNaN(id)) return res.status(400).json({ message: "ID de transaction invalide" });
-      const [tx] = await db.select().from(transactions).where(eq(transactions.id, id));
+      const [tx] = await financialDb.select().from(transactions).where(eq(transactions.id, id));
       if (!tx) return res.status(404).json({ message: "Transaction introuvable" });
       if (tx.status === "confirmed") return res.json({ success: true, alreadyConfirmed: true });
 
@@ -8208,7 +8207,7 @@ export async function registerRoutes(
         const credit = merchant?.feeExempt ? tx.amount : calcMerchantCredit(tx.amount, tx.country);
         await storage.incrementMerchantCountryBalance(mc.id, credit);
       }
-      await db.update(transactions).set({ status: "confirmed" }).where(eq(transactions.id, id));
+      await financialDb.update(transactions).set({ status: "confirmed" }).where(eq(transactions.id, id));
       notifyAdminPayment({ txId: tx.txId || `TX-${id}`, merchantName: merchant?.name || `#${tx.merchantId}`, payerNumber: tx.payerNumber, country: tx.country || "", amount: tx.amount, provider: tx.provider || "manual", status: "confirmed" }).catch(() => {});
       notifyMerchantPayment(tx.merchantId, { txId: tx.txId || `TX-${id}`, amount: tx.amount, payerNumber: tx.payerNumber, country: tx.country || "", provider: tx.provider || "manual" }).catch(() => {});
       console.log(`[ADMIN FORCE-VALIDATE TX] Transaction #${id} validée manuellement — crédit: ${mc ? "oui" : "pays non trouvé"}`);
@@ -8222,7 +8221,7 @@ export async function registerRoutes(
     try {
       const id = Number(req.params.id);
       if (isNaN(id)) return res.status(400).json({ message: "ID de transaction invalide" });
-      await db.update(transactions).set({ status: "rejected" }).where(eq(transactions.id, id));
+      await financialDb.update(transactions).set({ status: "rejected" }).where(eq(transactions.id, id));
       console.log(`[ADMIN FORCE-REJECT TX] Transaction #${id} rejetée manuellement`);
       res.json({ success: true });
     } catch (err: any) {
@@ -8245,7 +8244,7 @@ export async function registerRoutes(
         ref = pp.omnipayReference;
         txCountry = pp.country;
       } else {
-        const [tx] = await db.select().from(transactions).where(eq(transactions.id, id));
+        const [tx] = await financialDb.select().from(transactions).where(eq(transactions.id, id));
         if (!tx) return res.status(404).json({ message: "Transaction introuvable" });
         ref = tx.omnipayReference;
         txCountry = tx.country;
@@ -8311,7 +8310,7 @@ export async function registerRoutes(
         ref = pendingRecord.omnipayReference;
         txCountry = pendingRecord.country;
       } else {
-        const [tx] = await db.select().from(transactions).where(eq(transactions.id, id));
+        const [tx] = await financialDb.select().from(transactions).where(eq(transactions.id, id));
         if (!tx) return res.status(404).json({ message: "Transaction introuvable" });
         txRecord = tx;
         ref = tx.omnipayReference;
@@ -8397,7 +8396,7 @@ export async function registerRoutes(
               const credit = merchant?.feeExempt ? txRecord.amount : calcMerchantCredit(txRecord.amount, txRecord.country);
               await storage.incrementMerchantCountryBalance(mc.id, credit);
             }
-            await db.update(transactions).set({ status: "confirmed" }).where(eq(transactions.id, id));
+            await financialDb.update(transactions).set({ status: "confirmed" }).where(eq(transactions.id, id));
             notifyAdminPayment({ txId: txRecord.txId || `TX-${id}`, merchantName: (await storage.getMerchantById(txRecord.merchantId))?.name || `#${txRecord.merchantId}`, payerNumber: txRecord.payerNumber, country: txRecord.country || "", amount: txRecord.amount, provider: txRecord.provider || provider, status: "confirmed" }).catch(() => {});
             notifyMerchantPayment(txRecord.merchantId, { txId: txRecord.txId || `TX-${id}`, amount: txRecord.amount, payerNumber: txRecord.payerNumber, country: txRecord.country || "", provider: txRecord.provider || provider }).catch(() => {});
           }
@@ -8411,7 +8410,7 @@ export async function registerRoutes(
         if (source === "pending") {
           await storage.updatePendingPaymentStatus(id, "omnipay_failed");
         } else {
-          await db.update(transactions).set({ status: "failed" }).where(eq(transactions.id, id));
+          await financialDb.update(transactions).set({ status: "failed" }).where(eq(transactions.id, id));
         }
         console.log(`[ADMIN SYNC-STATUS TX] ${source} #${id} marqué échoué (${provider}/${providerStatus})`);
         return res.json({ success: true, applied: "failed", providerStatus });
@@ -8464,7 +8463,7 @@ export async function registerRoutes(
           const errorMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Échec inconnu";
           return res.status(502).json({ success: false, message: errorMsg });
         }
-        await db.update(pendingPayments).set({
+        await financialDb.update(pendingPayments).set({
           status: "omnipay_pending",
           omnipayReference: reference,
           omnipayTxId: result.id ? String(result.id) : null,
@@ -8496,7 +8495,7 @@ export async function registerRoutes(
         if (!result.success) {
           return res.status(502).json({ success: false, message: (result as any).error || (result as any).message || "Échec inconnu" });
         }
-        await db.update(pendingPayments).set({
+        await financialDb.update(pendingPayments).set({
           status: "omnipay_pending",
           omnipayReference: reference,
           gateway: "sendavapay",
@@ -8526,7 +8525,7 @@ export async function registerRoutes(
         if (result.status !== "success" && result.status !== "pending") {
           return res.status(502).json({ success: false, message: result.message || "Échec inconnu" });
         }
-        await db.update(pendingPayments).set({
+        await financialDb.update(pendingPayments).set({
           status: "omnipay_pending",
           omnipayReference: reference,
           gateway: "mbiyo",
@@ -8557,7 +8556,7 @@ export async function registerRoutes(
         if (result.code !== 200 || !result.data) {
           return res.status(502).json({ success: false, message: result.msg || "Échec inconnu" });
         }
-        await db.update(pendingPayments).set({
+        await financialDb.update(pendingPayments).set({
           status: "omnipay_pending",
           omnipayReference: reference,
           omnipayTxId: result.data.trade_no || null,
@@ -8601,7 +8600,7 @@ export async function registerRoutes(
         if (!result.success) {
           return res.status(502).json({ success: false, message: result.message || "Échec ClaPay" });
         }
-        await db.update(pendingPayments).set({
+        await financialDb.update(pendingPayments).set({
           status: "omnipay_pending",
           omnipayReference: reference,
           omnipayTxId: result.data?.signature || null,

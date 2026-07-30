@@ -1,7 +1,7 @@
 import { Telegraf } from "telegraf";
 import type { Express, Request, Response } from "express";
 import { storage } from "./storage";
-import { pool } from "./db";
+import { pool, financialPool } from "./db";
 import {
   initiateTransfer as omnipayInitiateTransfer,
   getTransactionStatus as omnipayGetStatus,
@@ -940,18 +940,25 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         return;
       }
 
-      const result = await pool.query<any>(
+      // withdrawals → base financière ; merchants → base auth (deux requêtes séparées)
+      const result = await financialPool.query<any>(
         `SELECT w.id, w.phone, w.amount, w.country, w.status, w.gateway, w.operator,
-                w.omnipay_ref, w.created_at, w.fees, w.admin_note,
-                m.name AS merchant_name
+                w.omnipay_ref, w.created_at, w.fees, w.admin_note, w.merchant_id
          FROM withdrawals w
-         JOIN merchants m ON m.id = w.merchant_id
          WHERE REGEXP_REPLACE(w.phone, '[^0-9]', '', 'g') LIKE $1
            AND w.status IN ('pending', 'failed')
          ORDER BY w.created_at DESC
          LIMIT 5`,
         [`%${digitsOnly}%`]
       );
+      // Enrichir avec le nom marchand depuis la base auth
+      const _uniqueMids = Array.from(new Set(result.rows.map((r: any) => Number(r.merchant_id))));
+      const _mNameMap = new Map<number, string>();
+      for (const mid of _uniqueMids) {
+        const m = await storage.getMerchantById(mid);
+        if (m) _mNameMap.set(mid, m.name);
+      }
+      result.rows.forEach((r: any) => { r.merchant_name = _mNameMap.get(Number(r.merchant_id)) || ""; });
 
       if (result.rows.length === 0) {
         await ctx.reply(
@@ -1493,7 +1500,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     const admin = formatUser(ctx);
     try {
       const now = new Date().toLocaleString("fr-FR", { timeZone: "Africa/Abidjan", hour: "2-digit", minute: "2-digit" });
-      await pool.query(
+      await financialPool.query(
         `UPDATE withdrawals
          SET admin_note = TRIM(COALESCE(admin_note, '') || $2)
          WHERE id = $1`,
@@ -3279,14 +3286,16 @@ async function sendDailyReport(): Promise<void> {
   const dayStart = new Date(yesterday); dayStart.setUTCHours(0, 0, 0, 0);
   const dayEnd = new Date(yesterday); dayEnd.setUTCHours(23, 59, 59, 999);
 
-  const [txRow] = await pool.query(
+  // transactions, withdrawals, security_logs → base financière
+  // blocked_ips → base auth (pool)
+  const [txRow] = await financialPool.query(
     `SELECT COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS total_payments,
             COUNT(*) AS total_count
      FROM transactions WHERE created_at >= $1 AND created_at <= $2 AND status = 'confirmed'`,
     [dayStart.toISOString(), dayEnd.toISOString()]
   ).then(r => r.rows);
 
-  const [wdRow] = await pool.query(
+  const [wdRow] = await financialPool.query(
     `SELECT COALESCE(SUM(amount), 0) AS total_withdrawals,
             COALESCE(SUM(fees), 0) AS total_fees,
             COUNT(*) AS wd_count
@@ -3295,7 +3304,7 @@ async function sendDailyReport(): Promise<void> {
   ).then(r => r.rows);
 
   // ── Statistiques sécurité / bots du jour ────────────────────────────────
-  const [secRow] = await pool.query(
+  const [secRow] = await financialPool.query(
     `SELECT
        COUNT(*) FILTER (WHERE event_type = 'bot_blocked') AS bots_blocked,
        COUNT(*) FILTER (WHERE event_type = 'brute_force') AS brute_force,

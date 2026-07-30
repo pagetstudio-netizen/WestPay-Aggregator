@@ -2,7 +2,8 @@ import {
   admins, merchants, merchantCountries, transactions, smsLogs, numbers, settings, loginLogs,
   merchantPins, apiLogs, pendingPayments, webhookLogs, telegramActivationCodes, paymentLinks,
   walletTransfers, walletTransferCountries, withdrawals, withdrawalOperators, statsBaselines,
-  cryptoAggregators, cryptoAggregatorCountries, cryptoAggregatorMerchants, cryptoTransactions, cryptoBalances, cryptoWithdrawalRequests, cryptoPaymentLinks,
+  cryptoAggregators, cryptoAggregatorCountries, cryptoAggregatorMerchants, cryptoTransactions,
+  cryptoBalances, cryptoWithdrawalRequests, cryptoPaymentLinks,
   allowedIps, blockedIps, blockedDevices, securityLogs, devices, adminOtpCodes, merchantLoginOtps,
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
@@ -29,8 +30,32 @@ import {
   type SecurityLog, type InsertSecurityLog,
   type Device, type InsertDevice,
 } from "@shared/schema";
-import { db } from "./db";
+import { authDb, financialDb } from "./db";
 import { eq, desc, sql, and, gte, lt, inArray, isNull } from "drizzle-orm";
+
+// ── Helpers cross-DB ──────────────────────────────────────────────────────────
+// Utilisés par les méthodes qui ont besoin de données des deux bases.
+
+/** IDs des marchands fee_exempt depuis la base Auth */
+async function getFeeExemptIds(): Promise<number[]> {
+  const rows = await authDb.select({ id: merchants.id })
+    .from(merchants)
+    .where(eq(merchants.feeExempt, true));
+  return rows.map(r => r.id);
+}
+
+/** Clause SQL "merchant_id IN (...)" ou "FALSE" si liste vide */
+function exemptClause(ids: number[]): string {
+  return ids.length > 0 ? `merchant_id IN (${ids.join(",")})` : "FALSE";
+}
+
+/** Map id → { name, website } de tous les marchands (depuis Auth) */
+async function getMerchantNameMap(): Promise<Map<number, { name: string; website: string | null }>> {
+  const rows = await authDb.select({ id: merchants.id, name: merchants.name, website: merchants.website }).from(merchants);
+  return new Map(rows.map(r => [r.id, { name: r.name, website: r.website ?? null }]));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export interface IStorage {
   getAdminByEmail(email: string): Promise<Admin | undefined>;
@@ -96,6 +121,7 @@ export interface IStorage {
   getPlatformBalance(): Promise<number>;
   getLatestStatsBaseline(): Promise<typeof statsBaselines.$inferSelect | undefined>;
   createStatsBaseline(values: { transactionCount: number; totalVolume: number; commissionTotal: number; apiPaymentsCount: number; apiPaymentsTotal: number; linkPaymentsCount: number; linkPaymentsTotal: number; withdrawalsCount: number; withdrawalsTotal: number }): Promise<void>;
+  deleteAllStatsBaselines(): Promise<void>;
 
   getMerchantPin(merchantId: number): Promise<MerchantPin | undefined>;
   upsertMerchantPin(merchantId: number, pinHash: string): Promise<MerchantPin>;
@@ -185,12 +211,8 @@ export interface IStorage {
   createCryptoTransaction(data: InsertCryptoTransaction): Promise<CryptoTransaction>;
   getCryptoTransactionByTrackId(trackId: string): Promise<CryptoTransaction | undefined>;
   updateCryptoTransactionStatus(id: number, updates: {
-    status: string;
-    payAmount?: string;
-    payCurrency?: string;
-    walletAddress?: string;
-    network?: string;
-    txHash?: string;
+    status: string; payAmount?: string; payCurrency?: string;
+    walletAddress?: string; network?: string; txHash?: string;
   }): Promise<void>;
   markCryptoTransactionCredited(id: number): Promise<boolean>;
   getCryptoTransactions(merchantId?: number): Promise<CryptoTransaction[]>;
@@ -218,8 +240,7 @@ export interface IStorage {
     collectionBenefit: number; withdrawalBenefit: number; transferBenefit: number; totalBenefit: number;
   }[]>;
   getCommissionByCountry(period: "today" | "month" | "all"): Promise<{
-    country: string;
-    collectionBenefit: number; withdrawalBenefit: number; totalBenefit: number;
+    country: string; collectionBenefit: number; withdrawalBenefit: number; totalBenefit: number;
   }[]>;
 
   getAllowedIps(): Promise<AllowedIp[]>;
@@ -240,7 +261,6 @@ export interface IStorage {
   createSecurityLog(data: InsertSecurityLog): Promise<SecurityLog>;
   getSecurityLogs(limit?: number): Promise<SecurityLog[]>;
 
-  // Devices (trusted/untrusted)
   getDeviceByFingerprint(userId: number, userRole: string, deviceId: string): Promise<Device | undefined>;
   upsertDevice(data: InsertDevice & { userId: number; userRole: string }): Promise<Device>;
   trustDevice(id: number): Promise<void>;
@@ -249,12 +269,10 @@ export interface IStorage {
   getAllDevices(limit?: number): Promise<Device[]>;
   deleteDevice(id: number): Promise<void>;
 
-  // Admin 2FA OTP
   createAdminOtp(email: string, code: string, expiresAt: Date): Promise<void>;
   getAdminOtp(email: string): Promise<{ code: string; expiresAt: Date } | undefined>;
   deleteAdminOtp(email: string): Promise<void>;
 
-  // Merchant login OTP (DB-backed — survives server restarts)
   createMerchantLoginOtp(email: string, otpHash: string, tempToken: string, expiresAt: Date): Promise<void>;
   getMerchantLoginOtp(email: string): Promise<{ otpHash: string; tempToken: string; expiresAt: Date; used: boolean; attempts: number } | undefined>;
   deleteMerchantLoginOtp(email: string): Promise<void>;
@@ -262,124 +280,135 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE AUTH — admins
+  // ══════════════════════════════════════════════════════════════════════════
   async getAdminByEmail(email: string): Promise<Admin | undefined> {
-    const [admin] = await db.select().from(admins).where(eq(admins.email, email));
-    return admin;
+    const [a] = await authDb.select().from(admins).where(eq(admins.email, email));
+    return a;
   }
-
   async getAdminById(id: number): Promise<Admin | undefined> {
-    const [admin] = await db.select().from(admins).where(eq(admins.id, id));
-    return admin;
+    const [a] = await authDb.select().from(admins).where(eq(admins.id, id));
+    return a;
   }
-
   async createAdmin(admin: InsertAdmin): Promise<Admin> {
-    const [created] = await db.insert(admins).values(admin).returning();
-    return created;
+    const [a] = await authDb.insert(admins).values(admin).returning();
+    return a;
   }
-
   async updateAdminPassword(id: number, passwordHash: string): Promise<void> {
-    await db.update(admins).set({ passwordHash }).where(eq(admins.id, id));
+    await authDb.update(admins).set({ passwordHash }).where(eq(admins.id, id));
   }
-
   async updateAdminTotp(id: number, totpSecret: string | null, totpEnabled: boolean): Promise<void> {
-    await db.update(admins).set({ totpSecret, totpEnabled }).where(eq(admins.id, id));
+    await authDb.update(admins).set({ totpSecret, totpEnabled }).where(eq(admins.id, id));
   }
-
   async revokeAdminTokens(id: number): Promise<void> {
-    await db.update(admins).set({ tokenInvalidatedAt: new Date() }).where(eq(admins.id, id));
+    await authDb.update(admins).set({ tokenInvalidatedAt: new Date() }).where(eq(admins.id, id));
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE AUTH — merchants
+  // ══════════════════════════════════════════════════════════════════════════
   async revokeMerchantTokens(id: number): Promise<void> {
-    await db.update(merchants).set({ tokenInvalidatedAt: new Date() }).where(eq(merchants.id, id));
+    await authDb.update(merchants).set({ tokenInvalidatedAt: new Date() }).where(eq(merchants.id, id));
   }
-
   async getMerchants(): Promise<Merchant[]> {
-    return db.select().from(merchants).orderBy(desc(merchants.createdAt));
+    return authDb.select().from(merchants).orderBy(desc(merchants.createdAt));
   }
-
   async getMerchantById(id: number): Promise<Merchant | undefined> {
-    const [merchant] = await db.select().from(merchants).where(eq(merchants.id, id));
-    return merchant;
+    const [m] = await authDb.select().from(merchants).where(eq(merchants.id, id));
+    return m;
   }
-
   async getMerchantByEmail(email: string): Promise<Merchant | undefined> {
-    const [merchant] = await db.select().from(merchants).where(
+    const [m] = await authDb.select().from(merchants).where(
       sql`LOWER(${merchants.email}) = LOWER(${email.trim()})`
     );
-    return merchant;
+    return m;
   }
-
   async getMerchantBySlug(slug: string): Promise<Merchant | undefined> {
-    const [merchant] = await db.select().from(merchants).where(eq(merchants.slug, slug));
-    return merchant;
+    const [m] = await authDb.select().from(merchants).where(eq(merchants.slug, slug));
+    return m;
   }
-
   async createMerchant(merchant: InsertMerchant): Promise<Merchant> {
-    const [created] = await db.insert(merchants).values(merchant).returning();
-    return created;
+    const [m] = await authDb.insert(merchants).values(merchant).returning();
+    return m;
   }
-
   async updateMerchant(id: number, data: Partial<Merchant>): Promise<void> {
-    await db.update(merchants).set(data).where(eq(merchants.id, id));
+    await authDb.update(merchants).set(data).where(eq(merchants.id, id));
   }
-
   async deleteMerchant(id: number): Promise<void> {
-    await db.delete(merchants).where(eq(merchants.id, id));
+    await authDb.delete(merchants).where(eq(merchants.id, id));
   }
 
+  // ── Cross-DB : merchants(auth) + merchantPins(auth) + paymentLinks/transactions(financial) ──
+  async getMerchantsWithStats(): Promise<(Merchant & { hasPin: boolean; linkCount: number; txCount: number; totalRevenue: number })[]> {
+    const [merchantsList, pinRows, linkRows, txRows] = await Promise.all([
+      authDb.select().from(merchants).orderBy(desc(merchants.createdAt)),
+      authDb.select({ merchantId: merchantPins.merchantId }).from(merchantPins),
+      financialDb.select({
+        merchantId: paymentLinks.merchantId,
+        cnt: sql<string>`count(*)`,
+      }).from(paymentLinks).groupBy(paymentLinks.merchantId),
+      financialDb.select({
+        merchantId: transactions.merchantId,
+        cnt: sql<string>`count(*)`,
+        revenue: sql<string>`coalesce(sum(case when status = any(array['confirmed','success','completed']::text[]) then amount else 0 end), 0)`,
+      }).from(transactions).groupBy(transactions.merchantId),
+    ]);
+    const pinSet  = new Set(pinRows.map(p => p.merchantId));
+    const linkMap = new Map(linkRows.map(r => [r.merchantId, Number(r.cnt)]));
+    const txMap   = new Map(txRows.map(r => [r.merchantId, { count: Number(r.cnt), revenue: Number(r.revenue) }]));
+    return merchantsList.map(m => ({
+      ...m,
+      hasPin:       pinSet.has(m.id),
+      linkCount:    linkMap.get(m.id) ?? 0,
+      txCount:      txMap.get(m.id)?.count ?? 0,
+      totalRevenue: txMap.get(m.id)?.revenue ?? 0,
+    }));
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE FINANCIAL — merchant_countries
+  // ══════════════════════════════════════════════════════════════════════════
   async getMerchantCountries(merchantId?: number): Promise<MerchantCountry[]> {
-    if (merchantId) {
-      return db.select().from(merchantCountries).where(eq(merchantCountries.merchantId, merchantId));
-    }
-    return db.select().from(merchantCountries);
+    if (merchantId) return financialDb.select().from(merchantCountries).where(eq(merchantCountries.merchantId, merchantId));
+    return financialDb.select().from(merchantCountries);
   }
-
   async getMerchantCountryById(id: number): Promise<MerchantCountry | undefined> {
-    const [mc] = await db.select().from(merchantCountries).where(eq(merchantCountries.id, id));
+    const [mc] = await financialDb.select().from(merchantCountries).where(eq(merchantCountries.id, id));
     return mc;
   }
-
   async addMerchantCountry(mc: InsertMerchantCountry): Promise<MerchantCountry> {
-    const [created] = await db.insert(merchantCountries).values(mc).returning();
-    return created;
+    const [c] = await financialDb.insert(merchantCountries).values(mc).returning();
+    return c;
   }
-
   async deleteMerchantCountry(id: number): Promise<void> {
-    await db.delete(merchantCountries).where(eq(merchantCountries.id, id));
+    await financialDb.delete(merchantCountries).where(eq(merchantCountries.id, id));
   }
-
   async updateMerchantCountryBalance(id: number, balance: number): Promise<void> {
-    await db.update(merchantCountries).set({ balance }).where(eq(merchantCountries.id, id));
+    await financialDb.update(merchantCountries).set({ balance }).where(eq(merchantCountries.id, id));
   }
-
   async incrementMerchantCountryBalance(id: number, amount: number): Promise<void> {
-    await db.update(merchantCountries)
+    await financialDb.update(merchantCountries)
       .set({ balance: sql`${merchantCountries.balance} + ${amount}` })
       .where(eq(merchantCountries.id, id));
   }
-
   async decrementMerchantCountryBalanceAtomic(id: number, amount: number): Promise<boolean> {
-    const result = await db.update(merchantCountries)
+    const r = await financialDb.update(merchantCountries)
       .set({ balance: sql`${merchantCountries.balance} - ${amount}` })
-      .where(and(
-        eq(merchantCountries.id, id),
-        sql`${merchantCountries.balance} >= ${amount}`
-      ))
+      .where(and(eq(merchantCountries.id, id), sql`${merchantCountries.balance} >= ${amount}`))
       .returning({ id: merchantCountries.id });
-    return result.length > 0;
+    return r.length > 0;
   }
-
   async findMerchantCountryBySimAndCountry(merchantId: number, country: string): Promise<MerchantCountry | undefined> {
-    const [mc] = await db.select().from(merchantCountries)
-      .where(and(
-        eq(merchantCountries.merchantId, merchantId),
-        sql`LOWER(${merchantCountries.country}) = LOWER(${country.trim()})`
-      ));
+    const [mc] = await financialDb.select().from(merchantCountries).where(and(
+      eq(merchantCountries.merchantId, merchantId),
+      sql`LOWER(${merchantCountries.country}) = LOWER(${country.trim()})`
+    ));
     return mc;
   }
-
   async getTotalConfirmedDepositsForMC(merchantId: number, country: string): Promise<number> {
-    const [row] = await db.select({ total: sql<string>`COALESCE(SUM(${transactions.amount}), 0)` })
+    const [row] = await financialDb.select({ total: sql<string>`COALESCE(SUM(${transactions.amount}), 0)` })
       .from(transactions)
       .where(and(
         eq(transactions.merchantId, merchantId),
@@ -388,1286 +417,950 @@ export class DatabaseStorage implements IStorage {
       ));
     return parseInt(row?.total ?? "0") || 0;
   }
-
   async getTotalApprovedWithdrawalsForMC(merchantCountryId: number): Promise<number> {
-    const [row] = await db.select({ total: sql<string>`COALESCE(SUM(${withdrawals.amount}), 0)` })
+    const [row] = await financialDb.select({ total: sql<string>`COALESCE(SUM(${withdrawals.amount}), 0)` })
       .from(withdrawals)
-      .where(and(
-        eq(withdrawals.merchantCountryId, merchantCountryId),
-        sql`${withdrawals.status} IN ('pending', 'approved')`
-      ));
+      .where(and(eq(withdrawals.merchantCountryId, merchantCountryId), sql`${withdrawals.status} IN ('pending', 'approved')`));
     return parseInt(row?.total ?? "0") || 0;
   }
-
   async addAdminCreditToMC(id: number, amount: number): Promise<void> {
-    await db.update(merchantCountries)
+    await financialDb.update(merchantCountries)
       .set({ adminCreditsTotal: sql`${merchantCountries.adminCreditsTotal} + ${amount}` })
       .where(eq(merchantCountries.id, id));
   }
-
   async findMerchantCountryByApiKey(apiKey: string): Promise<MerchantCountry | undefined> {
-    const [mc] = await db.select().from(merchantCountries)
-      .where(eq(merchantCountries.apiKey, apiKey));
+    const [mc] = await financialDb.select().from(merchantCountries).where(eq(merchantCountries.apiKey, apiKey));
     return mc;
   }
-
   async updateMerchantCountryApiKey(id: number, apiKey: string): Promise<void> {
-    await db.update(merchantCountries).set({ apiKey }).where(eq(merchantCountries.id, id));
+    await financialDb.update(merchantCountries).set({ apiKey }).where(eq(merchantCountries.id, id));
   }
-
   async updateMerchantCountryActive(id: number, active: boolean): Promise<void> {
-    await db.update(merchantCountries).set({ active }).where(eq(merchantCountries.id, id));
+    await financialDb.update(merchantCountries).set({ active }).where(eq(merchantCountries.id, id));
   }
-
-  async getTransactions(merchantId?: number, opts?: { dateFrom?: Date; dateTo?: Date; limit?: number }): Promise<Transaction[]> {
-    const conditions = [];
-    if (merchantId) conditions.push(eq(transactions.merchantId, merchantId));
-    if (opts?.dateFrom) conditions.push(gte(transactions.createdAt, opts.dateFrom));
-    if (opts?.dateTo) conditions.push(lt(transactions.createdAt, opts.dateTo));
-    let q = db.select().from(transactions);
-    if (conditions.length > 0) q = (q as any).where(and(...conditions));
-    q = (q as any).orderBy(desc(transactions.createdAt));
-    if (opts?.limit) q = (q as any).limit(opts.limit);
-    return q as any;
-  }
-
-  async getMerchantsWithStats(): Promise<(Merchant & { hasPin: boolean; linkCount: number; txCount: number; totalRevenue: number })[]> {
-    const [merchantsList, pinRows, linkRows, txRows] = await Promise.all([
-      db.select().from(merchants).orderBy(desc(merchants.createdAt)),
-      db.select({ merchantId: merchantPins.merchantId }).from(merchantPins),
-      db.select({
-        merchantId: paymentLinks.merchantId,
-        cnt: sql<string>`count(*)`,
-      }).from(paymentLinks).groupBy(paymentLinks.merchantId),
-      db.select({
-        merchantId: transactions.merchantId,
-        cnt: sql<string>`count(*)`,
-        revenue: sql<string>`coalesce(sum(case when status = any(array['confirmed','success','completed']::text[]) then amount else 0 end), 0)`,
-      }).from(transactions).groupBy(transactions.merchantId),
-    ]);
-    const pinSet = new Set(pinRows.map(p => p.merchantId));
-    const linkMap = new Map(linkRows.map(r => [r.merchantId, Number(r.cnt)]));
-    const txMap = new Map(txRows.map(r => [r.merchantId, { count: Number(r.cnt), revenue: Number(r.revenue) }]));
-    return merchantsList.map(m => ({
-      ...m,
-      hasPin: pinSet.has(m.id),
-      linkCount: linkMap.get(m.id) ?? 0,
-      txCount: txMap.get(m.id)?.count ?? 0,
-      totalRevenue: txMap.get(m.id)?.revenue ?? 0,
-    }));
-  }
-
-  async getTransactionByTxId(txId: string): Promise<Transaction | undefined> {
-    const [tx] = await db.select().from(transactions).where(eq(transactions.txId, txId));
-    return tx;
-  }
-
-  async createTransaction(tx: InsertTransaction): Promise<Transaction> {
-    const [created] = await db.insert(transactions).values(tx).returning();
-    return created;
-  }
-
-  async getSmsLogs(): Promise<SmsLog[]> {
-    return db.select().from(smsLogs).orderBy(desc(smsLogs.createdAt));
-  }
-
-  async createSmsLog(log: InsertSmsLog): Promise<SmsLog> {
-    const [created] = await db.insert(smsLogs).values(log).returning();
-    return created;
-  }
-
-  async getNumbers(): Promise<PhoneNumber[]> {
-    return db.select().from(numbers);
-  }
-
-  async getNumberByPhone(phone: string): Promise<PhoneNumber | undefined> {
-    const [num] = await db.select().from(numbers).where(eq(numbers.phoneNumber, phone));
-    return num;
-  }
-
-  async addNumber(num: InsertNumber): Promise<PhoneNumber> {
-    const [created] = await db.insert(numbers).values(num).returning();
-    return created;
-  }
-
-  async toggleNumberStatus(id: number): Promise<PhoneNumber> {
-    const [num] = await db.select().from(numbers).where(eq(numbers.id, id));
-    if (!num) throw new Error("Numero introuvable");
-    const newStatus = num.status === "active" ? "inactive" : "active";
-    const [updated] = await db.update(numbers).set({ status: newStatus }).where(eq(numbers.id, id)).returning();
-    return updated;
-  }
-
-  async deleteNumber(id: number): Promise<void> {
-    await db.delete(numbers).where(eq(numbers.id, id));
-  }
-
-  async getSetting(key: string): Promise<string | undefined> {
-    const [setting] = await db.select().from(settings).where(eq(settings.key, key));
-    return setting?.value;
-  }
-
-  async setSetting(key: string, value: string): Promise<void> {
-    const existing = await this.getSetting(key);
-    if (existing !== undefined) {
-      await db.update(settings).set({ value }).where(eq(settings.key, key));
-    } else {
-      await db.insert(settings).values({ key, value });
-    }
-  }
-
-  async createLoginLog(log: InsertLoginLog): Promise<void> {
-    await db.insert(loginLogs).values(log);
-  }
-
-  async getRecentLoginLogs(limit = 20): Promise<LoginLog[]> {
-    return db.select().from(loginLogs).orderBy(desc(loginLogs.createdAt)).limit(limit);
-  }
-
-  async hasMerchantSeenIp(merchantId: number, ip: string): Promise<boolean> {
-    const cleanIp = ip.replace(/^::ffff:/, "");
-    const hit = await db.select({ id: loginLogs.id }).from(loginLogs)
-      .where(and(
-        eq(loginLogs.userId, merchantId),
-        eq(loginLogs.role, "merchant"),
-        eq(loginLogs.ip, cleanIp),
-        eq(loginLogs.success, true),
-      )).limit(1);
-    return hit.length > 0;
-  }
-
-  async getFailedLoginCount(userId: number, role: string): Promise<number> {
-    const result = await db.select({ count: sql<number>`count(*)` })
-      .from(loginLogs)
-      .where(and(
-        eq(loginLogs.userId, userId),
-        eq(loginLogs.role, role),
-        eq(loginLogs.success, false),
-      ));
-    return result[0]?.count || 0;
-  }
-
-  async getStats() {
-    const validStatuses = ["confirmed", "success", "completed"];
-    const [mc] = await db.select({ count: sql<number>`count(*)` }).from(merchants);
-    const [tc] = await db.select({ count: sql<number>`count(*)` }).from(transactions).where(inArray(transactions.status, validStatuses));
-    const [tv] = await db.select({ total: sql<number>`coalesce(sum(amount), 0)` }).from(transactions).where(inArray(transactions.status, validStatuses));
-    const [an] = await db.select({ count: sql<number>`count(*)` }).from(numbers).where(eq(numbers.status, "active"));
-    return {
-      merchantCount: Number(mc?.count || 0),
-      transactionCount: Number(tc?.count || 0),
-      totalVolume: Number(tv?.total || 0),
-      activeNumbers: Number(an?.count || 0),
-    };
-  }
-
-  async getAdminDetailedStats() {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 1);
-    const todayIso = todayStart.toISOString();
-    const monthIso = monthStart.toISOString();
-    const prevMonthIso = prevMonthStart.toISOString();
-    const prevMonthEndIso = prevMonthEnd.toISOString();
-
-    type FeeRow = { total: string; today: string; this_month: string; prev_month: string };
-    const zero: FeeRow = { total: "0", today: "0", this_month: "0", prev_month: "0" };
-
-    // Bénéfice net WestPay sur les retraits
-    // = frais prélevés au marchand (4.5% / 5.5% Congo, 0% fee_exempt) − frais fournisseur (provider_payout_fee)
-    // provider_payout_fee = frais OmniPay/Mbiyo sur le payout (stockés explicitement depuis cette version)
-    // NULLIF(w.provider_payout_fee, 0) : traite 0 comme « non défini » pour retomber sur w.fees (valeur
-    // legacy) sur les anciennes lignes ayant reçu DEFAULT 0 avant la suppression du default.
-    const wdResult = await db.execute<FeeRow>(sql`
-      SELECT
-        coalesce(sum(
-          case when m.fee_exempt
-               then -coalesce(nullif(w.provider_payout_fee, 0), w.fees, 0)
-               else floor(w.amount * case when w.country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
-                    - coalesce(nullif(w.provider_payout_fee, 0), w.fees, 0)
-          end
-        ), 0) as total,
-        coalesce(sum(case when w.processed_at >= ${todayIso}::timestamp then
-          case when m.fee_exempt
-               then -coalesce(nullif(w.provider_payout_fee, 0), w.fees, 0)
-               else floor(w.amount * case when w.country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
-                    - coalesce(nullif(w.provider_payout_fee, 0), w.fees, 0)
-          end else 0 end), 0) as today,
-        coalesce(sum(case when w.processed_at >= ${monthIso}::timestamp then
-          case when m.fee_exempt
-               then -coalesce(nullif(w.provider_payout_fee, 0), w.fees, 0)
-               else floor(w.amount * case when w.country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
-                    - coalesce(nullif(w.provider_payout_fee, 0), w.fees, 0)
-          end else 0 end), 0) as this_month,
-        coalesce(sum(case when w.processed_at >= ${prevMonthIso}::timestamp and w.processed_at < ${prevMonthEndIso}::timestamp then
-          case when m.fee_exempt
-               then -coalesce(nullif(w.provider_payout_fee, 0), w.fees, 0)
-               else floor(w.amount * case when w.country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
-                    - coalesce(nullif(w.provider_payout_fee, 0), w.fees, 0)
-          end else 0 end), 0) as prev_month
-      FROM withdrawals w
-      LEFT JOIN merchants m ON m.id = w.merchant_id
-      WHERE w.status = 'approved'
-    `);
-    const wdFees = wdResult.rows[0] ?? zero;
-
-    // Frais de virement wallet (pas de provider fee externe — net = fee wallet direct)
-    const [wtFees] = await db.select({
-      total: sql<number>`coalesce(sum(fee), 0)`,
-      today: sql<number>`coalesce(sum(case when processed_at >= ${todayIso}::timestamp then fee else 0 end), 0)`,
-      thisMonth: sql<number>`coalesce(sum(case when processed_at >= ${monthIso}::timestamp then fee else 0 end), 0)`,
-      prevMonth: sql<number>`coalesce(sum(case when processed_at >= ${prevMonthIso}::timestamp and processed_at < ${prevMonthEndIso}::timestamp then fee else 0 end), 0)`,
-    }).from(walletTransfers).where(eq(walletTransfers.status, "approved"));
-
-    // Bénéfice net WestPay sur les collectes
-    // = frais prélevés au marchand (5.5% / 6.5% Congo, 0% fee_exempt) − frais fournisseur (provider_fee)
-    // Formule exacte alignée sur calcMerchantCredit :
-    // frais_collecte = amount - floor(amount * (1 - taux)) = amount - floor(amount * net_rate)
-    // net_rate standard = 0.945, Congo = 0.935
-    const txResult = await db.execute<FeeRow>(sql`
-      SELECT
-        coalesce(sum(
-          case when m.fee_exempt
-               then -coalesce(t.provider_fee, 0)
-               else (t.amount - floor(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.935 else 0.945 end))
-                    - coalesce(t.provider_fee, 0)
-          end
-        ), 0) as total,
-        coalesce(sum(case when t.created_at >= ${todayIso}::timestamp then
-          case when m.fee_exempt
-               then -coalesce(t.provider_fee, 0)
-               else (t.amount - floor(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.935 else 0.945 end))
-                    - coalesce(t.provider_fee, 0)
-          end else 0 end), 0) as today,
-        coalesce(sum(case when t.created_at >= ${monthIso}::timestamp then
-          case when m.fee_exempt
-               then -coalesce(t.provider_fee, 0)
-               else (t.amount - floor(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.935 else 0.945 end))
-                    - coalesce(t.provider_fee, 0)
-          end else 0 end), 0) as this_month,
-        coalesce(sum(case when t.created_at >= ${prevMonthIso}::timestamp and t.created_at < ${prevMonthEndIso}::timestamp then
-          case when m.fee_exempt
-               then -coalesce(t.provider_fee, 0)
-               else (t.amount - floor(t.amount * case when t.country in ('Congo Brazzaville','Congo RDC') then 0.935 else 0.945 end))
-                    - coalesce(t.provider_fee, 0)
-          end else 0 end), 0) as prev_month
-      FROM transactions t
-      JOIN merchants m ON m.id = t.merchant_id
-      WHERE t.status IN ('confirmed','success','completed')
-        AND t.amount > 0
-        AND (t.tx_id IS NULL OR t.tx_id NOT LIKE 'TR-%')
-    `);
-    const txFees = txResult.rows[0] ?? zero;
-
-    const [apiPay] = await db.select({
-      count: sql<number>`count(*)`,
-      total: sql<number>`coalesce(sum(amount), 0)`,
-    }).from(transactions).where(and(eq(transactions.provider, "omnipay"), sql`amount > 0`, sql`tx_id NOT LIKE 'TR-%'`, inArray(transactions.status, ["confirmed", "success", "completed"])));
-
-    const [linkPay] = await db.select({
-      count: sql<number>`count(*)`,
-      total: sql<number>`coalesce(sum(total_revenue), 0)`,
-    }).from(paymentLinks);
-
-    const [wdStats] = await db.select({
-      count: sql<number>`count(*)`,
-      total: sql<number>`coalesce(sum(amount), 0)`,
-    }).from(withdrawals).where(eq(withdrawals.status, "approved"));
-
-    return {
-      commissionTotal: Number(wdFees?.total || 0) + Number(wtFees?.total || 0) + Number(txFees.total || 0),
-      commissionToday: Number(wdFees?.today || 0) + Number(wtFees?.today || 0) + Number(txFees.today || 0),
-      commissionThisMonth: Number(wdFees?.this_month || 0) + Number(wtFees?.thisMonth || 0) + Number(txFees.this_month || 0),
-      commissionPrevMonth: Number(wdFees?.prev_month || 0) + Number(wtFees?.prevMonth || 0) + Number(txFees.prev_month || 0),
-      apiPaymentsCount: Number(apiPay?.count || 0),
-      apiPaymentsTotal: Number(apiPay?.total || 0),
-      linkPaymentsCount: Number(linkPay?.count || 0),
-      linkPaymentsTotal: Number(linkPay?.total || 0),
-      withdrawalsCount: Number(wdStats?.count || 0),
-      withdrawalsTotal: Number(wdStats?.total || 0),
-    };
-  }
-
-  async getPlatformBalance(): Promise<number> {
-    const [row] = await db.select({ total: sql<number>`coalesce(sum(balance), 0)` }).from(merchantCountries);
-    return Number(row?.total || 0);
-  }
-
-  async getLatestStatsBaseline() {
-    const [row] = await db.select().from(statsBaselines).orderBy(desc(statsBaselines.id)).limit(1);
-    return row;
-  }
-
-  async createStatsBaseline(values: { transactionCount: number; totalVolume: number; commissionTotal: number; apiPaymentsCount: number; apiPaymentsTotal: number; linkPaymentsCount: number; linkPaymentsTotal: number; withdrawalsCount: number; withdrawalsTotal: number }) {
-    await db.insert(statsBaselines).values(values);
-  }
-
-  async deleteAllStatsBaselines() {
-    await db.delete(statsBaselines);
-  }
-
-  async getMerchantStats(merchantId: number) {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const yesterdayStart = new Date(todayStart.getTime() - 86400000);
-
-    const [tc] = await db.select({ count: sql<number>`count(*)` }).from(transactions).where(eq(transactions.merchantId, merchantId));
-    const [tv] = await db.select({ total: sql<number>`coalesce(sum(amount), 0)` }).from(transactions).where(and(eq(transactions.merchantId, merchantId), eq(transactions.status, "confirmed")));
-    const [todayRow] = await db.select({ total: sql<number>`coalesce(sum(amount), 0)` }).from(transactions).where(and(eq(transactions.merchantId, merchantId), eq(transactions.status, "confirmed"), gte(transactions.createdAt, todayStart)));
-    const [yesterdayRow] = await db.select({ total: sql<number>`coalesce(sum(amount), 0)` }).from(transactions).where(and(eq(transactions.merchantId, merchantId), eq(transactions.status, "confirmed"), gte(transactions.createdAt, yesterdayStart), lt(transactions.createdAt, todayStart)));
-    const [wRow] = await db.select({ total: sql<number>`coalesce(sum(amount), 0)` }).from(withdrawals).where(and(eq(withdrawals.merchantId, merchantId), eq(withdrawals.status, "approved")));
-    return {
-      transactionCount: Number(tc?.count || 0),
-      totalVolume: Number(tv?.total || 0),
-      todayVolume: Number(todayRow?.total || 0),
-      yesterdayVolume: Number(yesterdayRow?.total || 0),
-      totalWithdrawn: Number(wRow?.total || 0),
-    };
-  }
-
-  async getMerchantPin(merchantId: number): Promise<MerchantPin | undefined> {
-    const [pin] = await db.select().from(merchantPins).where(eq(merchantPins.merchantId, merchantId));
-    return pin;
-  }
-
-  async upsertMerchantPin(merchantId: number, pinHash: string): Promise<MerchantPin> {
-    const existing = await this.getMerchantPin(merchantId);
-    if (existing) {
-      const [updated] = await db.update(merchantPins)
-        .set({ pinHash, updatedAt: new Date() })
-        .where(eq(merchantPins.merchantId, merchantId))
-        .returning();
-      return updated;
-    }
-    const [created] = await db.insert(merchantPins)
-      .values({ merchantId, pinHash })
-      .returning();
-    return created;
-  }
-
-  async createApiLog(log: InsertApiLog): Promise<ApiLog> {
-    const [created] = await db.insert(apiLogs).values(log).returning();
-    return created;
-  }
-
-  async getApiLogs(merchantId?: number): Promise<ApiLog[]> {
-    if (merchantId) {
-      return db.select().from(apiLogs).where(eq(apiLogs.merchantId, merchantId)).orderBy(desc(apiLogs.createdAt));
-    }
-    return db.select().from(apiLogs).orderBy(desc(apiLogs.createdAt));
-  }
-
-  async createPendingPayment(payment: InsertPendingPayment): Promise<PendingPayment> {
-    const [created] = await db.insert(pendingPayments).values(payment).returning();
-    return created;
-  }
-
-  async getPendingPaymentById(id: number): Promise<PendingPayment | undefined> {
-    const [pp] = await db.select().from(pendingPayments).where(eq(pendingPayments.id, id));
-    return pp;
-  }
-
-  async getPendingPaymentsByTxId(txId: string): Promise<PendingPayment[]> {
-    return db.select().from(pendingPayments)
-      .where(and(eq(pendingPayments.txId, txId), eq(pendingPayments.status, "submitted")));
-  }
-
-  async getPendingPayment(id: number): Promise<PendingPayment | undefined> {
-    const [p] = await db.select().from(pendingPayments).where(eq(pendingPayments.id, id));
-    return p;
-  }
-
-  async updatePendingPaymentTxId(id: number, txId: string): Promise<PendingPayment> {
-    const [updated] = await db.update(pendingPayments).set({ txId }).where(eq(pendingPayments.id, id)).returning();
-    return updated;
-  }
-
-  async updatePendingPaymentStatus(id: number, status: string): Promise<void> {
-    await db.update(pendingPayments).set({ status }).where(eq(pendingPayments.id, id));
-  }
-
-  async updatePendingPaymentError(id: number, status: string, errorMessage: string): Promise<void> {
-    await db.update(pendingPayments).set({ status, errorMessage }).where(eq(pendingPayments.id, id));
-  }
-
-  async cleanupExpiredPayments(): Promise<number> {
-    const result = await db.delete(pendingPayments)
-      .where(and(
-        eq(pendingPayments.status, "pending"),
-        sql`${pendingPayments.expiresAt} < NOW()`
-      ))
-      .returning();
-    return result.length;
-  }
-
-  async getPendingPayments(merchantId?: number): Promise<PendingPayment[]> {
-    if (merchantId) {
-      return db.select().from(pendingPayments).where(eq(pendingPayments.merchantId, merchantId)).orderBy(desc(pendingPayments.createdAt));
-    }
-    return db.select().from(pendingPayments).orderBy(desc(pendingPayments.createdAt));
-  }
-
-  async updateMerchantWebhook(id: number, webhookUrl: string | null, webhookSecret: string | null): Promise<void> {
-    await db.update(merchants).set({ webhookUrl, webhookSecret }).where(eq(merchants.id, id));
-  }
-
-  async createWebhookLog(log: InsertWebhookLog): Promise<WebhookLog> {
-    const [created] = await db.insert(webhookLogs).values(log).returning();
-    return created;
-  }
-
-  async getWebhookLogs(merchantId?: number): Promise<WebhookLog[]> {
-    if (merchantId) {
-      return db.select().from(webhookLogs).where(eq(webhookLogs.merchantId, merchantId)).orderBy(desc(webhookLogs.createdAt));
-    }
-    return db.select().from(webhookLogs).orderBy(desc(webhookLogs.createdAt));
-  }
-
   async updateMerchantCountryOmnipay(id: number, omnipayEnabled: boolean): Promise<void> {
-    await db.update(merchantCountries).set({ omnipayEnabled }).where(eq(merchantCountries.id, id));
+    await financialDb.update(merchantCountries).set({ omnipayEnabled }).where(eq(merchantCountries.id, id));
   }
-
   async updateMerchantCountryPayinGateway(id: number, payinGateway: string): Promise<void> {
-    await db.update(merchantCountries).set({ payinGateway }).where(eq(merchantCountries.id, id));
+    await financialDb.update(merchantCountries).set({ payinGateway }).where(eq(merchantCountries.id, id));
   }
-
-  async getPendingPaymentByOmnipayReference(reference: string): Promise<PendingPayment | undefined> {
-    const [pp] = await db.select().from(pendingPayments)
-      .where(eq(pendingPayments.omnipayReference, reference));
-    return pp;
-  }
-
   async decrementMerchantCountryBalance(id: number, amount: number): Promise<void> {
-    await db.update(merchantCountries)
+    await financialDb.update(merchantCountries)
       .set({ balance: sql`${merchantCountries.balance} - ${amount}` })
       .where(eq(merchantCountries.id, id));
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE FINANCIAL — transactions
+  // ══════════════════════════════════════════════════════════════════════════
+  async getTransactions(merchantId?: number, opts?: { dateFrom?: Date; dateTo?: Date; limit?: number }): Promise<Transaction[]> {
+    const conds = [];
+    if (merchantId)      conds.push(eq(transactions.merchantId, merchantId));
+    if (opts?.dateFrom)  conds.push(gte(transactions.createdAt, opts.dateFrom));
+    if (opts?.dateTo)    conds.push(lt(transactions.createdAt, opts.dateTo));
+    let q = financialDb.select().from(transactions);
+    if (conds.length) q = (q as any).where(and(...conds));
+    q = (q as any).orderBy(desc(transactions.createdAt));
+    if (opts?.limit) q = (q as any).limit(opts.limit);
+    return q as any;
+  }
+  async getTransactionByTxId(txId: string): Promise<Transaction | undefined> {
+    const [tx] = await financialDb.select().from(transactions).where(eq(transactions.txId, txId));
+    return tx;
+  }
+  async createTransaction(tx: InsertTransaction): Promise<Transaction> {
+    const [t] = await financialDb.insert(transactions).values(tx).returning();
+    return t;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE FINANCIAL — sms_logs
+  // ══════════════════════════════════════════════════════════════════════════
+  async getSmsLogs(): Promise<SmsLog[]> {
+    return financialDb.select().from(smsLogs).orderBy(desc(smsLogs.createdAt));
+  }
+  async createSmsLog(log: InsertSmsLog): Promise<SmsLog> {
+    const [s] = await financialDb.insert(smsLogs).values(log).returning();
+    return s;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE AUTH — numbers (SIM cards — configuration)
+  // ══════════════════════════════════════════════════════════════════════════
+  async getNumbers(): Promise<PhoneNumber[]> { return authDb.select().from(numbers); }
+  async getNumberByPhone(phone: string): Promise<PhoneNumber | undefined> {
+    const [n] = await authDb.select().from(numbers).where(eq(numbers.phoneNumber, phone));
+    return n;
+  }
+  async addNumber(num: InsertNumber): Promise<PhoneNumber> {
+    const [n] = await authDb.insert(numbers).values(num).returning();
+    return n;
+  }
+  async toggleNumberStatus(id: number): Promise<PhoneNumber> {
+    const [n] = await authDb.select().from(numbers).where(eq(numbers.id, id));
+    if (!n) throw new Error("Numero introuvable");
+    const [u] = await authDb.update(numbers).set({ status: n.status === "active" ? "inactive" : "active" }).where(eq(numbers.id, id)).returning();
+    return u;
+  }
+  async deleteNumber(id: number): Promise<void> { await authDb.delete(numbers).where(eq(numbers.id, id)); }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE AUTH — settings
+  // ══════════════════════════════════════════════════════════════════════════
+  async getSetting(key: string): Promise<string | undefined> {
+    const [s] = await authDb.select().from(settings).where(eq(settings.key, key));
+    return s?.value;
+  }
+  async setSetting(key: string, value: string): Promise<void> {
+    const ex = await this.getSetting(key);
+    if (ex !== undefined) {
+      await authDb.update(settings).set({ value }).where(eq(settings.key, key));
+    } else {
+      await authDb.insert(settings).values({ key, value });
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE FINANCIAL — login_logs
+  // ══════════════════════════════════════════════════════════════════════════
+  async createLoginLog(log: InsertLoginLog): Promise<void> {
+    await financialDb.insert(loginLogs).values(log);
+  }
+  async getRecentLoginLogs(limit = 20): Promise<LoginLog[]> {
+    return financialDb.select().from(loginLogs).orderBy(desc(loginLogs.createdAt)).limit(limit);
+  }
+  async hasMerchantSeenIp(merchantId: number, ip: string): Promise<boolean> {
+    const cleanIp = ip.replace(/^::ffff:/, "");
+    const hit = await financialDb.select({ id: loginLogs.id }).from(loginLogs).where(and(
+      eq(loginLogs.userId, merchantId), eq(loginLogs.role, "merchant"),
+      eq(loginLogs.ip, cleanIp), eq(loginLogs.success, true),
+    )).limit(1);
+    return hit.length > 0;
+  }
+  async getFailedLoginCount(userId: number, role: string): Promise<number> {
+    const [r] = await financialDb.select({ count: sql<number>`count(*)` }).from(loginLogs).where(and(
+      eq(loginLogs.userId, userId), eq(loginLogs.role, role), eq(loginLogs.success, false),
+    ));
+    return Number(r?.count || 0);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // STATS — cross-DB
+  // ══════════════════════════════════════════════════════════════════════════
+  async getStats() {
+    const validStatuses = ["confirmed", "success", "completed"];
+    const [[mc], [tc], [tv], [an]] = await Promise.all([
+      authDb.select({ count: sql<number>`count(*)` }).from(merchants),
+      financialDb.select({ count: sql<number>`count(*)` }).from(transactions).where(inArray(transactions.status, validStatuses)),
+      financialDb.select({ total: sql<number>`coalesce(sum(amount), 0)` }).from(transactions).where(inArray(transactions.status, validStatuses)),
+      authDb.select({ count: sql<number>`count(*)` }).from(numbers).where(eq(numbers.status, "active")),
+    ]);
+    return {
+      merchantCount:    Number(mc?.count || 0),
+      transactionCount: Number(tc?.count || 0),
+      totalVolume:      Number(tv?.total || 0),
+      activeNumbers:    Number(an?.count || 0),
+    };
+  }
+
+  async getAdminDetailedStats() {
+    const now           = new Date();
+    const todayStart    = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const monthStart    = new Date(now.getFullYear(), now.getMonth(), 1);
+    const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevMonthEnd  = new Date(now.getFullYear(), now.getMonth(), 1);
+    const todayIso      = todayStart.toISOString();
+    const monthIso      = monthStart.toISOString();
+    const prevIso       = prevMonthStart.toISOString();
+    const prevEndIso    = prevMonthEnd.toISOString();
+
+    type FeeRow = { total: string; today: string; this_month: string; prev_month: string };
+    const zero: FeeRow = { total: "0", today: "0", this_month: "0", prev_month: "0" };
+
+    // fee_exempt depuis Auth DB
+    const feeIds   = await getFeeExemptIds();
+    const exemptSql = sql.raw(exemptClause(feeIds));
+
+    const [wdResult, txResult, wtFees, apiPay, linkPay, wdStats] = await Promise.all([
+      financialDb.execute<FeeRow>(sql`
+        SELECT
+          coalesce(sum(case when ${exemptSql}
+            then -coalesce(nullif(provider_payout_fee,0),fees,0)
+            else floor(amount * case when country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
+                 - coalesce(nullif(provider_payout_fee,0),fees,0)
+          end), 0) as total,
+          coalesce(sum(case when processed_at >= ${todayIso}::timestamp then
+            case when ${exemptSql} then -coalesce(nullif(provider_payout_fee,0),fees,0)
+            else floor(amount * case when country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
+                 - coalesce(nullif(provider_payout_fee,0),fees,0) end else 0 end), 0) as today,
+          coalesce(sum(case when processed_at >= ${monthIso}::timestamp then
+            case when ${exemptSql} then -coalesce(nullif(provider_payout_fee,0),fees,0)
+            else floor(amount * case when country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
+                 - coalesce(nullif(provider_payout_fee,0),fees,0) end else 0 end), 0) as this_month,
+          coalesce(sum(case when processed_at >= ${prevIso}::timestamp and processed_at < ${prevEndIso}::timestamp then
+            case when ${exemptSql} then -coalesce(nullif(provider_payout_fee,0),fees,0)
+            else floor(amount * case when country in ('Congo Brazzaville','Congo RDC') then 0.055 else 0.045 end)
+                 - coalesce(nullif(provider_payout_fee,0),fees,0) end else 0 end), 0) as prev_month
+        FROM withdrawals WHERE status = 'approved'
+      `),
+      financialDb.execute<FeeRow>(sql`
+        SELECT
+          coalesce(sum(case when ${exemptSql}
+            then -coalesce(provider_fee,0)
+            else (amount - floor(amount * case when country in ('Congo Brazzaville','Congo RDC') then 0.935 else 0.945 end))
+                 - coalesce(provider_fee,0)
+          end), 0) as total,
+          coalesce(sum(case when created_at >= ${todayIso}::timestamp then
+            case when ${exemptSql} then -coalesce(provider_fee,0)
+            else (amount - floor(amount * case when country in ('Congo Brazzaville','Congo RDC') then 0.935 else 0.945 end))
+                 - coalesce(provider_fee,0) end else 0 end), 0) as today,
+          coalesce(sum(case when created_at >= ${monthIso}::timestamp then
+            case when ${exemptSql} then -coalesce(provider_fee,0)
+            else (amount - floor(amount * case when country in ('Congo Brazzaville','Congo RDC') then 0.935 else 0.945 end))
+                 - coalesce(provider_fee,0) end else 0 end), 0) as this_month,
+          coalesce(sum(case when created_at >= ${prevIso}::timestamp and created_at < ${prevEndIso}::timestamp then
+            case when ${exemptSql} then -coalesce(provider_fee,0)
+            else (amount - floor(amount * case when country in ('Congo Brazzaville','Congo RDC') then 0.935 else 0.945 end))
+                 - coalesce(provider_fee,0) end else 0 end), 0) as prev_month
+        FROM transactions
+        WHERE status IN ('confirmed','success','completed') AND amount > 0
+          AND (tx_id IS NULL OR tx_id NOT LIKE 'TR-%')
+      `),
+      financialDb.select({
+        total:     sql<number>`coalesce(sum(fee), 0)`,
+        today:     sql<number>`coalesce(sum(case when processed_at >= ${todayIso}::timestamp then fee else 0 end), 0)`,
+        thisMonth: sql<number>`coalesce(sum(case when processed_at >= ${monthIso}::timestamp then fee else 0 end), 0)`,
+        prevMonth: sql<number>`coalesce(sum(case when processed_at >= ${prevIso}::timestamp and processed_at < ${prevEndIso}::timestamp then fee else 0 end), 0)`,
+      }).from(walletTransfers).where(eq(walletTransfers.status, "approved")),
+      financialDb.select({ count: sql<number>`count(*)`, total: sql<number>`coalesce(sum(amount), 0)` })
+        .from(transactions).where(and(eq(transactions.provider, "omnipay"), sql`amount > 0`, sql`tx_id NOT LIKE 'TR-%'`, inArray(transactions.status, ["confirmed","success","completed"]))),
+      financialDb.select({ count: sql<number>`count(*)`, total: sql<number>`coalesce(sum(total_revenue), 0)` }).from(paymentLinks),
+      financialDb.select({ count: sql<number>`count(*)`, total: sql<number>`coalesce(sum(amount), 0)` }).from(withdrawals).where(eq(withdrawals.status, "approved")),
+    ]);
+
+    const wd = wdResult.rows[0] ?? zero;
+    const tx = txResult.rows[0] ?? zero;
+    const wt = wtFees[0];
+    return {
+      commissionTotal:      Number(wd.total)      + Number(wt?.total     || 0) + Number(tx.total),
+      commissionToday:      Number(wd.today)      + Number(wt?.today     || 0) + Number(tx.today),
+      commissionThisMonth:  Number(wd.this_month) + Number(wt?.thisMonth || 0) + Number(tx.this_month),
+      commissionPrevMonth:  Number(wd.prev_month) + Number(wt?.prevMonth || 0) + Number(tx.prev_month),
+      apiPaymentsCount:     Number(apiPay[0]?.count || 0),
+      apiPaymentsTotal:     Number(apiPay[0]?.total || 0),
+      linkPaymentsCount:    Number(linkPay[0]?.count || 0),
+      linkPaymentsTotal:    Number(linkPay[0]?.total || 0),
+      withdrawalsCount:     Number(wdStats[0]?.count || 0),
+      withdrawalsTotal:     Number(wdStats[0]?.total || 0),
+    };
+  }
+
+  async getPlatformBalance(): Promise<number> {
+    const [r] = await financialDb.select({ total: sql<number>`coalesce(sum(balance), 0)` }).from(merchantCountries);
+    return Number(r?.total || 0);
+  }
+
+  async getLatestStatsBaseline() {
+    const [r] = await financialDb.select().from(statsBaselines).orderBy(desc(statsBaselines.id)).limit(1);
+    return r;
+  }
+  async createStatsBaseline(values: any) {
+    await financialDb.insert(statsBaselines).values(values);
+  }
+  async deleteAllStatsBaselines() {
+    await financialDb.delete(statsBaselines);
+  }
+
+  async getMerchantStats(merchantId: number) {
+    const now          = new Date();
+    const todayStart   = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterdayStart = new Date(todayStart.getTime() - 86400000);
+    const [[tc],[tv],[todayRow],[ystdRow],[wRow]] = await Promise.all([
+      financialDb.select({ count: sql<number>`count(*)` }).from(transactions).where(eq(transactions.merchantId, merchantId)),
+      financialDb.select({ total: sql<number>`coalesce(sum(amount),0)` }).from(transactions).where(and(eq(transactions.merchantId, merchantId), eq(transactions.status, "confirmed"))),
+      financialDb.select({ total: sql<number>`coalesce(sum(amount),0)` }).from(transactions).where(and(eq(transactions.merchantId, merchantId), eq(transactions.status, "confirmed"), gte(transactions.createdAt, todayStart))),
+      financialDb.select({ total: sql<number>`coalesce(sum(amount),0)` }).from(transactions).where(and(eq(transactions.merchantId, merchantId), eq(transactions.status, "confirmed"), gte(transactions.createdAt, yesterdayStart), lt(transactions.createdAt, todayStart))),
+      financialDb.select({ total: sql<number>`coalesce(sum(amount),0)` }).from(withdrawals).where(and(eq(withdrawals.merchantId, merchantId), eq(withdrawals.status, "approved"))),
+    ]);
+    return {
+      transactionCount: Number(tc?.count || 0),
+      totalVolume:      Number(tv?.total || 0),
+      todayVolume:      Number(todayRow?.total || 0),
+      yesterdayVolume:  Number(ystdRow?.total || 0),
+      totalWithdrawn:   Number(wRow?.total || 0),
+    };
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE AUTH — merchant_pins
+  // ══════════════════════════════════════════════════════════════════════════
+  async getMerchantPin(merchantId: number): Promise<MerchantPin | undefined> {
+    const [p] = await authDb.select().from(merchantPins).where(eq(merchantPins.merchantId, merchantId));
+    return p;
+  }
+  async upsertMerchantPin(merchantId: number, pinHash: string): Promise<MerchantPin> {
+    const ex = await this.getMerchantPin(merchantId);
+    if (ex) {
+      const [u] = await authDb.update(merchantPins).set({ pinHash, updatedAt: new Date() }).where(eq(merchantPins.merchantId, merchantId)).returning();
+      return u;
+    }
+    const [c] = await authDb.insert(merchantPins).values({ merchantId, pinHash }).returning();
+    return c;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE FINANCIAL — api_logs
+  // ══════════════════════════════════════════════════════════════════════════
+  async createApiLog(log: InsertApiLog): Promise<ApiLog> {
+    const [a] = await financialDb.insert(apiLogs).values(log).returning();
+    return a;
+  }
+  async getApiLogs(merchantId?: number): Promise<ApiLog[]> {
+    if (merchantId) return financialDb.select().from(apiLogs).where(eq(apiLogs.merchantId, merchantId)).orderBy(desc(apiLogs.createdAt));
+    return financialDb.select().from(apiLogs).orderBy(desc(apiLogs.createdAt));
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE FINANCIAL — pending_payments
+  // ══════════════════════════════════════════════════════════════════════════
+  async createPendingPayment(payment: InsertPendingPayment): Promise<PendingPayment> {
+    const [p] = await financialDb.insert(pendingPayments).values(payment).returning();
+    return p;
+  }
+  async getPendingPaymentById(id: number): Promise<PendingPayment | undefined> {
+    const [p] = await financialDb.select().from(pendingPayments).where(eq(pendingPayments.id, id));
+    return p;
+  }
+  async getPendingPaymentsByTxId(txId: string): Promise<PendingPayment[]> {
+    return financialDb.select().from(pendingPayments).where(and(eq(pendingPayments.txId, txId), eq(pendingPayments.status, "submitted")));
+  }
+  async getPendingPayment(id: number): Promise<PendingPayment | undefined> {
+    return this.getPendingPaymentById(id);
+  }
+  async updatePendingPaymentTxId(id: number, txId: string): Promise<PendingPayment> {
+    const [p] = await financialDb.update(pendingPayments).set({ txId }).where(eq(pendingPayments.id, id)).returning();
+    return p;
+  }
+  async updatePendingPaymentStatus(id: number, status: string): Promise<void> {
+    await financialDb.update(pendingPayments).set({ status }).where(eq(pendingPayments.id, id));
+  }
+  async updatePendingPaymentError(id: number, status: string, errorMessage: string): Promise<void> {
+    await financialDb.update(pendingPayments).set({ status, errorMessage }).where(eq(pendingPayments.id, id));
+  }
+  async cleanupExpiredPayments(): Promise<number> {
+    const r = await financialDb.delete(pendingPayments).where(and(eq(pendingPayments.status, "pending"), sql`${pendingPayments.expiresAt} < NOW()`)).returning();
+    return r.length;
+  }
+  async getPendingPayments(merchantId?: number): Promise<PendingPayment[]> {
+    if (merchantId) return financialDb.select().from(pendingPayments).where(eq(pendingPayments.merchantId, merchantId)).orderBy(desc(pendingPayments.createdAt));
+    return financialDb.select().from(pendingPayments).orderBy(desc(pendingPayments.createdAt));
+  }
+  async getPendingPaymentByOmnipayReference(reference: string): Promise<PendingPayment | undefined> {
+    const [p] = await financialDb.select().from(pendingPayments).where(eq(pendingPayments.omnipayReference, reference));
+    return p;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE AUTH — webhook (URL/secret) + BASE FINANCIAL — webhook_logs
+  // ══════════════════════════════════════════════════════════════════════════
+  async updateMerchantWebhook(id: number, webhookUrl: string | null, webhookSecret: string | null): Promise<void> {
+    await authDb.update(merchants).set({ webhookUrl, webhookSecret }).where(eq(merchants.id, id));
+  }
+  async createWebhookLog(log: InsertWebhookLog): Promise<WebhookLog> {
+    const [w] = await financialDb.insert(webhookLogs).values(log).returning();
+    return w;
+  }
+  async getWebhookLogs(merchantId?: number): Promise<WebhookLog[]> {
+    if (merchantId) return financialDb.select().from(webhookLogs).where(eq(webhookLogs.merchantId, merchantId)).orderBy(desc(webhookLogs.createdAt));
+    return financialDb.select().from(webhookLogs).orderBy(desc(webhookLogs.createdAt));
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE AUTH — telegram
+  // ══════════════════════════════════════════════════════════════════════════
   async getMerchantByTelegramChatId(chatId: string): Promise<Merchant | undefined> {
-    const [merchant] = await db.select().from(merchants).where(eq(merchants.telegramChatId, chatId));
-    return merchant;
+    const [m] = await authDb.select().from(merchants).where(eq(merchants.telegramChatId, chatId));
+    return m;
   }
-
   async updateMerchantTelegramChatId(id: number, chatId: string | null): Promise<void> {
-    await db.update(merchants).set({ telegramChatId: chatId }).where(eq(merchants.id, id));
+    await authDb.update(merchants).set({ telegramChatId: chatId }).where(eq(merchants.id, id));
   }
-
   async updateMerchantTelegramBotLanguage(id: number, language: string): Promise<void> {
-    await db.update(merchants).set({ telegramBotLanguage: language }).where(eq(merchants.id, id));
+    await authDb.update(merchants).set({ telegramBotLanguage: language }).where(eq(merchants.id, id));
   }
-
   async createTelegramActivationCode(merchantId: number, code: string, expiresAt: Date): Promise<TelegramActivationCode> {
-    const [created] = await db.insert(telegramActivationCodes)
-      .values({ merchantId, code, expiresAt, used: false })
-      .returning();
-    return created;
+    const [c] = await authDb.insert(telegramActivationCodes).values({ merchantId, code, expiresAt, used: false }).returning();
+    return c;
   }
-
   async getTelegramActivationCode(code: string): Promise<TelegramActivationCode | undefined> {
-    const [ac] = await db.select().from(telegramActivationCodes).where(eq(telegramActivationCodes.code, code));
-    return ac;
+    const [c] = await authDb.select().from(telegramActivationCodes).where(eq(telegramActivationCodes.code, code));
+    return c;
   }
-
   async markTelegramActivationCodeUsed(code: string): Promise<void> {
-    await db.update(telegramActivationCodes).set({ used: true }).where(eq(telegramActivationCodes.code, code));
+    await authDb.update(telegramActivationCodes).set({ used: true }).where(eq(telegramActivationCodes.code, code));
   }
-
   async deleteTelegramActivationCodes(merchantId: number): Promise<void> {
-    await db.delete(telegramActivationCodes).where(eq(telegramActivationCodes.merchantId, merchantId));
+    await authDb.delete(telegramActivationCodes).where(eq(telegramActivationCodes.merchantId, merchantId));
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE FINANCIAL — payment_links  (cross-DB pour getAllPaymentLinks)
+  // ══════════════════════════════════════════════════════════════════════════
   async getPaymentLinks(merchantId: number): Promise<PaymentLink[]> {
-    return db.select().from(paymentLinks).where(eq(paymentLinks.merchantId, merchantId)).orderBy(desc(paymentLinks.createdAt));
+    return financialDb.select().from(paymentLinks).where(eq(paymentLinks.merchantId, merchantId)).orderBy(desc(paymentLinks.createdAt));
   }
-
   async getAllPaymentLinks(): Promise<(PaymentLink & { merchantName: string })[]> {
-    const rows = await db
-      .select({ link: paymentLinks, merchantName: merchants.name })
-      .from(paymentLinks)
-      .innerJoin(merchants, eq(paymentLinks.merchantId, merchants.id))
-      .orderBy(desc(paymentLinks.createdAt));
-    return rows.map(r => ({ ...r.link, merchantName: r.merchantName }));
+    const [links, nameMap] = await Promise.all([
+      financialDb.select().from(paymentLinks).orderBy(desc(paymentLinks.createdAt)),
+      getMerchantNameMap(),
+    ]);
+    return links.map(l => ({ ...l, merchantName: nameMap.get(l.merchantId)?.name || "" }));
   }
-
   async getPaymentLinkById(id: number): Promise<PaymentLink | undefined> {
-    const [link] = await db.select().from(paymentLinks).where(eq(paymentLinks.id, id));
-    return link;
+    const [l] = await financialDb.select().from(paymentLinks).where(eq(paymentLinks.id, id));
+    return l;
   }
-
   async getPaymentLinkByUniqueId(uniqueId: string): Promise<PaymentLink | undefined> {
-    const [link] = await db.select().from(paymentLinks).where(eq(paymentLinks.uniqueId, uniqueId));
-    return link;
+    const [l] = await financialDb.select().from(paymentLinks).where(eq(paymentLinks.uniqueId, uniqueId));
+    return l;
   }
-
   async createPaymentLink(data: InsertPaymentLink): Promise<PaymentLink> {
-    const [link] = await db.insert(paymentLinks).values(data).returning();
-    return link;
+    const [l] = await financialDb.insert(paymentLinks).values(data).returning();
+    return l;
   }
-
   async updatePaymentLink(id: number, data: Partial<InsertPaymentLink>): Promise<PaymentLink> {
-    const [link] = await db.update(paymentLinks).set(data).where(eq(paymentLinks.id, id)).returning();
-    return link;
+    const [l] = await financialDb.update(paymentLinks).set(data).where(eq(paymentLinks.id, id)).returning();
+    return l;
   }
-
   async deletePaymentLink(id: number): Promise<void> {
-    await db.delete(paymentLinks).where(eq(paymentLinks.id, id));
+    await financialDb.delete(paymentLinks).where(eq(paymentLinks.id, id));
   }
-
   async recordPaymentLinkPayment(id: number, amount: number): Promise<void> {
-    await db.update(paymentLinks).set({
-      paymentCount: sql`${paymentLinks.paymentCount} + 1`,
-      totalRevenue: sql`${paymentLinks.totalRevenue} + ${amount}`,
+    await financialDb.update(paymentLinks).set({
+      paymentCount:  sql`${paymentLinks.paymentCount} + 1`,
+      totalRevenue:  sql`${paymentLinks.totalRevenue} + ${amount}`,
       lastPaymentAt: new Date(),
     }).where(eq(paymentLinks.id, id));
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE FINANCIAL — wallet_transfers  (cross-DB pour getWalletTransfers)
+  // ══════════════════════════════════════════════════════════════════════════
   async createWalletTransfer(data: InsertWalletTransfer): Promise<WalletTransfer> {
-    const [created] = await db.insert(walletTransfers).values(data).returning();
-    return created;
+    const [w] = await financialDb.insert(walletTransfers).values(data).returning();
+    return w;
   }
-
   async getWalletTransfers(merchantId?: number): Promise<(WalletTransfer & { merchantName: string })[]> {
-    const rows = await db
-      .select({
-        id: walletTransfers.id,
-        merchantId: walletTransfers.merchantId,
-        fromCountryId: walletTransfers.fromCountryId,
-        toCountryId: walletTransfers.toCountryId,
-        fromCountry: walletTransfers.fromCountry,
-        toCountry: walletTransfers.toCountry,
-        currency: walletTransfers.currency,
-        amount: walletTransfers.amount,
-        fee: walletTransfers.fee,
-        netAmount: walletTransfers.netAmount,
-        status: walletTransfers.status,
-        adminNote: walletTransfers.adminNote,
-        createdAt: walletTransfers.createdAt,
-        processedAt: walletTransfers.processedAt,
-        merchantName: merchants.name,
-      })
-      .from(walletTransfers)
-      .leftJoin(merchants, eq(walletTransfers.merchantId, merchants.id))
-      .where(merchantId ? eq(walletTransfers.merchantId, merchantId) : sql`1=1`)
-      .orderBy(desc(walletTransfers.createdAt));
-    return rows.map(r => ({ ...r, merchantName: r.merchantName || "" }));
+    const [rows, nameMap] = await Promise.all([
+      merchantId
+        ? financialDb.select().from(walletTransfers).where(eq(walletTransfers.merchantId, merchantId)).orderBy(desc(walletTransfers.createdAt))
+        : financialDb.select().from(walletTransfers).orderBy(desc(walletTransfers.createdAt)),
+      getMerchantNameMap(),
+    ]);
+    return rows.map(r => ({ ...r, merchantName: nameMap.get(r.merchantId)?.name || "" }));
   }
-
   async getWalletTransferById(id: number): Promise<WalletTransfer | undefined> {
-    const [row] = await db.select().from(walletTransfers).where(eq(walletTransfers.id, id));
-    return row;
+    const [w] = await financialDb.select().from(walletTransfers).where(eq(walletTransfers.id, id));
+    return w;
   }
-
   async updateWalletTransferStatus(id: number, status: string, adminNote?: string): Promise<void> {
-    await db.update(walletTransfers).set({
-      status,
-      adminNote: adminNote || null,
-      processedAt: new Date(),
-    }).where(eq(walletTransfers.id, id));
+    await financialDb.update(walletTransfers).set({ status, adminNote: adminNote || null, processedAt: new Date() }).where(eq(walletTransfers.id, id));
   }
-
   async applyWalletTransfer(id: number): Promise<void> {
-    const transfer = await this.getWalletTransferById(id);
-    if (!transfer) throw new Error("Transfert introuvable");
-    await db.update(merchantCountries)
-      .set({ balance: sql`${merchantCountries.balance} + ${transfer.netAmount}` })
-      .where(eq(merchantCountries.id, transfer.toCountryId));
+    const t = await this.getWalletTransferById(id);
+    if (!t) throw new Error("Transfert introuvable");
+    await financialDb.update(merchantCountries).set({ balance: sql`${merchantCountries.balance} + ${t.netAmount}` }).where(eq(merchantCountries.id, t.toCountryId));
   }
-
   async reimbursWalletTransfer(id: number): Promise<void> {
-    const transfer = await this.getWalletTransferById(id);
-    if (!transfer) throw new Error("Transfert introuvable");
-    await db.update(merchantCountries)
-      .set({ balance: sql`${merchantCountries.balance} + ${transfer.amount + transfer.fee}` })
-      .where(eq(merchantCountries.id, transfer.fromCountryId));
+    const t = await this.getWalletTransferById(id);
+    if (!t) throw new Error("Transfert introuvable");
+    await financialDb.update(merchantCountries).set({ balance: sql`${merchantCountries.balance} + ${t.amount + t.fee}` }).where(eq(merchantCountries.id, t.fromCountryId));
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE AUTH — wallet_transfer_countries
+  // ══════════════════════════════════════════════════════════════════════════
   async getWalletTransferCountries(activeOnly = false): Promise<WalletTransferCountry[]> {
-    const rows = activeOnly
-      ? await db.select().from(walletTransferCountries).where(eq(walletTransferCountries.active, true)).orderBy(walletTransferCountries.currencyZone, walletTransferCountries.country)
-      : await db.select().from(walletTransferCountries).orderBy(walletTransferCountries.currencyZone, walletTransferCountries.country);
-    return rows;
+    return activeOnly
+      ? authDb.select().from(walletTransferCountries).where(eq(walletTransferCountries.active, true)).orderBy(walletTransferCountries.currencyZone, walletTransferCountries.country)
+      : authDb.select().from(walletTransferCountries).orderBy(walletTransferCountries.currencyZone, walletTransferCountries.country);
   }
-
   async getWalletTransferCountryByName(country: string): Promise<WalletTransferCountry | undefined> {
-    const [row] = await db.select().from(walletTransferCountries).where(eq(walletTransferCountries.country, country));
-    return row;
+    const [r] = await authDb.select().from(walletTransferCountries).where(eq(walletTransferCountries.country, country));
+    return r;
   }
-
   async createWalletTransferCountry(data: InsertWalletTransferCountry): Promise<WalletTransferCountry> {
-    const [created] = await db.insert(walletTransferCountries).values(data).returning();
-    return created;
+    const [r] = await authDb.insert(walletTransferCountries).values(data).returning();
+    return r;
   }
-
   async toggleWalletTransferCountry(id: number, active: boolean): Promise<void> {
-    await db.update(walletTransferCountries).set({ active }).where(eq(walletTransferCountries.id, id));
+    await authDb.update(walletTransferCountries).set({ active }).where(eq(walletTransferCountries.id, id));
   }
-
   async deleteWalletTransferCountry(id: number): Promise<void> {
-    await db.delete(walletTransferCountries).where(eq(walletTransferCountries.id, id));
+    await authDb.delete(walletTransferCountries).where(eq(walletTransferCountries.id, id));
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE FINANCIAL — withdrawals  (cross-DB pour getWithdrawals/getPendingWithdrawals)
+  // ══════════════════════════════════════════════════════════════════════════
   async createWithdrawal(data: InsertWithdrawal): Promise<Withdrawal> {
-    const [created] = await db.insert(withdrawals).values(data).returning();
-    return created;
+    const [w] = await financialDb.insert(withdrawals).values(data).returning();
+    return w;
   }
-
   async getWithdrawals(merchantId?: number): Promise<(Withdrawal & { merchantName: string; merchantWebsite?: string | null })[]> {
-    const rows = await db
-      .select({
-        id: withdrawals.id,
-        merchantId: withdrawals.merchantId,
-        merchantCountryId: withdrawals.merchantCountryId,
-        country: withdrawals.country,
-        amount: withdrawals.amount,
-        phone: withdrawals.phone,
-        operator: withdrawals.operator,
-        status: withdrawals.status,
-        withdrawalMode: withdrawals.withdrawalMode,
-        adminNote: withdrawals.adminNote,
-        omnipayRef: withdrawals.omnipayRef,
-        fees: withdrawals.fees,
-        createdAt: withdrawals.createdAt,
-        processedAt: withdrawals.processedAt,
-        merchantName: merchants.name,
-        merchantWebsite: merchants.website,
-      })
-      .from(withdrawals)
-      .leftJoin(merchants, eq(withdrawals.merchantId, merchants.id))
-      .where(merchantId ? eq(withdrawals.merchantId, merchantId) : sql`1=1`)
-      .orderBy(desc(withdrawals.createdAt));
-    return rows.map(r => ({ ...r, merchantName: r.merchantName || "" }));
+    const [rows, nameMap] = await Promise.all([
+      merchantId
+        ? financialDb.select().from(withdrawals).where(eq(withdrawals.merchantId, merchantId)).orderBy(desc(withdrawals.createdAt))
+        : financialDb.select().from(withdrawals).orderBy(desc(withdrawals.createdAt)),
+      getMerchantNameMap(),
+    ]);
+    return rows.map(r => ({
+      ...r,
+      merchantName:    nameMap.get(r.merchantId)?.name    || "",
+      merchantWebsite: nameMap.get(r.merchantId)?.website ?? null,
+    }));
   }
-
   async getPendingWithdrawals(): Promise<(Withdrawal & { merchantName: string })[]> {
-    const rows = await db
-      .select({
-        id: withdrawals.id,
-        merchantId: withdrawals.merchantId,
-        merchantCountryId: withdrawals.merchantCountryId,
-        country: withdrawals.country,
-        amount: withdrawals.amount,
-        phone: withdrawals.phone,
-        recipientName: withdrawals.recipientName,
-        operator: withdrawals.operator,
-        status: withdrawals.status,
-        withdrawalMode: withdrawals.withdrawalMode,
-        adminNote: withdrawals.adminNote,
-        omnipayRef: withdrawals.omnipayRef,
-        fees: withdrawals.fees,
-        providerPayoutFee: withdrawals.providerPayoutFee,
-        gateway: withdrawals.gateway,
-        createdAt: withdrawals.createdAt,
-        processedAt: withdrawals.processedAt,
-        merchantName: merchants.name,
-      })
-      .from(withdrawals)
-      .leftJoin(merchants, eq(withdrawals.merchantId, merchants.id))
-      .where(eq(withdrawals.status, "pending"))
-      .orderBy(desc(withdrawals.createdAt));
-    return rows.map(r => ({ ...r, merchantName: r.merchantName || "" }));
+    const [rows, nameMap] = await Promise.all([
+      financialDb.select().from(withdrawals).where(eq(withdrawals.status, "pending")).orderBy(desc(withdrawals.createdAt)),
+      getMerchantNameMap(),
+    ]);
+    return rows.map(r => ({ ...r, merchantName: nameMap.get(r.merchantId)?.name || "" }));
   }
-
   async getWithdrawalById(id: number): Promise<Withdrawal | undefined> {
-    const [row] = await db.select().from(withdrawals).where(eq(withdrawals.id, id));
-    return row;
+    const [w] = await financialDb.select().from(withdrawals).where(eq(withdrawals.id, id));
+    return w;
   }
-
   async getWithdrawalByOmnipayRef(ref: string): Promise<Withdrawal | undefined> {
-    const [row] = await db.select().from(withdrawals).where(eq(withdrawals.omnipayRef, ref));
-    return row;
+    const [w] = await financialDb.select().from(withdrawals).where(eq(withdrawals.omnipayRef, ref));
+    return w;
   }
-
   async updateWithdrawalStatus(id: number, status: string, adminNote?: string, omnipayRef?: string, fees?: number, providerPayoutFee?: number): Promise<void> {
-    const updateData: any = {
-      status,
-      adminNote: adminNote || null,
-      processedAt: new Date(),
-    };
-    if (omnipayRef) updateData.omnipayRef = omnipayRef;
-    if (fees !== undefined) updateData.fees = fees;
-    if (providerPayoutFee !== undefined) updateData.providerPayoutFee = providerPayoutFee;
-    await db.update(withdrawals).set(updateData).where(eq(withdrawals.id, id));
+    const data: any = { status, adminNote: adminNote || null, processedAt: new Date() };
+    if (omnipayRef)                       data.omnipayRef = omnipayRef;
+    if (fees !== undefined)               data.fees = fees;
+    if (providerPayoutFee !== undefined)  data.providerPayoutFee = providerPayoutFee;
+    await financialDb.update(withdrawals).set(data).where(eq(withdrawals.id, id));
   }
-
   async updateWithdrawalGateway(id: number, gateway: string): Promise<void> {
-    await db.update(withdrawals).set({ gateway }).where(eq(withdrawals.id, id));
+    await financialDb.update(withdrawals).set({ gateway }).where(eq(withdrawals.id, id));
   }
-
   async applyWithdrawal(id: number): Promise<void> {
     const w = await this.getWithdrawalById(id);
     if (!w) throw new Error("Reversement introuvable");
-    await db.update(merchantCountries)
-      .set({ balance: sql`${merchantCountries.balance} - ${w.amount}` })
-      .where(eq(merchantCountries.id, w.merchantCountryId));
+    await financialDb.update(merchantCountries).set({ balance: sql`${merchantCountries.balance} - ${w.amount}` }).where(eq(merchantCountries.id, w.merchantCountryId));
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE AUTH — withdrawal_operators
+  // ══════════════════════════════════════════════════════════════════════════
   async getWithdrawalOperators(country?: string, activeOnly?: boolean): Promise<WithdrawalOperator[]> {
-    const conditions = [];
-    if (country) conditions.push(eq(withdrawalOperators.country, country));
-    if (activeOnly) conditions.push(eq(withdrawalOperators.active, true));
-    if (conditions.length > 0) {
-      return db.select().from(withdrawalOperators).where(and(...conditions)).orderBy(withdrawalOperators.sortOrder, withdrawalOperators.name);
-    }
-    return db.select().from(withdrawalOperators).orderBy(withdrawalOperators.country, withdrawalOperators.sortOrder, withdrawalOperators.name);
+    const conds = [];
+    if (country)    conds.push(eq(withdrawalOperators.country, country));
+    if (activeOnly) conds.push(eq(withdrawalOperators.active, true));
+    if (conds.length) return authDb.select().from(withdrawalOperators).where(and(...conds)).orderBy(withdrawalOperators.sortOrder, withdrawalOperators.name);
+    return authDb.select().from(withdrawalOperators).orderBy(withdrawalOperators.country, withdrawalOperators.sortOrder, withdrawalOperators.name);
   }
-
+  async getWithdrawalOperatorById(id: number): Promise<WithdrawalOperator | undefined> {
+    const [o] = await authDb.select().from(withdrawalOperators).where(eq(withdrawalOperators.id, id));
+    return o;
+  }
+  async getWithdrawalOperatorByNameAndCountry(name: string, country: string): Promise<WithdrawalOperator | undefined> {
+    const [o] = await authDb.select().from(withdrawalOperators).where(and(eq(withdrawalOperators.name, name), eq(withdrawalOperators.country, country)));
+    return o;
+  }
+  async createWithdrawalOperator(data: InsertWithdrawalOperator): Promise<WithdrawalOperator> {
+    const [o] = await authDb.insert(withdrawalOperators).values(data).returning();
+    return o;
+  }
+  async updateWithdrawalOperator(id: number, data: Partial<InsertWithdrawalOperator>): Promise<WithdrawalOperator> {
+    const [o] = await authDb.update(withdrawalOperators).set(data).where(eq(withdrawalOperators.id, id)).returning();
+    return o;
+  }
+  async deleteWithdrawalOperator(id: number): Promise<void> {
+    await authDb.delete(withdrawalOperators).where(eq(withdrawalOperators.id, id));
+  }
   async updateOperatorsSortOrder(updates: { id: number; sortOrder: number }[]): Promise<void> {
     for (const { id, sortOrder } of updates) {
-      await db.update(withdrawalOperators).set({ sortOrder }).where(eq(withdrawalOperators.id, id));
+      await authDb.update(withdrawalOperators).set({ sortOrder }).where(eq(withdrawalOperators.id, id));
     }
   }
 
-  async getWithdrawalOperatorById(id: number): Promise<WithdrawalOperator | undefined> {
-    const [op] = await db.select().from(withdrawalOperators).where(eq(withdrawalOperators.id, id));
-    return op;
-  }
-
-  async getWithdrawalOperatorByNameAndCountry(name: string, country: string): Promise<WithdrawalOperator | undefined> {
-    const [op] = await db.select().from(withdrawalOperators)
-      .where(and(eq(withdrawalOperators.name, name), eq(withdrawalOperators.country, country)));
-    return op;
-  }
-
-  async createWithdrawalOperator(data: InsertWithdrawalOperator): Promise<WithdrawalOperator> {
-    const [created] = await db.insert(withdrawalOperators).values(data).returning();
-    return created;
-  }
-
-  async updateWithdrawalOperator(id: number, data: Partial<InsertWithdrawalOperator>): Promise<WithdrawalOperator> {
-    const [updated] = await db.update(withdrawalOperators).set(data).where(eq(withdrawalOperators.id, id)).returning();
-    return updated;
-  }
-
-  async deleteWithdrawalOperator(id: number): Promise<void> {
-    await db.delete(withdrawalOperators).where(eq(withdrawalOperators.id, id));
-  }
-
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE AUTH — crypto_aggregators (config)
+  // ══════════════════════════════════════════════════════════════════════════
   async getCryptoAggregators(): Promise<CryptoAggregator[]> {
-    return db.select().from(cryptoAggregators).orderBy(desc(cryptoAggregators.createdAt));
+    return authDb.select().from(cryptoAggregators).orderBy(desc(cryptoAggregators.createdAt));
   }
-
   async getCryptoAggregatorById(id: number): Promise<CryptoAggregator | undefined> {
-    const [row] = await db.select().from(cryptoAggregators).where(eq(cryptoAggregators.id, id));
-    return row;
+    const [a] = await authDb.select().from(cryptoAggregators).where(eq(cryptoAggregators.id, id));
+    return a;
   }
-
   async createCryptoAggregator(data: InsertCryptoAggregator): Promise<CryptoAggregator> {
-    const [created] = await db.insert(cryptoAggregators).values(data).returning();
-    return created;
+    const [a] = await authDb.insert(cryptoAggregators).values(data).returning();
+    return a;
   }
-
   async updateCryptoAggregator(id: number, data: Partial<CryptoAggregator>): Promise<void> {
-    await db.update(cryptoAggregators).set(data).where(eq(cryptoAggregators.id, id));
+    await authDb.update(cryptoAggregators).set(data).where(eq(cryptoAggregators.id, id));
   }
-
   async deleteCryptoAggregator(id: number): Promise<void> {
-    await db.delete(cryptoAggregators).where(eq(cryptoAggregators.id, id));
+    await authDb.delete(cryptoAggregators).where(eq(cryptoAggregators.id, id));
   }
-
   async getCryptoAggregatorCountries(aggregatorId: number): Promise<CryptoAggregatorCountry[]> {
-    return db.select().from(cryptoAggregatorCountries).where(eq(cryptoAggregatorCountries.aggregatorId, aggregatorId));
+    return authDb.select().from(cryptoAggregatorCountries).where(eq(cryptoAggregatorCountries.aggregatorId, aggregatorId));
   }
-
   async upsertCryptoAggregatorCountry(aggregatorId: number, country: string, active: boolean): Promise<void> {
-    const [existing] = await db.select().from(cryptoAggregatorCountries)
-      .where(and(eq(cryptoAggregatorCountries.aggregatorId, aggregatorId), eq(cryptoAggregatorCountries.country, country)));
-    if (existing) {
-      await db.update(cryptoAggregatorCountries).set({ active })
-        .where(and(eq(cryptoAggregatorCountries.aggregatorId, aggregatorId), eq(cryptoAggregatorCountries.country, country)));
-    } else {
-      await db.insert(cryptoAggregatorCountries).values({ aggregatorId, country, active });
-    }
+    const [ex] = await authDb.select().from(cryptoAggregatorCountries).where(and(eq(cryptoAggregatorCountries.aggregatorId, aggregatorId), eq(cryptoAggregatorCountries.country, country)));
+    if (ex) await authDb.update(cryptoAggregatorCountries).set({ active }).where(and(eq(cryptoAggregatorCountries.aggregatorId, aggregatorId), eq(cryptoAggregatorCountries.country, country)));
+    else    await authDb.insert(cryptoAggregatorCountries).values({ aggregatorId, country, active });
   }
-
   async getCryptoAggregatorMerchants(aggregatorId: number): Promise<CryptoAggregatorMerchant[]> {
-    return db.select().from(cryptoAggregatorMerchants).where(eq(cryptoAggregatorMerchants.aggregatorId, aggregatorId));
+    return authDb.select().from(cryptoAggregatorMerchants).where(eq(cryptoAggregatorMerchants.aggregatorId, aggregatorId));
   }
-
   async getCryptoAggregatorsByMerchant(merchantId: number): Promise<(CryptoAggregator & { countries: string[] })[]> {
-    const rows = await db.select({
-      aggregator: cryptoAggregators,
-      cam: cryptoAggregatorMerchants,
-    }).from(cryptoAggregatorMerchants)
+    const rows = await authDb.select({ aggregator: cryptoAggregators, cam: cryptoAggregatorMerchants })
+      .from(cryptoAggregatorMerchants)
       .innerJoin(cryptoAggregators, eq(cryptoAggregatorMerchants.aggregatorId, cryptoAggregators.id))
       .where(and(eq(cryptoAggregatorMerchants.merchantId, merchantId), eq(cryptoAggregatorMerchants.active, true), eq(cryptoAggregators.active, true)));
-
     const result: (CryptoAggregator & { countries: string[] })[] = [];
     for (const row of rows) {
-      const countryRows = await db.select().from(cryptoAggregatorCountries)
-        .where(and(eq(cryptoAggregatorCountries.aggregatorId, row.aggregator.id), eq(cryptoAggregatorCountries.active, true)));
-      result.push({ ...row.aggregator, countries: countryRows.map(c => c.country) });
+      const ctryRows = await authDb.select().from(cryptoAggregatorCountries).where(and(eq(cryptoAggregatorCountries.aggregatorId, row.aggregator.id), eq(cryptoAggregatorCountries.active, true)));
+      result.push({ ...row.aggregator, countries: ctryRows.map(c => c.country) });
     }
     return result;
   }
-
   async upsertCryptoAggregatorMerchant(aggregatorId: number, merchantId: number, active: boolean): Promise<void> {
-    const [existing] = await db.select().from(cryptoAggregatorMerchants)
-      .where(and(eq(cryptoAggregatorMerchants.aggregatorId, aggregatorId), eq(cryptoAggregatorMerchants.merchantId, merchantId)));
-    if (existing) {
-      await db.update(cryptoAggregatorMerchants).set({ active })
-        .where(and(eq(cryptoAggregatorMerchants.aggregatorId, aggregatorId), eq(cryptoAggregatorMerchants.merchantId, merchantId)));
-    } else {
-      await db.insert(cryptoAggregatorMerchants).values({ aggregatorId, merchantId, active });
-    }
+    const [ex] = await authDb.select().from(cryptoAggregatorMerchants).where(and(eq(cryptoAggregatorMerchants.aggregatorId, aggregatorId), eq(cryptoAggregatorMerchants.merchantId, merchantId)));
+    if (ex) await authDb.update(cryptoAggregatorMerchants).set({ active }).where(and(eq(cryptoAggregatorMerchants.aggregatorId, aggregatorId), eq(cryptoAggregatorMerchants.merchantId, merchantId)));
+    else    await authDb.insert(cryptoAggregatorMerchants).values({ aggregatorId, merchantId, active });
     if (active) {
-      const [merchant] = await db.select().from(merchants).where(eq(merchants.id, merchantId));
-      if (merchant && !merchant.cryptoApiKey) {
+      const [m] = await authDb.select().from(merchants).where(eq(merchants.id, merchantId));
+      if (m && !m.cryptoApiKey) {
         const { randomBytes } = await import("crypto");
-        const newKey = "WP-CRYPTO-" + randomBytes(20).toString("hex").toUpperCase();
-        await db.update(merchants).set({ cryptoApiKey: newKey }).where(eq(merchants.id, merchantId));
+        await authDb.update(merchants).set({ cryptoApiKey: "WP-CRYPTO-" + randomBytes(20).toString("hex").toUpperCase() }).where(eq(merchants.id, merchantId));
       }
     }
   }
-
   async getMerchantByCryptoApiKey(apiKey: string): Promise<Merchant | undefined> {
-    const [merchant] = await db.select().from(merchants).where(eq(merchants.cryptoApiKey, apiKey));
-    return merchant;
+    const [m] = await authDb.select().from(merchants).where(eq(merchants.cryptoApiKey, apiKey));
+    return m;
   }
-
   async updateMerchantCryptoApiKey(merchantId: number, apiKey: string): Promise<void> {
-    await db.update(merchants).set({ cryptoApiKey: apiKey }).where(eq(merchants.id, merchantId));
+    await authDb.update(merchants).set({ cryptoApiKey: apiKey }).where(eq(merchants.id, merchantId));
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE FINANCIAL — crypto_transactions
+  // ══════════════════════════════════════════════════════════════════════════
   async createCryptoTransaction(data: InsertCryptoTransaction): Promise<CryptoTransaction> {
-    const [created] = await db.insert(cryptoTransactions).values(data).returning();
-    return created;
+    const [t] = await financialDb.insert(cryptoTransactions).values(data).returning();
+    return t;
   }
-
   async getCryptoTransactionByTrackId(trackId: string): Promise<CryptoTransaction | undefined> {
-    const [row] = await db.select().from(cryptoTransactions).where(eq(cryptoTransactions.trackId, trackId));
-    return row;
+    const [t] = await financialDb.select().from(cryptoTransactions).where(eq(cryptoTransactions.trackId, trackId));
+    return t;
   }
-
-  async updateCryptoTransactionStatus(id: number, updates: {
-    status: string;
-    payAmount?: string;
-    payCurrency?: string;
-    walletAddress?: string;
-    network?: string;
-    txHash?: string;
-  }): Promise<void> {
+  async updateCryptoTransactionStatus(id: number, updates: { status: string; payAmount?: string; payCurrency?: string; walletAddress?: string; network?: string; txHash?: string; }): Promise<void> {
     const data: any = { status: updates.status };
-    if (updates.payAmount !== undefined) data.payAmount = updates.payAmount;
-    if (updates.payCurrency !== undefined) data.payCurrency = updates.payCurrency;
+    if (updates.payAmount    !== undefined) data.payAmount    = updates.payAmount;
+    if (updates.payCurrency  !== undefined) data.payCurrency  = updates.payCurrency;
     if (updates.walletAddress !== undefined) data.walletAddress = updates.walletAddress;
-    if (updates.network !== undefined) data.network = updates.network;
-    if (updates.txHash !== undefined) data.txHash = updates.txHash;
-    await db.update(cryptoTransactions).set(data).where(eq(cryptoTransactions.id, id));
+    if (updates.network      !== undefined) data.network      = updates.network;
+    if (updates.txHash       !== undefined) data.txHash       = updates.txHash;
+    await financialDb.update(cryptoTransactions).set(data).where(eq(cryptoTransactions.id, id));
   }
-
   async markCryptoTransactionCredited(id: number): Promise<boolean> {
-    const result = await db
-      .update(cryptoTransactions)
-      .set({ creditedAt: new Date() })
-      .where(
-        and(
-          eq(cryptoTransactions.id, id),
-          isNull(cryptoTransactions.creditedAt),
-        ),
-      )
-      .returning({ id: cryptoTransactions.id });
-    return result.length > 0;
+    const r = await financialDb.update(cryptoTransactions).set({ creditedAt: new Date() }).where(and(eq(cryptoTransactions.id, id), isNull(cryptoTransactions.creditedAt))).returning({ id: cryptoTransactions.id });
+    return r.length > 0;
   }
-
   async getCryptoTransactions(merchantId?: number): Promise<CryptoTransaction[]> {
-    if (merchantId) {
-      return db.select().from(cryptoTransactions).where(eq(cryptoTransactions.merchantId, merchantId)).orderBy(desc(cryptoTransactions.createdAt));
-    }
-    return db.select().from(cryptoTransactions).orderBy(desc(cryptoTransactions.createdAt));
+    if (merchantId) return financialDb.select().from(cryptoTransactions).where(eq(cryptoTransactions.merchantId, merchantId)).orderBy(desc(cryptoTransactions.createdAt));
+    return financialDb.select().from(cryptoTransactions).orderBy(desc(cryptoTransactions.createdAt));
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE FINANCIAL — crypto_balances
+  // ══════════════════════════════════════════════════════════════════════════
   async getCryptoBalances(merchantId: number): Promise<CryptoBalance[]> {
-    return db.select().from(cryptoBalances).where(eq(cryptoBalances.merchantId, merchantId));
+    return financialDb.select().from(cryptoBalances).where(eq(cryptoBalances.merchantId, merchantId));
   }
-
   async incrementCryptoBalance(merchantId: number, currency: string, amount: number): Promise<void> {
-    const [existing] = await db.select().from(cryptoBalances)
-      .where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
-    if (existing) {
-      const newBalance = (parseFloat(existing.balance) + amount).toFixed(8);
-      await db.update(cryptoBalances)
-        .set({ balance: newBalance, updatedAt: new Date() })
-        .where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
-    } else {
-      await db.insert(cryptoBalances).values({
-        merchantId,
-        currency,
-        balance: amount.toFixed(8),
-      });
-    }
+    const [ex] = await financialDb.select().from(cryptoBalances).where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
+    if (ex) await financialDb.update(cryptoBalances).set({ balance: (parseFloat(ex.balance) + amount).toFixed(8), updatedAt: new Date() }).where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
+    else    await financialDb.insert(cryptoBalances).values({ merchantId, currency, balance: amount.toFixed(8) });
   }
-
-  async getMerchantBySdkKey(sdkApiKey: string): Promise<Merchant | undefined> {
-    const [merchant] = await db.select().from(merchants).where(eq(merchants.sdkApiKey, sdkApiKey));
-    return merchant;
-  }
-
-  async enableMerchantSdk(merchantId: number, sdkApiKey: string): Promise<void> {
-    await db.update(merchants).set({ sdkEnabled: true, sdkApiKey }).where(eq(merchants.id, merchantId));
-  }
-
-  async disableMerchantSdk(merchantId: number): Promise<void> {
-    await db.update(merchants).set({ sdkEnabled: false, sdkApiKey: null }).where(eq(merchants.id, merchantId));
-  }
-
-  async createCryptoWithdrawalRequest(data: InsertCryptoWithdrawalRequest): Promise<CryptoWithdrawalRequest> {
-    const [req] = await db.insert(cryptoWithdrawalRequests).values(data).returning();
-    return req;
-  }
-
-  async getCryptoWithdrawalRequestsByMerchant(merchantId: number): Promise<CryptoWithdrawalRequest[]> {
-    return db.select().from(cryptoWithdrawalRequests)
-      .where(eq(cryptoWithdrawalRequests.merchantId, merchantId))
-      .orderBy(desc(cryptoWithdrawalRequests.createdAt));
-  }
-
-  async getAllCryptoWithdrawalRequests(): Promise<CryptoWithdrawalRequest[]> {
-    return db.select().from(cryptoWithdrawalRequests)
-      .orderBy(desc(cryptoWithdrawalRequests.createdAt));
-  }
-
-  async updateCryptoWithdrawalRequest(id: number, status: string, adminNote?: string): Promise<void> {
-    await db.update(cryptoWithdrawalRequests)
-      .set({ status, ...(adminNote !== undefined && { adminNote }), updatedAt: new Date() })
-      .where(eq(cryptoWithdrawalRequests.id, id));
-  }
-
   async deductCryptoBalance(merchantId: number, currency: string, amount: number): Promise<void> {
-    const [existing] = await db.select().from(cryptoBalances)
-      .where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
-    if (existing) {
-      const newBalance = Math.max(0, parseFloat(existing.balance) - amount).toFixed(8);
-      await db.update(cryptoBalances)
-        .set({ balance: newBalance, updatedAt: new Date() })
-        .where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
-    }
+    const [ex] = await financialDb.select().from(cryptoBalances).where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
+    if (ex) await financialDb.update(cryptoBalances).set({ balance: Math.max(0, parseFloat(ex.balance) - amount).toFixed(8), updatedAt: new Date() }).where(and(eq(cryptoBalances.merchantId, merchantId), eq(cryptoBalances.currency, currency)));
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE AUTH — merchant SDK
+  // ══════════════════════════════════════════════════════════════════════════
+  async getMerchantBySdkKey(sdkApiKey: string): Promise<Merchant | undefined> {
+    const [m] = await authDb.select().from(merchants).where(eq(merchants.sdkApiKey, sdkApiKey));
+    return m;
+  }
+  async enableMerchantSdk(merchantId: number, sdkApiKey: string): Promise<void> {
+    await authDb.update(merchants).set({ sdkEnabled: true, sdkApiKey }).where(eq(merchants.id, merchantId));
+  }
+  async disableMerchantSdk(merchantId: number): Promise<void> {
+    await authDb.update(merchants).set({ sdkEnabled: false, sdkApiKey: null }).where(eq(merchants.id, merchantId));
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE FINANCIAL — crypto_withdrawal_requests
+  // ══════════════════════════════════════════════════════════════════════════
+  async createCryptoWithdrawalRequest(data: InsertCryptoWithdrawalRequest): Promise<CryptoWithdrawalRequest> {
+    const [r] = await financialDb.insert(cryptoWithdrawalRequests).values(data).returning();
+    return r;
+  }
+  async getCryptoWithdrawalRequestsByMerchant(merchantId: number): Promise<CryptoWithdrawalRequest[]> {
+    return financialDb.select().from(cryptoWithdrawalRequests).where(eq(cryptoWithdrawalRequests.merchantId, merchantId)).orderBy(desc(cryptoWithdrawalRequests.createdAt));
+  }
+  async getAllCryptoWithdrawalRequests(): Promise<CryptoWithdrawalRequest[]> {
+    return financialDb.select().from(cryptoWithdrawalRequests).orderBy(desc(cryptoWithdrawalRequests.createdAt));
+  }
+  async updateCryptoWithdrawalRequest(id: number, status: string, adminNote?: string): Promise<void> {
+    await financialDb.update(cryptoWithdrawalRequests).set({ status, ...(adminNote !== undefined && { adminNote }), updatedAt: new Date() }).where(eq(cryptoWithdrawalRequests.id, id));
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE FINANCIAL — crypto_payment_links
+  // ══════════════════════════════════════════════════════════════════════════
   async createCryptoPaymentLink(data: InsertCryptoPaymentLink): Promise<CryptoPaymentLink> {
-    const [created] = await db.insert(cryptoPaymentLinks).values(data).returning();
-    return created;
+    const [l] = await financialDb.insert(cryptoPaymentLinks).values(data).returning();
+    return l;
   }
-
   async getCryptoPaymentLinkByUniqueId(uniqueId: string): Promise<CryptoPaymentLink | undefined> {
-    const [row] = await db.select().from(cryptoPaymentLinks).where(eq(cryptoPaymentLinks.uniqueId, uniqueId));
-    return row;
+    const [l] = await financialDb.select().from(cryptoPaymentLinks).where(eq(cryptoPaymentLinks.uniqueId, uniqueId));
+    return l;
   }
-
   async getCryptoPaymentLinksByMerchant(merchantId: number): Promise<CryptoPaymentLink[]> {
-    return db.select().from(cryptoPaymentLinks)
-      .where(eq(cryptoPaymentLinks.merchantId, merchantId))
-      .orderBy(desc(cryptoPaymentLinks.createdAt));
+    return financialDb.select().from(cryptoPaymentLinks).where(eq(cryptoPaymentLinks.merchantId, merchantId)).orderBy(desc(cryptoPaymentLinks.createdAt));
   }
-
   async deleteCryptoPaymentLink(id: number, merchantId: number): Promise<void> {
-    await db.delete(cryptoPaymentLinks)
-      .where(and(eq(cryptoPaymentLinks.id, id), eq(cryptoPaymentLinks.merchantId, merchantId)));
+    await financialDb.delete(cryptoPaymentLinks).where(and(eq(cryptoPaymentLinks.id, id), eq(cryptoPaymentLinks.merchantId, merchantId)));
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // COMMISSIONS — cross-DB (financial data + auth merchants)
+  // ══════════════════════════════════════════════════════════════════════════
   async getCommissionByMerchant(period: "today" | "month" | "all") {
-    const now = new Date();
+    const now      = new Date();
     const todayIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
     const monthIso = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-    const cutoff = period === "today" ? todayIso : period === "month" ? monthIso : null;
+    const cutoff   = period === "today" ? todayIso : period === "month" ? monthIso : null;
 
-    const txFilter = cutoff ? sql`AND t.created_at >= ${cutoff}::timestamp` : sql``;
-    const wdFilter = cutoff ? sql`AND w.processed_at >= ${cutoff}::timestamp` : sql``;
-    const wtFilter = cutoff ? sql`AND wt.processed_at >= ${cutoff}::timestamp` : sql``;
+    // 1. Marchands depuis Auth DB
+    const merchantRows = await authDb.select({ id: merchants.id, name: merchants.name, feeExempt: merchants.feeExempt }).from(merchants);
+    const mMap         = new Map(merchantRows.map(m => [m.id, m]));
+    const feeIds       = merchantRows.filter(m => m.feeExempt).map(m => m.id);
+    const exemptSql    = sql.raw(exemptClause(feeIds));
 
-    type Row = { merchant_id: string; merchant_name: string; net: string };
+    const txCutoff = cutoff ? sql` AND created_at >= ${cutoff}::timestamp` : sql``;
+    const wdCutoff = cutoff ? sql` AND processed_at >= ${cutoff}::timestamp` : sql``;
+    const wtCutoff = cutoff ? sql` AND processed_at >= ${cutoff}::timestamp` : sql``;
 
+    type Row = { merchant_id: string; net: string };
+
+    // 2. Agrégations sur Financial DB (sans JOIN merchants)
     const [txRows, wdRows, wtRows] = await Promise.all([
-      db.execute<Row>(sql`
-        SELECT t.merchant_id, m.name as merchant_name,
-          COALESCE(SUM(
-            CASE WHEN m.fee_exempt THEN -COALESCE(t.provider_fee, 0)
-            ELSE (t.amount - FLOOR(t.amount * CASE WHEN t.country IN ('Congo Brazzaville','Congo RDC') THEN 0.935 ELSE 0.945 END))
-                 - COALESCE(t.provider_fee, 0)
-            END
-          ), 0) as net
-        FROM transactions t
-        JOIN merchants m ON m.id = t.merchant_id
-        WHERE t.status IN ('confirmed','success','completed') AND t.amount > 0
-          AND (t.tx_id IS NULL OR t.tx_id NOT LIKE 'TR-%')
-          ${txFilter}
-        GROUP BY t.merchant_id, m.name
+      financialDb.execute<Row>(sql`
+        SELECT merchant_id,
+          COALESCE(SUM(CASE WHEN ${exemptSql} THEN -COALESCE(provider_fee,0)
+            ELSE (amount - FLOOR(amount * CASE WHEN country IN ('Congo Brazzaville','Congo RDC') THEN 0.935 ELSE 0.945 END))
+                 - COALESCE(provider_fee,0) END), 0) as net
+        FROM transactions
+        WHERE status IN ('confirmed','success','completed') AND amount > 0
+          AND (tx_id IS NULL OR tx_id NOT LIKE 'TR-%') ${txCutoff}
+        GROUP BY merchant_id
       `),
-      db.execute<Row>(sql`
-        SELECT w.merchant_id, m.name as merchant_name,
-          COALESCE(SUM(
-            CASE WHEN m.fee_exempt THEN -COALESCE(w.fees, 0)
-            ELSE FLOOR(w.amount * CASE WHEN w.country IN ('Congo Brazzaville','Congo RDC') THEN 0.055 ELSE 0.045 END)
-                 - COALESCE(w.fees, 0)
-            END
-          ), 0) as net
-        FROM withdrawals w
-        JOIN merchants m ON m.id = w.merchant_id
-        WHERE w.status = 'approved'
-          ${wdFilter}
-        GROUP BY w.merchant_id, m.name
+      financialDb.execute<Row>(sql`
+        SELECT merchant_id,
+          COALESCE(SUM(CASE WHEN ${exemptSql} THEN -COALESCE(fees,0)
+            ELSE FLOOR(amount * CASE WHEN country IN ('Congo Brazzaville','Congo RDC') THEN 0.055 ELSE 0.045 END)
+                 - COALESCE(fees,0) END), 0) as net
+        FROM withdrawals WHERE status = 'approved' ${wdCutoff}
+        GROUP BY merchant_id
       `),
-      db.execute<Row>(sql`
-        SELECT wt.merchant_id, m.name as merchant_name,
-          COALESCE(SUM(wt.fee), 0) as net
-        FROM wallet_transfers wt
-        JOIN merchants m ON m.id = wt.merchant_id
-        WHERE wt.status = 'approved'
-          ${wtFilter}
-        GROUP BY wt.merchant_id, m.name
+      financialDb.execute<Row>(sql`
+        SELECT merchant_id, COALESCE(SUM(fee), 0) as net
+        FROM wallet_transfers WHERE status = 'approved' ${wtCutoff}
+        GROUP BY merchant_id
       `),
     ]);
 
+    // 3. Fusion avec noms depuis Auth
     const map = new Map<number, { merchantId: number; merchantName: string; collectionBenefit: number; withdrawalBenefit: number; transferBenefit: number }>();
     for (const r of txRows.rows) {
       const id = Number(r.merchant_id);
-      map.set(id, { merchantId: id, merchantName: r.merchant_name, collectionBenefit: Number(r.net), withdrawalBenefit: 0, transferBenefit: 0 });
+      map.set(id, { merchantId: id, merchantName: mMap.get(id)?.name || "?", collectionBenefit: Number(r.net), withdrawalBenefit: 0, transferBenefit: 0 });
     }
     for (const r of wdRows.rows) {
-      const id = Number(r.merchant_id);
-      const ex = map.get(id);
+      const id = Number(r.merchant_id); const ex = map.get(id);
       if (ex) ex.withdrawalBenefit = Number(r.net);
-      else map.set(id, { merchantId: id, merchantName: r.merchant_name, collectionBenefit: 0, withdrawalBenefit: Number(r.net), transferBenefit: 0 });
+      else    map.set(id, { merchantId: id, merchantName: mMap.get(id)?.name || "?", collectionBenefit: 0, withdrawalBenefit: Number(r.net), transferBenefit: 0 });
     }
     for (const r of wtRows.rows) {
-      const id = Number(r.merchant_id);
-      const ex = map.get(id);
+      const id = Number(r.merchant_id); const ex = map.get(id);
       if (ex) ex.transferBenefit = Number(r.net);
-      else map.set(id, { merchantId: id, merchantName: r.merchant_name, collectionBenefit: 0, withdrawalBenefit: 0, transferBenefit: Number(r.net) });
+      else    map.set(id, { merchantId: id, merchantName: mMap.get(id)?.name || "?", collectionBenefit: 0, withdrawalBenefit: 0, transferBenefit: Number(r.net) });
     }
-
-    return Array.from(map.values())
-      .map(r => ({ ...r, totalBenefit: r.collectionBenefit + r.withdrawalBenefit + r.transferBenefit }))
-      .sort((a, b) => b.totalBenefit - a.totalBenefit);
+    return Array.from(map.values()).map(r => ({ ...r, totalBenefit: r.collectionBenefit + r.withdrawalBenefit + r.transferBenefit })).sort((a, b) => b.totalBenefit - a.totalBenefit);
   }
 
   async getCommissionByCountry(period: "today" | "month" | "all") {
-    const now = new Date();
+    const now      = new Date();
     const todayIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
     const monthIso = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-    const cutoff = period === "today" ? todayIso : period === "month" ? monthIso : null;
+    const cutoff   = period === "today" ? todayIso : period === "month" ? monthIso : null;
 
-    const txFilter = cutoff ? sql`AND t.created_at >= ${cutoff}::timestamp` : sql``;
-    const wdFilter = cutoff ? sql`AND w.processed_at >= ${cutoff}::timestamp` : sql``;
+    const feeIds    = await getFeeExemptIds();
+    const exemptSql = sql.raw(exemptClause(feeIds));
+
+    const txCutoff = cutoff ? sql` AND t.created_at >= ${cutoff}::timestamp` : sql``;
+    const wdCutoff = cutoff ? sql` AND w.processed_at >= ${cutoff}::timestamp` : sql``;
 
     type TxRow = { country: string; net: string };
-
     const [txRows, wdRows] = await Promise.all([
-      db.execute<TxRow>(sql`
-        SELECT t.country,
-          COALESCE(SUM(
-            CASE WHEN m.fee_exempt THEN -COALESCE(t.provider_fee, 0)
-            ELSE (t.amount - FLOOR(t.amount * CASE WHEN t.country IN ('Congo Brazzaville','Congo RDC') THEN 0.935 ELSE 0.945 END))
-                 - COALESCE(t.provider_fee, 0)
-            END
-          ), 0) as net
+      financialDb.execute<TxRow>(sql`
+        SELECT country, COALESCE(SUM(CASE WHEN ${exemptSql} THEN -COALESCE(provider_fee,0)
+          ELSE (amount - FLOOR(amount * CASE WHEN country IN ('Congo Brazzaville','Congo RDC') THEN 0.935 ELSE 0.945 END))
+               - COALESCE(provider_fee,0) END), 0) as net
         FROM transactions t
-        JOIN merchants m ON m.id = t.merchant_id
-        WHERE t.status IN ('confirmed','success','completed') AND t.amount > 0
-          AND (t.tx_id IS NULL OR t.tx_id NOT LIKE 'TR-%')
-          ${txFilter}
-        GROUP BY t.country
+        WHERE status IN ('confirmed','success','completed') AND amount > 0
+          AND (tx_id IS NULL OR tx_id NOT LIKE 'TR-%') ${txCutoff}
+        GROUP BY country
       `),
-      db.execute<TxRow>(sql`
-        SELECT w.country,
-          COALESCE(SUM(
-            CASE WHEN m.fee_exempt THEN -COALESCE(w.fees, 0)
-            ELSE FLOOR(w.amount * CASE WHEN w.country IN ('Congo Brazzaville','Congo RDC') THEN 0.055 ELSE 0.045 END)
-                 - COALESCE(w.fees, 0)
-            END
-          ), 0) as net
-        FROM withdrawals w
-        JOIN merchants m ON m.id = w.merchant_id
-        WHERE w.status = 'approved'
-          ${wdFilter}
-        GROUP BY w.country
+      financialDb.execute<TxRow>(sql`
+        SELECT country, COALESCE(SUM(CASE WHEN ${exemptSql} THEN -COALESCE(fees,0)
+          ELSE FLOOR(amount * CASE WHEN country IN ('Congo Brazzaville','Congo RDC') THEN 0.055 ELSE 0.045 END)
+               - COALESCE(fees,0) END), 0) as net
+        FROM withdrawals w WHERE status = 'approved' ${wdCutoff}
+        GROUP BY country
       `),
     ]);
-
     const map = new Map<string, { country: string; collectionBenefit: number; withdrawalBenefit: number }>();
     for (const r of txRows.rows) {
       const c = r.country || "Inconnu";
       map.set(c, { country: c, collectionBenefit: Number(r.net), withdrawalBenefit: 0 });
     }
     for (const r of wdRows.rows) {
-      const c = r.country || "Inconnu";
-      const ex = map.get(c);
+      const c = r.country || "Inconnu"; const ex = map.get(c);
       if (ex) ex.withdrawalBenefit = Number(r.net);
-      else map.set(c, { country: c, collectionBenefit: 0, withdrawalBenefit: Number(r.net) });
+      else    map.set(c, { country: c, collectionBenefit: 0, withdrawalBenefit: Number(r.net) });
     }
-
-    return Array.from(map.values())
-      .map(r => ({ ...r, totalBenefit: r.collectionBenefit + r.withdrawalBenefit }))
-      .sort((a, b) => b.totalBenefit - a.totalBenefit);
+    return Array.from(map.values()).map(r => ({ ...r, totalBenefit: r.collectionBenefit + r.withdrawalBenefit })).sort((a, b) => b.totalBenefit - a.totalBenefit);
   }
 
-  async getAllowedIps(): Promise<AllowedIp[]> {
-    return db.select().from(allowedIps).orderBy(desc(allowedIps.createdAt));
-  }
-
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE AUTH — allowed_ips, blocked_ips, blocked_devices
+  // ══════════════════════════════════════════════════════════════════════════
+  async getAllowedIps(): Promise<AllowedIp[]> { return authDb.select().from(allowedIps).orderBy(desc(allowedIps.createdAt)); }
   async isIpAllowed(ip: string): Promise<boolean> {
-    const all = await db.select({ id: allowedIps.id }).from(allowedIps);
+    const all = await authDb.select({ id: allowedIps.id }).from(allowedIps);
     if (all.length === 0) return true;
-    const hit = await db.select({ id: allowedIps.id }).from(allowedIps).where(eq(allowedIps.ipAddress, ip)).limit(1);
+    const hit = await authDb.select({ id: allowedIps.id }).from(allowedIps).where(eq(allowedIps.ipAddress, ip)).limit(1);
     return hit.length > 0;
   }
-
   async addAllowedIp(data: InsertAllowedIp): Promise<AllowedIp> {
-    const [row] = await db.insert(allowedIps).values(data).onConflictDoUpdate({
-      target: allowedIps.ipAddress,
-      set: { userEmail: data.userEmail, role: data.role, note: data.note, createdBy: data.createdBy },
-    }).returning();
-    return row;
+    const [r] = await authDb.insert(allowedIps).values(data).onConflictDoUpdate({ target: allowedIps.ipAddress, set: { userEmail: data.userEmail, role: data.role, note: data.note, createdBy: data.createdBy } }).returning();
+    return r;
   }
+  async removeAllowedIp(id: number): Promise<void> { await authDb.delete(allowedIps).where(eq(allowedIps.id, id)); }
 
-  async removeAllowedIp(id: number): Promise<void> {
-    await db.delete(allowedIps).where(eq(allowedIps.id, id));
-  }
-
-  async getBlockedIps(): Promise<BlockedIp[]> {
-    return db.select().from(blockedIps).orderBy(desc(blockedIps.createdAt));
-  }
-
+  async getBlockedIps(): Promise<BlockedIp[]> { return authDb.select().from(blockedIps).orderBy(desc(blockedIps.createdAt)); }
   async isIpBlocked(ip: string): Promise<boolean> {
     const cleanIp = ip.replace(/^::ffff:/, "");
-    const hit = await db.select({ id: blockedIps.id }).from(blockedIps)
-      .where(eq(blockedIps.ipAddress, cleanIp)).limit(1);
+    const hit = await authDb.select({ id: blockedIps.id }).from(blockedIps).where(eq(blockedIps.ipAddress, cleanIp)).limit(1);
     return hit.length > 0;
   }
-
   async addBlockedIp(data: InsertBlockedIp): Promise<BlockedIp> {
-    const [row] = await db.insert(blockedIps).values(data).onConflictDoUpdate({
-      target: blockedIps.ipAddress,
-      set: { reason: data.reason, blockedBy: data.blockedBy, country: data.country, city: data.city },
-    }).returning();
-    return row;
+    const [r] = await authDb.insert(blockedIps).values(data).onConflictDoUpdate({ target: blockedIps.ipAddress, set: { reason: data.reason, blockedBy: data.blockedBy, country: data.country, city: data.city } }).returning();
+    return r;
   }
+  async removeBlockedIp(id: number): Promise<void> { await authDb.delete(blockedIps).where(eq(blockedIps.id, id)); }
 
-  async removeBlockedIp(id: number): Promise<void> {
-    await db.delete(blockedIps).where(eq(blockedIps.id, id));
-  }
-
-  async getBlockedDevices(): Promise<BlockedDevice[]> {
-    return db.select().from(blockedDevices).orderBy(desc(blockedDevices.createdAt));
-  }
-
+  async getBlockedDevices(): Promise<BlockedDevice[]> { return authDb.select().from(blockedDevices).orderBy(desc(blockedDevices.createdAt)); }
   async isDeviceBlocked(fingerprint: string): Promise<boolean> {
-    const hit = await db.select({ id: blockedDevices.id }).from(blockedDevices)
-      .where(eq(blockedDevices.fingerprint, fingerprint)).limit(1);
+    const hit = await authDb.select({ id: blockedDevices.id }).from(blockedDevices).where(eq(blockedDevices.fingerprint, fingerprint)).limit(1);
     return hit.length > 0;
   }
-
   async addBlockedDevice(data: InsertBlockedDevice): Promise<BlockedDevice> {
-    const [row] = await db.insert(blockedDevices).values(data).onConflictDoUpdate({
-      target: blockedDevices.fingerprint,
-      set: { reason: data.reason, blockedBy: data.blockedBy, ipAddress: data.ipAddress, userAgent: data.userAgent },
-    }).returning();
-    return row;
+    const [r] = await authDb.insert(blockedDevices).values(data).onConflictDoUpdate({ target: blockedDevices.fingerprint, set: { reason: data.reason, blockedBy: data.blockedBy, ipAddress: data.ipAddress, userAgent: data.userAgent } }).returning();
+    return r;
   }
+  async removeBlockedDevice(id: number): Promise<void> { await authDb.delete(blockedDevices).where(eq(blockedDevices.id, id)); }
 
-  async removeBlockedDevice(id: number): Promise<void> {
-    await db.delete(blockedDevices).where(eq(blockedDevices.id, id));
-  }
-
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE FINANCIAL — security_logs
+  // ══════════════════════════════════════════════════════════════════════════
   async createSecurityLog(data: InsertSecurityLog): Promise<SecurityLog> {
-    const [row] = await db.insert(securityLogs).values(data).returning();
-    return row;
+    const [r] = await financialDb.insert(securityLogs).values(data).returning();
+    return r;
   }
-
   async getSecurityLogs(limit = 50): Promise<SecurityLog[]> {
-    return db.select().from(securityLogs).orderBy(desc(securityLogs.createdAt)).limit(limit);
+    return financialDb.select().from(securityLogs).orderBy(desc(securityLogs.createdAt)).limit(limit);
   }
 
-  // ── Devices ──────────────────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE AUTH — devices
+  // ══════════════════════════════════════════════════════════════════════════
   async getDeviceByFingerprint(userId: number, userRole: string, deviceId: string): Promise<Device | undefined> {
-    const [row] = await db.select().from(devices)
-      .where(and(eq(devices.userId, userId), eq(devices.userRole, userRole), eq(devices.deviceId, deviceId)))
-      .limit(1);
-    return row;
+    const [d] = await authDb.select().from(devices).where(and(eq(devices.userId, userId), eq(devices.userRole, userRole), eq(devices.deviceId, deviceId))).limit(1);
+    return d;
   }
-
   async upsertDevice(data: InsertDevice & { userId: number; userRole: string }): Promise<Device> {
-    const existing = await this.getDeviceByFingerprint(data.userId, data.userRole, data.deviceId);
-    if (existing) {
-      const [updated] = await db.update(devices)
-        .set({ lastSeen: new Date(), ipAddress: data.ipAddress, country: data.country, city: data.city })
-        .where(eq(devices.id, existing.id))
-        .returning();
-      return updated;
+    const ex = await this.getDeviceByFingerprint(data.userId, data.userRole, data.deviceId);
+    if (ex) {
+      const [u] = await authDb.update(devices).set({ lastSeen: new Date(), ipAddress: data.ipAddress, country: data.country, city: data.city }).where(eq(devices.id, ex.id)).returning();
+      return u;
     }
-    const [row] = await db.insert(devices).values({ ...data, lastSeen: new Date() }).returning();
-    return row;
+    const [r] = await authDb.insert(devices).values({ ...data, lastSeen: new Date() }).returning();
+    return r;
   }
-
-  async trustDevice(id: number): Promise<void> {
-    await db.update(devices).set({ isTrusted: true }).where(eq(devices.id, id));
-  }
-
+  async trustDevice(id: number): Promise<void> { await authDb.update(devices).set({ isTrusted: true }).where(eq(devices.id, id)); }
   async blockDeviceById(id: number): Promise<void> {
-    const [d] = await db.select().from(devices).where(eq(devices.id, id));
-    if (d) {
-      await db.insert(blockedDevices).values({
-        fingerprint: d.deviceId,
-        ipAddress: d.ipAddress,
-        userAgent: d.browser,
-        reason: "Bloqué via dashboard",
-        blockedBy: "admin",
-      }).onConflictDoNothing();
-    }
-    await db.delete(devices).where(eq(devices.id, id));
+    const [d] = await authDb.select().from(devices).where(eq(devices.id, id));
+    if (d) await authDb.insert(blockedDevices).values({ fingerprint: d.deviceId, ipAddress: d.ipAddress, userAgent: d.browser, reason: "Bloqué via dashboard", blockedBy: "admin" }).onConflictDoNothing();
+    await authDb.delete(devices).where(eq(devices.id, id));
   }
-
   async getDevicesForUser(userId: number, userRole: string): Promise<Device[]> {
-    return db.select().from(devices)
-      .where(and(eq(devices.userId, userId), eq(devices.userRole, userRole)))
-      .orderBy(desc(devices.lastSeen));
+    return authDb.select().from(devices).where(and(eq(devices.userId, userId), eq(devices.userRole, userRole))).orderBy(desc(devices.lastSeen));
   }
-
   async getAllDevices(limit = 100): Promise<Device[]> {
-    return db.select().from(devices).orderBy(desc(devices.lastSeen)).limit(limit);
+    return authDb.select().from(devices).orderBy(desc(devices.lastSeen)).limit(limit);
   }
+  async deleteDevice(id: number): Promise<void> { await authDb.delete(devices).where(eq(devices.id, id)); }
 
-  async deleteDevice(id: number): Promise<void> {
-    await db.delete(devices).where(eq(devices.id, id));
-  }
-
-  // ── Admin OTP ─────────────────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE AUTH — admin_otp_codes
+  // ══════════════════════════════════════════════════════════════════════════
   async createAdminOtp(email: string, code: string, expiresAt: Date): Promise<void> {
-    await db.delete(adminOtpCodes).where(eq(adminOtpCodes.email, email));
-    await db.insert(adminOtpCodes).values({ email, code, expiresAt });
+    await authDb.delete(adminOtpCodes).where(eq(adminOtpCodes.email, email));
+    await authDb.insert(adminOtpCodes).values({ email, code, expiresAt });
   }
-
   async getAdminOtp(email: string): Promise<{ code: string; expiresAt: Date } | undefined> {
-    const [row] = await db.select().from(adminOtpCodes).where(eq(adminOtpCodes.email, email)).limit(1);
-    if (!row) return undefined;
-    return { code: row.code, expiresAt: row.expiresAt };
+    const [r] = await authDb.select().from(adminOtpCodes).where(eq(adminOtpCodes.email, email)).limit(1);
+    return r ? { code: r.code, expiresAt: r.expiresAt } : undefined;
   }
+  async deleteAdminOtp(email: string): Promise<void> { await authDb.delete(adminOtpCodes).where(eq(adminOtpCodes.email, email)); }
 
-  async deleteAdminOtp(email: string): Promise<void> {
-    await db.delete(adminOtpCodes).where(eq(adminOtpCodes.email, email));
-  }
-
-  // ── Merchant login OTP (DB-backed) ────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE AUTH — merchant_login_otps
+  // ══════════════════════════════════════════════════════════════════════════
   async createMerchantLoginOtp(email: string, otpHash: string, tempToken: string, expiresAt: Date): Promise<void> {
-    await db.delete(merchantLoginOtps).where(eq(merchantLoginOtps.email, email));
-    await db.insert(merchantLoginOtps).values({ email, otpHash, tempToken, expiresAt, used: false, attempts: 0 });
+    await authDb.delete(merchantLoginOtps).where(eq(merchantLoginOtps.email, email));
+    await authDb.insert(merchantLoginOtps).values({ email, otpHash, tempToken, expiresAt, used: false, attempts: 0 });
   }
-
   async getMerchantLoginOtp(email: string): Promise<{ otpHash: string; tempToken: string; expiresAt: Date; used: boolean; attempts: number } | undefined> {
-    const [row] = await db.select().from(merchantLoginOtps).where(eq(merchantLoginOtps.email, email)).limit(1);
-    if (!row) return undefined;
-    return { otpHash: row.otpHash, tempToken: row.tempToken, expiresAt: row.expiresAt, used: row.used, attempts: row.attempts };
+    const [r] = await authDb.select().from(merchantLoginOtps).where(eq(merchantLoginOtps.email, email)).limit(1);
+    return r ? { otpHash: r.otpHash, tempToken: r.tempToken, expiresAt: r.expiresAt, used: r.used, attempts: r.attempts } : undefined;
   }
-
-  async deleteMerchantLoginOtp(email: string): Promise<void> {
-    await db.delete(merchantLoginOtps).where(eq(merchantLoginOtps.email, email));
-  }
-
+  async deleteMerchantLoginOtp(email: string): Promise<void> { await authDb.delete(merchantLoginOtps).where(eq(merchantLoginOtps.email, email)); }
   async incrementMerchantLoginOtpAttempts(email: string): Promise<void> {
-    await db.update(merchantLoginOtps)
-      .set({ attempts: sql`${merchantLoginOtps.attempts} + 1` })
-      .where(eq(merchantLoginOtps.email, email));
+    await authDb.update(merchantLoginOtps).set({ attempts: sql`${merchantLoginOtps.attempts} + 1` }).where(eq(merchantLoginOtps.email, email));
   }
 }
 

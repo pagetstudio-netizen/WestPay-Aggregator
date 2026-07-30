@@ -1,41 +1,101 @@
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
-import * as schema from "@shared/schema";
 
-const dbUrl = process.env.SUPABASE_DATABASE_URL || process.env.CUSTOM_DATABASE_URL || process.env.DATABASE_URL;
-if (!dbUrl) {
-  throw new Error("SUPABASE_DATABASE_URL, CUSTOM_DATABASE_URL ou DATABASE_URL doit être défini");
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function sslFor(url: string) {
+  return url.includes("localhost") || url.includes("127.0.0.1") || url.includes("/var/run")
+    ? false
+    : { rejectUnauthorized: false };
+}
+const POOL_CFG = { max: 10, connectionTimeoutMillis: 8000, idleTimeoutMillis: 30000, statement_timeout: 15000 };
+
+// ╔══════════════════════════════════════════════════════════════════════════════╗
+// ║  BASE 1 — AUTH / CONFIG  →  Supabase  (AUTH_DATABASE_URL)                  ║
+// ║  Tables : admins, merchants, merchant_pins, settings, numbers,              ║
+// ║           allowed_ips, blocked_ips, blocked_devices, devices,              ║
+// ║           admin_otp_codes, merchant_login_otps, telegram_activation_codes, ║
+// ║           withdrawal_operators, wallet_transfer_countries,                 ║
+// ║           crypto_aggregators, crypto_aggregator_countries,                 ║
+// ║           crypto_aggregator_merchants                                       ║
+// ╚══════════════════════════════════════════════════════════════════════════════╝
+const authUrl = process.env.AUTH_DATABASE_URL;
+if (!authUrl) throw new Error("AUTH_DATABASE_URL doit être défini");
+
+export const authPool = new Pool({ connectionString: authUrl, ssl: sslFor(authUrl), ...POOL_CFG });
+export const authDb   = drizzle(authPool);
+
+// ╔══════════════════════════════════════════════════════════════════════════════╗
+// ║  BASE 2 — FINANCIER  →  Neon  (FINANCIAL_DATABASE_URL)                      ║
+// ║  Tables : transactions, merchant_countries, withdrawals, pending_payments,  ║
+// ║           wallet_transfers, payment_links, crypto_transactions,             ║
+// ║           crypto_balances, crypto_withdrawal_requests,                      ║
+// ║           crypto_payment_links, sms_logs, api_logs, webhook_logs,          ║
+// ║           login_logs, security_logs, stats_baselines, knowledge_chunks      ║
+// ╚══════════════════════════════════════════════════════════════════════════════╝
+const financialUrl = process.env.FINANCIAL_DATABASE_URL;
+if (!financialUrl) throw new Error("FINANCIAL_DATABASE_URL doit être défini");
+
+export const financialPool = new Pool({ connectionString: financialUrl, ssl: sslFor(financialUrl), ...POOL_CFG });
+export const financialDb   = drizzle(financialPool);
+
+// ── Compatibilité rétrograde (routes.ts, telegram-bot.ts, knowledge.ts) ────────
+// db → authDb   (tables auth directement dans routes.ts : settings, admins)
+// pool → authPool (allowed_ips, blocked_ips dans telegram-bot.ts)
+export const db   = authDb;
+export const pool = authPool;
+
+// ── Chiffrement AES-256-GCM (clés API, webhookSecret, etc.) ──────────────────
+const ENC_KEY = process.env.ENCRYPTION_KEY;
+const ALGO = "aes-256-gcm" as const;
+
+export function encrypt(text: string): string {
+  if (!ENC_KEY || !text) return text;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const crypto = require("crypto") as typeof import("crypto");
+  const key    = Buffer.from(ENC_KEY, "hex");
+  const iv     = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv(ALGO, key, iv);
+  const enc    = Buffer.concat([cipher.update(text, "utf8"), cipher.final()]);
+  const tag    = cipher.getAuthTag();
+  return `enc:${iv.toString("hex")}:${tag.toString("hex")}:${enc.toString("hex")}`;
 }
 
-export const pool = new Pool({
-  connectionString: dbUrl,
-  ssl: dbUrl.includes("localhost") || dbUrl.includes("127.0.0.1") || dbUrl.includes("/var/run")
-    ? false
-    : { rejectUnauthorized: false },
-  max: 10,
-  // Timeout d'acquisition d'une connexion depuis le pool (évite les hangs infinis)
-  connectionTimeoutMillis: 8000,
-  // Timeout d'inactivité — libère les connexions idle après 30s
-  idleTimeoutMillis: 30000,
-  // Statement timeout côté serveur Postgres — tue toute requête > 15s
-  statement_timeout: 15000,
-});
-
-export const db = drizzle(pool, { schema });
-
-export async function runMigrations() {
-  const client = await pool.connect();
+export function decrypt(text: string): string {
+  if (!ENC_KEY || !text || !text.startsWith("enc:")) return text;
   try {
-    // ─── Toutes les migrations dans une seule transaction pour maximiser la vitesse ───
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const crypto   = require("crypto") as typeof import("crypto");
+    const key      = Buffer.from(ENC_KEY, "hex");
+    const parts    = text.split(":");
+    const iv       = Buffer.from(parts[1], "hex");
+    const tag      = Buffer.from(parts[2], "hex");
+    const encBuf   = Buffer.from(parts[3], "hex");
+    const decipher = crypto.createDecipheriv(ALGO, key, iv);
+    decipher.setAuthTag(tag);
+    return decipher.update(encBuf).toString("utf8") + decipher.final("utf8");
+  } catch {
+    return text; // graceful fallback — valeur stockée en clair
+  }
+}
+
+// ╔══════════════════════════════════════════════════════════════════════════════╗
+// ║  MIGRATIONS BASE AUTH (Supabase)                                            ║
+// ╚══════════════════════════════════════════════════════════════════════════════╝
+export async function runAuthMigrations() {
+  const client = await authPool.connect();
+  try {
     await client.query("BEGIN");
 
-    // ── Tables de base ──────────────────────────────────────────────────────────────
+    // ── Tables principales ───────────────────────────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS admins (
         id serial PRIMARY KEY,
         email text NOT NULL UNIQUE,
         password_hash text NOT NULL,
         api_key text NOT NULL,
+        totp_secret text,
+        totp_enabled boolean NOT NULL DEFAULT false,
+        token_invalidated_at timestamp,
         created_at timestamp DEFAULT now() NOT NULL
       );
 
@@ -46,70 +106,18 @@ export async function runMigrations() {
         slug text NOT NULL UNIQUE,
         password_hash text NOT NULL,
         suspended boolean NOT NULL DEFAULT false,
+        fee_exempt boolean NOT NULL DEFAULT false,
         webhook_url text,
         webhook_secret text,
         telegram_chat_id text,
+        telegram_bot_language text NOT NULL DEFAULT 'fr',
+        withdrawal_mode text NOT NULL DEFAULT 'manual',
+        website text,
         crypto_api_key text,
-        created_at timestamp DEFAULT now() NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS merchant_countries (
-        id serial PRIMARY KEY,
-        merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-        country text NOT NULL,
-        api_key text NOT NULL,
-        balance integer NOT NULL DEFAULT 0,
-        active boolean NOT NULL DEFAULT true,
-        omnipay_enabled boolean NOT NULL DEFAULT false
-      );
-
-      CREATE TABLE IF NOT EXISTS transactions (
-        id serial PRIMARY KEY,
-        merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-        country text NOT NULL,
-        tx_id text NOT NULL UNIQUE,
-        amount integer NOT NULL,
-        payer_number text,
-        status text NOT NULL DEFAULT 'confirmed',
-        provider text NOT NULL DEFAULT 'sms',
-        omnipay_tx_id text,
-        created_at timestamp DEFAULT now() NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS sms_logs (
-        id serial PRIMARY KEY,
-        from_sim text NOT NULL,
-        sms_text text NOT NULL,
-        parsed boolean NOT NULL DEFAULT false,
-        error_message text,
-        parsed_amount integer,
-        parsed_tx_id text,
-        parsed_payer text,
-        created_at timestamp DEFAULT now() NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS numbers (
-        id serial PRIMARY KEY,
-        phone_number text NOT NULL,
-        country text NOT NULL,
-        operator text,
-        status text NOT NULL DEFAULT 'active',
-        merchant_id integer REFERENCES merchants(id) ON DELETE SET NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS settings (
-        id serial PRIMARY KEY,
-        key text NOT NULL UNIQUE,
-        value text NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS login_logs (
-        id serial PRIMARY KEY,
-        user_id integer NOT NULL,
-        role text NOT NULL,
-        ip text,
-        device text,
-        success boolean NOT NULL DEFAULT true,
+        sdk_enabled boolean NOT NULL DEFAULT false,
+        sdk_api_key text,
+        withdrawals_disabled boolean NOT NULL DEFAULT false,
+        token_invalidated_at timestamp,
         created_at timestamp DEFAULT now() NOT NULL
       );
 
@@ -121,191 +129,19 @@ export async function runMigrations() {
         updated_at timestamp DEFAULT now() NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS api_logs (
+      CREATE TABLE IF NOT EXISTS settings (
         id serial PRIMARY KEY,
-        merchant_id integer REFERENCES merchants(id) ON DELETE SET NULL,
-        action text NOT NULL,
-        ip text,
-        description text,
-        created_at timestamp DEFAULT now() NOT NULL
+        key text NOT NULL UNIQUE,
+        value text NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS pending_payments (
+      CREATE TABLE IF NOT EXISTS numbers (
         id serial PRIMARY KEY,
-        merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+        phone_number text NOT NULL,
         country text NOT NULL,
-        amount integer NOT NULL,
-        payer_phone text,
-        payer_name text,
-        payment_method text NOT NULL,
-        tx_id text,
-        status text NOT NULL DEFAULT 'pending',
-        redirect_url text,
-        omnipay_reference text,
-        omnipay_tx_id text,
-        omnipay_payment_url text,
-        expires_at timestamp NOT NULL,
-        created_at timestamp DEFAULT now() NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS webhook_logs (
-        id serial PRIMARY KEY,
-        merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-        url text NOT NULL,
-        payload text NOT NULL,
-        status_code integer,
-        response text,
-        success boolean NOT NULL DEFAULT false,
-        created_at timestamp DEFAULT now() NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS telegram_activation_codes (
-        id serial PRIMARY KEY,
-        merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-        code text NOT NULL UNIQUE,
-        used boolean NOT NULL DEFAULT false,
-        expires_at timestamp NOT NULL,
-        created_at timestamp DEFAULT now() NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS payment_links (
-        id serial PRIMARY KEY,
-        merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-        unique_id text NOT NULL UNIQUE,
-        name text NOT NULL,
-        amount_type text NOT NULL DEFAULT 'fixed',
-        amount integer,
-        redirect_url text,
-        expires_at timestamp,
-        payment_limit integer,
-        payment_count integer NOT NULL DEFAULT 0,
-        total_revenue integer NOT NULL DEFAULT 0,
-        last_payment_at timestamp,
-        active boolean NOT NULL DEFAULT true,
-        created_at timestamp DEFAULT now() NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS wallet_transfer_countries (
-        id serial PRIMARY KEY,
-        country text NOT NULL UNIQUE,
-        currency_zone text NOT NULL,
-        active boolean NOT NULL DEFAULT true,
-        created_at timestamp DEFAULT now() NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS wallet_transfers (
-        id serial PRIMARY KEY,
-        merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-        from_country_id integer NOT NULL,
-        to_country_id integer NOT NULL,
-        from_country text NOT NULL,
-        to_country text NOT NULL,
-        currency text NOT NULL,
-        amount integer NOT NULL,
-        fee integer NOT NULL DEFAULT 0,
-        net_amount integer NOT NULL,
-        status text NOT NULL DEFAULT 'pending',
-        admin_note text,
-        created_at timestamp DEFAULT now() NOT NULL,
-        processed_at timestamp
-      );
-
-      CREATE TABLE IF NOT EXISTS withdrawals (
-        id serial PRIMARY KEY,
-        merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-        merchant_country_id integer NOT NULL,
-        country text NOT NULL,
-        amount integer NOT NULL,
-        phone text NOT NULL,
-        status text NOT NULL DEFAULT 'pending',
-        withdrawal_mode text NOT NULL DEFAULT 'manual',
-        admin_note text,
-        created_at timestamp DEFAULT now() NOT NULL,
-        processed_at timestamp
-      );
-
-      CREATE TABLE IF NOT EXISTS withdrawal_operators (
-        id serial PRIMARY KEY,
-        name text NOT NULL,
-        type text NOT NULL DEFAULT 'Mobile Money',
-        country text NOT NULL,
-        daily_limit integer NOT NULL DEFAULT 1000000,
-        gateway text NOT NULL DEFAULT 'OmniPay',
-        active boolean NOT NULL DEFAULT true,
-        maintenance_all boolean NOT NULL DEFAULT false,
-        maintenance_deposits boolean NOT NULL DEFAULT false,
-        maintenance_withdrawals boolean NOT NULL DEFAULT false,
-        maintenance_payment_links boolean NOT NULL DEFAULT false,
-        maintenance_api_payment boolean NOT NULL DEFAULT false,
-        created_at timestamp DEFAULT now() NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS crypto_aggregators (
-        id serial PRIMARY KEY,
-        name text NOT NULL,
-        type text NOT NULL DEFAULT 'oxapay',
-        api_key text NOT NULL,
-        active boolean NOT NULL DEFAULT true,
-        created_at timestamp DEFAULT now() NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS crypto_transactions (
-        id serial PRIMARY KEY,
-        aggregator_id integer NOT NULL REFERENCES crypto_aggregators(id) ON DELETE CASCADE,
-        merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-        track_id text NOT NULL UNIQUE,
-        amount text NOT NULL,
-        currency text NOT NULL DEFAULT 'USD',
-        pay_currency text,
-        pay_amount text,
-        status text NOT NULL DEFAULT 'pending',
-        wallet_address text,
-        network text,
-        tx_hash text,
-        order_id text,
-        description text,
-        callback_url text,
-        return_url text,
-        credited_at timestamp,
-        created_at timestamp DEFAULT now() NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS crypto_balances (
-        id serial PRIMARY KEY,
-        merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-        currency text NOT NULL,
-        balance text NOT NULL DEFAULT '0',
-        updated_at timestamp DEFAULT now() NOT NULL,
-        UNIQUE(merchant_id, currency)
-      );
-
-      CREATE TABLE IF NOT EXISTS crypto_withdrawal_requests (
-        id serial PRIMARY KEY,
-        merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-        currency text NOT NULL,
-        amount text NOT NULL,
-        fee_amount text NOT NULL DEFAULT '0',
-        net_amount text NOT NULL DEFAULT '0',
-        wallet_address text NOT NULL,
-        network text,
-        status text NOT NULL DEFAULT 'pending',
-        admin_note text,
-        created_at timestamp NOT NULL DEFAULT now(),
-        updated_at timestamp NOT NULL DEFAULT now()
-      );
-
-      CREATE TABLE IF NOT EXISTS crypto_payment_links (
-        id serial PRIMARY KEY,
-        merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
-        unique_id text NOT NULL UNIQUE,
-        name text NOT NULL,
-        currency text NOT NULL DEFAULT 'USDT',
-        amount_type text NOT NULL DEFAULT 'fixed',
-        amount text,
-        description text,
-        return_url text,
-        active boolean NOT NULL DEFAULT true,
-        created_at timestamp DEFAULT now() NOT NULL
+        operator text,
+        status text NOT NULL DEFAULT 'active',
+        merchant_id integer REFERENCES merchants(id) ON DELETE SET NULL
       );
 
       CREATE TABLE IF NOT EXISTS allowed_ips (
@@ -340,18 +176,6 @@ export async function runMigrations() {
         created_at timestamp DEFAULT now() NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS security_logs (
-        id serial PRIMARY KEY,
-        event_type text NOT NULL,
-        user_email text,
-        ip text,
-        fingerprint text,
-        action text,
-        details text,
-        telegram_admin text,
-        created_at timestamp DEFAULT now() NOT NULL
-      );
-
       CREATE TABLE IF NOT EXISTS devices (
         id serial PRIMARY KEY,
         user_id integer NOT NULL,
@@ -374,67 +198,7 @@ export async function runMigrations() {
         expires_at timestamp NOT NULL,
         created_at timestamp DEFAULT now() NOT NULL
       );
-    `);
 
-    // ── Colonnes ajoutées progressivement (idempotentes) ──────────────────────────
-    await client.query(`
-      ALTER TABLE merchants ADD COLUMN IF NOT EXISTS webhook_url text;
-      ALTER TABLE merchants ADD COLUMN IF NOT EXISTS webhook_secret text;
-      ALTER TABLE merchants ADD COLUMN IF NOT EXISTS telegram_chat_id text;
-      ALTER TABLE merchants ADD COLUMN IF NOT EXISTS telegram_bot_language text NOT NULL DEFAULT 'fr';
-      ALTER TABLE merchants ADD COLUMN IF NOT EXISTS withdrawal_mode text NOT NULL DEFAULT 'manual';
-      ALTER TABLE merchants ADD COLUMN IF NOT EXISTS website text;
-      ALTER TABLE merchants ADD COLUMN IF NOT EXISTS fee_exempt boolean NOT NULL DEFAULT false;
-      ALTER TABLE merchants ADD COLUMN IF NOT EXISTS crypto_api_key text;
-      ALTER TABLE merchants ADD COLUMN IF NOT EXISTS sdk_enabled boolean NOT NULL DEFAULT false;
-      ALTER TABLE merchants ADD COLUMN IF NOT EXISTS sdk_api_key text;
-      ALTER TABLE merchant_countries ADD COLUMN IF NOT EXISTS omnipay_enabled boolean NOT NULL DEFAULT false;
-      ALTER TABLE merchant_countries ADD COLUMN IF NOT EXISTS payin_gateway text NOT NULL DEFAULT 'omnipay';
-      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS provider text NOT NULL DEFAULT 'sms';
-      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS omnipay_tx_id text;
-      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS payer_name text;
-      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS merchant_country_id integer;
-      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS provider_fee integer;
-      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS operator text;
-      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS omnipay_reference text;
-      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS error_message text;
-      ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS omnipay_reference text;
-      ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS omnipay_tx_id text;
-      ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS omnipay_payment_url text;
-      ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS payer_name text;
-      ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS gateway text NOT NULL DEFAULT 'omnipay';
-      ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS error_message text;
-      ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS payment_token text;
-      ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS sendava_token text;
-      ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS sendava_payment_url text;
-      ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS operator text;
-      ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS omnipay_ref text;
-      ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS fees integer DEFAULT 0;
-      ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS provider_payout_fee integer;
-      ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS gateway text NOT NULL DEFAULT 'omnipay';
-      ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS recipient_name text;
-      ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS omnipay_code text;
-      ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS mbiyo_code text;
-      ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS seapay_code text;
-      ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS clapay_code text;
-      ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS logo text;
-      ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS sort_order integer NOT NULL DEFAULT 0;
-      ALTER TABLE payment_links ADD COLUMN IF NOT EXISTS description text;
-      ALTER TABLE payment_links ADD COLUMN IF NOT EXISTS countries text[];
-      ALTER TABLE payment_links ADD COLUMN IF NOT EXISTS confirmation_message text;
-      ALTER TABLE payment_links ADD COLUMN IF NOT EXISTS collect_billing_address boolean NOT NULL DEFAULT false;
-      ALTER TABLE payment_links ADD COLUMN IF NOT EXISTS show_share_button boolean NOT NULL DEFAULT true;
-      ALTER TABLE payment_links ADD COLUMN IF NOT EXISTS notification_email text;
-      ALTER TABLE admins ADD COLUMN IF NOT EXISTS totp_secret text;
-      ALTER TABLE admins ADD COLUMN IF NOT EXISTS totp_enabled boolean NOT NULL DEFAULT false;
-      ALTER TABLE merchants ADD COLUMN IF NOT EXISTS withdrawals_disabled boolean NOT NULL DEFAULT false;
-      ALTER TABLE merchants ADD COLUMN IF NOT EXISTS token_invalidated_at timestamp;
-      ALTER TABLE admins ADD COLUMN IF NOT EXISTS token_invalidated_at timestamp;
-      ALTER TABLE merchant_countries ADD COLUMN IF NOT EXISTS admin_credits_total integer NOT NULL DEFAULT 0;
-    `);
-
-    // ── Merchant login OTP table ────────────────────────────────────────────────
-    await client.query(`
       CREATE TABLE IF NOT EXISTS merchant_login_otps (
         id serial PRIMARY KEY,
         email text NOT NULL,
@@ -445,41 +209,55 @@ export async function runMigrations() {
         attempts integer DEFAULT 0 NOT NULL,
         created_at timestamp DEFAULT now() NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS merchant_login_otps_email_idx ON merchant_login_otps(email);
-    `);
 
-    // ── Knowledge chunks (RAG) — requires pgvector extension ─────────────────────
-    try {
-      await client.query(`CREATE EXTENSION IF NOT EXISTS vector;`);
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS knowledge_chunks (
-          id serial PRIMARY KEY,
-          category text NOT NULL,
-          title text NOT NULL,
-          content text NOT NULL,
-          embedding vector(1536),
-          active boolean NOT NULL DEFAULT true,
-          updated_at timestamp DEFAULT now() NOT NULL
-        );
-      `);
-    } catch (e: any) {
-      console.log("[KNOWLEDGE] pgvector not available, skipping knowledge_chunks table:", e.message);
-    }
-
-    // ── Tables manquantes : stats_baselines + crypto_aggregator_countries/merchants ─
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS stats_baselines (
+      CREATE TABLE IF NOT EXISTS telegram_activation_codes (
         id serial PRIMARY KEY,
-        reset_at timestamp DEFAULT now() NOT NULL,
-        transaction_count integer NOT NULL DEFAULT 0,
-        total_volume integer NOT NULL DEFAULT 0,
-        commission_total integer NOT NULL DEFAULT 0,
-        api_payments_count integer NOT NULL DEFAULT 0,
-        api_payments_total integer NOT NULL DEFAULT 0,
-        link_payments_count integer NOT NULL DEFAULT 0,
-        link_payments_total integer NOT NULL DEFAULT 0,
-        withdrawals_count integer NOT NULL DEFAULT 0,
-        withdrawals_total integer NOT NULL DEFAULT 0
+        merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+        code text NOT NULL UNIQUE,
+        used boolean NOT NULL DEFAULT false,
+        expires_at timestamp NOT NULL,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS withdrawal_operators (
+        id serial PRIMARY KEY,
+        name text NOT NULL,
+        type text NOT NULL DEFAULT 'Mobile Money',
+        country text NOT NULL,
+        daily_limit integer NOT NULL DEFAULT 1000000,
+        gateway text NOT NULL DEFAULT 'OmniPay',
+        omnipay_code text,
+        mbiyo_code text,
+        seapay_code text,
+        clapay_code text,
+        logo text,
+        sort_order integer NOT NULL DEFAULT 0,
+        active boolean NOT NULL DEFAULT true,
+        maintenance_all boolean NOT NULL DEFAULT false,
+        maintenance_deposits boolean NOT NULL DEFAULT false,
+        maintenance_withdrawals boolean NOT NULL DEFAULT false,
+        maintenance_payment_links boolean NOT NULL DEFAULT false,
+        maintenance_api_payment boolean NOT NULL DEFAULT false,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS wallet_transfer_countries (
+        id serial PRIMARY KEY,
+        country text NOT NULL UNIQUE,
+        currency_zone text NOT NULL,
+        active boolean NOT NULL DEFAULT true,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS crypto_aggregators (
+        id serial PRIMARY KEY,
+        name text NOT NULL,
+        type text NOT NULL DEFAULT 'oxapay',
+        api_key text NOT NULL,
+        payout_api_key text,
+        callback_key text,
+        active boolean NOT NULL DEFAULT false,
+        created_at timestamp DEFAULT now() NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS crypto_aggregator_countries (
@@ -497,41 +275,21 @@ export async function runMigrations() {
       );
     `);
 
-    // ── Colonnes manquantes sur crypto_aggregators ────────────────────────────────
-    await client.query(`
-      ALTER TABLE crypto_aggregators ADD COLUMN IF NOT EXISTS payout_api_key text;
-      ALTER TABLE crypto_aggregators ADD COLUMN IF NOT EXISTS callback_key text;
-    `);
-
-    // ── Index uniques ──────────────────────────────────────────────────────────────
+    // ── Index & contraintes ──────────────────────────────────────────────────
     await client.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS merchants_crypto_api_key_idx ON merchants(crypto_api_key) WHERE crypto_api_key IS NOT NULL;
       CREATE UNIQUE INDEX IF NOT EXISTS merchants_sdk_api_key_idx ON merchants(sdk_api_key) WHERE sdk_api_key IS NOT NULL;
-    `);
-
-    // ── Correction provider_payout_fee : suppression du DEFAULT 0 (idempotent) ─────
-    // La colonne peut avoir été créée initialement avec DEFAULT 0 ; on le supprime
-    // pour que les nouvelles lignes non-renseignées restent NULL.
-    // Les lignes historiques à 0 sont gérées côté stats via NULLIF(provider_payout_fee, 0)
-    // qui traite 0 comme « non défini » et bascule sur w.fees (valeur legacy).
-    await client.query(`
-      ALTER TABLE withdrawals ALTER COLUMN provider_payout_fee DROP DEFAULT;
-    `);
-
-    // ── Déduplication des opérateurs avant d'ajouter la contrainte ────────────────
-    await client.query(`
-      DELETE FROM withdrawal_operators a
-      USING withdrawal_operators b
-      WHERE a.id > b.id
-        AND a.name = b.name
-        AND a.country = b.country;
+      CREATE INDEX IF NOT EXISTS merchant_login_otps_email_idx ON merchant_login_otps(email);
     `);
     await client.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS withdrawal_operators_name_country_idx
-        ON withdrawal_operators(name, country);
+      DELETE FROM withdrawal_operators a USING withdrawal_operators b
+      WHERE a.id > b.id AND a.name = b.name AND a.country = b.country;
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS withdrawal_operators_name_country_idx ON withdrawal_operators(name, country);
     `);
 
-    // ── Données par défaut : pays de transfert ────────────────────────────────────
+    // ── Données initiales ────────────────────────────────────────────────────
     await client.query(`
       INSERT INTO wallet_transfer_countries (country, currency_zone) VALUES
         ('Benin','XOF'),('Burkina Faso','XOF'),('Cote d''Ivoire','XOF'),('Mali','XOF'),
@@ -542,7 +300,6 @@ export async function runMigrations() {
       ON CONFLICT (country) DO NOTHING
     `);
 
-    // ── Données par défaut : opérateurs de retrait ────────────────────────────────
     await client.query(`
       INSERT INTO withdrawal_operators (name, type, country, daily_limit, gateway) VALUES
         ('Moov Money','Mobile Money','Togo',1000000,'OmniPay'),
@@ -572,7 +329,6 @@ export async function runMigrations() {
       ON CONFLICT (name, country) DO NOTHING
     `);
 
-    // ── Mise à jour codes opérateurs ──────────────────────────────────────────────
     await client.query(`
       UPDATE withdrawal_operators SET omnipay_code = CASE
         WHEN LOWER(name) LIKE '%mtn%' THEN 'mtn'
@@ -585,43 +341,322 @@ export async function runMigrations() {
         WHEN LOWER(name) LIKE '%flooz%' THEN 'flooz'
         WHEN LOWER(name) LIKE '%mpesa%' OR LOWER(name) LIKE '%m-pesa%' OR LOWER(name) LIKE '%m pesa%' THEN 'mpesa'
         ELSE omnipay_code
-      END
-      WHERE omnipay_code IS NULL;
-
+      END WHERE omnipay_code IS NULL;
       UPDATE withdrawal_operators SET gateway = 'Mbiyo'
-      WHERE country IN ('Guinee', 'Gambie') AND gateway != 'Mbiyo';
-
+        WHERE country IN ('Guinee', 'Gambie') AND gateway != 'Mbiyo';
       UPDATE withdrawal_operators SET gateway = 'SendavaPay'
-      WHERE country IN ('Togo', 'Cote d''Ivoire') AND gateway NOT IN ('SendavaPay', 'Mbiyo');
+        WHERE country IN ('Togo', 'Cote d''Ivoire') AND gateway NOT IN ('SendavaPay', 'Mbiyo');
     `);
 
     await client.query("COMMIT");
 
-    // ── Auto-seed OxaPay (hors transaction pour éviter les problèmes de lock) ─────
+    // OxaPay (hors transaction)
     const oxapayKey = process.env.OXAPAY_API_KEY;
     if (oxapayKey) {
-      const existing = await client.query(`SELECT id FROM crypto_aggregators WHERE type = 'oxapay' LIMIT 1`);
-      if (existing.rows.length === 0) {
-        await client.query(
-          `INSERT INTO crypto_aggregators (name, type, api_key, active) VALUES ($1, $2, $3, $4)`,
-          ["OxaPay", "oxapay", oxapayKey, true]
-        );
-        console.log("[DB] Agrégateur OxaPay créé automatiquement");
+      const ex = await client.query(`SELECT id FROM crypto_aggregators WHERE type='oxapay' LIMIT 1`);
+      if (ex.rows.length === 0) {
+        await client.query(`INSERT INTO crypto_aggregators (name,type,api_key,active) VALUES ($1,$2,$3,$4)`, ["OxaPay","oxapay",oxapayKey,true]);
+        console.log("[AUTH DB] Agrégateur OxaPay créé");
       } else {
-        await client.query(
-          `UPDATE crypto_aggregators SET api_key = $1, active = true WHERE type = 'oxapay'`,
-          [oxapayKey]
-        );
-        console.log("[DB] Agrégateur OxaPay mis à jour");
+        await client.query(`UPDATE crypto_aggregators SET api_key=$1, active=true WHERE type='oxapay'`, [oxapayKey]);
       }
     }
 
-    console.log("[DB] Migrations appliquées avec succès");
+    console.log("[AUTH DB] Migrations appliquées ✓");
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
-    console.error("[DB] Erreur migration:", err);
-    throw err; // fail-fast: server must not boot with incomplete schema
+    console.error("[AUTH DB] Erreur migration:", err);
+    throw err;
   } finally {
     client.release();
   }
+}
+
+// ╔══════════════════════════════════════════════════════════════════════════════╗
+// ║  MIGRATIONS BASE FINANCIER (Neon)                                           ║
+// ║  Note : pas de FK cross-BD — merchant_id = integer simple                  ║
+// ╚══════════════════════════════════════════════════════════════════════════════╝
+export async function runFinancialMigrations() {
+  const client = await financialPool.connect();
+  try {
+    await client.query("BEGIN");
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS merchant_countries (
+        id serial PRIMARY KEY,
+        merchant_id integer NOT NULL,
+        country text NOT NULL,
+        api_key text NOT NULL,
+        balance integer NOT NULL DEFAULT 0,
+        active boolean NOT NULL DEFAULT true,
+        omnipay_enabled boolean NOT NULL DEFAULT false,
+        payin_gateway text NOT NULL DEFAULT 'omnipay',
+        admin_credits_total integer NOT NULL DEFAULT 0
+      );
+
+      CREATE TABLE IF NOT EXISTS transactions (
+        id serial PRIMARY KEY,
+        merchant_id integer NOT NULL,
+        country text NOT NULL,
+        tx_id text NOT NULL UNIQUE,
+        amount integer NOT NULL,
+        payer_number text,
+        payer_name text,
+        status text NOT NULL DEFAULT 'confirmed',
+        provider text NOT NULL DEFAULT 'sms',
+        omnipay_tx_id text,
+        operator text,
+        omnipay_reference text,
+        error_message text,
+        provider_fee integer,
+        merchant_country_id integer,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS sms_logs (
+        id serial PRIMARY KEY,
+        from_sim text NOT NULL,
+        sms_text text NOT NULL,
+        parsed boolean NOT NULL DEFAULT false,
+        error_message text,
+        parsed_amount integer,
+        parsed_tx_id text,
+        parsed_payer text,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS login_logs (
+        id serial PRIMARY KEY,
+        user_id integer NOT NULL,
+        role text NOT NULL,
+        ip text,
+        device text,
+        success boolean NOT NULL DEFAULT true,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS api_logs (
+        id serial PRIMARY KEY,
+        merchant_id integer,
+        action text NOT NULL,
+        ip text,
+        description text,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS pending_payments (
+        id serial PRIMARY KEY,
+        merchant_id integer NOT NULL,
+        country text NOT NULL,
+        amount integer NOT NULL,
+        payer_phone text,
+        payer_name text,
+        payment_method text NOT NULL,
+        tx_id text,
+        status text NOT NULL DEFAULT 'pending',
+        redirect_url text,
+        omnipay_reference text,
+        omnipay_tx_id text,
+        omnipay_payment_url text,
+        gateway text NOT NULL DEFAULT 'omnipay',
+        error_message text,
+        payment_token text,
+        sendava_token text,
+        sendava_payment_url text,
+        expires_at timestamp NOT NULL,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS webhook_logs (
+        id serial PRIMARY KEY,
+        merchant_id integer NOT NULL,
+        url text NOT NULL,
+        payload text NOT NULL,
+        status_code integer,
+        response text,
+        success boolean NOT NULL DEFAULT false,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS payment_links (
+        id serial PRIMARY KEY,
+        merchant_id integer NOT NULL,
+        unique_id text NOT NULL UNIQUE,
+        name text NOT NULL,
+        description text,
+        amount_type text NOT NULL DEFAULT 'fixed',
+        amount integer,
+        redirect_url text,
+        expires_at timestamp,
+        payment_limit integer,
+        payment_count integer NOT NULL DEFAULT 0,
+        total_revenue integer NOT NULL DEFAULT 0,
+        last_payment_at timestamp,
+        active boolean NOT NULL DEFAULT true,
+        created_at timestamp DEFAULT now() NOT NULL,
+        countries text[],
+        confirmation_message text,
+        collect_billing_address boolean NOT NULL DEFAULT false,
+        show_share_button boolean NOT NULL DEFAULT true,
+        notification_email text
+      );
+
+      CREATE TABLE IF NOT EXISTS withdrawals (
+        id serial PRIMARY KEY,
+        merchant_id integer NOT NULL,
+        merchant_country_id integer NOT NULL,
+        country text NOT NULL,
+        amount integer NOT NULL,
+        phone text NOT NULL,
+        recipient_name text,
+        operator text,
+        status text NOT NULL DEFAULT 'pending',
+        withdrawal_mode text NOT NULL DEFAULT 'manual',
+        admin_note text,
+        omnipay_ref text,
+        fees integer DEFAULT 0,
+        provider_payout_fee integer,
+        gateway text NOT NULL DEFAULT 'omnipay',
+        created_at timestamp DEFAULT now() NOT NULL,
+        processed_at timestamp
+      );
+
+      CREATE TABLE IF NOT EXISTS wallet_transfers (
+        id serial PRIMARY KEY,
+        merchant_id integer NOT NULL,
+        from_country_id integer NOT NULL,
+        to_country_id integer NOT NULL,
+        from_country text NOT NULL,
+        to_country text NOT NULL,
+        currency text NOT NULL,
+        amount integer NOT NULL,
+        fee integer NOT NULL DEFAULT 0,
+        net_amount integer NOT NULL,
+        status text NOT NULL DEFAULT 'pending',
+        admin_note text,
+        created_at timestamp DEFAULT now() NOT NULL,
+        processed_at timestamp
+      );
+
+      CREATE TABLE IF NOT EXISTS crypto_transactions (
+        id serial PRIMARY KEY,
+        aggregator_id integer NOT NULL,
+        merchant_id integer NOT NULL,
+        track_id text NOT NULL UNIQUE,
+        amount text NOT NULL,
+        currency text NOT NULL DEFAULT 'USD',
+        pay_currency text,
+        pay_amount text,
+        status text NOT NULL DEFAULT 'pending',
+        wallet_address text,
+        network text,
+        tx_hash text,
+        order_id text,
+        description text,
+        callback_url text,
+        return_url text,
+        credited_at timestamp,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS crypto_balances (
+        id serial PRIMARY KEY,
+        merchant_id integer NOT NULL,
+        currency text NOT NULL,
+        balance text NOT NULL DEFAULT '0',
+        updated_at timestamp DEFAULT now() NOT NULL,
+        UNIQUE(merchant_id, currency)
+      );
+
+      CREATE TABLE IF NOT EXISTS crypto_withdrawal_requests (
+        id serial PRIMARY KEY,
+        merchant_id integer NOT NULL,
+        currency text NOT NULL,
+        amount text NOT NULL,
+        fee_amount text NOT NULL DEFAULT '0',
+        net_amount text NOT NULL DEFAULT '0',
+        wallet_address text NOT NULL,
+        network text,
+        status text NOT NULL DEFAULT 'pending',
+        admin_note text,
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS crypto_payment_links (
+        id serial PRIMARY KEY,
+        merchant_id integer NOT NULL,
+        unique_id text NOT NULL UNIQUE,
+        name text NOT NULL,
+        currency text NOT NULL DEFAULT 'USDT',
+        amount_type text NOT NULL DEFAULT 'fixed',
+        amount text,
+        description text,
+        return_url text,
+        active boolean NOT NULL DEFAULT true,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS security_logs (
+        id serial PRIMARY KEY,
+        event_type text NOT NULL,
+        user_email text,
+        ip text,
+        fingerprint text,
+        action text,
+        details text,
+        telegram_admin text,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS stats_baselines (
+        id serial PRIMARY KEY,
+        reset_at timestamp DEFAULT now() NOT NULL,
+        transaction_count integer NOT NULL DEFAULT 0,
+        total_volume integer NOT NULL DEFAULT 0,
+        commission_total integer NOT NULL DEFAULT 0,
+        api_payments_count integer NOT NULL DEFAULT 0,
+        api_payments_total integer NOT NULL DEFAULT 0,
+        link_payments_count integer NOT NULL DEFAULT 0,
+        link_payments_total integer NOT NULL DEFAULT 0,
+        withdrawals_count integer NOT NULL DEFAULT 0,
+        withdrawals_total integer NOT NULL DEFAULT 0
+      );
+    `);
+
+    // pgvector (knowledge_chunks — RAG)
+    try {
+      await client.query(`CREATE EXTENSION IF NOT EXISTS vector;`);
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS knowledge_chunks (
+          id serial PRIMARY KEY,
+          category text NOT NULL,
+          title text NOT NULL,
+          content text NOT NULL,
+          embedding vector(1536),
+          active boolean NOT NULL DEFAULT true,
+          updated_at timestamp DEFAULT now() NOT NULL
+        );
+      `);
+    } catch (e: any) {
+      console.log("[FINANCIAL DB] pgvector non disponible:", e.message);
+    }
+
+    // Corriger default provider_payout_fee
+    await client.query(`ALTER TABLE withdrawals ALTER COLUMN provider_payout_fee DROP DEFAULT;`).catch(() => {});
+
+    await client.query("COMMIT");
+    console.log("[FINANCIAL DB] Migrations appliquées ✓");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("[FINANCIAL DB] Erreur migration:", err);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// ── Point d'entrée unique ────────────────────────────────────────────────────
+export async function runMigrations() {
+  await Promise.all([runAuthMigrations(), runFinancialMigrations()]);
 }
