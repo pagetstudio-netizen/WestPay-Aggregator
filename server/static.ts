@@ -16,13 +16,27 @@ export function serveStatic(app: Express) {
   // Serve static assets (JS, CSS, images) — index.html excluded (served below)
   app.use(express.static(distPath, { index: false }));
 
-  // Sert index.html pour toutes les routes SPA — SANS injection de window.__ADMIN_PATH__.
-  // Le chemin admin n'est JAMAIS exposé dans le HTML.
-  // Le client utilise POST /api/auth/admin/verify-path pour vérifier le chemin
-  // sans que le slug soit jamais révélé (réponse : { isAdminPath: true|false } uniquement).
-  app.get("/{*path}", (_req, res) => {
+  // Sert index.html pour toutes les routes SPA.
+  // Si la requête correspond au chemin admin, on injecte window.__IS_ADMIN_PATH__=true
+  // — uniquement un booléen, JAMAIS le slug lui-même dans le HTML.
+  // Le client lit ce flag pour savoir qu'il est sur la route admin et utilise
+  // l'URL courante comme chemin de base, sans connaître le slug.
+  app.get("/{*path}", (req, res) => {
+    const slug = process.env.ADMIN_SLUG || "";
+    const reqPath = req.path.replace(/\/+$/, "") || "/"; // normalise le trailing slash
+    const isAdminPath =
+      slug !== "" &&
+      (reqPath === `/${slug}` || reqPath.startsWith(`/${slug}/`));
+
+    const html = isAdminPath
+      ? indexHtml.replace(
+          "</head>",
+          `<script>window.__IS_ADMIN_PATH__=true;</script></head>`,
+        )
+      : indexHtml;
+
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "no-store");
-    res.send(indexHtml);
+    res.send(html);
   });
 }
