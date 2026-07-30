@@ -8,7 +8,7 @@ import { ThemeProvider } from "@/lib/theme";
 import { LanguageProvider } from "@/lib/language";
 import RestrictedPage from "@/pages/restricted";
 import AdminLogin from "@/pages/admin-login";
-import { ADMIN_PATH } from "@/lib/admin-config";
+import { ADMIN_PATH, updateAdminBase } from "@/lib/admin-config";
 import AdminDashboard from "@/pages/admin-dashboard";
 import MerchantLogin from "@/pages/merchant-login";
 import MerchantDashboard from "@/pages/merchant-dashboard";
@@ -24,20 +24,35 @@ import AdminCreateMerchant from "@/pages/admin-create-merchant";
 import { useState, useEffect } from "react";
 
 function Router() {
-  // ADMIN_PATH est injecté dans window.__ADMIN_PATH__ par le serveur.
-  // Si l'injection échoue (env var non transmise par Plesk, cache Cloudflare, etc.),
-  // on récupère le chemin via l'API /api/admin-path comme fallback.
   const [adminPath, setAdminPath] = useState<string>(ADMIN_PATH);
 
   useEffect(() => {
-    if (adminPath !== "/__admin_not_configured__") return; // injection OK, rien à faire
+    // Injection HTML par Node.js a fonctionné → rien à faire.
+    if (adminPath !== "/__admin_not_configured__") return;
 
-    fetch("/api/admin-path", { cache: "no-store" })
+    // Fallback sécurisé : vérification serveur sans révéler le slug.
+    // L'endpoint répond uniquement { isAdminPath: true|false }.
+    // Il est sous /api/auth/ donc couvert par le rate-limiter existant (30 req/5 min/IP).
+    const segments = window.location.pathname.split("/").filter(Boolean);
+    // Le chemin admin est toujours un slug de premier niveau (1-2 segments max)
+    if (segments.length === 0 || segments.length > 2) return;
+
+    const basePath = "/" + segments[0];
+
+    fetch("/api/auth/admin/verify-path", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: basePath }),
+      cache: "no-store",
+    })
       .then((r) => r.json())
-      .then((data: { path: string | null }) => {
-        if (data.path) setAdminPath(data.path);
+      .then((data: { isAdminPath: boolean }) => {
+        if (data.isAdminPath) {
+          updateAdminBase(basePath);   // met à jour adminConfig.base pour la navigation interne
+          setAdminPath(basePath);      // force le re-render du Switch avec le bon chemin
+        }
       })
-      .catch(() => {}); // silencieux — le 404 reste affiché en dernier recours
+      .catch(() => {}); // silencieux — 404 reste affiché en dernier recours
   }, [adminPath]);
 
   return (

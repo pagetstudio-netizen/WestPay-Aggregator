@@ -854,14 +854,20 @@ export async function registerRoutes(
     res.type("text/plain").send("User-agent: *\nDisallow: /\n");
   });
 
-  // ── Admin path discovery — fallback si window.__ADMIN_PATH__ n'est pas injecté ──
-  // Aucune info sensible exposée : retourne juste le chemin (pas de secret).
-  // Un attaquant peut tenter de brute-forcer l'URL de toute façon.
-  app.get("/api/admin-path", (_req, res) => {
+  // ── Vérification sécurisée du chemin admin ────────────────────────────────────
+  // Utilisé comme fallback par le client quand window.__ADMIN_PATH__ n'est pas
+  // injecté (Apache/Nginx sert index.html en statique, bypassant Node.js).
+  // Ne révèle JAMAIS le slug — répond uniquement { isAdminPath: true|false }.
+  // Protégé par le rate-limiter /api/auth (30 req / 5 min / IP).
+  app.post("/api/auth/admin/verify-path", (req, res) => {
+    const { path } = req.body || {};
+    if (typeof path !== "string" || !path.startsWith("/")) {
+      return res.status(400).json({ isAdminPath: false });
+    }
     const slug = process.env.ADMIN_SLUG || "";
-    const path = slug ? `/${slug}` : null;
+    const adminPath = slug ? `/${slug}` : null;
     res.setHeader("Cache-Control", "no-store");
-    res.json({ path });
+    res.json({ isAdminPath: !!adminPath && path === adminPath });
   });
 
   // ── Route Telegram webhook PERMANENTE ─────────────────────────────────────────────────

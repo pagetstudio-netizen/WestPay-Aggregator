@@ -3,7 +3,7 @@ import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, us
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { getAvatarUrl, getInitials, getAvatarColor } from "@/lib/avatar";
-import { ADMIN_BASE } from "@/lib/admin-config";
+import { adminConfig } from "@/lib/admin-config";
 import { useAuth } from "@/lib/auth";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -52,7 +52,7 @@ function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: {
       });
       if (res.status === 401 || res.status === 403) {
         logout();
-        setLocation(ADMIN_BASE);
+        setLocation(adminConfig.base);
         throw new Error("Session expiree");
       }
       if (!res.ok) throw new Error("Erreur de chargement");
@@ -1268,7 +1268,7 @@ function MerchantsPanel() {
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-lg font-semibold text-foreground">Marchands</h2>
         <Button
-          onClick={() => setLocation(`${ADMIN_BASE}/create-merchant`)}
+          onClick={() => setLocation(`${adminConfig.base}/create-merchant`)}
           data-testid="button-create-merchant"
         >
           <Plus className="w-4 h-4 mr-2" />Nouveau marchand
@@ -9523,7 +9523,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     if (!authLoading && (!user || user.role !== "admin")) {
-      setLocation(ADMIN_BASE);
+      setLocation(adminConfig.base);
     }
   }, [authLoading, user, setLocation]);
 

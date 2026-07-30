@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { Eye, EyeOff, Loader2, Shield, KeyRound, Lock, CheckCircle2, Zap, Globe, Smartphone, QrCode, AlertTriangle, Copy, Check } from "lucide-react";
-import { ADMIN_BASE } from "@/lib/admin-config";
+import { adminConfig } from "@/lib/admin-config";
 
 async function buildDeviceFingerprint(): Promise<string> {
   try {
@@ -192,7 +192,7 @@ export default function AdminLogin() {
       }
       login(data.token, { id: data.user.id, email: data.user.email, role: "admin" });
       toast({ title: "Connexion réussie", description: "Redirection..." });
-      setTimeout(() => setLocation(`${ADMIN_BASE}/dashboard`), 300);
+      setTimeout(() => setLocation(`${adminConfig.base}/dashboard`), 300);
     } catch (err: any) {
       toast({ title: "Erreur", description: err.message, variant: "destructive" });
     } finally {
@@ -214,7 +214,7 @@ export default function AdminLogin() {
       if (!res.ok) throw new Error(data.message || "Code invalide");
       login(data.token, { id: data.user.id, email: data.user.email, role: "admin" });
       toast({ title: "Authentification réussie" });
-      setTimeout(() => setLocation(`${ADMIN_BASE}/dashboard`), 300);
+      setTimeout(() => setLocation(`${adminConfig.base}/dashboard`), 300);
     } catch (err: any) {
       toast({ title: "Erreur 2FA", description: err.message, variant: "destructive" });
     } finally {
@@ -236,7 +236,7 @@ export default function AdminLogin() {
       if (!res.ok) throw new Error(data.message || "Code invalide");
       login(data.token, { id: data.user.id, email: data.user.email, role: "admin" });
       toast({ title: "Authentification réussie" });
-      setTimeout(() => setLocation(`${ADMIN_BASE}/dashboard`), 300);
+      setTimeout(() => setLocation(`${adminConfig.base}/dashboard`), 300);
     } catch (err: any) {
       toast({ title: "Erreur TOTP", description: err.message, variant: "destructive" });
       setTotpCode("");
@@ -259,7 +259,7 @@ export default function AdminLogin() {
       if (!res.ok) throw new Error(data.message || "Code invalide");
       login(data.token, { id: data.user.id, email: data.user.email, role: "admin" });
       toast({ title: "Google Authenticator activé !", description: "Votre compte est maintenant protégé par 2FA." });
-      setTimeout(() => setLocation(`${ADMIN_BASE}/dashboard`), 300);
+      setTimeout(() => setLocation(`${adminConfig.base}/dashboard`), 300);
     } catch (err: any) {
       toast({ title: "Erreur de configuration", description: err.message, variant: "destructive" });
       setSetupCode("");

@@ -14,7 +14,7 @@ import {
   Shield, CheckCircle, Eye, EyeOff, Users
 } from "lucide-react";
 
-import { ADMIN_BASE } from "@/lib/admin-config";
+import { adminConfig } from "@/lib/admin-config";
 
 export default function AdminCreateMerchant() {
   const { user, isLoading: authLoading, token } = useAuth();
@@ -32,7 +32,7 @@ export default function AdminCreateMerchant() {
 
   useEffect(() => {
     if (!authLoading && (!user || user.role !== "admin")) {
-      setLocation(ADMIN_BASE);
+      setLocation(adminConfig.base);
     }
   }, [authLoading, user, setLocation]);
 
@@ -72,7 +72,7 @@ export default function AdminCreateMerchant() {
         title: "✅ Marchand créé avec succès",
         description: `${name} — accès : /merchant/${slug}`,
       });
-      setLocation(`${ADMIN_BASE}/dashboard`);
+      setLocation(`${adminConfig.base}/dashboard`);
     },
     onError: (err: any) => {
       toast({ title: "Erreur", description: err.message, variant: "destructive" });
@@ -98,7 +98,7 @@ export default function AdminCreateMerchant() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setLocation(`${ADMIN_BASE}/dashboard`)}
+              onClick={() => setLocation(`${adminConfig.base}/dashboard`)}
               className="gap-2 text-muted-foreground hover:text-foreground"
               data-testid="button-back-dashboard"
             >
@@ -347,7 +347,7 @@ export default function AdminCreateMerchant() {
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => setLocation(`${ADMIN_BASE}/dashboard`)}
+                      onClick={() => setLocation(`${adminConfig.base}/dashboard`)}
                       className="flex-1 h-11"
                       disabled={createMutation.isPending}
                       data-testid="button-cancel-create-merchant"
