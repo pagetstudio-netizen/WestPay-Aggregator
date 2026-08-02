@@ -41,8 +41,8 @@ const allowlist = [
 ];
 
 async function buildAll() {
-  await rm("dist", { recursive: true, force: true });
-
+  // Ne PAS supprimer dist/ avant le build — si le build échoue sur le serveur,
+  // l'ancien dist/index.cjs reste disponible et le serveur continue à tourner.
   console.log("building client...");
   await viteBuild();
 
