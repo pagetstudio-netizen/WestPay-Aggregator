@@ -854,6 +854,60 @@ export async function registerRoutes(
     res.type("text/plain").send("User-agent: *\nDisallow: /\n");
   });
 
+  // ── Diagnostic endpoint (public, sans auth) ───────────────────────────────────
+  app.get("/api/healthz", async (_req, res) => {
+    const envVars = [
+      "AUTH_DATABASE_URL",
+      "FINANCIAL_DATABASE_URL",
+      "SESSION_SECRET",
+      "NODE_ENV",
+      "ADMIN_SLUG",
+      "PORT",
+      "APP_URL",
+      "TELEGRAM_BOT_TOKEN",
+    ];
+
+    const envStatus: Record<string, boolean> = {};
+    for (const key of envVars) {
+      envStatus[key] = !!process.env[key];
+    }
+
+    // Test DB connections
+    let authDb = "untested";
+    let financialDb = "untested";
+    try {
+      const { authPool } = await import("./db");
+      const client = await authPool.connect();
+      await client.query("SELECT 1");
+      client.release();
+      authDb = "ok";
+    } catch (e: any) {
+      authDb = `error: ${e.message}`;
+    }
+    try {
+      const { financialPool } = await import("./db");
+      const client = await financialPool.connect();
+      await client.query("SELECT 1");
+      client.release();
+      financialDb = "ok";
+    } catch (e: any) {
+      financialDb = `error: ${e.message}`;
+    }
+
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      status: "running",
+      timestamp: new Date().toISOString(),
+      node: process.version,
+      uptime_s: Math.floor(process.uptime()),
+      env: envStatus,
+      db: {
+        auth: authDb,
+        financial: financialDb,
+      },
+    });
+  });
+
   // ── Vérification sécurisée du chemin admin ────────────────────────────────────
   // Utilisé comme fallback par le client quand window.__ADMIN_PATH__ n'est pas
   // injecté (Apache/Nginx sert index.html en statique, bypassant Node.js).
