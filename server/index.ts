@@ -149,11 +149,8 @@ const bootState: {
 // Démarrer le serveur HTTP EN PREMIER — avant toute initialisation.
 // /api/healthz-boot répond toujours, même si la suite crashe.
 const port = parseInt(process.env.PORT || "5000", 10);
-httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, () => {
-  log(`serving on port ${port}`);
-});
 
-// Endpoint de diagnostic de démarrage — toujours accessible
+// Endpoint de diagnostic de démarrage — enregistré AVANT listen()
 app.get("/api/healthz-boot", (_req, res) => {
   const envKeys = ["AUTH_DATABASE_URL", "FINANCIAL_DATABASE_URL", "SESSION_SECRET", "NODE_ENV", "ADMIN_SLUG", "PORT"];
   res.setHeader("Cache-Control", "no-store");
@@ -164,7 +161,29 @@ app.get("/api/healthz-boot", (_req, res) => {
     uptime_s: Math.floor(process.uptime()),
     env: Object.fromEntries(envKeys.map(k => [k, !!process.env[k]])),
     env_node: process.env.NODE_ENV ?? "(not set)",
+    port_used: port,
   });
+});
+
+// Handler d'erreur — évite que EADDRINUSE ou autre erreur réseau crashe le process
+httpServer.on("error", (err: any) => {
+  const msg = `[FATAL] httpServer error: ${err.message} (code: ${err.code})`;
+  console.error(msg);
+  bootState.status = "error";
+  bootState.errors.push(msg);
+  // Écrire dans un fichier log lisible depuis le gestionnaire Plesk
+  try {
+    const fs = require("fs");
+    const logPath = require("path").resolve(
+      (globalThis as any).__dirname ?? process.cwd(), "..", "crash.log"
+    );
+    fs.appendFileSync(logPath, `${new Date().toISOString()} ${msg}\n`);
+  } catch {}
+});
+
+// Démarrer l'écoute — sans reusePort (incompatible avec certains setups Passenger)
+httpServer.listen(port, "0.0.0.0", () => {
+  log(`serving on port ${port}`);
 });
 
 (async () => {

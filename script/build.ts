@@ -69,6 +69,7 @@ async function buildAll() {
   await esbuild({
     entryPoints: ["server/index.ts"],
     platform: "node",
+    target: "node16",   // compatible Node.js 16+ (Plesk LTS typique)
     bundle: true,
     format: "cjs",
     outfile: "dist/index.cjs",
