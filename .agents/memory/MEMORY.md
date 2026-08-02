@@ -2,3 +2,4 @@
 - [SeaPay operator seeding](seapay-operator-seeding.md) — new-country withdrawal operators are seeded idempotently on every server start, not one-time; India has no fixed bank list (IFSC is per-transaction).
 - [NoWallet (ClaPay) API v3](nowallet-v3-integration.md) — payloads, phone format, tunnel modes, and status check endpoint differ significantly from older API.
 - [Dual-database architecture](dual-db-architecture.md) — Auth tables on Supabase (AUTH_DATABASE_URL), financial tables on Neon (FINANCIAL_DATABASE_URL). Cross-DB FKs impossible: enforced at app layer.
+- [Plesk deploy.sh root cause](plesk-deploy-root-cause.md) — deploy.sh ran npm run build which deletes dist/ first; if build fails on server, dist/ is gone → Passenger crash. Fix: remove build step, use pre-built dist/ from git.
