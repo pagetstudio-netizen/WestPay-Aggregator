@@ -128,81 +128,140 @@ app.use((req, res, next) => {
   next();
 });
 
+// ── État d'initialisation exposé par /api/healthz-boot ───────────────────────
+const bootState: {
+  status: "starting" | "ready" | "error";
+  errors: string[];
+  steps: Record<string, "ok" | "error" | "pending">;
+} = {
+  status: "starting",
+  errors: [],
+  steps: {
+    env: "pending",
+    db_migrations: "pending",
+    db_seed: "pending",
+    routes: "pending",
+    static: "pending",
+  },
+};
+
+// Démarrer le serveur HTTP EN PREMIER — avant toute initialisation.
+// /api/healthz-boot répond toujours, même si la suite crashe.
+const port = parseInt(process.env.PORT || "5000", 10);
+httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, () => {
+  log(`serving on port ${port}`);
+});
+
+// Endpoint de diagnostic de démarrage — toujours accessible
+app.get("/api/healthz-boot", (_req, res) => {
+  const envKeys = ["AUTH_DATABASE_URL", "FINANCIAL_DATABASE_URL", "SESSION_SECRET", "NODE_ENV", "ADMIN_SLUG", "PORT"];
+  res.setHeader("Cache-Control", "no-store");
+  res.json({
+    ...bootState,
+    timestamp: new Date().toISOString(),
+    node: process.version,
+    uptime_s: Math.floor(process.uptime()),
+    env: Object.fromEntries(envKeys.map(k => [k, !!process.env[k]])),
+    env_node: process.env.NODE_ENV ?? "(not set)",
+  });
+});
+
 (async () => {
-  const { pool, runMigrations } = await import("./db");
-  const { seedDatabase } = await import("./seed");
+  // Vérification env
+  const missingEnv = ["AUTH_DATABASE_URL", "FINANCIAL_DATABASE_URL", "SESSION_SECRET"]
+    .filter(k => !process.env[k]);
+  if (missingEnv.length > 0) {
+    bootState.steps.env = "error";
+    bootState.errors.push(`Missing env vars: ${missingEnv.join(", ")}`);
+    bootState.status = "error";
+    console.error("[FATAL] Variables manquantes:", missingEnv.join(", "));
+    return; // Ne pas appeler process.exit — le serveur reste up pour /api/healthz-boot
+  }
+  bootState.steps.env = "ok";
+
+  let runMigrations: () => Promise<void>;
+  let seedDatabase: () => Promise<void>;
+  try {
+    ({ runMigrations } = await import("./db"));
+    ({ seedDatabase } = await import("./seed"));
+  } catch (err: any) {
+    bootState.steps.db_migrations = "error";
+    bootState.errors.push(`DB module load: ${err.message}`);
+    bootState.status = "error";
+    console.error("[FATAL] DB module load failed:", err.message);
+    return;
+  }
 
   try {
     await runMigrations();
-  } catch (err) {
-    console.error("[FATAL] Migration failed — cannot start with incomplete schema:", (err as any).message);
-    process.exit(1);
+    bootState.steps.db_migrations = "ok";
+  } catch (err: any) {
+    bootState.steps.db_migrations = "error";
+    bootState.errors.push(`Migrations: ${err.message}`);
+    bootState.status = "error";
+    console.error("[FATAL] Migration failed:", err.message);
+    return;
   }
 
   try {
     await seedDatabase();
-  } catch (err) {
-    console.log("Seed skipped or already done:", (err as any).message);
+    bootState.steps.db_seed = "ok";
+  } catch (err: any) {
+    bootState.steps.db_seed = "error";
+    console.log("Seed skipped or already done:", err.message);
   }
 
   try {
     const { seedKnowledge } = await import("./knowledge");
     seedKnowledge().catch(e => console.log("[KNOWLEDGE] Seed error:", e.message));
-  } catch (err) {
-    console.log("Knowledge seed skipped:", (err as any).message);
+  } catch (err: any) {
+    console.log("Knowledge seed skipped:", err.message);
   }
 
-  await registerRoutes(httpServer, app);
+  try {
+    await registerRoutes(httpServer, app);
+    bootState.steps.routes = "ok";
+  } catch (err: any) {
+    bootState.steps.routes = "error";
+    bootState.errors.push(`Routes: ${err.message}`);
+    bootState.status = "error";
+    console.error("[FATAL] Routes registration failed:", err.message);
+    return;
+  }
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
-
-    // Toujours logger l'erreur complète côté serveur
     console.error("Internal Server Error:", err);
-
-    if (res.headersSent) {
-      return next(err);
-    }
-
-    // En production : ne jamais renvoyer err.message au client —
-    // il peut contenir des noms de tables, contraintes DB, chemins internes, etc.
-    // En développement : message complet pour faciliter le debug.
+    if (res.headersSent) return next(err);
     const clientMessage = process.env.NODE_ENV === "production"
       ? (status < 500 ? (err.message || "Erreur de requête") : "Erreur interne du serveur")
       : (err.message || "Internal Server Error");
-
     return res.status(status).json({ message: clientMessage });
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (process.env.NODE_ENV === "production") {
-    serveStatic(app);
-  } else {
-    const { setupVite } = await import("./vite");
-    await setupVite(httpServer, app);
+  try {
+    if (process.env.NODE_ENV === "production") {
+      serveStatic(app);
+    } else {
+      const { setupVite } = await import("./vite");
+      await setupVite(httpServer, app);
+    }
+    bootState.steps.static = "ok";
+  } catch (err: any) {
+    bootState.steps.static = "error";
+    bootState.errors.push(`Static/Vite: ${err.message}`);
+    bootState.status = "error";
+    console.error("[FATAL] Static setup failed:", err.message);
+    return;
   }
 
-  // Vérification ADMIN_SLUG — pas de slug = tableau de bord admin inaccessible
   if (!process.env.ADMIN_SLUG) {
-    console.warn("[SECURITY] ADMIN_SLUG non défini — le tableau de bord admin sera inaccessible. Définissez ADMIN_SLUG dans les variables d'environnement.");
+    console.warn("[SECURITY] ADMIN_SLUG non défini — le tableau de bord admin sera inaccessible.");
   } else {
     log(`admin path configured (ADMIN_SLUG is set)`);
   }
 
-  // Start listening FIRST — optional services initialized after
-  const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
-      log(`serving on port ${port}`);
-    },
-  );
+  bootState.status = "ready";
 
   // ── Optional services (failures must never crash the server) ──────────────
 
