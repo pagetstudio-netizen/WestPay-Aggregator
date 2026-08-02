@@ -20,9 +20,10 @@ import express, { type Request, Response, NextFunction } from "express";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import path from "path";
-import { registerRoutes } from "./routes";
-import { serveStatic } from "./static";
 import { createServer } from "http";
+// NOTE: routes et static sont importés dynamiquement plus bas (dans l'IIFE async)
+// pour garantir que httpServer.listen() s'exécute AVANT tout code module-level
+// de ces fichiers (db.ts throws, mkdirSync, SESSION_SECRET check, etc.).
 
 const app = express();
 // Trust exactement 1 niveau de proxy (Replit reverse-proxy).
@@ -219,6 +220,9 @@ app.get("/api/healthz-boot", (_req, res) => {
   }
 
   try {
+    // Import dynamique — évite que le code module-level de routes.ts
+    // (db import, mkdirSync, SESSION_SECRET check) s'exécute avant httpServer.listen()
+    const { registerRoutes } = await import("./routes");
     await registerRoutes(httpServer, app);
     bootState.steps.routes = "ok";
   } catch (err: any) {
@@ -241,6 +245,8 @@ app.get("/api/healthz-boot", (_req, res) => {
 
   try {
     if (process.env.NODE_ENV === "production") {
+      // Import dynamique — même raison que pour routes
+      const { serveStatic } = await import("./static");
       serveStatic(app);
     } else {
       const { setupVite } = await import("./vite");
