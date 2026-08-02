@@ -4,10 +4,16 @@
 // override:false → process.env existant a toujours la priorité.
 import { config as loadEnv } from "dotenv";
 import { resolve } from "path";
-// __dirname est disponible en CJS (sortie esbuild) — pas besoin de import.meta.url
-// Essaie d'abord le dossier parent (racine projet quand on tourne depuis dist/)
-loadEnv({ path: resolve(__dirname, "..", ".env"), override: false });
-// Puis le dossier courant (racine projet si lancé directement)
+// En production (CJS esbuild) __dirname est injecté comme global Node.js.
+// En dev ESM (tsx) il n'existe pas — seul loadEnv({ override:false }) est nécessaire
+// car process.cwd() pointe déjà sur la racine projet.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const _dirname: string | undefined = (globalThis as any).__dirname;
+if (_dirname) {
+  // Tourne depuis dist/ (Plesk) : charge .env à la racine projet (dossier parent)
+  loadEnv({ path: resolve(_dirname, "..", ".env"), override: false });
+}
+// Charge .env depuis le dossier courant (fallback dev ou racine Plesk)
 loadEnv({ override: false });
 
 import express, { type Request, Response, NextFunction } from "express";
