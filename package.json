@@ -4,7 +4,7 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "NODE_ENV=development node --import ./node_modules/tsx/dist/esm/index.mjs server/index.ts",
+    "dev": "NODE_ENV=development node_modules/.bin/tsx server/index.ts",
     "build": "node --import ./node_modules/tsx/dist/esm/index.mjs script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
