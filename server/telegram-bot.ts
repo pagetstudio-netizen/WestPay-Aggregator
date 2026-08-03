@@ -1912,7 +1912,9 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     "Morocco", "Algeria", "Tunisia", "Libya", "Egypt",
   ]);
 
-  const IP_REGEX = /^(\d{1,3}\.){3}\d{1,3}$/;
+  // Détecte une IPv4 n'importe où dans le message (ex: "IP: 41.207.187.10 merci")
+  const IP_EXTRACT_REGEX = /\b((?:\d{1,3}\.){3}\d{1,3})\b/;
+  const isValidIpv4 = (ip: string) => ip.split(".").every((o) => +o >= 0 && +o <= 255);
 
   // ─── Catch-all message handler (doit être le DERNIER handler) ───────────────
   // IMPORTANT : utiliser (ctx, next) et toujours appeler next() pour ne jamais
@@ -1934,8 +1936,10 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         const merchant = await getMerchantForGroup(chatId);
         if (!merchant) return next();
 
-        const candidate = text.trim();
-        if (!IP_REGEX.test(candidate)) return next();
+        const ipMatch = text.match(IP_EXTRACT_REGEX);
+        if (!ipMatch || !isValidIpv4(ipMatch[1])) return next();
+        const candidate = ipMatch[1];
+        console.log(`[TG] IP détectée dans groupe marchand ${chatId}: ${candidate}`);
 
         // Réponse immédiate en chinois
         await ctx.reply("请稍等，我这就帮你添加。");
