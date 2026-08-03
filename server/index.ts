@@ -186,6 +186,25 @@ httpServer.listen(port, "0.0.0.0", () => {
   log(`serving on port ${port}`);
 });
 
+// ── PRODUCTION : servir le frontend IMMÉDIATEMENT ─────────────────────────────
+// Ne dépend pas de la DB. Sur Plesk/Passenger, le process est démarré à la
+// demande : sans ça, la première requête arrive avant la fin de l'init DB et
+// reçoit "Cannot GET /". Le catch-all de static.ts laisse passer /api via next().
+if (process.env.NODE_ENV === "production") {
+  (async () => {
+    try {
+      const { serveStatic } = await import("./static");
+      serveStatic(app);
+      bootState.steps.static = "ok";
+      log("frontend statique servi (immédiat)");
+    } catch (err: any) {
+      bootState.steps.static = "error";
+      bootState.errors.push(`Static: ${err.message}`);
+      console.error("[FATAL] Static setup failed:", err.message);
+    }
+  })();
+}
+
 (async () => {
   // Vérification env
   const missingEnv = ["AUTH_DATABASE_URL", "FINANCIAL_DATABASE_URL", "SESSION_SECRET"]
@@ -262,22 +281,20 @@ httpServer.listen(port, "0.0.0.0", () => {
     return res.status(status).json({ message: clientMessage });
   });
 
-  try {
-    if (process.env.NODE_ENV === "production") {
-      // Import dynamique — même raison que pour routes
-      const { serveStatic } = await import("./static");
-      serveStatic(app);
-    } else {
+  // En production le frontend est déjà servi (immédiatement après listen()).
+  // Ici uniquement le mode dev (Vite middleware).
+  if (process.env.NODE_ENV !== "production") {
+    try {
       const { setupVite } = await import("./vite");
       await setupVite(httpServer, app);
+      bootState.steps.static = "ok";
+    } catch (err: any) {
+      bootState.steps.static = "error";
+      bootState.errors.push(`Vite: ${err.message}`);
+      bootState.status = "error";
+      console.error("[FATAL] Vite setup failed:", err.message);
+      return;
     }
-    bootState.steps.static = "ok";
-  } catch (err: any) {
-    bootState.steps.static = "error";
-    bootState.errors.push(`Static/Vite: ${err.message}`);
-    bootState.status = "error";
-    console.error("[FATAL] Static setup failed:", err.message);
-    return;
   }
 
   if (!process.env.ADMIN_SLUG) {

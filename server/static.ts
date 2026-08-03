@@ -21,7 +21,10 @@ export function serveStatic(app: Express) {
   // — uniquement un booléen, JAMAIS le slug lui-même dans le HTML.
   // Le client lit ce flag pour savoir qu'il est sur la route admin et utilise
   // l'URL courante comme chemin de base, sans connaître le slug.
-  app.get("/{*path}", (req, res) => {
+  app.get("/{*path}", (req, res, next) => {
+    // Ne jamais intercepter les routes API — elles sont enregistrées plus tard
+    // (après l'init DB) et doivent recevoir la requête via next().
+    if (req.path.startsWith("/api")) return next();
     const slug = process.env.ADMIN_SLUG || "";
     const reqPath = req.path.replace(/\/+$/, "") || "/"; // normalise le trailing slash
     const isAdminPath =
