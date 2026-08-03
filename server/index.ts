@@ -171,6 +171,26 @@ httpServer.listen(port, "0.0.0.0", () => {
   log(`serving on port ${port}`);
 });
 
+// ── Gate API : attendre la fin de l'init avant de traiter les requêtes /api ──
+// Sur Plesk/Passenger, le process démarre à la demande : une requête API peut
+// arriver AVANT que registerRoutes() ait tourné → 404 HTML → erreur JSON côté
+// client. Ce middleware fait patienter la requête (max 30s) jusqu'à ce que les
+// routes soient prêtes, au lieu de la rejeter.
+let routesReady = false;
+let resolveRoutesReady: () => void = () => {};
+const routesReadyPromise = new Promise<void>((r) => { resolveRoutesReady = r; });
+app.use("/api", async (_req, res, next) => {
+  if (routesReady) return next();
+  const timedOut = await Promise.race([
+    routesReadyPromise.then(() => false),
+    new Promise<boolean>((r) => setTimeout(() => r(true), 30_000)),
+  ]);
+  if (timedOut && !routesReady) {
+    return res.status(503).json({ message: "Serveur en cours de démarrage, réessayez dans quelques secondes." });
+  }
+  next();
+});
+
 // ── PRODUCTION : servir le frontend IMMÉDIATEMENT ─────────────────────────────
 // Ne dépend pas de la DB. Sur Plesk/Passenger, le process est démarré à la
 // demande : sans ça, la première requête arrive avant la fin de l'init DB et
@@ -248,6 +268,8 @@ if (process.env.NODE_ENV === "production") {
     const { registerRoutes } = await import("./routes");
     await registerRoutes(httpServer, app);
     bootState.steps.routes = "ok";
+    routesReady = true;
+    resolveRoutesReady();
   } catch (err: any) {
     bootState.steps.routes = "error";
     bootState.errors.push(`Routes: ${err.message}`);
