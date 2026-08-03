@@ -31,6 +31,22 @@ const app = express();
 // "1" signifie : seul le dernier proxy connu est fiable — le client ne peut pas forger req.ip.
 app.set("trust proxy", 1);
 
+// ── IP réelle derrière Cloudflare ─────────────────────────────────────────────
+// En production (Plesk), le site passe par Cloudflare : req.ip vaut l'IP de
+// Cloudflare (ex: 104.23.x.x) et non celle du visiteur → géolocalisation fausse
+// (tous les visiteurs paraissaient "hors Afrique"). Cloudflare transmet la vraie
+// IP dans l'en-tête CF-Connecting-IP, qu'on utilise en priorité quand présent.
+app.use((req, _res, next) => {
+  const cfIp = req.headers["cf-connecting-ip"];
+  if (typeof cfIp === "string" && cfIp.length > 0 && cfIp.length < 64) {
+    Object.defineProperty(req, "ip", {
+      value: cfIp.replace(/^::ffff:/, "").trim(),
+      configurable: true,
+    });
+  }
+  next();
+});
+
 // ── Security headers — couche Helmet (baseline globale) ──────────────────────
 // La couche complète est dans registerRoutes() (routes.ts) qui s'exécute après
 // et surchargé les valeurs Helmet avec des directives plus strictes.
