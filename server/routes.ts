@@ -199,6 +199,12 @@ async function checkAdminGeoAllowed(ip: string): Promise<{ allowed: boolean; cou
 
 // Extraction IP minimale utilisable hors de registerRoutes (authMiddleware)
 function extractIp(req: Request): string {
+  // Cloudflare transmet la vraie IP du visiteur dans CF-Connecting-IP (non spoofable
+  // tant que le trafic passe par Cloudflare) — priorité absolue quand présent.
+  const cfIp = req.headers["cf-connecting-ip"];
+  if (typeof cfIp === "string" && cfIp.length > 0 && cfIp.length < 64) {
+    return cfIp.replace(/^::ffff:/, "").trim();
+  }
   const forwarded = req.headers["x-forwarded-for"];
   if (forwarded) {
     const first = (Array.isArray(forwarded) ? forwarded[0] : forwarded).split(",")[0].trim().replace(/^::ffff:/, "");
@@ -491,7 +497,10 @@ function setAuthCookie(res: Response, token: string) {
   res.cookie("wp_auth", token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
+    // "lax" (et non "strict") : avec strict, ouvrir le site depuis un lien externe
+    // (Telegram, WhatsApp, email) n'envoie pas le cookie → l'utilisateur paraît
+    // déconnecté. "lax" garde la protection CSRF sur les requêtes POST cross-site.
+    sameSite: "lax",
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 jours — aligné sur l'expiry JWT
     path: "/",
   });
