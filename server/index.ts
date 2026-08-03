@@ -150,21 +150,6 @@ const bootState: {
 // /api/healthz-boot répond toujours, même si la suite crashe.
 const port = parseInt(process.env.PORT || "5000", 10);
 
-// Endpoint de diagnostic de démarrage — enregistré AVANT listen()
-app.get("/api/healthz-boot", (_req, res) => {
-  const envKeys = ["AUTH_DATABASE_URL", "FINANCIAL_DATABASE_URL", "SESSION_SECRET", "NODE_ENV", "ADMIN_SLUG", "PORT"];
-  res.setHeader("Cache-Control", "no-store");
-  res.json({
-    ...bootState,
-    timestamp: new Date().toISOString(),
-    node: process.version,
-    uptime_s: Math.floor(process.uptime()),
-    env: Object.fromEntries(envKeys.map(k => [k, !!process.env[k]])),
-    env_node: process.env.NODE_ENV ?? "(not set)",
-    port_used: port,
-  });
-});
-
 // Handler d'erreur — évite que EADDRINUSE ou autre erreur réseau crashe le process
 httpServer.on("error", (err: any) => {
   const msg = `[FATAL] httpServer error: ${err.message} (code: ${err.code})`;
