@@ -89,12 +89,7 @@ import {
   isClapayCheckoutOperator,
   type ClapayWebhookPayload,
 } from "./clapay";
-
-// ── Masquage des numéros de téléphone dans les logs (RGPD) ────────────────────
-function maskPhoneForLog(phone: string | null | undefined): string {
-  if (!phone) return "?";
-  return String(phone).replace(/(\d{3})\d+(\d{2})$/, "$1****$2");
-}
+import { maskPhone as maskPhoneForLog, maskAddress as maskAddressForLog } from "./logMask";
 
 // ── Multer — logo opérateur ───────────────────────────────────────────────────
 const LOGOS_DIR = path.resolve(process.cwd(), "uploads", "operator-logos");
@@ -7512,7 +7507,7 @@ export async function registerRoutes(
           const network = payoutOpRecord?.mbiyoCode || mbiyoNetwork(operator || "");
           const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
           const callbackUrl = `${callbackBaseUrl}/api/mbiyo/payout-callback`;
-          console.log(`[WITHDRAWAL MBIYO] Params: msisdn=${msisdnFull} network=${network} country=${countryCode} currency=${currency}`);
+          console.log(`[WITHDRAWAL MBIYO] Params: msisdn=${maskPhoneForLog(msisdnFull)} network=${network} country=${countryCode} currency=${currency}`);
 
           const result = await mbiyoInitiatePayout({
             apiKey: mbiyoApiKey,
@@ -7626,7 +7621,7 @@ export async function registerRoutes(
           const countryCode = SENDAVAPAY_COUNTRY_CODES[mc.country] || "";
           const currency = SENDAVAPAY_CURRENCY_MAP[countryCode] || "XOF";
           const sendavaOperator = toSendavaOperator(operator || "", countryCode);
-          console.log(`[WITHDRAWAL SENDAVAPAY] Params: msisdn=${msisdnFull} op=${sendavaOperator} country=${countryCode}`);
+          console.log(`[WITHDRAWAL SENDAVAPAY] Params: msisdn=${maskPhoneForLog(msisdnFull)} op=${sendavaOperator} country=${countryCode}`);
 
           const result = await sendavaInitiateWithdraw(sendavaApiKey, {
             amount: netAmount,
@@ -7922,7 +7917,7 @@ export async function registerRoutes(
             const network = wdOpRecord?.mbiyoCode || mbiyoNetwork(w.operator || "");
             const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
             const callbackUrl = `${callbackBaseUrl}/api/mbiyo/payout-callback`;
-            console.log(`[ADMIN APPROVE WD MBIYO] Transfert: ${w.amount} vers ${msisdnFull}, ref: ${reference}, network: ${network}`);
+            console.log(`[ADMIN APPROVE WD MBIYO] Transfert: ${w.amount} vers ${maskPhoneForLog(msisdnFull)}, ref: ${reference}, network: ${network}`);
             const result = await mbiyoInitiatePayout({
               apiKey: mbiyoApiKey,
               amount: w.amount,
@@ -7958,7 +7953,7 @@ export async function registerRoutes(
             const mLastName = mNameParts.length > 1 ? mNameParts.slice(1).join(" ") : mNameParts[0] || merchant.name;
             const adminOmnipayCode = await resolveOmnipayOperatorCode(w.operator, w.country);
             const wdMsisdn = prependDialCode(w.phone, w.country);
-            console.log(`[ADMIN APPROVE WD] Transfert: ${w.amount} vers ${wdMsisdn}, operateur: ${adminOmnipayCode || "(auto)"}, ref: ${reference}`);
+            console.log(`[ADMIN APPROVE WD] Transfert: ${w.amount} vers ${maskPhoneForLog(wdMsisdn)}, operateur: ${adminOmnipayCode || "(auto)"}, ref: ${reference}`);
             const result = await omnipayInitiateTransfer({
               apikey: omnipayApiKey,
               msisdn: wdMsisdn,

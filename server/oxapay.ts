@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { maskPhone, maskAddress } from "./logMask";
 
 const OXAPAY_BASE_URL = "https://api.oxapay.com";
 
@@ -176,7 +177,7 @@ export async function createWhiteLabel(merchantApiKey: string, params: OxaPayWhi
   });
 
   if (result.result === 100) {
-    console.log(`[OXAPAY] White Label créée - TrackId: ${result.trackId} | Adresse: ${result.address} | Réseau: ${result.network}`);
+    console.log(`[OXAPAY] White Label créée - TrackId: ${result.trackId} | Adresse: ${maskAddress(result.address)} | Réseau: ${result.network}`);
   } else {
     console.error(`[OXAPAY] Échec White Label - Code: ${result.result} - ${result.message}`);
   }
@@ -191,7 +192,7 @@ export async function getStatus(merchantApiKey: string, trackId: string): Promis
 }
 
 export async function generatePayout(payoutApiKey: string, params: OxaPayPayoutRequest): Promise<OxaPayPayoutResponse> {
-  console.log(`[OXAPAY] Payout vers ${params.address}: ${params.amount} ${params.currency}`);
+  console.log(`[OXAPAY] Payout vers ${maskAddress(params.address)}: ${params.amount} ${params.currency}`);
 
   const result = await oxapayRequest<OxaPayPayoutResponse>(payoutApiKey, "/merchants/payout", {
     address: params.address,

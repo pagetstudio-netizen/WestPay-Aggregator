@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { maskPhone } from "./logMask";
 
 const OMNIPAY_BASE_URL = "https://omnipay.webtechci.com/interface/api2";
 
@@ -155,7 +156,7 @@ export async function initiatePayment(params: OmniPayPaymentRequest): Promise<Om
   if (params.operator) payload.operator = params.operator;
   if (params.return_url) payload.return_url = params.return_url;
 
-  console.log(`[OMNIPAY] Demande de paiement: ${params.amount} - Ref: ${params.reference} - Tel: ${params.msisdn}`);
+  console.log(`[OMNIPAY] Demande de paiement: ${params.amount} - Ref: ${params.reference} - Tel: ${maskPhone(params.msisdn)}`);
   const result = await omnipayRequest<OmniPayResponse>(payload);
 
   if (result.success === 1) {
@@ -181,7 +182,7 @@ export async function initiateTransfer(params: OmniPayTransferRequest): Promise<
 
   if (params.operator) payload.operator = params.operator;
 
-  console.log(`[OMNIPAY] Demande de transfert: ${params.amount} - Ref: ${params.reference} - Tel: ${params.msisdn}`);
+  console.log(`[OMNIPAY] Demande de transfert: ${params.amount} - Ref: ${params.reference} - Tel: ${maskPhone(params.msisdn)}`);
   const result = await omnipayRequest<OmniPayResponse>(payload);
 
   if (result.success === 1) {
