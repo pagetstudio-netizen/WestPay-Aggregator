@@ -489,7 +489,7 @@ function generateSecureApiKey(country: string): string {
 }
 
 function signToken(payload: { id: number; role: string; email: string }) {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: "2d" });
 }
 
 /** Pose le JWT dans un cookie httpOnly (inaccessible au JS) — protection XSS */
@@ -501,7 +501,7 @@ function setAuthCookie(res: Response, token: string) {
     // (Telegram, WhatsApp, email) n'envoie pas le cookie → l'utilisateur paraît
     // déconnecté. "lax" garde la protection CSRF sur les requêtes POST cross-site.
     sameSite: "lax",
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 jours — aligné sur l'expiry JWT
+    maxAge: 2 * 24 * 60 * 60 * 1000, // 2 jours — aligné sur l'expiry JWT
     path: "/",
   });
 }
@@ -1883,7 +1883,7 @@ export async function registerRoutes(
         const token = jwt.sign(
           { merchantId: merchant.id, email: merchant.email, role: "merchant", slug: merchant.slug, name: merchant.name },
           JWT_SECRET,
-          { expiresIn: "7d" }
+          { expiresIn: "2d" }
         );
         setAuthCookie(res, token);
         return res.json({ token, user: { id: merchant.id, email: merchant.email, name: merchant.name, slug: merchant.slug } });
