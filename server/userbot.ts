@@ -1024,7 +1024,8 @@ export async function startUbotAuth(phone: string): Promise<{ success: boolean; 
       settings: new Api.CodeSettings({}),
     }));
     pendingAuth = { phone, phoneCodeHash: result.phoneCodeHash, client: tempClient };
-    console.log(`[USERBOT] SMS code sent to ${phone}`);
+    const maskedUbotPhone = phone ? String(phone).replace(/(\d{3})\d+(\d{2})$/, "$1****$2") : "?";
+    console.log(`[USERBOT] SMS code sent to ${maskedUbotPhone}`);
     return { success: true, message: `Verification code sent to ${phone}.` };
   } catch (err: any) {
     console.error("[USERBOT] startUbotAuth error:", err.message);

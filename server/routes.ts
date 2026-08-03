@@ -90,6 +90,12 @@ import {
   type ClapayWebhookPayload,
 } from "./clapay";
 
+// ── Masquage des numéros de téléphone dans les logs (RGPD) ────────────────────
+function maskPhoneForLog(phone: string | null | undefined): string {
+  if (!phone) return "?";
+  return String(phone).replace(/(\d{3})\d+(\d{2})$/, "$1****$2");
+}
+
 // ── Multer — logo opérateur ───────────────────────────────────────────────────
 const LOGOS_DIR = path.resolve(process.cwd(), "uploads", "operator-logos");
 if (!fs.existsSync(LOGOS_DIR)) fs.mkdirSync(LOGOS_DIR, { recursive: true });
@@ -7701,7 +7707,7 @@ export async function registerRoutes(
           const cpCallbackUrl = `${callbackBaseUrl}/api/clapay/payout-callback`;
           const msisdnFull = "+" + prependDialCode(phone, mc.country);
           const cpLocalPhone = clapayLocalPhone(msisdnFull, countryCode);
-          console.log(`[WITHDRAWAL CLAPAY] Virement: ${netAmount} ${currency} → ${cpLocalPhone}, service: ${serviceName}, ref: ${reference}`);
+          console.log(`[WITHDRAWAL CLAPAY] Virement: ${netAmount} ${currency} → ${maskPhoneForLog(cpLocalPhone)}, service: ${serviceName}, ref: ${reference}`);
           const result = await clapayInitiatePayout(cpToken, {
             transaction_id: reference,
             amount: netAmount,
@@ -7837,7 +7843,7 @@ export async function registerRoutes(
             const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
             const callbackUrl = `${callbackBaseUrl}/api/clapay/payout-callback`;
             const cpAdminLocalPhone = clapayLocalPhone(w.phone || "", countryCode);
-            console.log(`[ADMIN APPROVE WD CLAPAY] Virement: ${w.amount} ${currency} → ${cpAdminLocalPhone}, service: ${serviceName}, ref: ${reference}`);
+            console.log(`[ADMIN APPROVE WD CLAPAY] Virement: ${w.amount} ${currency} → ${maskPhoneForLog(cpAdminLocalPhone)}, service: ${serviceName}, ref: ${reference}`);
             const result = await clapayInitiatePayout(cpToken, {
               transaction_id: reference,
               amount: w.amount,
@@ -7877,7 +7883,7 @@ export async function registerRoutes(
             const isBankTransfer = wdOpRecord?.type === "Virement bancaire";
             const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
             const notifyUrl = `${callbackBaseUrl}/api/seapay/payout-callback`;
-            console.log(`[ADMIN APPROVE WD SEAPAY] Transfert: ${w.amount} ${currency} vers ${w.phone}, canal: ${channelCode || "(non defini)"}, ref: ${reference}`);
+            console.log(`[ADMIN APPROVE WD SEAPAY] Transfert: ${w.amount} ${currency} vers ${maskPhoneForLog(w.phone)}, canal: ${channelCode || "(non defini)"}, ref: ${reference}`);
             const result = await seapayPayout({
               merchantId: spMerchantId,
               currency,
