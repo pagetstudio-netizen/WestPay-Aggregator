@@ -1,0 +1,6 @@
+# Sécurité : ne jamais servir le bundle serveur ni les fichiers sensibles
+# via Apache (Document Root = /httpdocs/dist).
+<FilesMatch "\.(cjs|mjs|ts|sh|env|log)$">
+    Require all denied
+</FilesMatch>
+Options -Indexes
