@@ -51,23 +51,50 @@ app.use((req, _res, next) => {
 // La couche complète est dans registerRoutes() (routes.ts) qui s'exécute après
 // et surchargé les valeurs Helmet avec des directives plus strictes.
 app.use(helmet({
-  // CSP gérée par le middleware dans routes.ts (plus complète et toujours active)
-  contentSecurityPolicy: false,
-  // X-Frame-Options → DENY (surclasse le défaut SAMEORIGIN de Helmet)
+  contentSecurityPolicy: false,   // géré manuellement ci-dessous (plus complet)
   frameguard: { action: "deny" },
-  // Supprime X-Powered-By (ne pas révéler Express)
   hidePoweredBy: true,
-  // HSTS géré dans routes.ts (production only, pour éviter les boucles en dev HTTP)
-  hsts: false,
+  hsts: false,                    // géré manuellement ci-dessous
   crossOriginEmbedderPolicy: false,
-  // "same-site" au lieu de "cross-origin" — les ressources statiques (JS/CSS/images)
-  // ne doivent pas être embarquables par des sites tiers. Les callbacks de paiement
-  // (qui reçoivent du JSON depuis des serveurs tiers) ne sont pas affectés par ce header.
   crossOriginResourcePolicy: { policy: "same-site" },
-  // Actifs par défaut dans Helmet : noSniff, xssFilter, dnsPrefetchControl, etc.
 }));
 // X-Powered-By supprimé explicitement (double protection)
 app.disable("x-powered-by");
+
+// ── Security headers appliqués à TOUTES les réponses ─────────────────────────
+// Ce bloc est intentionnellement dans index.ts (et non routes.ts) pour garantir
+// qu'il s'exécute avant serveStatic en production. serveStatic est enregistré
+// dans une IIFE asynchrone avant registerRoutes → sans ce bloc ici, les pages
+// HTML statiques (ex : /) partiraient sans HSTS / CSP / Permissions-Policy.
+app.use((_req, res, next) => {
+  // HSTS : uniquement en production (évite les boucles en dev HTTP)
+  if (process.env.NODE_ENV === "production") {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
+  }
+
+  // Permissions-Policy : désactiver les APIs sensibles du navigateur
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
+
+  // Content-Security-Policy
+  const scriptSrc = process.env.NODE_ENV === "production"
+    ? "script-src 'self'"
+    : "script-src 'self' 'unsafe-inline'";
+  res.setHeader("Content-Security-Policy", [
+    "default-src 'self'",
+    scriptSrc,
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "img-src 'self' data: blob: https://api.dicebear.com",
+    "connect-src 'self' wss: ws: https:",
+    "font-src 'self' data: https://fonts.gstatic.com",
+    "frame-src 'none'",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join("; "));
+
+  next();
+});
 
 // ── Cookie parser (requis pour lire les cookies httpOnly d'authentification) ──
 app.use(cookieParser());
