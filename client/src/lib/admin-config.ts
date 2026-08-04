@@ -6,7 +6,8 @@
  *  2. Si oui, il injecte window.__IS_ADMIN_PATH__ = true dans le HTML
  *     (uniquement un booléen — le slug n'apparaît jamais).
  *  3. Le client lit ce flag, prend l'URL courante comme chemin de base admin,
- *     et enregistre la route dans le routeur React.
+ *     et enregistre la route dans le routeur React. Le chemin est mis en cache
+ *     dans localStorage pour éviter le flash 404 au refresh.
  *  4. Si le flag est absent (Apache sert le HTML en statique, bypassant Node.js),
  *     App.tsx bascule en fallback : POST /api/auth/admin/verify-path
  *     qui répond uniquement { isAdminPath: true|false }.
@@ -21,6 +22,8 @@ declare global {
   }
 }
 
+const LS_KEY = "wp_adm_path";
+
 /** true si le serveur a confirmé que cette page est le chemin admin. */
 const serverFlaggedAdmin =
   typeof window !== "undefined" && window.__IS_ADMIN_PATH__ === true;
@@ -30,9 +33,24 @@ const detectedAdminPath = serverFlaggedAdmin
   ? "/" + window.location.pathname.split("/").filter(Boolean)[0]
   : null;
 
-/** Chemin admin initial — non nul si le serveur a confirmé le flag. */
+// Si le serveur a posé le flag, on met à jour le cache localStorage immédiatement.
+if (detectedAdminPath && typeof window !== "undefined") {
+  try { localStorage.setItem(LS_KEY, detectedAdminPath); } catch {}
+}
+
+/**
+ * Chemin admin en cache localStorage — évite le flash 404 au refresh.
+ * Utilisé uniquement si le serveur n'a pas posé le flag ET si le cache existe.
+ * Sécurité : le chemin n'est pas secret (la vraie protection est le JWT + cookie).
+ */
+const cachedAdminPath =
+  typeof window !== "undefined" && !detectedAdminPath
+    ? (() => { try { return localStorage.getItem(LS_KEY); } catch { return null; } })()
+    : null;
+
+/** Chemin admin initial — priorité : flag serveur > cache localStorage > sentinel. */
 export const ADMIN_PATH: string =
-  detectedAdminPath ?? "/__admin_not_configured__";
+  detectedAdminPath ?? cachedAdminPath ?? "/__admin_not_configured__";
 
 /**
  * Objet mutable partagé entre toutes les pages admin.
@@ -46,6 +64,12 @@ export const adminConfig = {
 /** Appelé par App.tsx une fois le chemin confirmé (fallback API). */
 export function updateAdminBase(path: string) {
   adminConfig.base = path;
+  try { localStorage.setItem(LS_KEY, path); } catch {}
+}
+
+/** Vider le cache (appelé à la déconnexion si nécessaire). */
+export function clearAdminPathCache() {
+  try { localStorage.removeItem(LS_KEY); } catch {}
 }
 
 /** @deprecated Utiliser adminConfig.base dans les pages admin. */

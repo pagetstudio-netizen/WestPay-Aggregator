@@ -51,10 +51,17 @@ function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: {
         credentials: "include",
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
-      if (res.status === 401 || res.status === 403) {
+      if (res.status === 401) {
+        // 401 = session vraiment expirée → déconnexion
         logout();
         setLocation(adminConfig.base);
         throw new Error("Session expiree");
+      }
+      if (res.status === 403) {
+        // 403 = accès refusé temporaire (geo, IP, maintenance) — session toujours valide.
+        // Ne PAS appeler logout() ici : ça déconnecterait l'admin à chaque refresh
+        // si ip-api.com est lent ou si le geo-check échoue momentanément.
+        throw new Error("Accès refusé");
       }
       if (!res.ok) throw new Error("Erreur de chargement");
       return res.json();
