@@ -252,6 +252,46 @@ export async function verifyPayment(apiKey: string, reference: string): Promise<
 }
 
 /**
+ * Récupère la liste des opérateurs disponibles pour un pays (code ISO 2 lettres, ex: "TG").
+ */
+export async function getOperators(
+  apiKey: string,
+  countryCode: string,
+): Promise<{ success: boolean; data?: any[]; error?: string; message?: string }> {
+  return sendavaRequest<{ success: boolean; data?: any[]; error?: string; message?: string }>(
+    `/operators/${encodeURIComponent(countryCode)}`,
+    "GET",
+    apiKey,
+  );
+}
+
+/**
+ * Déclenche le push USSD côté serveur (SDK v1 initiate-payment).
+ * Retourne : polling normal, redirect URL, ou OTP requis.
+ */
+export async function initiatePayment(
+  apiKey: string,
+  params: {
+    paymentToken: string;
+    payerName: string;
+    payerPhone: string;
+    payerCountry: string;
+    operatorId: string;
+  },
+): Promise<{
+  success: boolean;
+  code?: string;
+  requiresRedirect?: boolean;
+  redirectUrl?: string;
+  requiresOtp?: boolean;
+  otpToken?: string | null;
+  error?: string;
+  message?: string;
+}> {
+  return sendavaRequest<any>("/initiate-payment", "POST", apiKey, params);
+}
+
+/**
  * Effectue un retrait (pay-out) depuis votre wallet vers un numéro Mobile Money.
  */
 export async function initiateWithdraw(apiKey: string, params: SendavaWithdrawRequest): Promise<SendavaWithdrawResponse> {

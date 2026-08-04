@@ -59,6 +59,8 @@ import {
 } from "./seapay";
 import {
   createPayment as sendavaCreatePayment,
+  getOperators as sendavaGetOperators,
+  initiatePayment as sendavaInitiatePayment,
   getPaymentStatus as sendavaGetPaymentStatus,
   verifyPayment as sendavaVerifyPayment,
   initiateWithdraw as sendavaInitiateWithdraw,
@@ -4100,8 +4102,60 @@ export async function registerRoutes(
 
           const spReference = sendavaResult.data.reference;
           const paymentToken = sendavaResult.data.paymentToken;
+          const payerPhoneE164 = msisdn.startsWith("+") ? msisdn : `+${msisdn}`;
 
-          // Stocker le paiement en attente (l'invite USSD sera déclenchée par le frontend via CORS)
+          // ── Étape 2 (serveur) : résoudre l'opérateur ────────────────────
+          // Résolution serveur — identique à la logique du frontend (supprimée).
+          const normStr = (s: string) => s.toLowerCase().replace(/[\s\-_]+/g, "");
+          const resolveOpId = (ops: any[], name: string): string | null => {
+            const low = name.toLowerCase().trim();
+            const normLow = normStr(low);
+            const exact = ops.find((o: any) => normStr(o.name) === normLow);
+            if (exact) return exact.id;
+            const contained = ops.find((o: any) => {
+              const on = normStr(o.name);
+              return normLow.includes(on) || on.includes(normLow);
+            });
+            if (contained) return contained.id;
+            const BRAND_MAP: Record<string, string> = {
+              "tmoney": "tmoney", "moov money": "moov", "moov": "moov",
+              "mtn mobile money": "mtn", "mtn money": "mtn", "mtn": "mtn",
+              "orange money": "orange", "orange": "orange",
+              "wave": "wave", "mixx by yas": "mixx", "mixx": "mixx",
+              "free money": "free", "free": "free",
+              "coris money": "coris", "coris": "coris",
+              "airtel money": "airtel", "airtel": "airtel",
+              "m-pesa": "mpesa", "mpesa": "mpesa",
+              "vodacom": "vodacom",
+              "africell money": "africell", "africell": "africell",
+              "celtiis": "celtiis",
+            };
+            const brand = BRAND_MAP[low];
+            if (brand) {
+              const branded = ops.find((o: any) => normStr(o.name).includes(brand) || normStr(o.id ?? "").includes(brand));
+              if (branded) return branded.id;
+            }
+            for (const kw of ["mtn","orange","moov","wave","mixx","airtel","vodacom","mpesa","tmoney","coris","free","africell","celtiis"]) {
+              if (normLow.includes(kw)) {
+                const found = ops.find((o: any) => normStr(o.name).includes(kw) || normStr(o.id ?? "").includes(kw));
+                if (found) return found.id;
+              }
+            }
+            return ops[0]?.id ?? null;
+          };
+
+          let operatorId: string | null = null;
+          try {
+            const opsResult = await sendavaGetOperators(sendavaApiKey, countryCode);
+            const ops: any[] = Array.isArray(opsResult.data) ? opsResult.data : [];
+            operatorId = resolveOpId(ops, paymentMethod);
+            console.log(`[SENDAVAPAY] Opérateurs ${countryCode}: ${ops.length} — résolu: ${operatorId}`);
+          } catch (opsErr: any) {
+            console.error("[SENDAVAPAY] Erreur récupération opérateurs:", opsErr.message);
+            // Continuer sans operatorId — le push pourrait quand même fonctionner
+          }
+
+          // Stocker le paiement en attente
           const pending = await storage.createPendingPayment({
             merchantId: merchant.id,
             country,
@@ -4123,23 +4177,49 @@ export async function registerRoutes(
             merchantId: merchant.id,
             action: "sendavapay_payment_created",
             ip: req.ip || "",
-            description: `Paiement SendavaPay créé - Ref: ${spReference} - Montant: ${parsedAmount} ${currency} - Pays: ${countryCode}`,
+            description: `Paiement SendavaPay créé - Ref: ${spReference} - Montant: ${parsedAmount} ${currency} - Opérateur: ${operatorId ?? "inconnu"}`,
           });
 
-          // Étape 2 (frontend) : transmettre paymentToken + reference au client
-          // Le frontend appellera directement l'API CORS SendavaPay pour déclencher l'invite USSD
-          const payerPhoneE164 = msisdn.startsWith("+") ? msisdn : `+${msisdn}`;
-          return res.json({
-            success: true,
-            paymentId: pending.id,
-            sendavapay: true,
-            sendavapayToken: true,
-            omnipayReference: spReference,
-            paymentToken,
-            countryCode,
-            payerPhoneE164,
-            fees: 0,
-          });
+          // ── Étape 3 (serveur) : déclencher le push USSD ─────────────────
+          if (!operatorId) {
+            // Pas d'opérateur trouvé → polling, le webhook confirmera
+            console.warn(`[SENDAVAPAY] Opérateur introuvable pour "${paymentMethod}" — passage en polling`);
+            return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, polling: true, fees: 0 });
+          }
+
+          try {
+            const initResult = await sendavaInitiatePayment(sendavaApiKey, {
+              paymentToken,
+              payerName: payerName || "Client",
+              payerPhone: payerPhoneE164,
+              payerCountry: countryCode,
+              operatorId,
+            });
+            console.log(`[SENDAVAPAY] initiate-payment: success=${initResult.success} code=${initResult.code ?? "-"} redirect=${!!initResult.requiresRedirect} otp=${!!initResult.requiresOtp}`);
+
+            if (!initResult.success) {
+              // SERVER_ERROR ou PAYMENT_IN_PROGRESS → polling (le webhook arrivera)
+              if (initResult.code === "SERVER_ERROR" || initResult.code === "PAYMENT_IN_PROGRESS") {
+                return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, polling: true, fees: 0 });
+              }
+              const errMsg = initResult.error || initResult.message || "Erreur initiation paiement";
+              console.error(`[SENDAVAPAY] initiate-payment erreur: ${errMsg}`);
+              return res.status(400).json({ message: errMsg });
+            }
+
+            if (initResult.requiresRedirect && initResult.redirectUrl) {
+              return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, paymentUrl: initResult.redirectUrl, fees: 0 });
+            }
+            if (initResult.requiresOtp) {
+              return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, requiresOtp: true, otpToken: initResult.otpToken ?? null, fees: 0 });
+            }
+            // Succès normal : push USSD envoyé → polling
+            return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, polling: true, fees: 0 });
+          } catch (initErr: any) {
+            console.error("[SENDAVAPAY] Erreur initiation paiement:", initErr.message);
+            // Timeout ou erreur réseau → polling quand même (le webhook peut confirmer)
+            return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, polling: true, fees: 0 });
+          }
         } catch (sendavaErr: any) {
           console.error("[SENDAVAPAY] Erreur création paiement:", sendavaErr.message);
           return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });

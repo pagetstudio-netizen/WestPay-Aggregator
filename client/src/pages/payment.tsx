@@ -371,10 +371,18 @@ export default function PaymentPage() {
       const d = await r.json();
       if (!r.ok) throw new Error(d.message);
       setPaymentId(d.paymentId); setOmniRef(d.omnipayReference); setShowOtpModal(false);
-      if (d.sendavapay && d.sendavapayToken && d.paymentToken) {
-        /* ── SendavaPay: API CORS flow ── */
+      if (d.sendavapay) {
+        /* ── SendavaPay: push USSD déclenché côté serveur ── */
         setStep(2);
-        initiateSendavaPayment(d.paymentToken, d.paymentId, d.countryCode, d.payerPhoneE164);
+        if (d.requiresOtp && d.otpToken) {
+          setSndOtpRequired(true);
+          setSndOtpToken(d.otpToken);
+        } else if (d.paymentUrl) {
+          setPaymentUrl(d.paymentUrl);
+          startPolling(d.paymentId);
+        } else {
+          startPolling(d.paymentId);
+        }
         return;
       }
       if (d.paymentUrl) { setPaymentUrl(d.paymentUrl); setStep(2); }
