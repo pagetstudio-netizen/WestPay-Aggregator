@@ -291,8 +291,10 @@ const MERCHANT_AIDE_MSG = (name: string) =>
   `💰 /solde — Solde détaillé par pays\n` +
   `📋 /transactions — Les 5 dernières transactions\n` +
   `📊 /stats — Vos statistiques globales\n` +
+  `🌐 /addip ADRESSE\\_IP — Ajouter une IP à la whitelist\n` +
   `❓ /aide — Afficher cette aide\n\n` +
-  `📲 *Notifications automatiques*\nChaque paiement confirmé est affiché ici en temps réel.`;
+  `📲 *Notifications automatiques*\nChaque paiement confirmé est affiché ici en temps réel.\n\n` +
+  `💡 *Astuce IP :* Si le bot ne répond pas quand vous envoyez une IP en texte, utilisez la commande \`/addip 1.2.3.4\` à la place.`;
 
 // ─── Security helpers ─────────────────────────────────────────────────────────
 async function getAdminGroupId(): Promise<string | undefined> {
@@ -1890,19 +1892,24 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     }
   });
 
-  // ─── Messages non reconnus (DM uniquement) ─────────────────────────────────
   // ─── Détection IP dans les groupes marchands ────────────────────────────────
   // Quand un marchand envoie une adresse IP dans son groupe, le bot la whitelist
   // automatiquement si elle vient d'Afrique, sinon refuse.
+
+  // Noms exacts retournés par ip-api.com (champ "country")
+  // IMPORTANT : ne pas se fier aux noms ISO — ip-api.com a ses propres libellés.
   const AFRICAN_COUNTRIES = new Set([
     // Afrique de l'Ouest
     "Togo", "Benin", "Ivory Coast", "Côte d'Ivoire", "Senegal", "Mali",
     "Burkina Faso", "Ghana", "Nigeria", "Guinea", "Niger", "Mauritania",
     "Sierra Leone", "Liberia", "Cape Verde", "Gambia", "Guinea-Bissau",
     // Afrique Centrale
-    "Cameroon", "Democratic Republic of the Congo", "Republic of the Congo",
-    "Congo", "Gabon", "Chad", "Central African Republic", "Equatorial Guinea",
-    "São Tomé and Príncipe", "Angola", "Rwanda", "Burundi",
+    // ip-api.com retourne "Congo, The Democratic Republic of the" pour la RDC
+    "Democratic Republic of the Congo",
+    "Congo, The Democratic Republic of the",
+    "Republic of the Congo", "Congo",
+    "Cameroon", "Gabon", "Chad", "Central African Republic", "Equatorial Guinea",
+    "Sao Tome and Principe", "São Tomé and Príncipe", "Angola", "Rwanda", "Burundi",
     // Afrique de l'Est
     "Kenya", "Tanzania", "Uganda", "Ethiopia", "Somalia", "Eritrea",
     "Djibouti", "South Sudan", "Sudan", "Mozambique", "Madagascar",
@@ -1915,6 +1922,92 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
   // Détecte une IPv4 n'importe où dans le message (ex: "IP: 41.207.187.10 merci")
   const IP_EXTRACT_REGEX = /\b((?:\d{1,3}\.){3}\d{1,3})\b/;
   const isValidIpv4 = (ip: string) => ip.split(".").every((o) => +o >= 0 && +o <= 255);
+
+  // ─── Fonction utilitaire partagée : whitelist une IP depuis un groupe marchand ─
+  async function whitelistMerchantIp(ctx: any, candidate: string, merchant: any) {
+    const geo = await getGeoInfo(candidate);
+    console.log(`[TG/addip] geo pour ${candidate}: country="${geo.country}" city="${geo.city}"`);
+
+    if (!geo.country || !AFRICAN_COUNTRIES.has(geo.country)) {
+      await ctx.reply(
+        `❌ IP refusée\n\n🌐 \`${candidate}\`\n📍 ${geo.city || "?"}${geo.country ? ", " + geo.country : " — pays inconnu"}\n\n` +
+        `Cette adresse IP ne provient pas d'Afrique et ne peut pas être ajoutée.`,
+        { parse_mode: "Markdown" }
+      );
+      await alertAdminGroup(
+        `⚠️ *IP non africaine refusée*\n\n` +
+        `👤 Marchand : *${merchant.name}*\n` +
+        `🌐 IP : \`${candidate}\`\n` +
+        `📍 ${geo.city || "?"}${geo.country ? ", " + geo.country : " — pays inconnu"}\n` +
+        `🔌 ${geo.isp || "?"}`
+      );
+      return;
+    }
+
+    try {
+      await storage.addAllowedIp({
+        ipAddress: candidate,
+        userEmail: merchant.email,
+        role: "merchant",
+        country: geo.country,
+        city: geo.city || null,
+        note: `Ajouté via Telegram — ${merchant.name}`,
+        createdBy: `Telegram/${merchant.name}`,
+      });
+      await storage.createSecurityLog({
+        eventType: "ip_allowed",
+        ip: candidate,
+        action: "allowed_via_merchant_telegram",
+        details: `IP ajoutée par le marchand ${merchant.name} via Telegram — ${geo.city}, ${geo.country}`,
+      }).catch(() => {});
+      await ctx.reply(
+        `✅ *IP ajoutée avec succès*\n\n🌐 \`${candidate}\`\n📍 ${geo.city || "?"}${geo.country ? ", " + geo.country : ""}\n🔌 ${geo.isp || "?"}`,
+        { parse_mode: "Markdown" }
+      );
+      await alertAdminGroup(
+        `✅ *IP autorisée via Telegram marchand*\n\n` +
+        `👤 Marchand : *${merchant.name}*\n` +
+        `🌐 IP : \`${candidate}\`\n` +
+        `📍 ${geo.city || "?"}${geo.country ? ", " + geo.country : ""}\n` +
+        `🔌 ${geo.isp || "?"}`
+      );
+    } catch (err: any) {
+      console.error(`[TG/addip] Erreur addAllowedIp pour ${candidate}:`, err?.message);
+      await ctx.reply(`❌ Erreur lors de l'ajout : ${err?.message || "inconnue"}. Contactez l'administrateur.`);
+    }
+  }
+
+  // ─── /addip — Commande pour ajouter une IP depuis un groupe marchand ──────────
+  // ⚠️  IMPORTANT : utiliser cette commande si le bot ne répond pas aux messages
+  // texte (mode privacy Telegram activé). Les commandes /xxx sont TOUJOURS reçues
+  // par le bot même en mode privacy, contrairement aux messages texte ordinaires.
+  bot.command("addip", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
+    if (!isGroup) {
+      await ctx.reply("❌ Cette commande doit être utilisée dans un groupe marchand.");
+      return;
+    }
+
+    const merchant = await getMerchantForGroup(chatId);
+    if (!merchant) {
+      // Pas un groupe marchand — ignorer silencieusement
+      return;
+    }
+
+    const args = (ctx.message.text || "").split(/\s+/).slice(1);
+    const ip = args[0]?.trim();
+    if (!ip || !IP_EXTRACT_REGEX.test(ip) || !isValidIpv4(ip)) {
+      await ctx.reply(
+        `❌ Usage : \`/addip ADRESSE_IP\`\n\nExemple : \`/addip 41.207.187.10\``,
+        { parse_mode: "Markdown" }
+      );
+      return;
+    }
+
+    await ctx.reply("⏳ Vérification en cours...");
+    await whitelistMerchantIp(ctx, ip, merchant);
+  });
 
   // ─── Catch-all message handler (doit être le DERNIER handler) ───────────────
   // IMPORTANT : utiliser (ctx, next) et toujours appeler next() pour ne jamais
@@ -1939,53 +2032,10 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         const ipMatch = text.match(IP_EXTRACT_REGEX);
         if (!ipMatch || !isValidIpv4(ipMatch[1])) return next();
         const candidate = ipMatch[1];
-        console.log(`[TG] IP détectée dans groupe marchand ${chatId}: ${candidate}`);
+        console.log(`[TG] IP détectée (texte) dans groupe marchand ${chatId}: ${candidate}`);
 
-        // Réponse immédiate en chinois
-        await ctx.reply("请稍等，我这就帮你添加。");
-
-        const geo = await getGeoInfo(candidate);
-
-        if (!geo.country || !AFRICAN_COUNTRIES.has(geo.country)) {
-          await ctx.reply("❌fake ip 该IP地址无法添加到我们的白名单中。");
-          await alertAdminGroup(
-            `⚠️ *IP non africaine refusée*\n\n` +
-            `👤 Marchand : *${merchant.name}*\n` +
-            `🌐 IP : \`${candidate}\`\n` +
-            `📍 ${geo.city || "?"}${geo.country ? ", " + geo.country : " — pays inconnu"}\n` +
-            `🔌 ${geo.isp || "?"}\n\n` +
-            `❌ Impossible — cette IP vient de *${geo.country || "pays inconnu"}*, qui n'est pas en Afrique.`
-          );
-          return;
-        }
-
-        try {
-          await storage.addAllowedIp({
-            ipAddress: candidate,
-            userEmail: merchant.email,
-            role: "merchant",
-            country: geo.country,
-            city: geo.city || null,
-            note: `Ajouté via Telegram — ${merchant.name}`,
-            createdBy: `Telegram/${merchant.name}`,
-          });
-          await storage.createSecurityLog({
-            eventType: "ip_allowed",
-            ip: candidate,
-            action: "allowed_via_merchant_telegram",
-            details: `IP ajoutée par le marchand ${merchant.name} via Telegram — ${geo.city}, ${geo.country}`,
-          });
-          await ctx.reply("done ✅");
-          await alertAdminGroup(
-            `✅ *IP autorisée via Telegram marchand*\n\n` +
-            `👤 Marchand : *${merchant.name}*\n` +
-            `🌐 IP : \`${candidate}\`\n` +
-            `📍 ${geo.city}${geo.country ? ", " + geo.country : ""}\n` +
-            `🔌 ${geo.isp || "?"}`
-          );
-        } catch {
-          await ctx.reply("❌ Erreur lors de l'ajout. Contactez l'administrateur.");
-        }
+        await ctx.reply("⏳ Vérification en cours...");
+        await whitelistMerchantIp(ctx, candidate, merchant);
         return;
       }
 

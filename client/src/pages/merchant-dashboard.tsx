@@ -60,12 +60,14 @@ function useMerchantFetch(url: string, key: string[], token: string | null) {
     queryKey: key,
     queryFn: async () => {
       const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) throw new Error("Erreur de chargement");
       return res.json();
     },
-    enabled: !!token,
+    // Ne pas bloquer sur token=null : après un refresh de page le token en mémoire
+    // est perdu mais le cookie httpOnly reste valide — credentials:"include" suffit.
   });
 }
 
@@ -910,7 +912,9 @@ function ApiKeysPanel({ token }: { token: string | null }) {
     mutationFn: async (merchantCountryId: number) => {
       const res = await fetch("/api/merchant/regenerate-api", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ merchantCountryId }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -1084,7 +1088,9 @@ function WebhookPanel({ token }: { token: string | null }) {
     try {
       const res = await fetch("/api/merchant/webhook", {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ webhookUrl: webhookUrl.trim() }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || t("error")); }
@@ -1101,7 +1107,9 @@ function WebhookPanel({ token }: { token: string | null }) {
     try {
       const res = await fetch("/api/merchant/webhook/test", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       const data = await res.json();
       if (data.success) toast({ title: t("webhookTested"), description: `HTTP ${data.statusCode}` });
@@ -1117,7 +1125,9 @@ function WebhookPanel({ token }: { token: string | null }) {
     try {
       const res = await fetch("/api/merchant/webhook", {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ webhookUrl: "" }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || t("error")); }
@@ -1284,7 +1294,9 @@ function TransfersPanel({ token }: { token: string | null }) {
     mutationFn: async (data: { country: string; msisdn: string; amount: number; firstName: string; lastName: string; operator?: string }) => {
       const res = await fetch("/api/merchant/transfer", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify(data),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -1611,7 +1623,9 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
     queryKey: ["/api/merchant/withdrawal-operators", selectedWallet?.country],
     queryFn: () =>
       fetch(`/api/merchant/withdrawal-operators/${encodeURIComponent(selectedWallet!.country)}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       }).then(r => r.json()),
     enabled: !!selectedWallet && !!token,
   });
@@ -1628,7 +1642,9 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
     mutationFn: async (data: { merchantCountryId: number; amount: number; phone: string; operator: string; recipientName?: string }) => {
       const res = await fetch("/api/merchant/withdrawals", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify(data),
       });
       const d = await res.json();
@@ -2148,7 +2164,9 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
     mutationFn: async (data: { fromCountryId: string; toCountryId: string; amount: string }) => {
       const res = await fetch("/api/merchant/wallet-transfers", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify(data),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -2491,7 +2509,9 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
     try {
       const res = await fetch("/api/merchant/change-password", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ currentPassword, newPassword }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || t("error")); }
@@ -2839,7 +2859,8 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
   const { data: links = [], isLoading } = useQuery<PaymentLink[]>({
     queryKey: ["/api/merchant/payment-links"],
     queryFn: async () => {
-      const res = await fetch("/api/merchant/payment-links", { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch("/api/merchant/payment-links", { credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!res.ok) throw new Error("Error");
       return res.json();
     },
@@ -2863,7 +2884,9 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
     mutationFn: async (f: ReturnType<typeof mkForm>) => {
       const res = await fetch("/api/merchant/payment-links", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify(buildPayload(f)),
       });
       if (!res.ok) throw new Error((await res.json()).message);
@@ -2880,7 +2903,8 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: number; data: any }) => {
       const res = await fetch(`/api/merchant/payment-links/${id}`, {
-        method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        method: "PUT", credentials: "include",
+ headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify(data),
       });
       if (!res.ok) throw new Error((await res.json()).message);
@@ -2896,7 +2920,8 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      const res = await fetch(`/api/merchant/payment-links/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`/api/merchant/payment-links/${id}`, { method: "DELETE", credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!res.ok) throw new Error("Error");
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] }); toast({ title: t("linkDeleted") }); },
@@ -3672,7 +3697,9 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
     try {
       const res = await fetch("/api/merchant/crypto/regenerate-api-key", {
         method: "POST",
-        headers: { "Authorization": `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) throw new Error("Échec de la régénération");
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/crypto/api-key"] });
@@ -3693,7 +3720,9 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
     try {
       const res = await fetch("/api/merchant/webhook", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ webhookUrl: cryptoWebhookUrl.trim() }),
       });
       if (!res.ok) throw new Error("Erreur lors de la sauvegarde");
@@ -3732,6 +3761,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
     try {
       const res = await fetch("/api/merchant/crypto/withdraw", {
         method: "POST",
+        credentials: "include",
         headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ currency: withdrawModal?.currency, amount: amt, walletAddress: wdAddress, network: wdNetwork }),
       });
@@ -3786,6 +3816,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
       for (const currency of invSelectedCurrencies) {
         const res = await fetch("/api/merchant/crypto-links", {
           method: "POST",
+          credentials: "include",
           headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             name: invDescription.trim(),
@@ -5131,6 +5162,7 @@ const BASE_URL = '${BASE_URL}';
 async function initiatePayin({ amount, currency, orderId, callbackUrl, phone, network, countryCode }) {
   const res = await fetch(\`\${BASE_URL}/api/sdk/v1/payin\`, {
     method: 'POST',
+    credentials: "include",
     headers: { 'Content-Type': 'application/json', 'X-SDK-Key': SDK_KEY },
     body: JSON.stringify({
       amount, currency, order_id: orderId, callback_url: callbackUrl,
@@ -5144,6 +5176,7 @@ async function initiatePayin({ amount, currency, orderId, callbackUrl, phone, ne
 async function initiatePayout({ amount, currency, orderId, callbackUrl, phone, network, countryCode, beneficiary }) {
   const res = await fetch(\`\${BASE_URL}/api/sdk/v1/payout\`, {
     method: 'POST',
+    credentials: "include",
     headers: { 'Content-Type': 'application/json', 'X-SDK-Key': SDK_KEY },
     body: JSON.stringify({
       amount, currency, order_id: orderId, callback_url: callbackUrl,
@@ -5156,6 +5189,7 @@ async function initiatePayout({ amount, currency, orderId, callbackUrl, phone, n
 // Vérifier un statut
 async function getTransactionStatus(reference) {
   const res = await fetch(\`\${BASE_URL}/api/sdk/v1/transaction/\${reference}\`, {
+    credentials: "include",
     headers: { 'X-SDK-Key': SDK_KEY }
   });
   return res.json();
@@ -5191,7 +5225,9 @@ export default function MerchantDashboard() {
     queryFn: async () => {
       if (!token) return [];
       const res = await fetch("/api/merchant/crypto-aggregators", {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) return [];
       return res.json();
@@ -5205,7 +5241,9 @@ export default function MerchantDashboard() {
     queryFn: async () => {
       if (!token) return { sdkEnabled: false };
       const res = await fetch("/api/merchant/sdk/status", {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) return { sdkEnabled: false };
       return res.json();

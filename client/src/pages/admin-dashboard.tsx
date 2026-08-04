@@ -48,7 +48,8 @@ function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: {
     queryKey: key,
     queryFn: async () => {
       const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (res.status === 401 || res.status === 403) {
         logout();
@@ -112,7 +113,9 @@ function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string
     mutationFn: async () => {
       const res = await fetch(`/api/admin/merchant/${merchant.id}/telegram/generate-code`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) throw new Error("Erreur");
       return res.json();
@@ -128,7 +131,9 @@ function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string
     mutationFn: async () => {
       const res = await fetch(`/api/admin/merchant/${merchant.id}/telegram/revoke`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) throw new Error("Erreur");
     },
@@ -146,7 +151,9 @@ function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string
     try {
       const res = await fetch(`/api/admin/merchant/${merchant.id}/telegram/language`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ language: lang }),
       });
       if (!res.ok) throw new Error("Erreur");
@@ -326,7 +333,9 @@ function OverviewPanel() {
     try {
       const res = await fetch("/api/admin/stats-baseline", {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) throw new Error("Échec");
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
@@ -343,7 +352,9 @@ function OverviewPanel() {
     try {
       const res = await fetch("/api/admin/reset-stats", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) throw new Error("Échec de la réinitialisation");
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
@@ -361,7 +372,9 @@ function OverviewPanel() {
     try {
       const res = await fetch("/api/admin/reset-fees", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) throw new Error("Échec de la réinitialisation des frais");
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
@@ -682,7 +695,8 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["/api/admin/merchant", merchantId, "details"],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/merchant/${merchantId}/details`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`/api/admin/merchant/${merchantId}/details`, { credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!res.ok) throw new Error("Erreur chargement");
       return res.json();
     },
@@ -692,7 +706,8 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
   const { data: wallets = [], refetch: refetchWallets } = useQuery<MerchantCountry[]>({
     queryKey: ["/api/admin/merchant", merchantId, "wallets"],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/merchant/${merchantId}/wallets`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`/api/admin/merchant/${merchantId}/wallets`, { credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!res.ok) throw new Error();
       return res.json();
     },
@@ -736,7 +751,9 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
     mutationFn: async () => {
       const res = await fetch(`/api/admin/merchant/${merchantId}/profile`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ name: profileName, email: profileEmail, password: profilePassword || undefined, website: profileWebsite }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -755,7 +772,9 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
     mutationFn: async () => {
       const res = await fetch(`/api/admin/merchants/${merchantId}/slug`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ slug: profileSlug }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -778,7 +797,9 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
     mutationFn: async () => {
       const res = await fetch(`/api/admin/merchant/${merchantId}/webhook`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ webhookUrl }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -805,7 +826,9 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
     setBalancePwSaving(true);
     const res = await fetch("/api/admin/update-balance", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      credentials: "include",
+
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({ id: balancePwDialog.walletId, balance: balancePwDialog.balance, adminPassword: balancePwInput }),
     });
     setBalancePwSaving(false);
@@ -823,7 +846,9 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
   const toggleWalletActive = async (walletId: number, merchantId: number, active: boolean) => {
     const res = await fetch(`/api/admin/merchant/${merchantId}/country/${walletId}/active`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      credentials: "include",
+
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({ active }),
     });
     if (res.ok) { refetchWallets(); toast({ title: active ? "Wallet activé" : "Wallet désactivé" }); }
@@ -915,7 +940,9 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
                     onCheckedChange={async (val) => {
                       const res = await fetch(`/api/admin/merchants/${merchantId}/fee-exempt`, {
                         method: "PATCH",
-                        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                        credentials: "include",
+
+                        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
                         body: JSON.stringify({ feeExempt: val }),
                       });
                       if (res.ok) {
@@ -1083,7 +1110,8 @@ function AdminPaymentLinksPanel() {
 
   const toggleMutation = useMutation({
     mutationFn: async (id: number) => {
-      const res = await fetch(`/api/admin/payment-links/${id}/toggle`, { method: "PUT", headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`/api/admin/payment-links/${id}/toggle`, { method: "PUT", credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!res.ok) throw new Error("Erreur");
       return res.json();
     },
@@ -1092,7 +1120,8 @@ function AdminPaymentLinksPanel() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      const res = await fetch(`/api/admin/payment-links/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`/api/admin/payment-links/${id}`, { method: "DELETE", credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!res.ok) throw new Error("Erreur");
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/payment-links"] }); queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] }); toast({ title: "Lien supprimé" }); },
@@ -1223,7 +1252,9 @@ function MerchantsPanel() {
     mutationFn: async ({ id, suspended }: { id: number; suspended: boolean }) => {
       const res = await fetch("/api/admin/update-merchant", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ id, suspended }),
       });
       if (!res.ok) throw new Error("Erreur");
@@ -1239,7 +1270,9 @@ function MerchantsPanel() {
     mutationFn: async (id: number) => {
       const res = await fetch(`/api/admin/delete-merchant/${id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) throw new Error("Erreur");
     },
@@ -1373,7 +1406,9 @@ function MerchantsPanel() {
                       onValueChange={async (mode) => {
                         await fetch(`/api/admin/merchants/${merchant.id}/withdrawal-mode`, {
                           method: "PATCH",
-                          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                          credentials: "include",
+
+                          headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
                           body: JSON.stringify({ mode }),
                         });
                         queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
@@ -1397,7 +1432,9 @@ function MerchantsPanel() {
                         const newVal = !merchant.withdrawalsDisabled;
                         await fetch(`/api/admin/merchants/${merchant.id}/withdrawals-disabled`, {
                           method: "PATCH",
-                          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                          credentials: "include",
+
+                          headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
                           body: JSON.stringify({ withdrawalsDisabled: newVal }),
                         });
                         queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
@@ -1481,7 +1518,8 @@ function TransactionsPanel() {
 
   const validateTxMutation = useMutation({
     mutationFn: async (id: number) => {
-      const res = await fetch(`/api/admin/transactions/${id}/validate`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`/api/admin/transactions/${id}/validate`, { method: "POST", credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
       return res.json();
     },
@@ -1491,7 +1529,8 @@ function TransactionsPanel() {
 
   const rejectTxMutation = useMutation({
     mutationFn: async (id: number) => {
-      const res = await fetch(`/api/admin/transactions/${id}/reject`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`/api/admin/transactions/${id}/reject`, { method: "POST", credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
       return res.json();
     },
@@ -1510,7 +1549,9 @@ function TransactionsPanel() {
     const source = tx.type === "pending" ? "pending" : "payment";
     try {
       const res = await fetch(`/api/admin/transactions/${tx.rowId}/check-status?provider=${provider}&source=${source}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Erreur");
@@ -1527,7 +1568,9 @@ function TransactionsPanel() {
       const source = tx.type === "pending" ? "pending" : "payment";
       const res = await fetch(`/api/admin/transactions/${tx.rowId}/sync-status`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ provider, source }),
       });
       const data = await res.json();
@@ -1547,7 +1590,9 @@ function TransactionsPanel() {
     mutationFn: async ({ tx, provider }: { tx: any; provider: string }) => {
       const res = await fetch(`/api/admin/transactions/${tx.rowId}/trigger`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ provider }),
       });
       const data = await res.json();
@@ -1867,7 +1912,9 @@ function CountriesPanel() {
     mutationFn: async () => {
       const res = await fetch("/api/admin/add-countries", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ merchantId: parseInt(merchantId), countries: selectedCountries }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -1885,7 +1932,9 @@ function CountriesPanel() {
     mutationFn: async ({ id, balance, adminPassword }: { id: number; balance: number; adminPassword: string }) => {
       const res = await fetch("/api/admin/update-balance", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ id, balance, adminPassword }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -1917,7 +1966,9 @@ function CountriesPanel() {
     mutationFn: async ({ merchantId, countryId, omnipayEnabled }: { merchantId: number; countryId: number; omnipayEnabled: boolean }) => {
       const res = await fetch(`/api/admin/merchant/${merchantId}/country/${countryId}/omnipay`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ omnipayEnabled }),
       });
       if (!res.ok) throw new Error("Erreur");
@@ -1934,7 +1985,9 @@ function CountriesPanel() {
     mutationFn: async (id: number) => {
       const res = await fetch(`/api/admin/merchant-country/${id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) throw new Error("Erreur suppression");
     },
@@ -2242,7 +2295,9 @@ function NumbersPanel() {
     mutationFn: async () => {
       const res = await fetch("/api/admin/add-number", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({
           phoneNumber, country, operator: operator || undefined,
           merchantId: numMerchantId ? parseInt(numMerchantId) : undefined,
@@ -2263,7 +2318,9 @@ function NumbersPanel() {
     mutationFn: async (id: number) => {
       const res = await fetch(`/api/admin/toggle-number/${id}`, {
         method: "PATCH",
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) throw new Error("Erreur");
       return res.json();
@@ -2279,7 +2336,9 @@ function NumbersPanel() {
     mutationFn: async (id: number) => {
       const res = await fetch(`/api/admin/delete-number/${id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) throw new Error("Erreur");
     },
@@ -2486,7 +2545,9 @@ function ApiKeysManagementPanel() {
     mutationFn: async () => {
       const res = await fetch("/api/admin/update-pin", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ merchantId: pinMerchantId, pin: pinInput }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -2504,7 +2565,9 @@ function ApiKeysManagementPanel() {
     mutationFn: async (merchantCountryId: number) => {
       const res = await fetch("/api/admin/regenerate-api", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ merchantCountryId }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -2739,7 +2802,9 @@ function OmniPayPanel() {
     queryKey: ["/api/admin/omnipay/balance"],
     queryFn: async () => {
       const res = await fetch("/api/admin/omnipay/balance", {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) return null;
       return res.json();
@@ -2751,7 +2816,9 @@ function OmniPayPanel() {
     mutationFn: async () => {
       const res = await fetch("/api/admin/omnipay/settings", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ apiKey, callbackKey }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -2902,7 +2969,9 @@ function MbiyoPanel() {
     mutationFn: async () => {
       const res = await fetch("/api/admin/mbiyo/settings", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ apiKey, webhookSecret }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -3208,7 +3277,9 @@ function SeaPayPanel() {
   const handleSave = async (country: string, data: SeapayCountryForm) => {
     const res = await fetch("/api/admin/seapay/settings", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      credentials: "include",
+
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({ country, ...data }),
     });
     if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -3337,7 +3408,9 @@ function MbiyoManualConfirmCard({ token }: { token: string | null }) {
     mutationFn: async () => {
       const res = await fetch("/api/admin/mbiyo/confirm-payment", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ reference: reference.trim(), txId: txId.trim() || undefined }),
       });
       const d = await res.json();
@@ -3419,7 +3492,9 @@ function SendavaPayPanel() {
     queryKey: ["/api/admin/sendavapay/balance"],
     queryFn: async () => {
       const res = await fetch("/api/admin/sendavapay/balance", {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) return null;
       return res.json();
@@ -3431,7 +3506,9 @@ function SendavaPayPanel() {
     mutationFn: async () => {
       const res = await fetch("/api/admin/sendavapay/settings", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ apiKey, webhookSecret }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -3621,7 +3698,9 @@ function AdminWalletTransfersPanel() {
     mutationFn: async ({ id, action, note: n }: { id: number; action: "approve" | "reject"; note: string }) => {
       const res = await fetch(`/api/admin/wallet-transfers/${id}/${action}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ note: n }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -3649,7 +3728,9 @@ function AdminWalletTransfersPanel() {
     try {
       const res = await fetch("/api/admin/wallet-transfer-fee", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ feeType, feeValue }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -3743,7 +3824,9 @@ function AdminWalletTransfersPanel() {
               try {
                 const res = await fetch("/api/admin/wallet-transfer-countries", {
                   method: "POST",
-                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                  credentials: "include",
+
+                  headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
                   body: JSON.stringify({ country: newCountry.trim(), currencyZone: newZone }),
                 });
                 if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -3810,7 +3893,9 @@ function AdminWalletTransfersPanel() {
                             onCheckedChange={async (v) => {
                               await fetch(`/api/admin/wallet-transfer-countries/${c.id}/toggle`, {
                                 method: "PATCH",
-                                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                                credentials: "include",
+
+                                headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
                                 body: JSON.stringify({ active: v }),
                               });
                               refetchWtc();
@@ -3826,7 +3911,9 @@ function AdminWalletTransfersPanel() {
                               if (!(await showConfirm(`Supprimer ${c.country} ?`))) return;
                               await fetch(`/api/admin/wallet-transfer-countries/${c.id}`, {
                                 method: "DELETE",
-                                headers: { Authorization: `Bearer ${token}` },
+                                credentials: "include",
+
+                                headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
                               });
                               refetchWtc();
                               toast({ title: `${c.country} supprimé` });
@@ -4008,7 +4095,9 @@ function AdminsPanel() {
     mutationFn: async () => {
       const res = await fetch("/api/admin/create-admin", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify(form),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -4027,7 +4116,9 @@ function AdminsPanel() {
     mutationFn: async (id: number) => {
       const res = await fetch(`/api/admin/delete-admin/${id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur suppression"); }
     },
@@ -4294,7 +4385,8 @@ function WithdrawalOperatorsPanel() {
     mutationFn: async () => {
       const url = editingOp ? `/api/admin/withdrawal-operators/${editingOp.id}` : "/api/admin/withdrawal-operators";
       const method = editingOp ? "PUT" : "POST";
-      const res = await fetch(url, { method, headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(form) });
+      const res = await fetch(url, { method, credentials: "include",
+ headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(form) });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
       return res.json();
     },
@@ -4308,7 +4400,8 @@ function WithdrawalOperatorsPanel() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      const res = await fetch(`/api/admin/withdrawal-operators/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`/api/admin/withdrawal-operators/${id}`, { method: "DELETE", credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!res.ok) throw new Error("Erreur suppression");
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawal-operators"] }); toast({ title: "Opérateur supprimé" }); },
@@ -4318,7 +4411,9 @@ function WithdrawalOperatorsPanel() {
   const toggleMaint = async (op: WithdrawalOperator, field: string, value: boolean) => {
     await fetch(`/api/admin/withdrawal-operators/${op.id}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      credentials: "include",
+
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({ [field]: value }),
     });
     queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawal-operators"] });
@@ -4331,7 +4426,9 @@ function WithdrawalOperatorsPanel() {
       fd.append("logo", file);
       const res = await fetch(`/api/admin/operator-logo/${opId}`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: fd,
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message); }
@@ -4345,7 +4442,8 @@ function WithdrawalOperatorsPanel() {
   };
 
   const removeLogo = async (opId: number) => {
-    const res = await fetch(`/api/admin/operator-logo/${opId}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(`/api/admin/operator-logo/${opId}`, { method: "DELETE", credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
     if (res.ok) {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawal-operators"] });
       toast({ title: "Logo supprimé" });
@@ -4373,7 +4471,9 @@ function WithdrawalOperatorsPanel() {
     try {
       await fetch("/api/admin/withdrawal-operators/reorder", {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ updates: newFull.map((op, i) => ({ id: op.id, sortOrder: i })) }),
       });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawal-operators"] });
@@ -4529,7 +4629,9 @@ function AdminWithdrawalsPanel() {
     try {
       const res = await fetch("/api/admin/platform-flags", {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ withdrawalsDisabled: disabled }),
       });
       if (!res.ok) throw new Error("Erreur");
@@ -4552,7 +4654,9 @@ function AdminWithdrawalsPanel() {
     try {
       const res = await fetch("/api/admin/platform-flags", {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ withdrawalMinAmount: val }),
       });
       if (!res.ok) throw new Error("Erreur");
@@ -4586,7 +4690,9 @@ function AdminWithdrawalsPanel() {
     mutationFn: async ({ id, action, note: n }: { id: number; action: "approve" | "reject"; note: string }) => {
       const res = await fetch(`/api/admin/withdrawals/${id}/${action}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ note: n }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -4609,7 +4715,9 @@ function AdminWithdrawalsPanel() {
     mutationFn: async ({ id, note: n }: { id: number; note: string }) => {
       const res = await fetch(`/api/admin/withdrawals/${id}/force-validate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ note: n }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -4629,7 +4737,9 @@ function AdminWithdrawalsPanel() {
     mutationFn: async ({ id, note: n }: { id: number; note: string }) => {
       const res = await fetch(`/api/admin/withdrawals/${id}/force-reject`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ note: n }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -4649,7 +4759,9 @@ function AdminWithdrawalsPanel() {
     mutationFn: async ({ id, provider }: { id: number; provider: string }) => {
       const res = await fetch(`/api/admin/withdrawals/${id}/retry`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ provider }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -4666,7 +4778,9 @@ function AdminWithdrawalsPanel() {
     mutationFn: async ({ id, provider }: { id: number; provider: string }) => {
       const res = await fetch(`/api/admin/withdrawals/${id}/sync-status`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ provider }),
       });
       const data = await res.json();
@@ -4689,7 +4803,9 @@ function AdminWithdrawalsPanel() {
     setStatusDialogOpen(true);
     try {
       const res = await fetch(`/api/admin/withdrawals/${wd.id}/check-status?provider=${provider}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Erreur");
@@ -5249,7 +5365,9 @@ function SettingsPanel() {
     try {
       const res = await fetch("/api/admin/change-password", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ currentPassword, newPassword }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -5375,7 +5493,8 @@ function TotpCard({ token }: { token: string | null }) {
   const { data: totpStatus, refetch: refetchStatus } = useQuery<{ totpEnabled: boolean }>({
     queryKey: ["/api/admin/2fa/status"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/2fa/status", { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch("/api/admin/2fa/status", { credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       return res.json();
     },
   });
@@ -5385,7 +5504,9 @@ function TotpCard({ token }: { token: string | null }) {
     try {
       const res = await fetch("/api/admin/2fa/setup", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Erreur");
@@ -5407,7 +5528,9 @@ function TotpCard({ token }: { token: string | null }) {
     try {
       const res = await fetch("/api/admin/2fa/enable", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ secret, code: verifyCode }),
       });
       const data = await res.json();
@@ -5431,7 +5554,9 @@ function TotpCard({ token }: { token: string | null }) {
     try {
       const res = await fetch("/api/admin/2fa/disable", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ code: disableCode }),
       });
       const data = await res.json();
@@ -5583,7 +5708,8 @@ function AIKeysCard({ token }: { token: string | null }) {
     queryKey: ["/api/admin/ai-keys"],
     staleTime: 0,
     queryFn: async () => {
-      const res = await fetch("/api/admin/ai-keys", { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch("/api/admin/ai-keys", { credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!res.ok) throw new Error("Erreur");
       return res.json();
     },
@@ -5614,7 +5740,9 @@ function AIKeysCard({ token }: { token: string | null }) {
       }
       const res = await fetch("/api/admin/ai-keys", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify(body),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -5632,7 +5760,9 @@ function AIKeysCard({ token }: { token: string | null }) {
     try {
       const res = await fetch("/api/admin/ai-keys", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ [provider]: "" }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -5649,7 +5779,9 @@ function AIKeysCard({ token }: { token: string | null }) {
     try {
       const res = await fetch("/api/admin/ai-keys/test", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ provider }),
       });
       const data = await res.json();
@@ -5857,7 +5989,9 @@ function SupportContactsCard({ token }: { token: string | null }) {
     try {
       const res = await fetch("/api/admin/support-contacts", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ telegram1: tg1, telegram2: tg2, telegram3: tg3, telegram4: tg4 }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -5918,7 +6052,8 @@ function AdminAccountsCard({ token, currentUserId }: { token: string | null; cur
   const { data: adminList = [], refetch } = useQuery<{ id: number; email: string; createdAt: string }[]>({
     queryKey: ["/api/admin/admins"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/admins", { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch("/api/admin/admins", { credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!res.ok) throw new Error("Erreur");
       return res.json();
     },
@@ -5929,7 +6064,9 @@ function AdminAccountsCard({ token, currentUserId }: { token: string | null; cur
     mutationFn: async () => {
       const res = await fetch("/api/admin/create-admin", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ email: newEmail, password: newPassword }),
       });
       if (!res.ok) throw new Error((await res.json()).message);
@@ -5945,7 +6082,8 @@ function AdminAccountsCard({ token, currentUserId }: { token: string | null; cur
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      const res = await fetch(`/api/admin/delete-admin/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`/api/admin/delete-admin/${id}`, { method: "DELETE", credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!res.ok) throw new Error((await res.json()).message);
     },
     onSuccess: () => { refetch(); toast({ title: "Compte supprimé" }); },
@@ -6048,6 +6186,7 @@ function CryptoWithdrawalsAdminPanel() {
     try {
       const res = await fetch(`/api/admin/crypto/withdrawals/${id}`, {
         method: "PATCH",
+        credentials: "include",
         headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ status, adminNote: note }),
       });
@@ -6294,6 +6433,7 @@ function CryptoAggPanel() {
   const adminFetch = async (url: string, opts: RequestInit = {}) => {
     const res = await fetch(url, {
       ...opts,
+      credentials: "include",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(opts.headers || {}) },
     });
     if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -6369,7 +6509,9 @@ function CryptoAggPanel() {
     mutationFn: async (merchantId: number) => {
       const res = await fetch(`/api/admin/merchant/${merchantId}/crypto/regenerate-key`, {
         method: "PUT",
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) throw new Error((await res.json()).message);
       return { merchantId, ...(await res.json()) };
@@ -6750,7 +6892,9 @@ function EmailNotifyPanel({ merchants }: { merchants: Merchant[] }) {
     try {
       const res = await fetch("/api/admin/notify", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ subject: subject.trim(), message: message.trim(), to: mode === "specific" ? specificEmail.trim() : undefined }),
       });
       const data = await res.json();
@@ -6917,7 +7061,9 @@ function TelegramBroadcastPanel({ merchants }: { merchants: Merchant[] }) {
         formData.append("image", imageFile);
         const upRes = await fetch("/api/admin/telegram/upload-image", {
           method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
+          credentials: "include",
+
+          headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
           body: formData,
         });
         const upData = await upRes.json();
@@ -6937,7 +7083,9 @@ function TelegramBroadcastPanel({ merchants }: { merchants: Merchant[] }) {
     try {
       const res = await fetch("/api/admin/telegram/broadcast", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({
           message: message.trim(),
           imageUrl: finalImageUrl,
@@ -7281,7 +7429,9 @@ function OtpBotPanel() {
     queryKey: ["/api/admin/telegram/otp-bot/settings"],
     queryFn: async () => {
       const res = await fetch("/api/admin/telegram/otp-bot/settings", {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) throw new Error("Failed to load");
       return res.json();
@@ -7295,7 +7445,9 @@ function OtpBotPanel() {
     try {
       const res = await fetch("/api/admin/telegram/otp-bot/settings", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ token: botToken.trim() }),
       });
       const data = await res.json();
@@ -7317,7 +7469,9 @@ function OtpBotPanel() {
     try {
       const res = await fetch("/api/admin/telegram/otp-bot/test", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ chatId: testChatId.trim(), merchantName: testMerchantName.trim() || "Test Merchant" }),
       });
       const data = await res.json();
@@ -7497,7 +7651,9 @@ function BotTokenCard({ onSaved }: { onSaved: () => void }) {
     try {
       const res = await fetch("/api/admin/telegram/main-bot/settings", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ token: botToken.trim() }),
       });
       const data = await res.json();
@@ -7566,7 +7722,8 @@ function TelegramBotPanel() {
   const { data: botStatus, refetch: refetchStatus, isLoading: statusLoading } = useQuery({
     queryKey: ["/api/admin/telegram/bot-status"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/telegram/bot-status", { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch("/api/admin/telegram/bot-status", { credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!res.ok) throw new Error("Failed");
       return res.json() as Promise<{
         hasToken: boolean; running: boolean; username: string | null;
@@ -7580,7 +7737,8 @@ function TelegramBotPanel() {
   const { data: tgSettings } = useQuery({
     queryKey: ["/api/admin/telegram/settings"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/telegram/settings", { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch("/api/admin/telegram/settings", { credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!res.ok) throw new Error("Failed");
       return res.json() as Promise<{ groupId: string | null; knownGroupsCount: number }>;
     },
@@ -7596,7 +7754,9 @@ function TelegramBotPanel() {
     try {
       const res = await fetch("/api/admin/telegram/settings", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ groupId: groupId.trim() }),
       });
       const data = await res.json();
@@ -7615,7 +7775,9 @@ function TelegramBotPanel() {
     try {
       const res = await fetch("/api/admin/telegram/refresh-webhook", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message);
@@ -7633,7 +7795,9 @@ function TelegramBotPanel() {
     try {
       const res = await fetch("/api/admin/telegram/test-bot", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message);
@@ -7910,7 +8074,8 @@ function UserbotPanel() {
   const { data: status, refetch: refetchStatus } = useQuery({
     queryKey: ["/api/admin/userbot/status"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/userbot/status", { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch("/api/admin/userbot/status", { credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!res.ok) throw new Error("Failed");
       return res.json() as Promise<{ connected: boolean; phone: string; linkedGroups: number; pendingAuth: boolean; responseDelay: string }>;
     },
@@ -7923,7 +8088,9 @@ function UserbotPanel() {
   async function adminPost(endpoint: string, body: object) {
     const res = await fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      credentials: "include",
+
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify(body),
     });
     return res.json();
@@ -8161,7 +8328,8 @@ function KnowledgePanel() {
   const { data: chunks = [], isLoading, refetch } = useQuery<any[]>({
     queryKey: ["/api/admin/knowledge"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/knowledge", { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch("/api/admin/knowledge", { credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
@@ -8181,7 +8349,8 @@ function KnowledgePanel() {
     try {
       const url = editItem ? `/api/admin/knowledge/${editItem.id}` : "/api/admin/knowledge";
       const method = editItem ? "PUT" : "POST";
-      const res = await fetch(url, { method, headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(form) });
+      const res = await fetch(url, { method, credentials: "include",
+ headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(form) });
       if (!res.ok) throw new Error((await res.json()).message);
       toast({ title: editItem ? "Mis à jour ✅" : "Ajouté ✅", description: "Embedding généré automatiquement" });
       setShowForm(false); setEditItem(null); refetch();
@@ -8191,18 +8360,21 @@ function KnowledgePanel() {
 
   const handleDelete = async (id: number) => {
     if (!(await showConfirm("Supprimer ce chunk ?"))) return;
-    await fetch(`/api/admin/knowledge/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+    await fetch(`/api/admin/knowledge/${id}`, { method: "DELETE", credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
     toast({ title: "Supprimé" }); refetch();
   };
 
   const handleToggle = async (id: number, active: boolean) => {
-    await fetch(`/api/admin/knowledge/${id}`, { method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ active }) });
+    await fetch(`/api/admin/knowledge/${id}`, { method: "PUT", credentials: "include",
+ headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ active }) });
     refetch();
   };
 
   const handleReembed = async () => {
     setReembedding(true);
-    await fetch("/api/admin/knowledge/reembed", { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+    await fetch("/api/admin/knowledge/reembed", { method: "POST", credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
     toast({ title: "Re-embedding lancé", description: "Les embeddings manquants sont générés en arrière-plan" });
     setReembedding(false);
   };
@@ -8311,7 +8483,9 @@ function SdkPanel() {
   const toggleSdk = async (id: number, enable: boolean) => {
     const res = await fetch(`/api/admin/sdk/merchants/${id}/${enable ? "enable" : "disable"}`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
+
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     });
     if (!res.ok) { const d = await res.json(); toast({ title: "Erreur", description: d.message, variant: "destructive" }); return; }
     const d = await res.json();
@@ -8323,7 +8497,9 @@ function SdkPanel() {
   const regenerateKey = async (id: number) => {
     const res = await fetch(`/api/admin/sdk/merchants/${id}/regenerate`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
+
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     });
     if (!res.ok) { const d = await res.json(); toast({ title: "Erreur", description: d.message, variant: "destructive" }); return; }
     const d = await res.json();
@@ -8580,7 +8756,8 @@ function SecurityIpsPanel() {
   const [addingBlock, setAddingBlock] = useState(false);
 
   const fetchWith = async (url: string) => {
-    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const r = await fetch(url, { credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
     if (!r.ok) throw new Error("Erreur");
     return r.json();
   };
@@ -8640,6 +8817,7 @@ function SecurityIpsPanel() {
     mutationFn: async (data: typeof form) => {
       const r = await fetch("/api/admin/security/ips", {
         method: "POST",
+        credentials: "include",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
@@ -8657,7 +8835,8 @@ function SecurityIpsPanel() {
 
   const removeMutation = useMutation({
     mutationFn: async (id: number) => {
-      const r = await fetch(`/api/admin/security/ips/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      const r = await fetch(`/api/admin/security/ips/${id}`, { method: "DELETE", credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!r.ok) throw new Error("Erreur");
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/security/ips"] }); toast({ title: "IP retirée" }); },
@@ -8668,6 +8847,7 @@ function SecurityIpsPanel() {
     mutationFn: async (data: typeof blockForm) => {
       const r = await fetch("/api/admin/security/blocked-ips", {
         method: "POST",
+        credentials: "include",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
@@ -8685,7 +8865,8 @@ function SecurityIpsPanel() {
 
   const removeBlockMutation = useMutation({
     mutationFn: async (id: number) => {
-      const r = await fetch(`/api/admin/security/blocked-ips/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      const r = await fetch(`/api/admin/security/blocked-ips/${id}`, { method: "DELETE", credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!r.ok) throw new Error("Erreur");
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/security/blocked-ips"] }); toast({ title: "IP débloquée" }); },
@@ -8694,7 +8875,8 @@ function SecurityIpsPanel() {
 
   const removeDeviceMutation = useMutation({
     mutationFn: async (id: number) => {
-      const r = await fetch(`/api/admin/security/blocked-devices/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      const r = await fetch(`/api/admin/security/blocked-devices/${id}`, { method: "DELETE", credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!r.ok) throw new Error("Erreur");
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/security/blocked-devices"] }); toast({ title: "Appareil débloqué" }); },
@@ -8703,7 +8885,8 @@ function SecurityIpsPanel() {
 
   const trustDeviceMutation = useMutation({
     mutationFn: async (id: number) => {
-      const r = await fetch(`/api/admin/security/devices/${id}/trust`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+      const r = await fetch(`/api/admin/security/devices/${id}/trust`, { method: "POST", credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!r.ok) throw new Error("Erreur");
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/security/devices"] }); toast({ title: "Appareil autorisé" }); },
@@ -8712,7 +8895,8 @@ function SecurityIpsPanel() {
 
   const blockTrustedDeviceMutation = useMutation({
     mutationFn: async (id: number) => {
-      const r = await fetch(`/api/admin/security/devices/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      const r = await fetch(`/api/admin/security/devices/${id}`, { method: "DELETE", credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       if (!r.ok) throw new Error("Erreur");
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/security/devices"] }); toast({ title: "Appareil bloqué" }); },
@@ -8724,6 +8908,7 @@ function SecurityIpsPanel() {
     try {
       const r = await fetch("/api/admin/security/config", {
         method: "PUT",
+        credentials: "include",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
@@ -9384,7 +9569,8 @@ function AdminActionLogsPanel() {
   const [search, setSearch] = useState("");
 
   const fetchWith = async (url: string) => {
-    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const r = await fetch(url, { credentials: "include",
+ headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
     if (!r.ok) throw new Error("Erreur");
     return r.json();
   };

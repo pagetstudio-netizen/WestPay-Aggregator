@@ -5545,6 +5545,69 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== SENDAVAPAY SDK v1 PROXY (anti-CORS) ====================
+  // Le navigateur ne peut pas appeler sendavapay.com directement (CORS bloqué par Cloudflare).
+  // Ces routes proxifient les 3 endpoints SDK v1 côté serveur.
+
+  // 1. Récupérer la liste des opérateurs
+  app.get("/api/sendavapay/proxy/v1/operators/:countryCode", async (req, res) => {
+    try {
+      const { countryCode } = req.params;
+      const sendavaApiKey = await getSendavaApiKey();
+      const authHeaders: Record<string, string> = sendavaApiKey
+        ? { "Authorization": `Bearer ${sendavaApiKey}` }
+        : {};
+      const upstream = await fetch(`https://sendavapay.com/api/sdk/v1/operators/${encodeURIComponent(countryCode)}`, {
+        headers: authHeaders,
+      });
+      const data = await upstream.json();
+      res.status(upstream.status).json(data);
+    } catch (err: any) {
+      console.error("[SENDAVAPAY PROXY v1] /operators erreur:", err.message);
+      res.status(502).json({ success: false, message: "Erreur récupération opérateurs" });
+    }
+  });
+
+  // 2. Initier le paiement USSD push (SDK v1)
+  app.post("/api/sendavapay/proxy/v1/initiate-payment", async (req, res) => {
+    try {
+      const sendavaApiKey = await getSendavaApiKey();
+      const authHeaders: Record<string, string> = sendavaApiKey
+        ? { "Authorization": `Bearer ${sendavaApiKey}` }
+        : {};
+      const upstream = await fetch("https://sendavapay.com/api/sdk/v1/initiate-payment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(req.body),
+      });
+      const data = await upstream.json();
+      res.status(upstream.status).json(data);
+    } catch (err: any) {
+      console.error("[SENDAVAPAY PROXY v1] /initiate-payment erreur:", err.message);
+      res.status(502).json({ success: false, message: "Erreur initiation paiement" });
+    }
+  });
+
+  // 3. Soumettre l'OTP (SDK v1)
+  app.post("/api/sendavapay/proxy/v1/submit-otp", async (req, res) => {
+    try {
+      const sendavaApiKey = await getSendavaApiKey();
+      const authHeaders: Record<string, string> = sendavaApiKey
+        ? { "Authorization": `Bearer ${sendavaApiKey}` }
+        : {};
+      const upstream = await fetch("https://sendavapay.com/api/sdk/v1/submit-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(req.body),
+      });
+      const data = await upstream.json();
+      res.status(upstream.status).json(data);
+    } catch (err: any) {
+      console.error("[SENDAVAPAY PROXY v1] /submit-otp erreur:", err.message);
+      res.status(502).json({ success: false, message: "Erreur vérification OTP" });
+    }
+  });
+
   // ==================== SEAPAY CALLBACK ====================
   app.post("/api/seapay/callback", async (req, res) => {
     try {

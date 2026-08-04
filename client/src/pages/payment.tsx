@@ -432,12 +432,12 @@ export default function PaymentPage() {
 
   const initiateSendavaPayment = async (token: string, pId: number, countryCode: string, payerPhoneE164: string) => {
     try {
-      const opsRes = await fetch(`https://sendavapay.com/api/sdk/v1/operators/${countryCode}`);
+      const opsRes = await fetch(`/api/sendavapay/proxy/v1/operators/${countryCode}`);
       const opsData = await opsRes.json();
       const ops: any[] = opsData.data || [];
       const operatorId = resolveOperatorId(ops, method, countryCode);
       if (!operatorId) throw new Error(`${t("payOperatorRequired")}: ${method}`);
-      const initRes = await fetch("https://sendavapay.com/api/sdk/v1/initiate-payment", {
+      const initRes = await fetch("/api/sendavapay/proxy/v1/initiate-payment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -478,7 +478,7 @@ export default function PaymentPage() {
     if (!sndOtpToken || !sndOtp.trim()) return;
     setSndOtpSubmitting(true);
     try {
-      const res = await fetch("https://sendavapay.com/api/sdk/v1/submit-otp", {
+      const res = await fetch("/api/sendavapay/proxy/v1/submit-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ otpToken: sndOtpToken, otp: sndOtp.trim() }),
