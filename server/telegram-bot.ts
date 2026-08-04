@@ -1922,6 +1922,9 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
   // Détecte une IPv4 n'importe où dans le message (ex: "IP: 41.207.187.10 merci")
   const IP_EXTRACT_REGEX = /\b((?:\d{1,3}\.){3}\d{1,3})\b/;
   const isValidIpv4 = (ip: string) => ip.split(".").every((o) => +o >= 0 && +o <= 255);
+  const IPV6_REGEX = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]+|::(ffff(:0{1,4})?:)?((25[0-5]|(2[0-4]|1?[0-9])?[0-9])\.){3}(25[0-5]|(2[0-4]|1?[0-9])?[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1?[0-9])?[0-9])\.){3}(25[0-5]|(2[0-4]|1?[0-9])?[0-9]))$/;
+  const isValidIpv6 = (ip: string) => IPV6_REGEX.test(ip);
+  const isValidIp = (ip: string) => (IP_EXTRACT_REGEX.test(ip) && isValidIpv4(ip)) || isValidIpv6(ip);
 
   // ─── Fonction utilitaire partagée : whitelist une IP depuis un groupe marchand ─
   async function whitelistMerchantIp(ctx: any, candidate: string, merchant: any) {
@@ -1990,9 +1993,9 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
 
     const args = (ctx.message.text || "").split(/\s+/).slice(1);
     const ip = args[0]?.trim();
-    if (!ip || !IP_EXTRACT_REGEX.test(ip) || !isValidIpv4(ip)) {
+    if (!ip || !isValidIp(ip)) {
       await ctx.reply(
-        `❌ Usage : \`/addip ADRESSE_IP\`\n\nExemple : \`/addip 41.207.187.10\``,
+        `❌ Usage : \`/addip ADRESSE_IP\`\n\nExemple : \`/addip 41.207.187.10\` ou \`/addip 2409:4053:59e:9bec::1\``,
         { parse_mode: "Markdown" }
       );
       return;
