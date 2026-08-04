@@ -190,10 +190,19 @@ async function checkAdminGeoAllowed(ip: string): Promise<{ allowed: boolean; cou
     return { allowed: hit.allowed, country: hit.country };
   }
   // Résolution géographique via ip-api.com
-  const geo = await getGeoInfo(ip).catch(() => ({ country: "", city: "" }));
+  // FAIL-OPEN intentionnel : si ip-api.com est indisponible ou lente, on autorise la session.
+  // Le JWT (signé avec SESSION_SECRET) est la protection principale.
+  // La restriction géo est une couche supplémentaire, pas le verrou primaire.
+  // Sans fail-open, un redémarrage Passenger vide le cache → première requête = geo lookup
+  // → ip-api.com timeout → country="" → 403 → useAdminFetch logout() → déconnexion parasite.
+  const geo = await getGeoInfo(ip).catch(() => null);
+  if (!geo || !geo.country) {
+    // ip-api.com indisponible — autoriser, cache court (90s) pour re-tenter
+    _geoCache.set(ip, { country: "inconnu", allowed: true, ts: Date.now() - (GEO_CACHE_TTL - 90_000) });
+    return { allowed: true, country: "inconnu" };
+  }
   const countryRaw = geo.country || "";
   const countryLower = countryRaw.toLowerCase().trim();
-  // Whitelist stricte — si pays inconnu ou non listé → REFUSÉ (fail-secure)
   const allowed = countryLower !== "" && ADMIN_GEO_WHITELIST.some(c => countryLower === c || countryLower.includes(c));
   _geoCache.set(ip, { country: countryRaw || "inconnu", allowed, ts: Date.now() });
   return { allowed, country: countryRaw || "inconnu" };
@@ -1646,7 +1655,7 @@ export async function registerRoutes(
 
   // ── Rate-limit store pour les endpoints de paiement ──────────────────────────
   const paymentInitiateAttempts = new Map<string, { count: number; firstReq: number }>();
-  const PAYMENT_RATE_MAX = 10;
+  const PAYMENT_RATE_MAX = 30;           // 30 tentatives/min — assez pour les tests légitimes
   const PAYMENT_RATE_WINDOW = 60 * 1000; // 1 min
 
   const paymentRateLimit = (req: Request, res: Response, next: NextFunction) => {
@@ -1657,8 +1666,11 @@ export async function registerRoutes(
     entry.count++;
     paymentInitiateAttempts.set(clientIp, entry);
     if (entry.count > PAYMENT_RATE_MAX) {
-      storage.addBlockedIp({ ipAddress: clientIp, reason: `Rate limit paiement — ${entry.count} req/min`, blockedBy: "système" }).catch(() => {});
-      storage.createSecurityLog({ eventType: "rate_limit", ip: clientIp, action: "payment_rate_autoblock", details: `${entry.count} req/min — ${req.path}` }).catch(() => {});
+      // NOTE : pas de addBlockedIp ici — le rate-limit paiement est temporaire (1 min).
+      // Un blocage permanent par rate-limit de paiement bloque aussi les marchands
+      // qui testent leurs intégrations et les clients qui réessaient légitimement.
+      // Les vraies attaques (bots, flood) sont gérées par blockedIpGuard + botGuard.
+      storage.createSecurityLog({ eventType: "rate_limit", ip: clientIp, action: "payment_rate_limit", details: `${entry.count} req/min — ${req.path}` }).catch(() => {});
       return res.status(429).json({ message: "Trop de requêtes. Réessayez dans un moment." });
     }
     next();
