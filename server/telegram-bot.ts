@@ -1929,11 +1929,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     console.log(`[TG/addip] geo pour ${candidate}: country="${geo.country}" city="${geo.city}"`);
 
     if (!geo.country || !AFRICAN_COUNTRIES.has(geo.country)) {
-      await ctx.reply(
-        `❌ IP refusée\n\n🌐 \`${candidate}\`\n📍 ${geo.city || "?"}${geo.country ? ", " + geo.country : " — pays inconnu"}\n\n` +
-        `Cette adresse IP ne provient pas d'Afrique et ne peut pas être ajoutée.`,
-        { parse_mode: "Markdown" }
-      );
+      await ctx.reply("Fake ip 您无法访问该平台。请联系客服。");
       await alertAdminGroup(
         `⚠️ *IP non africaine refusée*\n\n` +
         `👤 Marchand : *${merchant.name}*\n` +
@@ -1960,10 +1956,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         action: "allowed_via_merchant_telegram",
         details: `IP ajoutée par le marchand ${merchant.name} via Telegram — ${geo.city}, ${geo.country}`,
       }).catch(() => {});
-      await ctx.reply(
-        `✅ *IP ajoutée avec succès*\n\n🌐 \`${candidate}\`\n📍 ${geo.city || "?"}${geo.country ? ", " + geo.country : ""}\n🔌 ${geo.isp || "?"}`,
-        { parse_mode: "Markdown" }
-      );
+      await ctx.reply("done ✅");
       await alertAdminGroup(
         `✅ *IP autorisée via Telegram marchand*\n\n` +
         `👤 Marchand : *${merchant.name}*\n` +
@@ -2005,7 +1998,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       return;
     }
 
-    await ctx.reply("⏳ Vérification en cours...");
+    await ctx.reply("请稍等，我这就添加。");
     await whitelistMerchantIp(ctx, ip, merchant);
   });
 
@@ -2034,7 +2027,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         const candidate = ipMatch[1];
         console.log(`[TG] IP détectée (texte) dans groupe marchand ${chatId}: ${candidate}`);
 
-        await ctx.reply("⏳ Vérification en cours...");
+        await ctx.reply("请稍等，我这就添加。");
         await whitelistMerchantIp(ctx, candidate, merchant);
         return;
       }
