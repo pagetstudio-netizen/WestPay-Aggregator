@@ -4411,6 +4411,17 @@ export async function registerRoutes(
             clapayLocalPhoneVal = phoneCheck.localPhone;
           }
 
+          // additional_infos est obligatoire pour TOUTES les requêtes ClaPay (API v3)
+          // — confirmé : sans ce champ, l'API retourne 400 "additional_infos must be an object"
+          const nameParts = (payerName || "Client RobotPay").split(" ");
+          const cpAdditionalInfos: Record<string, string> = {
+            customer_firstname: nameParts[0] || "Client",
+            customer_lastname:  nameParts.slice(1).join(" ") || "RobotPay",
+          };
+          if (clapayTunnel === "API" && clapayLocalPhoneVal) {
+            cpAdditionalInfos.customer_phone = clapayLocalPhoneVal;
+          }
+
           const cpResult = await clapayInitiatePayin(clapayToken, {
             transaction_id: reference,
             amount: parsedAmount,
@@ -4420,8 +4431,7 @@ export async function registerRoutes(
             tunnel: clapayTunnel,
             callback_url: callbackUrl,
             return_url: returnUrl,
-            // API direct : numéro local obligatoire | CHECKOUTPAGE (Wave/Mynita) : saisi sur page hébergée
-            ...(clapayTunnel === "API" ? { additional_infos: { customer_phone: clapayLocalPhoneVal } } : {}),
+            additional_infos: cpAdditionalInfos,
           });
 
           if (!cpResult.success) {
@@ -8874,6 +8884,15 @@ export async function registerRoutes(
           adminLocalPhone = phoneCheck.localPhone;
         }
 
+        const adminNameParts = (pp.payerName || "Client RobotPay").split(" ");
+        const adminAdditionalInfos: Record<string, string> = {
+          customer_firstname: adminNameParts[0] || "Client",
+          customer_lastname:  adminNameParts.slice(1).join(" ") || "RobotPay",
+        };
+        if (adminTunnel === "API" && adminLocalPhone) {
+          adminAdditionalInfos.customer_phone = adminLocalPhone;
+        }
+
         const result = await clapayInitiatePayin(cpToken, {
           transaction_id: reference,
           amount: pp.amount,
@@ -8883,7 +8902,7 @@ export async function registerRoutes(
           tunnel: adminTunnel,
           callback_url: `${callbackBaseUrl}/api/clapay/callback`,
           return_url: `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
-          ...(adminTunnel === "API" ? { additional_infos: { customer_phone: adminLocalPhone } } : {}),
+          additional_infos: adminAdditionalInfos,
         });
         if (!result.success) {
           return res.status(502).json({ success: false, message: result.message || "Échec ClaPay" });
