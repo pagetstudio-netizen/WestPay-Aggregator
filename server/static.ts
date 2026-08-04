@@ -24,7 +24,7 @@ export function serveStatic(app: Express) {
   app.get("/{*path}", (req, res, next) => {
     // Ne jamais intercepter les routes API — elles sont enregistrées plus tard
     // (après l'init DB) et doivent recevoir la requête via next().
-    if (req.path.startsWith("/api")) return next();
+    if (req.path.startsWith("/api/") || req.path === "/api") return next();
     const slug = process.env.ADMIN_SLUG || "";
     const reqPath = req.path.replace(/\/+$/, "") || "/"; // normalise le trailing slash
     const isAdminPath =
