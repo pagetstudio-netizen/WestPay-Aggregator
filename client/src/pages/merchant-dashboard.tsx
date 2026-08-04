@@ -2510,15 +2510,15 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
       const res = await fetch("/api/merchant/change-password", {
         method: "POST",
         credentials: "include",
-
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ currentPassword, newPassword }),
       });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.message || t("error")); }
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.message || t("error"));
       toast({ title: t("passwordChanged") });
       setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
     } catch (err: any) {
-      toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" });
+      toast({ title: "Action non effectuée", description: err.message || "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" });
     } finally { setIsChanging(false); }
   };
 
