@@ -1624,10 +1624,11 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
     queryFn: () =>
       fetch(`/api/merchant/withdrawal-operators/${encodeURIComponent(selectedWallet!.country)}`, {
         credentials: "include",
-
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       }).then(r => r.json()),
-    enabled: !!selectedWallet && !!token,
+    // !!token retiré — cet endpoint est public (pas d'authMiddleware).
+    // !!token bloquait la query après un refresh quand le token React est null.
+    enabled: !!selectedWallet,
   });
 
   const handleWalletSelect = (walletId: string) => {
