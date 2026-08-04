@@ -2864,7 +2864,9 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
       if (!res.ok) throw new Error("Error");
       return res.json();
     },
-    enabled: !!token,
+    // enabled: !!token retiré — la requête s'appuie sur le cookie (credentials: "include")
+    // qui est valide même si le token React est null après un refresh.
+    // enabled: !!token désactivait la query au chargement → liste toujours vide.
   });
 
   const buildPayload = (f: ReturnType<typeof mkForm>) => ({
