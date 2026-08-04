@@ -2272,21 +2272,30 @@ export async function notifyMerchantPayment(merchantId: number, data: {
       return { success, total, amount };
     })();
 
-    const feeRate = merchant?.feeExempt ? 0 : 0.055;
+    // ── Taux de frais par pays (miroir de COUNTRY_FEE_OVERRIDES dans routes.ts) ──
+    // Ne pas importer depuis routes.ts → dépendance circulaire.
+    const PAYIN_FEE_OVERRIDES: Record<string, number> = {
+      "India": 0.15, "Pakistan": 0.15, "Nigeria": 0.15, "Philippines": 0.15,
+      "Niger": 0.06, "Kenya": 0.06, "Ghana": 0.06,
+    };
+    const baseFeeRate = PAYIN_FEE_OVERRIDES[data.country] ?? 0.055;
+    const feeRate = merchant?.feeExempt ? 0 : baseFeeRate;
+    const feePct = (feeRate * 100).toLocaleString("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
+    const feePctEn = (feeRate * 100).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
     const grossAmount = data.amount;
     const westpayFee = Math.round(grossAmount * feeRate);
     const netCredited = grossAmount - westpayFee;
 
     const feeLinesFr = feeRate > 0 ? [
       `💳 *Brut reçu :* ${formatAmountC(grossAmount, data.country)}`,
-      `📉 *Frais WestPay (5,5%) :* -${formatAmountC(westpayFee, data.country)}`,
+      `📉 *Frais WestPay (${feePct}%) :* -${formatAmountC(westpayFee, data.country)}`,
       `✅ *Net crédité :* ${formatAmountC(netCredited, data.country)}`,
     ] : [
       `💳 *Montant crédité :* ${formatAmountC(grossAmount, data.country)} *(sans frais)*`,
     ];
     const feeLinesEn = feeRate > 0 ? [
       `💳 *Gross received:* ${formatAmountC(grossAmount, data.country)}`,
-      `📉 *WestPay fee (5.5%):* -${formatAmountC(westpayFee, data.country)}`,
+      `📉 *WestPay fee (${feePctEn}%):* -${formatAmountC(westpayFee, data.country)}`,
       `✅ *Net credited:* ${formatAmountC(netCredited, data.country)}`,
     ] : [
       `💳 *Amount credited:* ${formatAmountC(grossAmount, data.country)} *(no fee)*`,
