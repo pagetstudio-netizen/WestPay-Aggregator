@@ -5549,6 +5549,13 @@ export async function registerRoutes(
   // Le navigateur ne peut pas appeler sendavapay.com directement (CORS bloqué par Cloudflare).
   // Ces routes proxifient les 3 endpoints SDK v1 côté serveur.
 
+  // Helper : fetch avec timeout pour les proxies SendavaPay
+  const fetchWithTimeout = (url: string, options: RequestInit = {}, timeoutMs = 15000) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    return fetch(url, { ...options, signal: ctrl.signal }).finally(() => clearTimeout(timer));
+  };
+
   // 1. Récupérer la liste des opérateurs
   app.get("/api/sendavapay/proxy/v1/operators/:countryCode", async (req, res) => {
     try {
@@ -5557,14 +5564,16 @@ export async function registerRoutes(
       const authHeaders: Record<string, string> = sendavaApiKey
         ? { "Authorization": `Bearer ${sendavaApiKey}` }
         : {};
-      const upstream = await fetch(`https://sendavapay.com/api/sdk/v1/operators/${encodeURIComponent(countryCode)}`, {
-        headers: authHeaders,
-      });
+      const upstream = await fetchWithTimeout(
+        `https://sendavapay.com/api/sdk/v1/operators/${encodeURIComponent(countryCode)}`,
+        { headers: authHeaders }
+      );
       const data = await upstream.json();
       res.status(upstream.status).json(data);
     } catch (err: any) {
-      console.error("[SENDAVAPAY PROXY v1] /operators erreur:", err.message);
-      res.status(502).json({ success: false, message: "Erreur récupération opérateurs" });
+      const msg = err.name === "AbortError" ? "Timeout opérateurs SendavaPay (15s)" : err.message;
+      console.error("[SENDAVAPAY PROXY v1] /operators erreur:", msg);
+      res.status(502).json({ success: false, message: "Service de paiement indisponible. Réessayez." });
     }
   });
 
@@ -5575,16 +5584,16 @@ export async function registerRoutes(
       const authHeaders: Record<string, string> = sendavaApiKey
         ? { "Authorization": `Bearer ${sendavaApiKey}` }
         : {};
-      const upstream = await fetch("https://sendavapay.com/api/sdk/v1/initiate-payment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders },
-        body: JSON.stringify(req.body),
-      });
+      const upstream = await fetchWithTimeout(
+        "https://sendavapay.com/api/sdk/v1/initiate-payment",
+        { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders }, body: JSON.stringify(req.body) }
+      );
       const data = await upstream.json();
       res.status(upstream.status).json(data);
     } catch (err: any) {
-      console.error("[SENDAVAPAY PROXY v1] /initiate-payment erreur:", err.message);
-      res.status(502).json({ success: false, message: "Erreur initiation paiement" });
+      const msg = err.name === "AbortError" ? "Timeout initiation SendavaPay (15s)" : err.message;
+      console.error("[SENDAVAPAY PROXY v1] /initiate-payment erreur:", msg);
+      res.status(502).json({ success: false, message: "Service de paiement indisponible. Réessayez." });
     }
   });
 
@@ -5595,16 +5604,16 @@ export async function registerRoutes(
       const authHeaders: Record<string, string> = sendavaApiKey
         ? { "Authorization": `Bearer ${sendavaApiKey}` }
         : {};
-      const upstream = await fetch("https://sendavapay.com/api/sdk/v1/submit-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders },
-        body: JSON.stringify(req.body),
-      });
+      const upstream = await fetchWithTimeout(
+        "https://sendavapay.com/api/sdk/v1/submit-otp",
+        { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders }, body: JSON.stringify(req.body) }
+      );
       const data = await upstream.json();
       res.status(upstream.status).json(data);
     } catch (err: any) {
-      console.error("[SENDAVAPAY PROXY v1] /submit-otp erreur:", err.message);
-      res.status(502).json({ success: false, message: "Erreur vérification OTP" });
+      const msg = err.name === "AbortError" ? "Timeout OTP SendavaPay (15s)" : err.message;
+      console.error("[SENDAVAPAY PROXY v1] /submit-otp erreur:", msg);
+      res.status(502).json({ success: false, message: "Service de paiement indisponible. Réessayez." });
     }
   });
 

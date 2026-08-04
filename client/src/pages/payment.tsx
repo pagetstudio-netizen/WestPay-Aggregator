@@ -379,7 +379,7 @@ export default function PaymentPage() {
       }
       if (d.paymentUrl) { setPaymentUrl(d.paymentUrl); setStep(2); }
       else { setStep(2); startPolling(d.paymentId); }
-    } catch { toast({ title: t("payFailed"), description: t("payFailedDesc"), variant:"destructive" }); }
+    } catch (e: any) { toast({ title: t("payFailed"), description: e?.message || t("payFailedDesc"), variant:"destructive" }); }
     finally { setIsSubmitting(false); }
   };
 
