@@ -5265,6 +5265,18 @@ export async function registerRoutes(
       const isFailure = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(statusLower);
 
       if (isSuccess) {
+        // CAS atomique — protège contre les doubles callbacks simultanés
+        const mbiyoCas = await financialPool.query(
+          `UPDATE pending_payments SET status = 'omnipay_confirmed'
+           WHERE id = $1 AND status NOT IN ('omnipay_confirmed','confirmed','omnipay_error')
+           RETURNING id`,
+          [pending.id]
+        );
+        if (!mbiyoCas.rowCount || mbiyoCas.rowCount === 0) {
+          console.log(`[MBIYO CALLBACK] Déjà traité (CAS) order_id=${payload.order_id}`);
+          return res.json({ status: "already_processed" });
+        }
+
         const merchant = await storage.getMerchantById(pending.merchantId);
         const credit = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount, pending.country);
 
@@ -5275,7 +5287,6 @@ export async function registerRoutes(
         }
 
         await storage.incrementMerchantCountryBalance(mc.id, credit);
-        await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
 
         const txRef = payload.transaction_id || payload.order_id;
         const tx = await storage.createTransaction({
@@ -5903,18 +5914,26 @@ export async function registerRoutes(
         console.log(`[CLAPAY CALLBACK] Paiement non trouvé pour ref=${reference}`);
         return res.json({ received: true });
       }
-      if (pending.status === "omnipay_confirmed") {
-        return res.json({ received: true, alreadyConfirmed: true });
-      }
-
       if (isSuccess) {
+        // ── CAS atomique — même protection que le callback OmniPay ──────────
+        // Un seul UPDATE réussira si deux callbacks arrivent simultanément.
+        const cpCas = await financialPool.query(
+          `UPDATE pending_payments SET status = 'omnipay_confirmed'
+           WHERE id = $1 AND status NOT IN ('omnipay_confirmed','confirmed','omnipay_error')
+           RETURNING id`,
+          [pending.id]
+        );
+        if (!cpCas.rowCount || cpCas.rowCount === 0) {
+          console.log(`[CLAPAY CALLBACK] Déjà traité (CAS) ref=${reference}`);
+          return res.json({ received: true, alreadyConfirmed: true });
+        }
+
         const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
         const merchant = await storage.getMerchantById(pending.merchantId);
         if (!mc) return res.json({ received: true });
 
         const credit = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount, pending.country);
         const westpayFee = pending.amount - credit;
-        await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
         const txRef = `CP-${reference}`;
         const existingTx = await storage.getTransactionByTxId(txRef);
         if (!existingTx) {
@@ -6116,11 +6135,19 @@ export async function registerRoutes(
         return res.json({ status: "pending" });
       }
 
-      if (pending.status === "omnipay_confirmed" || pending.status === "omnipay_failed") {
-        return res.json({ status: "already_processed" });
-      }
-
       if (isSuccess) {
+        // CAS atomique — protège contre les doubles callbacks simultanés
+        const spCas = await financialPool.query(
+          `UPDATE pending_payments SET status = 'omnipay_confirmed'
+           WHERE id = $1 AND status NOT IN ('omnipay_confirmed','confirmed','omnipay_error')
+           RETURNING id`,
+          [pending.id]
+        );
+        if (!spCas.rowCount || spCas.rowCount === 0) {
+          console.log(`[SENDAVAPAY CALLBACK] Déjà traité (CAS) ref=${reference}`);
+          return res.json({ status: "already_processed" });
+        }
+
         const merchant = await storage.getMerchantById(pending.merchantId);
         const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
 
@@ -6129,8 +6156,6 @@ export async function registerRoutes(
           await storage.updatePendingPaymentStatus(pending.id, "omnipay_error");
           return res.status(500).json({ message: "Configuration marchand/pays introuvable" });
         }
-
-        await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
 
         const txId = `SP-${reference}`;
         const existingTx = await storage.getTransactionByTxId(txId);

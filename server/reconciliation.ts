@@ -5,6 +5,7 @@
  */
 
 import { storage } from "./storage";
+import { financialPool } from "./db";
 import { getPaymentStatus as sendavaGetStatus, getWithdrawalStatus as sendavaGetWithdrawalStatus } from "./sendavapay";
 import { getTransactionStatus as omnipayGetStatus } from "./omnipay";
 import { getTransactionStatus as mbiyoGetStatus } from "./mbiyo";
@@ -54,6 +55,19 @@ async function getClapayKey(): Promise<string | undefined> {
 }
 
 async function creditConfirmedPayment(pending: any, txRef: string): Promise<boolean> {
+  // ── CAS atomique : on ne crédite QUE si c'est nous qui faisons la transition
+  // de statut. Si le callback ou un autre cycle de réconciliation a déjà
+  // changé le statut, rowCount = 0 → on sort sans toucher au solde.
+  const casResult = await financialPool.query(
+    `UPDATE pending_payments SET status = 'omnipay_confirmed'
+     WHERE id = $1 AND status NOT IN ('omnipay_confirmed','confirmed','omnipay_error')
+     RETURNING id`,
+    [pending.id]
+  );
+  if (!casResult.rowCount || casResult.rowCount === 0) return false;
+
+  // Sécurité supplémentaire : si la transaction existe déjà (créée par le callback),
+  // ne pas créditer une 2e fois.
   const existing = await storage.getTransactionByTxId(txRef);
   if (existing) return false;
 
@@ -66,7 +80,6 @@ async function creditConfirmedPayment(pending: any, txRef: string): Promise<bool
 
   const credit = merchant?.feeExempt ? pending.amount : calcCredit(pending.amount, pending.country);
 
-  await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
   await storage.incrementMerchantCountryBalance(mc.id, credit);
   await storage.createTransaction({
     merchantId: pending.merchantId,
@@ -366,40 +379,49 @@ export async function runReconciliation(): Promise<void> {
 
           if (cpSuccess) {
             const txRef = `CP-${pending.omnipayReference}`;
-            const existing = await storage.getTransactionByTxId(txRef);
-            if (!existing) {
-              const merchant = await storage.getMerchantById(pending.merchantId);
-              const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
-              if (mc) {
-                const credit = merchant?.feeExempt ? pending.amount : calcCredit(pending.amount, pending.country);
-                const fee = pending.amount - credit;
-                await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
-                await storage.incrementMerchantCountryBalance(mc.id, credit);
-                await storage.createTransaction({
-                  merchantId: pending.merchantId,
-                  country: pending.country,
-                  txId: txRef,
-                  amount: pending.amount,
-                  payerNumber: pending.payerPhone || null,
-                  payerName: pending.payerName || null,
-                  status: "confirmed",
-                  provider: "clapay",
-                  omnipayTxId: clapaySignature,
-                  operator: pending.paymentMethod || null,
-                  omnipayReference: pending.omnipayReference || null,
-                  errorMessage: null,
-                  providerFee: fee,
-                });
-                notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "clapay" }).catch(() => {});
-                notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "clapay", status: "confirmed" }).catch(() => {});
-                console.log(`[RECONCILIATION] ClaPay OK — ref=${pending.omnipayReference} montant=${pending.amount} — crédité`);
-              } else {
-                console.error(`[RECONCILIATION] ClaPay — MerchantCountry introuvable paiement #${pending.id}`);
-              }
+            // CAS atomique : on ne crédite que si c'est nous qui confirmons le statut.
+            // Protège contre la course avec le callback ou un cycle précédent.
+            const cpCas = await financialPool.query(
+              `UPDATE pending_payments SET status = 'omnipay_confirmed'
+               WHERE id = $1 AND status NOT IN ('omnipay_confirmed','confirmed','omnipay_error')
+               RETURNING id`,
+              [pending.id]
+            );
+            if (!cpCas.rowCount || cpCas.rowCount === 0) {
+              console.log(`[RECONCILIATION] ClaPay OK — ref=${pending.omnipayReference} — déjà traité (CAS)`);
             } else {
-              // Transaction déjà créée (ex. par le callback ou un polling précédent), juste fermer le pending
-              await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
-              console.log(`[RECONCILIATION] ClaPay OK — ref=${pending.omnipayReference} — déjà traité`);
+              const existingTx = await storage.getTransactionByTxId(txRef);
+              if (existingTx) {
+                console.log(`[RECONCILIATION] ClaPay OK — ref=${pending.omnipayReference} — tx déjà créée (callback plus rapide)`);
+              } else {
+                const merchant = await storage.getMerchantById(pending.merchantId);
+                const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
+                if (mc) {
+                  const credit = merchant?.feeExempt ? pending.amount : calcCredit(pending.amount, pending.country);
+                  const fee = pending.amount - credit;
+                  await storage.incrementMerchantCountryBalance(mc.id, credit);
+                  await storage.createTransaction({
+                    merchantId: pending.merchantId,
+                    country: pending.country,
+                    txId: txRef,
+                    amount: pending.amount,
+                    payerNumber: pending.payerPhone || null,
+                    payerName: pending.payerName || null,
+                    status: "confirmed",
+                    provider: "clapay",
+                    omnipayTxId: clapaySignature,
+                    operator: pending.paymentMethod || null,
+                    omnipayReference: pending.omnipayReference || null,
+                    errorMessage: null,
+                    providerFee: fee,
+                  });
+                  notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "clapay" }).catch(() => {});
+                  notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "clapay", status: "confirmed" }).catch(() => {});
+                  console.log(`[RECONCILIATION] ClaPay OK — ref=${pending.omnipayReference} montant=${pending.amount} — crédité`);
+                } else {
+                  console.error(`[RECONCILIATION] ClaPay — MerchantCountry introuvable paiement #${pending.id}`);
+                }
+              }
             }
           } else if (cpFailed) {
             await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
