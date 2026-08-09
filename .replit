@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "web", "bash"]
+modules = ["nodejs-20", "web", "bash", "postgresql-16"]
 run = "npm run dev"
 hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
 
@@ -54,6 +54,8 @@ XOF_PER_USD = "600"
 APP_URL = "https://west-pay-aggregator-1--beryowone.replit.app"
 TELEGRAM_API_ID = "36887606"
 TELEGRAM_ADMIN_GROUP_ID = "-1003802528942"
+AUTH_DATABASE_URL = "postgresql://postgres:password@helium:5432/heliumdb"
+FINANCIAL_DATABASE_URL = "postgresql://postgres:password@helium:5432/heliumdb"
 
 [postMerge]
 path = "scripts/post-merge.sh"

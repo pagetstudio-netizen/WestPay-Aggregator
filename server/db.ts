@@ -345,7 +345,7 @@ export async function runAuthMigrations() {
       UPDATE withdrawal_operators SET gateway = 'Mbiyo'
         WHERE country IN ('Guinee', 'Gambie') AND gateway != 'Mbiyo';
       UPDATE withdrawal_operators SET gateway = 'SendavaPay'
-        WHERE country IN ('Togo', 'Cote d''Ivoire') AND gateway NOT IN ('SendavaPay', 'Mbiyo');
+        WHERE country IN ('Togo', 'Cote d''Ivoire') AND gateway = 'OmniPay';
     `);
 
     await client.query("COMMIT");
