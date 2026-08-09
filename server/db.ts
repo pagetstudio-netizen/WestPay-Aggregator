@@ -121,6 +121,7 @@ export async function runAuthMigrations() {
         sdk_enabled boolean NOT NULL DEFAULT false,
         sdk_api_key text,
         withdrawals_disabled boolean NOT NULL DEFAULT false,
+        custom_fee_rate real,
         token_invalidated_at timestamp,
         created_at timestamp DEFAULT now() NOT NULL
       );
@@ -280,6 +281,11 @@ export async function runAuthMigrations() {
     `);
 
     // ── Index & contraintes ──────────────────────────────────────────────────
+    // ── Colonnes ajoutées après déploiement initial ──────────────────────────
+    await client.query(`
+      ALTER TABLE merchants ADD COLUMN IF NOT EXISTS custom_fee_rate REAL;
+    `);
+
     await client.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS merchants_crypto_api_key_idx ON merchants(crypto_api_key) WHERE crypto_api_key IS NOT NULL;
       CREATE UNIQUE INDEX IF NOT EXISTS merchants_sdk_api_key_idx ON merchants(sdk_api_key) WHERE sdk_api_key IS NOT NULL;

@@ -869,7 +869,11 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
           <DialogTitle className="flex items-center gap-2 flex-wrap">
             {isLoading ? "Chargement..." : merchant?.name}
             {merchant && <Badge variant={merchant.suspended ? "destructive" : "secondary"} className="text-xs">{merchant.suspended ? "Suspendu" : "Actif"}</Badge>}
-            {merchant?.feeExempt && <Badge className="text-xs bg-emerald-600 text-white">Zéro frais</Badge>}
+            {merchant?.feeExempt && (
+              <Badge className="text-xs bg-emerald-600 text-white">
+                {merchant.customFeeRate != null ? `${merchant.customFeeRate}% custom` : "Zéro frais"}
+              </Badge>
+            )}
           </DialogTitle>
         </DialogHeader>
 
@@ -937,31 +941,90 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
                   Enregistrer les modifications
                 </Button>
 
-                <div className="flex items-center justify-between rounded-lg border p-3 bg-emerald-50 dark:bg-emerald-950/20">
-                  <div>
-                    <p className="text-sm font-medium">Mode sans frais</p>
-                    <p className="text-xs text-muted-foreground">Exempte ce marchand de tous les frais (payin 5.5%, payout 4.5%, virements)</p>
+                <div className="rounded-lg border p-3 bg-emerald-50 dark:bg-emerald-950/20 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">Frais personnalisés</p>
+                      <p className="text-xs text-muted-foreground">
+                        {merchant?.customFeeRate != null
+                          ? `Taux actuel : ${merchant.customFeeRate}% (payin & payout)`
+                          : merchant?.feeExempt
+                            ? "Zéro frais — totalement gratuit"
+                            : "Taux standard (5.5% payin, 4.5% payout)"}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={!!merchant?.feeExempt}
+                      onCheckedChange={async (val) => {
+                        const res = await fetch(`/api/admin/merchants/${merchantId}/fee-exempt`, {
+                          method: "PATCH",
+                          credentials: "include",
+                          headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                          body: JSON.stringify({ feeExempt: val, customFeeRate: null }),
+                        });
+                        if (res.ok) {
+                          refetch();
+                          queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
+                          toast({ title: val ? "Mode sans frais activé" : "Mode standard rétabli" });
+                        } else {
+                          toast({ title: "Erreur", variant: "destructive" });
+                        }
+                      }}
+                      data-testid="switch-fee-exempt"
+                    />
                   </div>
-                  <Switch
-                    checked={!!merchant?.feeExempt}
-                    onCheckedChange={async (val) => {
-                      const res = await fetch(`/api/admin/merchants/${merchantId}/fee-exempt`, {
-                        method: "PATCH",
-                        credentials: "include",
 
-                        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-                        body: JSON.stringify({ feeExempt: val }),
-                      });
-                      if (res.ok) {
-                        refetch();
-                        queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
-                        toast({ title: val ? "Mode sans frais activé" : "Mode sans frais désactivé" });
-                      } else {
-                        toast({ title: "Erreur", variant: "destructive" });
-                      }
-                    }}
-                    data-testid="switch-fee-exempt"
-                  />
+                  {/* Taux personnalisé — visible uniquement quand fee-exempt est activé */}
+                  {merchant?.feeExempt && (
+                    <div className="space-y-2 pt-1 border-t border-emerald-200 dark:border-emerald-800">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        Taux de frais personnalisé <span className="font-normal">(laisser vide = 0% gratuit)</span>
+                      </p>
+                      <div className="flex gap-2 items-center">
+                        <div className="relative flex-1">
+                          <Input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            placeholder="ex: 3.5"
+                            defaultValue={merchant?.customFeeRate ?? ""}
+                            id={`custom-fee-rate-${merchantId}`}
+                            className="pr-8 text-sm"
+                          />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={async () => {
+                            const input = document.getElementById(`custom-fee-rate-${merchantId}`) as HTMLInputElement;
+                            const val = input.value.trim();
+                            const rate = val === "" ? null : parseFloat(val);
+                            if (rate !== null && (isNaN(rate) || rate < 0 || rate > 100)) {
+                              toast({ title: "Taux invalide (0–100)", variant: "destructive" });
+                              return;
+                            }
+                            const res = await fetch(`/api/admin/merchants/${merchantId}/fee-exempt`, {
+                              method: "PATCH",
+                              credentials: "include",
+                              headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                              body: JSON.stringify({ feeExempt: true, customFeeRate: rate }),
+                            });
+                            if (res.ok) {
+                              refetch();
+                              queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
+                              toast({ title: rate === null ? "Taux remis à 0% (gratuit)" : `Taux personnalisé défini : ${rate}%` });
+                            } else {
+                              toast({ title: "Erreur", variant: "destructive" });
+                            }
+                          }}
+                        >
+                          Appliquer
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -3682,24 +3745,82 @@ function AdminWalletTransfersPanel() {
   const { data: transfers = [], isLoading } = useAdminFetch("/api/admin/wallet-transfers", ["/api/admin/wallet-transfers"]);
   const { data: feeConfig, refetch: refetchFee } = useAdminFetch("/api/admin/wallet-transfer-fee", ["/api/admin/wallet-transfer-fee"]);
   const { data: wtcList = [], refetch: refetchWtc } = useAdminFetch("/api/admin/wallet-transfer-countries", ["/api/admin/wallet-transfer-countries"]);
+  const { data: feeSettings, refetch: refetchFeeSettings } = useAdminFetch("/api/admin/fee-settings", ["/api/admin/fee-settings"]);
+  const { data: platformFlags, refetch: refetchFlags } = useQuery<{ withdrawalsDisabled: boolean; withdrawalMinAmount: number; walletTransfersDisabled: boolean }>({
+    queryKey: ["/api/public/platform-flags"],
+    queryFn: () => fetch("/api/public/platform-flags").then(r => r.json()),
+  });
 
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
   const [selectedTransfer, setSelectedTransfer] = useState<(WalletTransfer & { merchantName: string }) | null>(null);
   const [noteAction, setNoteAction] = useState<"approve" | "reject">("approve");
   const [note, setNote] = useState("");
   const [feeType, setFeeType] = useState("percentage");
-  const [feeValue, setFeeValue] = useState("2");
+  const [feeValue, setFeeValue] = useState("4.5");
   const [savingFee, setSavingFee] = useState(false);
   const [newCountry, setNewCountry] = useState("");
   const [newZone, setNewZone] = useState("XOF");
   const [addingCountry, setAddingCountry] = useState(false);
 
+  // Taux globaux payin/payout
+  const [payinRate, setPayinRate] = useState("6.6");
+  const [payoutRate, setPayoutRate] = useState("5.5");
+  const [countryOverrides, setCountryOverrides] = useState<Record<string, { payin: number; payout: number }>>({});
+  const [savingGlobalFee, setSavingGlobalFee] = useState(false);
+  const [isTogglingWalletTransfer, setIsTogglingWalletTransfer] = useState(false);
+
   useEffect(() => {
     if (feeConfig) {
       setFeeType((feeConfig as any).feeType || "percentage");
-      setFeeValue((feeConfig as any).feeValue || "2");
+      setFeeValue(String((feeConfig as any).feeValue || "4.5"));
     }
   }, [feeConfig]);
+
+  useEffect(() => {
+    if (feeSettings) {
+      setPayinRate(String((feeSettings as any).payinRate ?? "6.6"));
+      setPayoutRate(String((feeSettings as any).payoutRate ?? "5.5"));
+      setCountryOverrides((feeSettings as any).countryOverrides ?? {});
+    }
+  }, [feeSettings]);
+
+  const toggleWalletTransfers = async (disabled: boolean) => {
+    setIsTogglingWalletTransfer(true);
+    try {
+      const res = await fetch("/api/admin/platform-flags", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ walletTransfersDisabled: disabled }),
+      });
+      if (!res.ok) throw new Error("Erreur");
+      await refetchFlags();
+      toast({ title: disabled ? "Virements inter-wallets désactivés" : "Virements inter-wallets réactivés" });
+    } catch {
+      toast({ title: "Erreur", variant: "destructive" });
+    } finally {
+      setIsTogglingWalletTransfer(false);
+    }
+  };
+
+  const saveGlobalFee = async () => {
+    setSavingGlobalFee(true);
+    try {
+      const res = await fetch("/api/admin/fee-settings", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ payinRate: parseFloat(payinRate), payoutRate: parseFloat(payoutRate), countryOverrides }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      refetchFeeSettings();
+      toast({ title: "Taux mis à jour", description: `Payin ${payinRate}% · Payout ${payoutRate}%` });
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setSavingGlobalFee(false);
+    }
+  };
 
   const actionMutation = useMutation({
     mutationFn: async ({ id, action, note: n }: { id: number; action: "approve" | "reject"; note: string }) => {
@@ -3775,8 +3896,184 @@ function AdminWalletTransfersPanel() {
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-foreground">Virements Inter-Wallets</h2>
 
+      {/* ── Activer / désactiver les virements inter-wallets ────────────────── */}
+      <div className={`flex items-center justify-between gap-4 p-4 rounded-xl border-2 ${platformFlags?.walletTransfersDisabled ? "border-red-400 bg-red-50 dark:bg-red-950/20" : "border-green-300 bg-green-50 dark:bg-green-950/20"}`}>
+        <div className="flex items-center gap-3">
+          <span className={`w-3 h-3 rounded-full shrink-0 ${platformFlags?.walletTransfersDisabled ? "bg-red-500" : "bg-green-500"}`} />
+          <div>
+            <p className="text-sm font-semibold text-foreground">
+              {platformFlags?.walletTransfersDisabled ? "Échanges inter-wallets bloqués" : "Échanges inter-wallets actifs"}
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {platformFlags?.walletTransfersDisabled
+                ? "Les marchands ne peuvent pas transférer entre leurs wallets."
+                : "Les marchands peuvent transférer librement entre leurs wallets."}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {isTogglingWalletTransfer && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+          <Switch
+            checked={!platformFlags?.walletTransfersDisabled}
+            onCheckedChange={(v) => toggleWalletTransfers(!v)}
+            disabled={isTogglingWalletTransfer}
+          />
+        </div>
+      </div>
+
+      {/* ── Taux globaux payin / payout ──────────────────────────────────────── */}
       <Card>
-        <CardHeader><CardTitle className="text-base">Configuration des frais</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-base">Taux de frais globaux (payin &amp; payout)</CardTitle>
+          <p className="text-xs text-muted-foreground">S'appliquent à tous les pays de l'Afrique de l'Ouest et Centrale. Les taux ci-dessous sont stockés en base de données et persistent après redémarrage.</p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label className="text-sm">Frais dépôt (payin) %</Label>
+              <div className="relative">
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  value={payinRate}
+                  onChange={(e) => setPayinRate(e.target.value)}
+                  className="pr-8"
+                  placeholder="ex: 6.6"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm">Frais retrait (payout) %</Label>
+              <div className="relative">
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  value={payoutRate}
+                  onChange={(e) => setPayoutRate(e.target.value)}
+                  className="pr-8"
+                  placeholder="ex: 5.5"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Overrides par pays */}
+          {Object.keys(countryOverrides).length > 0 && (
+            <div className="space-y-2">
+              <Label className="text-sm">Taux spécifiques par pays</Label>
+              <div className="rounded-lg border overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium">Pays</th>
+                      <th className="text-center px-3 py-2 font-medium">Dépôt %</th>
+                      <th className="text-center px-3 py-2 font-medium">Retrait %</th>
+                      <th className="px-2 py-2" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(countryOverrides).map(([country, rates]) => (
+                      <tr key={country} className="border-t">
+                        <td className="px-3 py-2 font-medium">{country}</td>
+                        <td className="px-3 py-2 text-center">
+                          <Input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            className="w-20 h-7 text-center text-xs"
+                            value={rates.payin}
+                            onChange={(e) => setCountryOverrides(prev => ({
+                              ...prev,
+                              [country]: { ...prev[country], payin: parseFloat(e.target.value) || 0 }
+                            }))}
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <Input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            className="w-20 h-7 text-center text-xs"
+                            value={rates.payout}
+                            onChange={(e) => setCountryOverrides(prev => ({
+                              ...prev,
+                              [country]: { ...prev[country], payout: parseFloat(e.target.value) || 0 }
+                            }))}
+                          />
+                        </td>
+                        <td className="px-2 py-2 text-right">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 text-destructive"
+                            onClick={() => setCountryOverrides(prev => {
+                              const next = { ...prev };
+                              delete next[country];
+                              return next;
+                            })}
+                          >×</Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Ajouter un override pays */}
+          <div className="flex gap-2 items-end flex-wrap">
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Ajouter un taux spécifique</Label>
+              <Input
+                placeholder="Pays (ex: Niger)"
+                className="w-36 h-8 text-sm"
+                id="new-override-country"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Dépôt %</Label>
+              <Input type="number" min="0" max="100" step="0.1" className="w-20 h-8 text-sm" id="new-override-payin" defaultValue="6" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Retrait %</Label>
+              <Input type="number" min="0" max="100" step="0.1" className="w-20 h-8 text-sm" id="new-override-payout" defaultValue="6" />
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8"
+              onClick={() => {
+                const c = (document.getElementById("new-override-country") as HTMLInputElement)?.value.trim();
+                const pi = parseFloat((document.getElementById("new-override-payin") as HTMLInputElement)?.value || "6");
+                const po = parseFloat((document.getElementById("new-override-payout") as HTMLInputElement)?.value || "6");
+                if (!c) return;
+                setCountryOverrides(prev => ({ ...prev, [c]: { payin: pi, payout: po } }));
+                (document.getElementById("new-override-country") as HTMLInputElement).value = "";
+              }}
+            >
+              Ajouter
+            </Button>
+          </div>
+
+          <Button onClick={saveGlobalFee} disabled={savingGlobalFee} className="w-full sm:w-auto">
+            {savingGlobalFee ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+            Enregistrer les taux
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* ── Frais de virement inter-wallets ──────────────────────────────────── */}
+      <Card>
+        <CardHeader><CardTitle className="text-base">Frais de virement inter-wallets</CardTitle></CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-4 items-end">
             <div className="space-y-2">
@@ -3797,7 +4094,7 @@ function AdminWalletTransfersPanel() {
                 type="number"
                 value={feeValue}
                 onChange={(e) => setFeeValue(e.target.value)}
-                placeholder={feeType === "percentage" ? "Ex: 2" : "Ex: 500"}
+                placeholder={feeType === "percentage" ? "Ex: 4.5" : "Ex: 500"}
                 min="0"
                 step="0.1"
                 className="w-40"

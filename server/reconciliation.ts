@@ -12,22 +12,7 @@ import { getTransactionStatus as mbiyoGetStatus } from "./mbiyo";
 import { clapayGetTransactionStatus as clapayGetStatus } from "./clapay";
 import { notifyMerchantPayment, notifyAdminPayment, notifyAdminWithdrawal, notifyMerchantWithdrawal } from "./telegram-bot";
 
-const COLLECTION_FEE_RATE = 0.055;
-const EXTRA_FEE_COUNTRIES = new Set(["Congo Brazzaville", "Congo RDC"]);
-const COUNTRY_FEE_OVERRIDES_RECON: Record<string, number> = {
-  "India": 0.15, "Pakistan": 0.15, "Nigeria": 0.15, "Philippines": 0.15,
-  "Niger": 0.06, "Kenya": 0.06, "Ghana": 0.06,
-};
-
-function calcCredit(amount: number, country?: string | null): number {
-  if (country && COUNTRY_FEE_OVERRIDES_RECON[country] !== undefined) {
-    return Math.floor(amount * (1 - COUNTRY_FEE_OVERRIDES_RECON[country]));
-  }
-  const rate = country && EXTRA_FEE_COUNTRIES.has(country)
-    ? COLLECTION_FEE_RATE + 0.01
-    : COLLECTION_FEE_RATE;
-  return Math.floor(amount * (1 - rate));
-}
+import { calcMerchantCredit as calcCredit } from "./feeConfig";
 
 async function getSendavaKey(): Promise<string | undefined> {
   return (
@@ -78,7 +63,9 @@ async function creditConfirmedPayment(pending: any, txRef: string): Promise<bool
     return false;
   }
 
-  const credit = merchant?.feeExempt ? pending.amount : calcCredit(pending.amount, pending.country);
+  const credit = merchant?.customFeeRate != null
+    ? Math.max(0, Math.floor(pending.amount * (1 - merchant.customFeeRate / 100)))
+    : merchant?.feeExempt ? pending.amount : calcCredit(pending.amount, pending.country);
 
   await storage.incrementMerchantCountryBalance(mc.id, credit);
   await storage.createTransaction({
@@ -397,7 +384,9 @@ export async function runReconciliation(): Promise<void> {
                 const merchant = await storage.getMerchantById(pending.merchantId);
                 const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
                 if (mc) {
-                  const credit = merchant?.feeExempt ? pending.amount : calcCredit(pending.amount, pending.country);
+                  const credit = merchant?.customFeeRate != null
+    ? Math.max(0, Math.floor(pending.amount * (1 - merchant.customFeeRate / 100)))
+    : merchant?.feeExempt ? pending.amount : calcCredit(pending.amount, pending.country);
                   const fee = pending.amount - credit;
                   await storage.incrementMerchantCountryBalance(mc.id, credit);
                   await storage.createTransaction({

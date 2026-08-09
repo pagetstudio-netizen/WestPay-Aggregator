@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, boolean, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, boolean, serial, real } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -32,6 +32,7 @@ export const merchants = pgTable("merchants", {
   sdkEnabled: boolean("sdk_enabled").default(false).notNull(),
   sdkApiKey: text("sdk_api_key"),
   withdrawalsDisabled: boolean("withdrawals_disabled").default(false).notNull(),
+  customFeeRate: real("custom_fee_rate"),   // % personnalisé (ex: 3.5 = 3.5%) — null = taux standard
   tokenInvalidatedAt: timestamp("token_invalidated_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

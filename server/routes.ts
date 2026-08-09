@@ -92,6 +92,10 @@ import {
   type ClapayWebhookPayload,
 } from "./clapay";
 import { maskPhone as maskPhoneForLog, maskAddress as maskAddressForLog } from "./logMask";
+import {
+  getCollectionFeeRate, getWithdrawalFeeRate, calcMerchantCredit,
+  FLAT_PAYIN_FEE, loadFeeConfig, saveFeeConfig, getFeeSnapshot,
+} from "./feeConfig";
 
 // ── Multer — logo opérateur ───────────────────────────────────────────────────
 const LOGOS_DIR = path.resolve(process.cwd(), "uploads", "operator-logos");
@@ -358,39 +362,22 @@ function toMerchantSafeMessage(msg: string | null | undefined): string {
     .trim();
 }
 
-const COLLECTION_FEE_RATE = 0.055;
-const WITHDRAWAL_FEE_RATE = 0.045;
-const EXTRA_FEE_COUNTRIES = new Set(["Congo Brazzaville", "Congo RDC"]);
-/* Frais spécifiques par pays (payin + payout) */
-const COUNTRY_FEE_OVERRIDES: Record<string, { payin: number; payout: number }> = {
-  /* SeaPay countries */
-  "India":       { payin: 0.15, payout: 0.05 },
-  "Pakistan":    { payin: 0.15, payout: 0.05 },
-  "Nigeria":     { payin: 0.15, payout: 0.05 },
-  "Philippines": { payin: 0.15, payout: 0.05 },
-  /* ClaPay countries : devise propre (XOF isolé / KES / GHS), pas d'échange inter-pays */
-  "Niger":       { payin: 0.06, payout: 0.06 },
-  "Kenya":       { payin: 0.06, payout: 0.06 },
-  "Ghana":       { payin: 0.06, payout: 0.06 },
-};
-/* Pays fermés aux transferts inter-pays (wallet transfer interdit) */
+/* Pays fermés aux transferts inter-pays (wallet transfer interdit — devise isolée) */
 const NO_WALLET_TRANSFER_COUNTRIES = new Set(["Niger", "Kenya", "Ghana"]);
-function getCollectionFeeRate(country?: string | null): number {
-  if (country && COUNTRY_FEE_OVERRIDES[country]) return COUNTRY_FEE_OVERRIDES[country].payin;
-  return country && EXTRA_FEE_COUNTRIES.has(country) ? COLLECTION_FEE_RATE + 0.01 : COLLECTION_FEE_RATE;
-}
-function getWithdrawalFeeRate(country?: string | null): number {
-  if (country && COUNTRY_FEE_OVERRIDES[country]) return COUNTRY_FEE_OVERRIDES[country].payout;
-  return country && EXTRA_FEE_COUNTRIES.has(country) ? WITHDRAWAL_FEE_RATE + 0.01 : WITHDRAWAL_FEE_RATE;
-}
-/* India payin: 10 INR frais fixe prélevés en plus des 15% (cf. COUNTRY_FEE_OVERRIDES) */
-const FLAT_PAYIN_FEE_OVERRIDES: Record<string, number> = {
-  "India": 10,
-};
-function calcMerchantCredit(grossAmount: number, country?: string | null): number {
-  const flatFee = country && FLAT_PAYIN_FEE_OVERRIDES[country] ? FLAT_PAYIN_FEE_OVERRIDES[country] : 0;
-  const afterPercentFee = grossAmount * (1 - getCollectionFeeRate(country));
-  return Math.max(0, Math.floor(afterPercentFee - flatFee));
+
+/** Calcule le montant net crédité au marchand en tenant compte du taux personnalisé. */
+function calcMerchantCreditForMerchant(
+  grossAmount: number,
+  country: string | null | undefined,
+  merchant: { feeExempt?: boolean; customFeeRate?: number | null } | null | undefined
+): number {
+  if (merchant?.customFeeRate != null) {
+    // Taux personnalisé (ex: 3.5 → 3.5%) — frais fixes pays conservés
+    const flatFee = country && FLAT_PAYIN_FEE[country] ? FLAT_PAYIN_FEE[country] : 0;
+    return Math.max(0, Math.floor(grossAmount * (1 - merchant.customFeeRate / 100) - flatFee));
+  }
+  if (merchant?.feeExempt) return grossAmount; // 0% — totalement gratuit
+  return calcMerchantCredit(grossAmount, country);
 }
 function calcWithdrawalFee(amount: number, country?: string | null): number {
   return Math.floor(amount * getWithdrawalFeeRate(country));
@@ -800,6 +787,9 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // ── Charger la config des frais depuis la DB ──────────────────────────────────
+  await loadFeeConfig();
+
   // ── Security headers (applied to every response) ─────────────────────────────
   app.use((req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -4842,7 +4832,7 @@ export async function registerRoutes(
           const existingTx = await storage.getTransactionByTxId(txId);
           if (!existingTx) {
             const payerFullName = [payload.first_name, payload.last_name].filter(Boolean).join(" ") || pending.payerName || null;
-            const merchantCredit1 = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount, pending.country);
+            const merchantCredit1 = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
             await storage.createTransaction({
               merchantId: pending.merchantId,
               country: pending.country,
@@ -4970,7 +4960,7 @@ export async function registerRoutes(
                   const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
                   const merchant = await storage.getMerchantById(pending.merchantId);
                   if (mc) {
-                    const credit = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount, pending.country);
+                    const credit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
                     await storage.incrementMerchantCountryBalance(mc.id, credit);
                     await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
                     const txRef = statusResult.data.transaction_id || pending.omnipayReference;
@@ -5050,7 +5040,7 @@ export async function registerRoutes(
                 const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
                 const merchant = await storage.getMerchantById(pending.merchantId);
                 if (mc) {
-                  const credit = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount, pending.country);
+                  const credit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
                   const westpayFee = pending.amount - credit;
                   await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
                   const txRef = `SP-${pending.omnipayReference}`;
@@ -5123,7 +5113,7 @@ export async function registerRoutes(
                 const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
                 const merchant = await storage.getMerchantById(pending.merchantId);
                 if (mc) {
-                  const credit = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount, pending.country);
+                  const credit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
                   const westpayFee = pending.amount - credit;
                   await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
                   const txRef = `CP-${pending.omnipayReference}`;
@@ -5278,7 +5268,7 @@ export async function registerRoutes(
         }
 
         const merchant = await storage.getMerchantById(pending.merchantId);
-        const credit = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount, pending.country);
+        const credit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
 
         const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
         if (!mc) {
@@ -5932,7 +5922,7 @@ export async function registerRoutes(
         const merchant = await storage.getMerchantById(pending.merchantId);
         if (!mc) return res.json({ received: true });
 
-        const credit = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount, pending.country);
+        const credit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
         const westpayFee = pending.amount - credit;
         const txRef = `CP-${reference}`;
         const existingTx = await storage.getTransactionByTxId(txRef);
@@ -6160,7 +6150,7 @@ export async function registerRoutes(
         const txId = `SP-${reference}`;
         const existingTx = await storage.getTransactionByTxId(txId);
         if (!existingTx) {
-          const credit = merchant?.feeExempt ? pending.amount : calcMerchantCredit(pending.amount, pending.country);
+          const credit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
           const westpayFee = pending.amount - credit;
           await storage.createTransaction({
             merchantId: pending.merchantId,
@@ -6783,7 +6773,7 @@ export async function registerRoutes(
         }
 
         const smsM2 = await storage.getMerchantById(found.merchantId);
-        const merchantCredit2 = smsM2?.feeExempt ? amount : calcMerchantCredit(amount, found.country);
+        const merchantCredit2 = calcMerchantCreditForMerchant(amount, found.country, smsM2);
         await storage.createTransaction({
           merchantId: found.merchantId,
           country: found.country,
@@ -6883,7 +6873,7 @@ export async function registerRoutes(
       }
 
       const smsM3 = await storage.getMerchantById(simNumber.merchantId);
-      const merchantCredit3 = smsM3?.feeExempt ? amount : calcMerchantCredit(amount, simNumber.country);
+      const merchantCredit3 = calcMerchantCreditForMerchant(amount, simNumber.country, smsM3);
       await storage.createTransaction({
         merchantId: simNumber.merchantId,
         country: simNumber.country,
@@ -7097,8 +7087,8 @@ export async function registerRoutes(
       const feeType = await storage.getSetting("wallet_transfer_fee_type");
       const feeValue = await storage.getSetting("wallet_transfer_fee_value");
       res.json({
-        feeType: feeType?.value || "percentage",
-        feeValue: parseFloat(feeValue?.value || "3"),
+        feeType: feeType || "percentage",
+        feeValue: parseFloat(feeValue || "4.5"),
       });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
@@ -7107,12 +7097,17 @@ export async function registerRoutes(
 
   app.get("/api/public/platform-flags", async (_req, res) => {
     try {
-      const [withdrawalsDisabled, minAmountRaw] = await Promise.all([
+      const [withdrawalsDisabled, minAmountRaw, walletTransfersDisabled] = await Promise.all([
         storage.getSetting("withdrawals_disabled"),
         storage.getSetting("withdrawal_min_amount"),
+        storage.getSetting("wallet_transfers_disabled"),
       ]);
       const withdrawalMinAmount = minAmountRaw ? parseInt(minAmountRaw) || 200 : 200;
-      res.json({ withdrawalsDisabled: withdrawalsDisabled === "true", withdrawalMinAmount });
+      res.json({
+        withdrawalsDisabled: withdrawalsDisabled === "true",
+        withdrawalMinAmount,
+        walletTransfersDisabled: walletTransfersDisabled === "true",
+      });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }
@@ -7120,9 +7115,12 @@ export async function registerRoutes(
 
   app.put("/api/admin/platform-flags", authMiddleware("admin"), async (req, res) => {
     try {
-      const { withdrawalsDisabled, withdrawalMinAmount } = req.body;
+      const { withdrawalsDisabled, withdrawalMinAmount, walletTransfersDisabled } = req.body;
       if (withdrawalsDisabled !== undefined) {
         await storage.setSetting("withdrawals_disabled", withdrawalsDisabled ? "true" : "false");
+      }
+      if (walletTransfersDisabled !== undefined) {
+        await storage.setSetting("wallet_transfers_disabled", walletTransfersDisabled ? "true" : "false");
       }
       if (withdrawalMinAmount !== undefined) {
         const parsed = parseInt(withdrawalMinAmount);
@@ -7289,11 +7287,17 @@ export async function registerRoutes(
       if (!fromZone || !toZone || fromZone !== toZone) {
         return res.status(400).json({ message: "Les deux pays doivent etre dans la meme zone monetaire (XOF ou XAF)" });
       }
+      // Vérifier si les virements inter-wallets sont globalement désactivés
+      const walletTransfersDisabledFlag = await storage.getSetting("wallet_transfers_disabled");
+      if (walletTransfersDisabledFlag === "true") {
+        return res.status(403).json({ message: "Les virements inter-wallets sont temporairement désactivés par l'administrateur." });
+      }
+
       const wtMerchantForFee = await storage.getMerchantById(merchantId);
       const feeTypeSetting = await storage.getSetting("wallet_transfer_fee_type");
       const feeValueSetting = await storage.getSetting("wallet_transfer_fee_value");
-      const feeType = feeTypeSetting?.value || "percentage";
-      const feeValue = parseFloat(feeValueSetting?.value || "3");
+      const feeType = feeTypeSetting || "percentage";
+      const feeValue = parseFloat(feeValueSetting || "4.5");
       let fee = 0;
       if (!wtMerchantForFee?.feeExempt) {
         if (feeType === "percentage") {
@@ -7382,8 +7386,8 @@ export async function registerRoutes(
       const feeType = await storage.getSetting("wallet_transfer_fee_type");
       const feeValue = await storage.getSetting("wallet_transfer_fee_value");
       res.json({
-        feeType: feeType?.value || "percentage",
-        feeValue: feeValue?.value || "2",
+        feeType: feeType || "percentage",
+        feeValue: feeValue || "4.5",
       });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
@@ -7399,6 +7403,39 @@ export async function registerRoutes(
       await storage.setSetting("wallet_transfer_fee_type", feeType);
       await storage.setSetting("wallet_transfer_fee_value", String(v));
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+  // ── Taux de frais payin/payout globaux ────────────────────────────────────────
+  app.get("/api/admin/fee-settings", authMiddleware("admin"), async (_req, res) => {
+    try {
+      res.json(getFeeSnapshot());
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+  app.post("/api/admin/fee-settings", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { payinRate, payoutRate, countryOverrides } = req.body;
+      const payin  = parseFloat(payinRate);
+      const payout = parseFloat(payoutRate);
+      if (isNaN(payin)  || payin  < 0 || payin  > 100) return res.status(400).json({ message: "Taux payin invalide (0–100)" });
+      if (isNaN(payout) || payout < 0 || payout > 100) return res.status(400).json({ message: "Taux payout invalide (0–100)" });
+      if (typeof countryOverrides !== "object" || Array.isArray(countryOverrides)) {
+        return res.status(400).json({ message: "countryOverrides invalide" });
+      }
+      // Valider chaque override pays
+      for (const [country, rates] of Object.entries(countryOverrides as any)) {
+        const r = rates as any;
+        if (typeof r?.payin !== "number" || typeof r?.payout !== "number" || r.payin < 0 || r.payout < 0) {
+          return res.status(400).json({ message: `Override invalide pour ${country}` });
+        }
+      }
+      await saveFeeConfig(payin, payout, countryOverrides as any);
+      res.json({ success: true, ...getFeeSnapshot() });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }
@@ -7697,7 +7734,9 @@ export async function registerRoutes(
         notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, merchantEmail: merchant.email, merchantId, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "pending", mode: "auto", ip: wdRawIp }).catch(() => {});
       });
 
-      const withdrawalFee = merchant.feeExempt ? 0 : calcWithdrawalFee(amount, mc.country);
+      const withdrawalFee = merchant.customFeeRate != null
+        ? Math.floor(amount * merchant.customFeeRate / 100)
+        : merchant.feeExempt ? 0 : calcWithdrawalFee(amount, mc.country);
       const netAmount = amount - withdrawalFee;
       const reference = mbiyoGenerateRef();
 
@@ -8539,7 +8578,7 @@ export async function registerRoutes(
       const mc = await storage.findMerchantCountryBySimAndCountry(tx.merchantId, tx.country || "");
       const merchant = await storage.getMerchantById(tx.merchantId);
       if (mc) {
-        const credit = merchant?.feeExempt ? tx.amount : calcMerchantCredit(tx.amount, tx.country);
+        const credit = calcMerchantCreditForMerchant(tx.amount, tx.country, merchant);
         await storage.incrementMerchantCountryBalance(mc.id, credit);
       }
       await financialDb.update(transactions).set({ status: "confirmed" }).where(eq(transactions.id, id));
@@ -8697,7 +8736,7 @@ export async function registerRoutes(
           const txRef = `SYNC-${ref}`;
           const existingTx = await storage.getTransactionByTxId(txRef);
           if (!existingTx && mc) {
-            const credit = merchant?.feeExempt ? pp.amount : calcMerchantCredit(pp.amount, pp.country);
+            const credit = calcMerchantCreditForMerchant(pp.amount, pp.country, merchant);
             const fee = pp.amount - credit;
             await storage.incrementMerchantCountryBalance(mc.id, credit);
             await storage.createTransaction({
@@ -8728,7 +8767,7 @@ export async function registerRoutes(
             const merchant = await storage.getMerchantById(txRecord.merchantId);
             const mc = await storage.findMerchantCountryBySimAndCountry(txRecord.merchantId, txRecord.country || "");
             if (mc) {
-              const credit = merchant?.feeExempt ? txRecord.amount : calcMerchantCredit(txRecord.amount, txRecord.country);
+              const credit = calcMerchantCreditForMerchant(txRecord.amount, txRecord.country, merchant);
               await storage.incrementMerchantCountryBalance(mc.id, credit);
             }
             await financialDb.update(transactions).set({ status: "confirmed" }).where(eq(transactions.id, id));
@@ -8974,10 +9013,15 @@ export async function registerRoutes(
   app.patch("/api/admin/merchants/:id/fee-exempt", authMiddleware("admin"), async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const { feeExempt } = req.body;
+      const { feeExempt, customFeeRate } = req.body;
       if (typeof feeExempt !== "boolean") return res.status(400).json({ message: "Valeur invalide" });
-      await storage.updateMerchant(id, { feeExempt });
-      res.json({ success: true, feeExempt });
+      if (customFeeRate !== undefined && customFeeRate !== null && (typeof customFeeRate !== "number" || customFeeRate < 0 || customFeeRate > 100)) {
+        return res.status(400).json({ message: "Taux personnalisé invalide (0–100)" });
+      }
+      const update: any = { feeExempt };
+      update.customFeeRate = (customFeeRate === null || customFeeRate === undefined || customFeeRate === "") ? null : Number(customFeeRate);
+      await storage.updateMerchant(id, update);
+      res.json({ success: true, feeExempt, customFeeRate: update.customFeeRate });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }
@@ -9918,7 +9962,9 @@ export async function registerRoutes(
       };
       const countryName = countryMap[metadata.country_code.toUpperCase()] || metadata.country_code;
 
-      const feeRate = merchant.feeExempt ? 0 : getWithdrawalFeeRate(countryName);
+      const feeRate = merchant.customFeeRate != null
+        ? merchant.customFeeRate / 100
+        : merchant.feeExempt ? 0 : getWithdrawalFeeRate(countryName);
       const totalDeducted = Math.ceil(amount * (1 + feeRate));
 
       const mc = await storage.findMerchantCountryBySimAndCountry(merchant.id, countryName);
