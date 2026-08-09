@@ -3,9 +3,13 @@ import { drizzle } from "drizzle-orm/node-postgres";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function sslFor(url: string) {
-  return url.includes("localhost") || url.includes("127.0.0.1") || url.includes("/var/run")
-    ? false
-    : { rejectUnauthorized: false };
+  const noSsl =
+    url.includes("localhost") ||
+    url.includes("127.0.0.1") ||
+    url.includes("/var/run") ||
+    url.includes("helium") ||          // Replit internal PostgreSQL host
+    url.includes("sslmode=disable");
+  return noSsl ? false : { rejectUnauthorized: false };
 }
 const POOL_CFG = { max: 10, connectionTimeoutMillis: 8000, idleTimeoutMillis: 30000, statement_timeout: 15000 };
 
