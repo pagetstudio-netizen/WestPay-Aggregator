@@ -40,7 +40,7 @@ async function enforceCompromisedAccountSuspensions(): Promise<void> {
     // If admin explicitly re-enables an account, that decision is preserved across restarts
     if (!suspensionDone && !merchant.suspended) {
       await storage.updateMerchant(merchant.id, { suspended: true });
-      console.log(`[SECURITY] Compte compromis suspendu (initialisation): ${email} (${merchant.slug})`);
+      console.log(`[SECURITY] Compte compromis suspendu (initialisation): slug=${merchant.slug}`);
     }
 
     // One-time: invalidate password hash so account cannot log in even if un-suspended without reset
@@ -55,7 +55,7 @@ async function enforceCompromisedAccountSuspensions(): Promise<void> {
         const newKey = `${prefix}-${crypto.randomBytes(20).toString("hex").toUpperCase()}`;
         await storage.updateMerchantCountryApiKey(mc.id, newKey);
       }
-      console.log(`[SECURITY] Clés API + mot de passe invalidés: ${email} (${countries.length} pays)`);
+      console.log(`[SECURITY] Clés API + mot de passe invalidés: slug=${merchant.slug} (${countries.length} pays)`);
     }
   }
 

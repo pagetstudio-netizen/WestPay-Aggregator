@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { maskPhone as maskPhoneForLog } from "./logMask";
 
 const MBIYO_BASE_URL = "https://dashboard.mbiyo.africa/api/v1";
 
@@ -145,8 +146,7 @@ export async function initiatePayin(params: MbiyoPayinRequest): Promise<MbiyoPay
     body.metadata.om_otp = params.otp;
   }
 
-  const maskedPhone = params.phoneNumber ? params.phoneNumber.replace(/(\d{3})\d+(\d{2})/, "$1****$2") : "?";
-  console.log(`[MBIYO] Demande de paiement: ${params.amount} ${params.currency} - Ref: ${params.orderId} - Tel: ${maskedPhone} - Network: ${params.network} - Country: ${params.countryCode}`);
+  console.log(`[MBIYO] Demande de paiement: ${params.amount} ${params.currency} - Ref: ${params.orderId} - Tel: ${maskPhoneForLog(params.phoneNumber)} - Network: ${params.network} - Country: ${params.countryCode}`);
 
   try {
     const response = await fetch(`${MBIYO_BASE_URL}/merchant/payin`, {
@@ -279,8 +279,7 @@ export async function initiatePayout(params: MbiyoPayoutRequest): Promise<MbiyoP
     },
   };
 
-  const maskedPayoutPhone = params.phoneNumber ? params.phoneNumber.replace(/(\d{3})\d+(\d{2})/, "$1****$2") : "?";
-  console.log(`[MBIYO PAYOUT] Demande de transfert: ${params.amount} ${params.currency} - Ref: ${params.orderId} - Tel: ${maskedPayoutPhone}`);
+  console.log(`[MBIYO PAYOUT] Demande de transfert: ${params.amount} ${params.currency} - Ref: ${params.orderId} - Tel: ${maskPhoneForLog(params.phoneNumber)}`);
 
   try {
     const response = await fetch(`${MBIYO_BASE_URL}/merchant/payout`, {

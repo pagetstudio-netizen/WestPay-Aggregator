@@ -1682,6 +1682,12 @@ export async function registerRoutes(
   const reportFailureRateLimit = makeRateLimit({ max: 10, windowMs: 60 * 1000, label: "report_failure" });
   // sendavapay-proxy : max 15 req/min par IP — payer-facing CORS proxy
   const sendavaProxyRateLimit = makeRateLimit({ max: 15, windowMs: 60 * 1000, label: "sendavapay_proxy" });
+  // omnipay-status : max 60 req/min par IP — polling de statut (payer-facing); limite l'énumération des IDs séquentiels
+  const omnipayStatusRateLimit = makeRateLimit({ max: 60, windowMs: 60 * 1000, label: "omnipay_status" });
+  // payment-by-ref : max 30 req/min par IP — lookup de paiement par référence; limite l'énumération
+  const paymentByRefRateLimit = makeRateLimit({ max: 30, windowMs: 60 * 1000, label: "payment_by_ref" });
+  // crypto-status : max 60 req/min par IP — polling de statut crypto (payer-facing)
+  const cryptoStatusRateLimit = makeRateLimit({ max: 60, windowMs: 60 * 1000, label: "crypto_status" });
 
   // ── Per-account rate limiter for docs/access (defeats IP rotation) ────────
   // Tracks failed PIN attempts per merchant email globally (not per IP).
@@ -4687,14 +4693,14 @@ export async function registerRoutes(
 
   // ─── Récupérer un paiement en attente par référence OmniPay (public) ──────
 
-  app.get("/api/payment/by-ref/:reference", async (req, res) => {
+  app.get("/api/payment/by-ref/:reference", paymentByRefRateLimit, async (req, res) => {
     try {
       const { reference } = req.params;
       const pending = await storage.getPendingPaymentByOmnipayReference(reference);
       if (!pending) return res.status(404).json({ message: "Paiement introuvable" });
       const merchant = await storage.getMerchantById(pending.merchantId);
+      // merchantSlug omitted — not needed post-payment and reduces data exposure
       res.json({
-        merchantSlug: merchant?.slug || "",
         merchantName: merchant?.name || "",
         amount: pending.amount,
         country: pending.country,
@@ -4995,7 +5001,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/omnipay/payment/:paymentId/status", async (req, res) => {
+  app.get("/api/omnipay/payment/:paymentId/status", omnipayStatusRateLimit, async (req, res) => {
     try {
       const pending = await storage.getPendingPaymentById(parseInt(req.params.paymentId));
       if (!pending) return res.status(404).json({ message: "Paiement non trouve" });
@@ -7775,7 +7781,7 @@ export async function registerRoutes(
       const clientIp = extractIp(req);
       const rlCheck = checkWithdrawalRateLimit(clientIp);
       if (!rlCheck.allowed) {
-        console.warn(`[WITHDRAWAL RATE LIMIT] IP ${clientIp} bloquée — trop de tentatives. Retry dans ${rlCheck.retryAfterSec}s`);
+        console.warn(`[WITHDRAWAL RATE LIMIT] IP [redacted] bloquée — trop de tentatives. Retry dans ${rlCheck.retryAfterSec}s`);
         res.setHeader("Retry-After", String(rlCheck.retryAfterSec));
         return res.status(429).json({
           message: `Trop de demandes de retrait. Veuillez réessayer dans ${Math.ceil(rlCheck.retryAfterSec / 60)} minute(s).`,
@@ -9564,7 +9570,7 @@ export async function registerRoutes(
 
   // ─── Crypto : statut polling (page de paiement publique) ─────────────────
 
-  app.get("/api/payment/crypto/:trackId/status", async (req, res) => {
+  app.get("/api/payment/crypto/:trackId/status", cryptoStatusRateLimit, async (req, res) => {
     try {
       const { trackId } = req.params;
       const cryptoTx = await storage.getCryptoTransactionByTrackId(trackId);
@@ -9611,7 +9617,7 @@ export async function registerRoutes(
           payCurrency: updatedPayCurrency || null,
           address: oxaStatus.address || cryptoTx.walletAddress,
           network: oxaStatus.network || cryptoTx.network,
-          txHash: oxaStatus.txHash || cryptoTx.txHash,
+          // txHash omitted — blockchain tx hash is sensitive; available via api/public/crypto-payment/:trackId
           expiredAt: oxaStatus.expiredAt,
           createdAt: cryptoTx.createdAt,
         });
@@ -9625,7 +9631,7 @@ export async function registerRoutes(
           payCurrency: cryptoTx.payCurrency,
           address: cryptoTx.walletAddress,
           network: cryptoTx.network,
-          txHash: cryptoTx.txHash,
+          // txHash omitted — blockchain tx hash is sensitive; available via api/public/crypto-payment/:trackId
           createdAt: cryptoTx.createdAt,
         });
       }
@@ -9636,7 +9642,7 @@ export async function registerRoutes(
 
   // ─── Crypto : infos publiques d'une transaction (page de paiement) ────────
 
-  app.get("/api/public/crypto-payment/:trackId", async (req, res) => {
+  app.get("/api/public/crypto-payment/:trackId", cryptoStatusRateLimit, async (req, res) => {
     try {
       const { trackId } = req.params;
       const cryptoTx = await storage.getCryptoTransactionByTrackId(trackId);
@@ -9654,7 +9660,7 @@ export async function registerRoutes(
         payCurrency: cryptoTx.payCurrency,
         walletAddress: cryptoTx.walletAddress,
         network: cryptoTx.network,
-        txHash: cryptoTx.txHash,
+        // txHash omitted — blockchain tx hash is sensitive financial data; not needed by the payment UI
         aggregatorName: "WestPay Crypto",
         merchantName: merchant?.name || "",
         createdAt: cryptoTx.createdAt,

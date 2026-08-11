@@ -1024,8 +1024,7 @@ export async function startUbotAuth(phone: string): Promise<{ success: boolean; 
       settings: new Api.CodeSettings({}),
     }));
     pendingAuth = { phone, phoneCodeHash: result.phoneCodeHash, client: tempClient };
-    const maskedUbotPhone = phone ? String(phone).replace(/(\d{3})\d+(\d{2})$/, "$1****$2") : "?";
-    console.log(`[USERBOT] SMS code sent to ${maskedUbotPhone}`);
+    console.log(`[USERBOT] SMS code sent to [phone redacted]`);
     return { success: true, message: `Verification code sent to ${phone}.` };
   } catch (err: any) {
     console.error("[USERBOT] startUbotAuth error:", err.message);
@@ -1089,7 +1088,7 @@ export async function initUserbot(): Promise<void> {
     const c = new TelegramClient(session, API_ID, API_HASH, { connectionRetries: 3, useWSS: false });
     await c.connect();
     const me = await c.getMe();
-    console.log(`[USERBOT] Reconnected as ${(me as any).firstName} ${(me as any).lastName || ""} (@${(me as any).username || "no username"})`);
+    console.log(`[USERBOT] Reconnected as Telegram user (id=${(me as any).id || "unknown"})`);
     client = c;
     isConnected = true;
     const refreshed = c.session.save() as unknown as string;

@@ -6,7 +6,7 @@ const FROM_EMAIL = process.env.FROM_EMAIL || "RobotPay <noreply@westpay.cfd>";
 
 export async function sendMerchantOtpEmail(to: string, otp: string, merchantName?: string): Promise<boolean> {
   if (!resend) {
-    console.log(`[EMAIL OTP] RESEND_API_KEY non configuré — OTP pour ${to}: ${otp}`);
+    console.log(`[EMAIL OTP] RESEND_API_KEY non configuré — email OTP non envoyé (destinataire et code redactés)`);
     return true;
   }
 
@@ -99,7 +99,7 @@ export async function sendAdminNotificationEmail(
   recipientName?: string
 ): Promise<boolean> {
   if (!resend) {
-    console.log(`[EMAIL NOTIFY] RESEND_API_KEY non configuré — notification pour ${to}: ${subject}`);
+    console.log(`[EMAIL NOTIFY] RESEND_API_KEY non configuré — notification non envoyée (destinataire redacté)`);
     return true; // pretend success in dev
   }
 
