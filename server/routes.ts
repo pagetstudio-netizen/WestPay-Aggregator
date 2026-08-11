@@ -1669,6 +1669,8 @@ export async function registerRoutes(
   // ── Rate-limiters pour les autres endpoints publics sensibles ────────────────
   // docs/access : authentification par PIN — max 5 tentatives/5min (anti brute-force)
   const docsAccessRateLimit = makeRateLimit({ max: 5, windowMs: 5 * 60 * 1000, label: "docs_access", autoBlock: true });
+  // create-merchant : max 5 créations / heure / IP — bloque les bots de masse
+  const createMerchantRateLimit = makeRateLimit({ max: 5, windowMs: 60 * 60 * 1000, label: "create_merchant", autoBlock: true });
   // crypto pay : max 15 req/min par IP (création de factures crypto)
   const cryptoPayRateLimit  = makeRateLimit({ max: 15, windowMs: 60 * 1000, label: "crypto_pay", autoBlock: true });
   // validate   : max 20 req/min — polling de statut, mais abus possible
@@ -2638,7 +2640,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/create-merchant", authMiddleware("admin"), async (req, res) => {
+  app.post("/api/admin/create-merchant", authMiddleware("admin"), createMerchantRateLimit, async (req, res) => {
     try {
       const { name, email, slug, password, pin, website, totpCode } = req.body;
       if (!name || !email || !slug || !password) return res.status(400).json({ message: "Tous les champs sont requis" });
