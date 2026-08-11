@@ -1680,6 +1680,8 @@ export async function registerRoutes(
   const verifyTxRateLimit   = makeRateLimit({ max: 10, windowMs: 60 * 1000, label: "verify_tx", autoBlock: true });
   // report-failure : max 10 req/min — signalement d'échec de paiement
   const reportFailureRateLimit = makeRateLimit({ max: 10, windowMs: 60 * 1000, label: "report_failure" });
+  // sendavapay-proxy : max 15 req/min par IP — payer-facing CORS proxy
+  const sendavaProxyRateLimit = makeRateLimit({ max: 15, windowMs: 60 * 1000, label: "sendavapay_proxy" });
 
   // ── Per-account rate limiter for docs/access (defeats IP rotation) ────────
   // Tracks failed PIN attempts per merchant email globally (not per IP).
@@ -4197,6 +4199,10 @@ export async function registerRoutes(
             // Continuer sans operatorId — le push pourrait quand même fonctionner
           }
 
+          // Generate a high-entropy, expiry-bound proxy token for payer-facing proxy routes.
+          // Stored in omnipayTxId so the DB lookup is O(1) without a schema change.
+          const spProxyToken = crypto.randomBytes(32).toString("hex");
+
           // Stocker le paiement en attente
           const pending = await storage.createPendingPayment({
             merchantId: merchant.id,
@@ -4209,7 +4215,7 @@ export async function registerRoutes(
             status: "omnipay_pending",
             redirectUrl: redirectUrl || null,
             omnipayReference: spReference,
-            omnipayTxId: null,
+            omnipayTxId: spProxyToken,
             omnipayPaymentUrl: null,
             gateway: "sendavapay",
             expiresAt,
@@ -4226,7 +4232,7 @@ export async function registerRoutes(
           if (!operatorId) {
             // Pas d'opérateur trouvé → polling, le webhook confirmera
             console.warn(`[SENDAVAPAY] Opérateur introuvable pour "${paymentMethod}" — passage en polling`);
-            return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, polling: true, fees: 0 });
+            return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, proxyToken: spProxyToken, polling: true, fees: 0 });
           }
 
           try {
@@ -4242,7 +4248,7 @@ export async function registerRoutes(
             if (!initResult.success) {
               // SERVER_ERROR ou PAYMENT_IN_PROGRESS → polling (le webhook arrivera)
               if (initResult.code === "SERVER_ERROR" || initResult.code === "PAYMENT_IN_PROGRESS") {
-                return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, polling: true, fees: 0 });
+                return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, proxyToken: spProxyToken, polling: true, fees: 0 });
               }
               const errMsg = initResult.error || initResult.message || "Erreur initiation paiement";
               console.error(`[SENDAVAPAY] initiate-payment erreur: ${errMsg}`);
@@ -4250,17 +4256,22 @@ export async function registerRoutes(
             }
 
             if (initResult.requiresRedirect && initResult.redirectUrl) {
-              return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, paymentUrl: initResult.redirectUrl, fees: 0 });
+              return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, proxyToken: spProxyToken, paymentUrl: initResult.redirectUrl, fees: 0 });
             }
             if (initResult.requiresOtp) {
-              return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, requiresOtp: true, otpToken: initResult.otpToken ?? null, fees: 0 });
+              // Store the OTP token server-side so the proxy submit-otp route can use it
+              // without accepting it from the (untrusted) client.
+              if (initResult.otpToken) {
+                await storage.updatePendingPaymentOtpToken(pending.id, initResult.otpToken);
+              }
+              return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, proxyToken: spProxyToken, requiresOtp: true, fees: 0 });
             }
             // Succès normal : push USSD envoyé → polling
-            return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, polling: true, fees: 0 });
+            return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, proxyToken: spProxyToken, polling: true, fees: 0 });
           } catch (initErr: any) {
             console.error("[SENDAVAPAY] Erreur initiation paiement:", initErr.message);
             // Timeout ou erreur réseau → polling quand même (le webhook peut confirmer)
-            return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, polling: true, fees: 0 });
+            return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, proxyToken: spProxyToken, polling: true, fees: 0 });
           }
         } catch (sendavaErr: any) {
           console.error("[SENDAVAPAY] Erreur création paiement:", sendavaErr.message);
@@ -5639,7 +5650,7 @@ export async function registerRoutes(
   // ── Proxy routes (évite les blocages CORS depuis le navigateur) ──────────
 
   // 1. Liste des opérateurs disponibles pour un pays
-  app.get("/api/sendavapay/proxy/services/:countryCode", async (req, res) => {
+  app.get("/api/sendavapay/proxy/services/:countryCode", authMiddleware("merchant"), async (req, res) => {
     try {
       const { countryCode } = req.params;
       const sendavaApiKey = await getSendavaApiKey();
@@ -5658,14 +5669,14 @@ export async function registerRoutes(
   });
 
   // 2. Initier le paiement USSD push
-  app.post("/api/sendavapay/proxy/pay/:ref", async (req, res) => {
+  app.post("/api/sendavapay/proxy/pay/:ref", authMiddleware("merchant"), async (req, res) => {
     try {
       const { ref } = req.params;
       const sendavaApiKey = await getSendavaApiKey();
       const authHeaders: Record<string, string> = sendavaApiKey
         ? { "Authorization": `Bearer ${sendavaApiKey}` }
         : {};
-      const upstream = await fetch(`https://sendavapay.com/api/pay-api/${encodeURIComponent(ref)}`, {
+      const upstream = await fetch(`https://sendavapay.com/api/pay-api/${encodeURIComponent(String(ref))}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify(req.body),
@@ -5679,14 +5690,14 @@ export async function registerRoutes(
   });
 
   // 3. Vérifier l'OTP
-  app.post("/api/sendavapay/proxy/pay/:ref/verify", async (req, res) => {
+  app.post("/api/sendavapay/proxy/pay/:ref/verify", authMiddleware("merchant"), async (req, res) => {
     try {
       const { ref } = req.params;
       const sendavaApiKey = await getSendavaApiKey();
       const authHeaders: Record<string, string> = sendavaApiKey
         ? { "Authorization": `Bearer ${sendavaApiKey}` }
         : {};
-      const upstream = await fetch(`https://sendavapay.com/api/pay-api/${encodeURIComponent(ref)}/verify`, {
+      const upstream = await fetch(`https://sendavapay.com/api/pay-api/${encodeURIComponent(String(ref))}/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify(req.body),
@@ -5702,6 +5713,11 @@ export async function registerRoutes(
   // ==================== SENDAVAPAY SDK v1 PROXY (anti-CORS) ====================
   // Le navigateur ne peut pas appeler sendavapay.com directement (CORS bloqué par Cloudflare).
   // Ces routes proxifient les 3 endpoints SDK v1 côté serveur.
+  //
+  // SECURITY: All three payer-facing routes require a high-entropy proxy token issued by the
+  // server when the pending payment was created and stored in omnipayTxId.  The token is
+  // bound to a specific pending payment, expires with the payment, and is invalidated once
+  // the payment reaches a terminal state — preventing API-key abuse and USSD spam.
 
   // Helper : fetch avec timeout pour les proxies SendavaPay
   const fetchWithTimeout = (url: string, options: RequestInit = {}, timeoutMs = 15000) => {
@@ -5710,57 +5726,80 @@ export async function registerRoutes(
     return fetch(url, { ...options, signal: ctrl.signal }).finally(() => clearTimeout(timer));
   };
 
-  // 1. Récupérer la liste des opérateurs
-  app.get("/api/sendavapay/proxy/v1/operators/:countryCode", async (req, res) => {
-    try {
-      const { countryCode } = req.params;
-      const sendavaApiKey = await getSendavaApiKey();
-      const authHeaders: Record<string, string> = sendavaApiKey
-        ? { "Authorization": `Bearer ${sendavaApiKey}` }
-        : {};
-      const upstream = await fetchWithTimeout(
-        `https://sendavapay.com/api/sdk/v1/operators/${encodeURIComponent(countryCode)}`,
-        { headers: authHeaders }
-      );
-      const data = await upstream.json();
-      res.status(upstream.status).json(data);
-    } catch (err: any) {
-      const msg = err.name === "AbortError" ? "Timeout opérateurs SendavaPay (15s)" : err.message;
-      console.error("[SENDAVAPAY PROXY v1] /operators erreur:", msg);
-      res.status(502).json({ success: false, message: "Service de paiement indisponible. Réessayez." });
+  // Helper: validate the SendavaPay proxy token sent by the payer's browser.
+  // Returns the matching PendingPayment on success, or sends an error response and returns null.
+  const SENDAVA_TERMINAL_STATUSES = new Set(["confirmed", "omnipay_confirmed", "failed", "omnipay_failed", "omnipay_error", "expired"]);
+  async function validateSendavaProxyToken(req: Request, res: Response): Promise<import("@shared/schema").PendingPayment | null> {
+    const proxyToken = req.headers["x-sp-proxy-token"] as string | undefined;
+    if (!proxyToken || typeof proxyToken !== "string" || proxyToken.length !== 64) {
+      res.status(401).json({ success: false, message: "Token d'accès manquant ou invalide" });
+      return null;
     }
-  });
-
-  // 2. Initier le paiement USSD push (SDK v1)
-  app.post("/api/sendavapay/proxy/v1/initiate-payment", async (req, res) => {
-    try {
-      const sendavaApiKey = await getSendavaApiKey();
-      const authHeaders: Record<string, string> = sendavaApiKey
-        ? { "Authorization": `Bearer ${sendavaApiKey}` }
-        : {};
-      const upstream = await fetchWithTimeout(
-        "https://sendavapay.com/api/sdk/v1/initiate-payment",
-        { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders }, body: JSON.stringify(req.body) }
-      );
-      const data = await upstream.json();
-      res.status(upstream.status).json(data);
-    } catch (err: any) {
-      const msg = err.name === "AbortError" ? "Timeout initiation SendavaPay (15s)" : err.message;
-      console.error("[SENDAVAPAY PROXY v1] /initiate-payment erreur:", msg);
-      res.status(502).json({ success: false, message: "Service de paiement indisponible. Réessayez." });
+    // Constant-time-safe lookup: token is 256-bit random, brute-force not viable.
+    const pending = await storage.getPendingPaymentByOmnipayTxId(proxyToken);
+    if (!pending || pending.gateway !== "sendavapay") {
+      console.warn("[SENDAVAPAY PROXY v1] Token invalide ou gateway incorrect");
+      res.status(401).json({ success: false, message: "Token d'accès invalide" });
+      return null;
     }
-  });
+    // Enforce expiry
+    if (pending.expiresAt && new Date() > new Date(pending.expiresAt)) {
+      res.status(401).json({ success: false, message: "Session de paiement expirée" });
+      return null;
+    }
+    // Reject terminal payments — token is single-use per payment lifecycle
+    if (SENDAVA_TERMINAL_STATUSES.has(pending.status)) {
+      res.status(401).json({ success: false, message: "Paiement déjà traité ou expiré" });
+      return null;
+    }
+    return pending;
+  }
 
-  // 3. Soumettre l'OTP (SDK v1)
-  app.post("/api/sendavapay/proxy/v1/submit-otp", async (req, res) => {
+  // NOTE: v1/operators and v1/initiate-payment proxy routes have been removed.
+  // The server already handles operator resolution and USSD initiation server-side
+  // in /api/payment/initiate — the browser never needs to call these directly.
+  // Removing them eliminates the API-quota-abuse and USSD-spam attack vectors entirely.
+
+  // Soumettre l'OTP (SDK v1) — seul endpoint payer-facing nécessaire.
+  // SECURITY design:
+  //  - Requires the server-issued proxy token (X-Sp-Proxy-Token header, 256-bit random,
+  //    stored in omnipayTxId, bound to a single pending SendavaPay payment).
+  //  - The upstream OTP token (otpToken) is NOT accepted from the client; instead it is
+  //    read from omnipayPaymentUrl where the server stored it when OTP was required.
+  //    This prevents a token holder from driving arbitrary OTP flows against our API key.
+  //  - Only the user-entered OTP code (otp) is accepted from the client.
+  //  - The upstream request body is constructed entirely server-side.
+  app.post("/api/sendavapay/proxy/v1/submit-otp", sendavaProxyRateLimit, async (req, res) => {
     try {
+      const pendingPayment = await validateSendavaProxyToken(req, res);
+      if (!pendingPayment) return;
+
+      // Retrieve the SendavaPay OTP token stored server-side when OTP was triggered.
+      const storedOtpToken = pendingPayment.omnipayPaymentUrl;
+      if (!storedOtpToken) {
+        console.warn(`[SENDAVAPAY PROXY v1] /submit-otp — aucun otpToken stocké pour payment #${pendingPayment.id}`);
+        return res.status(400).json({ success: false, message: "Aucun OTP en attente pour ce paiement" });
+      }
+
+      // Accept only the user-entered OTP code from the client — nothing else is forwarded.
+      const { otp } = req.body as { otp?: string };
+      if (!otp?.trim()) {
+        return res.status(400).json({ success: false, message: "Code OTP requis" });
+      }
+
       const sendavaApiKey = await getSendavaApiKey();
       const authHeaders: Record<string, string> = sendavaApiKey
         ? { "Authorization": `Bearer ${sendavaApiKey}` }
         : {};
+
+      // Construct the upstream body entirely from server-side data.
       const upstream = await fetchWithTimeout(
         "https://sendavapay.com/api/sdk/v1/submit-otp",
-        { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders }, body: JSON.stringify(req.body) }
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify({ otpToken: storedOtpToken, otp: otp.trim() }),
+        }
       );
       const data = await upstream.json();
       res.status(upstream.status).json(data);
@@ -6058,7 +6097,7 @@ export async function registerRoutes(
       const orderId = payload.transaction_id || payload.reference || payload.external_reference || "";
       if (!orderId) return res.status(200).json({ received: true });
 
-      const withdrawal = await storage.getWithdrawalByRef(orderId);
+      const withdrawal = await storage.getWithdrawalByOmnipayRef(orderId);
       if (!withdrawal) return res.json({ received: true });
 
       const statusUpper = (payload.status || "").toUpperCase();
@@ -6088,16 +6127,19 @@ export async function registerRoutes(
       const rawBody = (req.rawBody as Buffer)?.toString() || JSON.stringify(req.body);
       const signature = (req.headers["x-sendavapay-signature"] || "") as string;
 
-      console.log(`[SENDAVAPAY CALLBACK] Headers: ${JSON.stringify(req.headers)}`);
-      console.log(`[SENDAVAPAY CALLBACK] Body: ${rawBody}`);
+      // Log only non-sensitive metadata — never log raw headers (contain auth credentials) or raw body (contains PII).
+      console.log(`[SENDAVAPAY CALLBACK] Reçu — signature présente: ${!!signature}`);
 
       const webhookSecret = await getSendavaWebhookSecret();
       if (!webhookSecret) {
-        // Pas de secret configuré : on accepte le callback mais on log un avertissement.
-        // Le fail-closed empêchait tous les callbacks de passer en production quand le secret
-        // n'avait pas encore été enregistré — les retraits restaient bloqués indéfiniment.
-        console.warn("[SENDAVAPAY CALLBACK] ⚠️ Secret webhook non configuré — callback accepté sans vérification de signature. Configurez sendavapay_webhook_secret dans les paramètres admin pour sécuriser.");
-      } else if (signature) {
+        // Fail-closed: reject all callbacks until the webhook secret is configured in admin settings.
+        console.error("[SENDAVAPAY CALLBACK] Secret webhook non configuré — callback rejeté. Configurez sendavapay_webhook_secret dans les paramètres admin.");
+        return res.status(503).json({ message: "Webhook non configuré — configurez le secret SendavaPay dans les paramètres admin." });
+      } else if (!signature) {
+        // Secret is configured but the request carries no signature header — reject.
+        console.error("[SENDAVAPAY CALLBACK] Signature absente alors que le secret est configuré — callback rejeté.");
+        return res.status(401).json({ message: "Signature manquante" });
+      } else {
         // Secret présent : vérifier la signature (préfixe sha256= ou sans)
         const isValid =
           sendavaVerifySignature(webhookSecret, signature, rawBody) ||
@@ -6107,9 +6149,6 @@ export async function registerRoutes(
           console.error(`[SENDAVAPAY CALLBACK] Signature invalide — header: ${signature}`);
           return res.status(401).json({ message: "Signature invalide" });
         }
-      } else {
-        // Secret configuré mais signature absente des headers
-        console.warn("[SENDAVAPAY CALLBACK] ⚠️ Signature absente des headers mais secret configuré — callback accepté (SendavaPay en cours de configuration).");
       }
 
       const payload = req.body as SendavaWebhookPayload;

@@ -219,9 +219,10 @@ export default function PaymentPage() {
 
   /* ── SendavaPay API flow ──────────────────────────────────────────────── */
   const [sndOtpRequired,   setSndOtpRequired]   = useState(false);
-  const [sndOtpToken,      setSndOtpToken]      = useState<string | null>(null);
+
   const [sndOtp,           setSndOtp]           = useState("");
   const [sndOtpSubmitting, setSndOtpSubmitting] = useState(false);
+  const [sndProxyToken,    setSndProxyToken]    = useState<string | null>(null);
   const [helpName,     setHelpName]     = useState("");
   const [helpWhatsapp, setHelpWhatsapp] = useState("");
   const [helpMessage,  setHelpMessage]  = useState("");
@@ -373,10 +374,11 @@ export default function PaymentPage() {
       setPaymentId(d.paymentId); setOmniRef(d.omnipayReference); setShowOtpModal(false);
       if (d.sendavapay) {
         /* ── SendavaPay: push USSD déclenché côté serveur ── */
+        if (d.proxyToken) setSndProxyToken(d.proxyToken);
         setStep(2);
-        if (d.requiresOtp && d.otpToken) {
+        if (d.requiresOtp) {
           setSndOtpRequired(true);
-          setSndOtpToken(d.otpToken);
+          // otpToken is now stored server-side; no need to hold it in browser state.
         } else if (d.paymentUrl) {
           setPaymentUrl(d.paymentUrl);
           startPolling(d.paymentId);
@@ -433,63 +435,18 @@ export default function PaymentPage() {
     return ops[0]?.id ?? null;
   };
 
-  /* ── SendavaPay : API CORS — initier le paiement ─────────────────────── */
-  const sndReportFailure = (pId: number, reason: string) => {
-    fetch("/api/payment/report-failure", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ paymentId:pId, errorMessage:reason }) }).catch(() => {});
-  };
-
-  const initiateSendavaPayment = async (token: string, pId: number, countryCode: string, payerPhoneE164: string) => {
-    try {
-      const opsRes = await fetch(`/api/sendavapay/proxy/v1/operators/${countryCode}`);
-      const opsData = await opsRes.json();
-      const ops: any[] = opsData.data || [];
-      const operatorId = resolveOperatorId(ops, method, countryCode);
-      if (!operatorId) throw new Error(`${t("payOperatorRequired")}: ${method}`);
-      const initRes = await fetch("/api/sendavapay/proxy/v1/initiate-payment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          paymentToken: token,
-          payerName: payerName || "Client",
-          payerPhone: payerPhoneE164,
-          payerCountry: countryCode,
-          operatorId,
-        }),
-      });
-      const initData = await initRes.json();
-      if (!initData.success) {
-        if (initData.code === "SERVER_ERROR" || initData.code === "PAYMENT_IN_PROGRESS") {
-          startPolling(pId);
-          return;
-        }
-        throw new Error(initData.error || initData.message || t("payErrorGeneric"));
-      }
-      if (initData.requiresRedirect && initData.redirectUrl) {
-        setPaymentUrl(initData.redirectUrl);
-        startPolling(pId);
-      } else if (initData.requiresOtp) {
-        setSndOtpRequired(true);
-        setSndOtpToken(initData.otpToken || null);
-      } else {
-        startPolling(pId);
-      }
-    } catch (e: any) {
-      const reason = e.message || t("payErrorGeneric");
-      setFailed(true);
-      setFailReason(reason);
-      sndReportFailure(pId, reason);
-    }
-  };
-
   /* ── SendavaPay : soumettre le code OTP ──────────────────────────────── */
   const submitSendavaOtp = async () => {
-    if (!sndOtpToken || !sndOtp.trim()) return;
+    if (!sndOtpRequired || !sndOtp.trim()) return;
     setSndOtpSubmitting(true);
     try {
+      const proxyHeaders: Record<string, string> = sndProxyToken ? { "X-Sp-Proxy-Token": sndProxyToken } : {};
+      // Only send the user-entered OTP code — the OTP token is stored server-side and
+      // used directly by the proxy without trusting the client to supply it.
       const res = await fetch("/api/sendavapay/proxy/v1/submit-otp", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ otpToken: sndOtpToken, otp: sndOtp.trim() }),
+        headers: { "Content-Type": "application/json", ...proxyHeaders },
+        body: JSON.stringify({ otp: sndOtp.trim() }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.message || t("otpInvalidCode"));

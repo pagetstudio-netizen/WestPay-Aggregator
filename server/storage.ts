@@ -144,6 +144,9 @@ export interface IStorage {
   updateMerchantCountryOmnipay(id: number, omnipayEnabled: boolean): Promise<void>;
   updateMerchantCountryPayinGateway(id: number, payinGateway: string): Promise<void>;
   getPendingPaymentByOmnipayReference(reference: string): Promise<PendingPayment | undefined>;
+  getPendingPaymentByOmnipayTxId(omnipayTxId: string): Promise<PendingPayment | undefined>;
+  updatePendingPaymentOmnipayTxId(id: number, omnipayTxId: string): Promise<void>;
+  updatePendingPaymentOtpToken(id: number, otpToken: string): Promise<void>;
   decrementMerchantCountryBalance(id: number, amount: number): Promise<void>;
 
   getMerchantByTelegramChatId(chatId: string): Promise<Merchant | undefined>;
@@ -758,6 +761,19 @@ export class DatabaseStorage implements IStorage {
   async getPendingPaymentByOmnipayReference(reference: string): Promise<PendingPayment | undefined> {
     const [p] = await financialDb.select().from(pendingPayments).where(eq(pendingPayments.omnipayReference, reference));
     return p;
+  }
+  async getPendingPaymentByOmnipayTxId(omnipayTxId: string): Promise<PendingPayment | undefined> {
+    const [p] = await financialDb.select().from(pendingPayments).where(eq(pendingPayments.omnipayTxId, omnipayTxId));
+    return p;
+  }
+  async updatePendingPaymentOmnipayTxId(id: number, omnipayTxId: string): Promise<void> {
+    await financialDb.update(pendingPayments).set({ omnipayTxId }).where(eq(pendingPayments.id, id));
+  }
+  // Stores the SendavaPay OTP token server-side in omnipayPaymentUrl.
+  // omnipayPaymentUrl is null for SendavaPay payments; reusing it avoids a schema migration.
+  // The proxy submit-otp route reads this value instead of accepting it from the client.
+  async updatePendingPaymentOtpToken(id: number, otpToken: string): Promise<void> {
+    await financialDb.update(pendingPayments).set({ omnipayPaymentUrl: otpToken }).where(eq(pendingPayments.id, id));
   }
 
   // ══════════════════════════════════════════════════════════════════════════
