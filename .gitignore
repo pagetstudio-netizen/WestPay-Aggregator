@@ -6,6 +6,11 @@ vite.config.ts.*
 uploads/broadcast
 uploads/operator-logos
 
+# ── Log files — may contain URL paths, IPs, or PII ────────────────────────
+*.log
+logs/
+attached_assets/*.txt
+
 # ── Secrets — ne JAMAIS commiter ──────────────────────
 .env
 .env.*
