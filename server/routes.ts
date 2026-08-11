@@ -5820,7 +5820,7 @@ export async function registerRoutes(
       if (!orderId) { return res.status(200).send("ok"); }
 
       // Trouver le pays depuis l'ordre pour utiliser la bonne cle API
-      const pendingForCountry = await storage.getPendingPaymentByReference(orderId);
+      const pendingForCountry = await storage.getPendingPaymentByOmnipayReference(orderId);
       const callbackCountry = pendingForCountry?.country || "";
       const cbCountry = SEAPAY_COUNTRY_FROM_CURRENCY[SEAPAY_CURRENCY_COUNTRY[callbackCountry] || ""] || callbackCountry;
       const apiKey = await getSeapayApiKey(cbCountry);
@@ -5838,51 +5838,106 @@ export async function registerRoutes(
       const tradeNo = body.trade_no || "";
       const amount  = parseInt(body.amount || "0", 10);
 
-      const pending = pendingForCountry || await storage.getPendingPaymentByReference(orderId);
+      const pending = pendingForCountry;
       if (!pending) {
         console.warn(`[SEAPAY CALLBACK] Paiement en attente introuvable: ${orderId}`);
         return res.status(200).send("ok");
       }
-      if (pending.status === "confirmed") { return res.status(200).send("ok"); }
 
       if (status === "success" || status === "paid" || status === "completed") {
-        const merchant = await storage.getMerchantById(pending.merchantId);
-        if (!merchant) { return res.status(200).send("ok"); }
-
+        // Transaction atomique : CAS + création transaction + crédit solde net en une seule unité
+        // Si une étape échoue, tout est rollback → le callback peut être rejoué sans risque de double-crédit
         const txId = `SP-${orderId}`;
-        const tx = await storage.createTransaction({
-          merchantId: pending.merchantId,
-          country:    pending.country,
-          txId,
-          amount:     pending.amount,
-          payerNumber: pending.payerPhone || null,
-          payerName:  pending.payerName  || null,
-          status:     "confirmed",
-          provider:   "seapay",
-          omnipayTxId: tradeNo || null,
-          operator:   pending.paymentMethod || null,
-          omnipayReference: orderId,
-          errorMessage: null,
-        });
 
-        await storage.updateMerchantCountryBalance(pending.merchantId, pending.country, pending.amount);
-        await storage.updatePendingPaymentStatus(pending.id, "confirmed");
+        // Charger le marchand avant la transaction pour calculer le crédit net (frais appliqués)
+        const merchant = await storage.getMerchantById(pending.merchantId);
+        const merchantCredit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
+        const providerFee = pending.amount - merchantCredit;
 
-        // Webhook marchand
-        const webhookUrl = merchant.webhookUrl;
-        if (webhookUrl) {
+        let creditedMcId: number | null = null;
+        const seapayTxClient = await financialPool.connect();
+        try {
+          await seapayTxClient.query("BEGIN");
+
+          // CAS — bloque les callbacks simultanés
+          const casResult = await seapayTxClient.query(
+            `UPDATE pending_payments SET status = 'omnipay_confirmed'
+             WHERE id = $1 AND status NOT IN ('omnipay_confirmed','confirmed','omnipay_error')
+             RETURNING id`,
+            [pending.id]
+          );
+          if (!casResult.rowCount || casResult.rowCount === 0) {
+            await seapayTxClient.query("ROLLBACK");
+            console.log(`[SEAPAY CALLBACK] Déjà traité (CAS) ref=${orderId}`);
+            return res.status(200).send("ok");
+          }
+
+          // Résoudre le merchant_country dans la même transaction
+          const mcRow = await seapayTxClient.query(
+            `SELECT id FROM merchant_countries WHERE merchant_id = $1 AND LOWER(country) = LOWER($2) LIMIT 1`,
+            [pending.merchantId, pending.country.trim()]
+          );
+          if (!mcRow.rows.length) {
+            await seapayTxClient.query("ROLLBACK");
+            console.error(`[SEAPAY CALLBACK] CRITIQUE: MerchantCountry introuvable pour merchantId=${pending.merchantId} country="${pending.country}" — rollback, callback sera rejoué`);
+            return res.status(500).send("error");
+          }
+          creditedMcId = mcRow.rows[0].id as number;
+
+          // Insérer la transaction avec frais — RETURNING id détecte si l'insertion a réussi ou non.
+          // ON CONFLICT DO NOTHING : si la ligne existe déjà (retry après panne partielle), rowCount = 0
+          // → le crédit a déjà été appliqué lors de la tentative précédente, on ne crédite pas à nouveau.
+          const txInsert = await seapayTxClient.query(
+            `INSERT INTO transactions
+               (merchant_id, country, tx_id, amount, payer_number, payer_name, status, provider, omnipay_tx_id, operator, omnipay_reference, error_message, provider_fee)
+             VALUES ($1,$2,$3,$4,$5,$6,'confirmed','seapay',$7,$8,$9,NULL,$10)
+             ON CONFLICT (tx_id) DO NOTHING
+             RETURNING id`,
+            [pending.merchantId, pending.country, txId, pending.amount,
+             pending.payerPhone || null, pending.payerName || null,
+             tradeNo || null, pending.paymentMethod || null, orderId, providerFee]
+          );
+
+          if (txInsert.rowCount && txInsert.rowCount > 0) {
+            // Nouvelle insertion : créditer le solde marchand avec le montant net (après frais plateforme)
+            await seapayTxClient.query(
+              `UPDATE merchant_countries SET balance = balance + $1 WHERE id = $2`,
+              [merchantCredit, creditedMcId]
+            );
+          } else {
+            // La ligne existait déjà — la tentative précédente a déjà crédité le solde. On ne crédite pas à nouveau.
+            console.warn(`[SEAPAY CALLBACK] Transaction ${txId} existait déjà — crédit ignoré pour éviter le doublon`);
+          }
+
+          // Statut final (idempotent)
+          await seapayTxClient.query(
+            `UPDATE pending_payments SET status = 'confirmed' WHERE id = $1`,
+            [pending.id]
+          );
+
+          await seapayTxClient.query("COMMIT");
+        } catch (seapayTxErr: any) {
+          await seapayTxClient.query("ROLLBACK").catch(() => {});
+          throw seapayTxErr;
+        } finally {
+          seapayTxClient.release();
+        }
+
+        // Webhook marchand (hors transaction — effets secondaires non critiques)
+        const webhookUrl = merchant?.webhookUrl;
+        if (webhookUrl && merchant) {
           const webhookSecret = merchant.webhookSecret || "";
-          const payload = {
+          const wPayload = {
             event: "payment.confirmed",
-            txId: tx.id, amount: pending.amount, currency: pending.country,
+            txId, amount: pending.amount, currency: pending.country,
             payer: pending.payerPhone || "", country: pending.country,
             merchantSlug: merchant.slug, provider: "seapay", timestamp: new Date().toISOString(),
           };
-          const sig = require("crypto").createHmac("sha256", webhookSecret).update(JSON.stringify(payload)).digest("hex");
+          const sig = crypto.createHmac("sha256", webhookSecret).update(JSON.stringify(wPayload)).digest("hex");
           fetch(webhookUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json", "X-WestPay-Signature": sig, "X-WestPay-Event": "payment.confirmed" },
-            body: JSON.stringify(payload),
+            body: JSON.stringify(wPayload),
           }).catch(() => {});
         }
 
@@ -6188,24 +6243,72 @@ export async function registerRoutes(
           return res.status(200).json({ received: true });
         }
 
-        // Notification de retrait
-        if (withdrawal.status === "approved" || withdrawal.status === "failed") {
-          return res.json({ status: "already_processed" });
+        // Notification de retrait — transaction atomique : CAS + mise à jour complète statut + remboursement solde
+        // Tout est dans une seule transaction → si une étape échoue, ROLLBACK → callback rejouable sans double-crédit ni statut terminal orphelin
+        if (!isSuccess && !isFailure) {
+          return res.json({ status: "pending" });
         }
 
+        const wdFees = withdrawal.fees || 0;
+        const wdNote = isSuccess
+          ? `Retrait confirmé automatiquement`
+          : `Retrait refusé (${payload.status || "échec"})`;
+        const wdFinalStatus = isSuccess ? "approved" : "failed";
+
+        const wdTxClient = await financialPool.connect();
+        try {
+          await wdTxClient.query("BEGIN");
+
+          // CAS — bloque les callbacks simultanés ; rollback si déjà traité
+          const wdCas = await wdTxClient.query(
+            `UPDATE withdrawals SET status = $1 WHERE id = $2 AND status = 'pending' RETURNING id`,
+            [wdFinalStatus, withdrawal.id]
+          );
+          if (!wdCas.rowCount || wdCas.rowCount === 0) {
+            await wdTxClient.query("ROLLBACK");
+            return res.json({ status: "already_processed" });
+          }
+
+          // Écriture atomique des métadonnées (référence fournisseur, frais, note, horodatage)
+          if (isSuccess) {
+            await wdTxClient.query(
+              `UPDATE withdrawals
+               SET admin_note=$1, omnipay_ref=$2, fees=$3, provider_payout_fee=$4, processed_at=NOW()
+               WHERE id=$5`,
+              [wdNote, reference, wdFees, wdFees, withdrawal.id]
+            );
+          } else {
+            await wdTxClient.query(
+              `UPDATE withdrawals
+               SET admin_note=$1, omnipay_ref=$2, processed_at=NOW()
+               WHERE id=$3`,
+              [wdNote, reference, withdrawal.id]
+            );
+            // Remboursement atomique : si cette mise à jour échoue, le ROLLBACK remet tout à "pending"
+            await wdTxClient.query(
+              `UPDATE merchant_countries SET balance = balance + $1
+               WHERE merchant_id = $2 AND LOWER(country) = LOWER($3)`,
+              [withdrawal.amount, withdrawal.merchantId, withdrawal.country.trim()]
+            );
+          }
+
+          await wdTxClient.query("COMMIT");
+        } catch (wdTxErr: any) {
+          await wdTxClient.query("ROLLBACK").catch(() => {});
+          throw wdTxErr;
+        } finally {
+          wdTxClient.release();
+        }
+
+        // Notifications hors transaction (effets secondaires non critiques)
         const wdMerchant = await storage.getMerchantById(withdrawal.merchantId);
 
         if (isSuccess) {
-          const wdFees = withdrawal.fees || 0;
-          await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Retrait confirmé automatiquement`, reference, wdFees, wdFees);
           notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: "auto" }).catch(() => {});
           notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
           console.log(`[SENDAVAPAY CALLBACK] Retrait #${withdrawal.id} approuvé — ref=${reference}`);
           return res.json({ status: "withdrawal_confirmed" });
-        } else if (isFailure) {
-          await storage.updateWithdrawalStatus(withdrawal.id, "failed", `Retrait refusé (${payload.status || "échec"})`, reference);
-          const wdMc = await storage.findMerchantCountryBySimAndCountry(withdrawal.merchantId, withdrawal.country);
-          if (wdMc) await storage.incrementMerchantCountryBalance(wdMc.id, withdrawal.amount);
+        } else {
           notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed", mode: "auto" }).catch(() => {});
           notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed" }).catch(() => {});
           console.log(`[SENDAVAPAY CALLBACK] Retrait #${withdrawal.id} échoué — ref=${reference} status=${payload.status}`);

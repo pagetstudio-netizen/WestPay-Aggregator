@@ -384,7 +384,17 @@ export function verifyClapaySignature(
     const keyEncrypted = crypto.createHmac("sha256", webhookUniqueKey).update(key).digest("hex");
     const payload = keyEncrypted + bodyStr;
     const expected = crypto.createHmac("sha256", webhookSecret).update(payload).digest("hex");
-    return signatures.includes(expected);
+    const expectedBuf = Buffer.from(expected);
+    // Compare all candidates in constant time to prevent timing oracles on multi-signature headers.
+    // Do not short-circuit on a match — evaluate every candidate before returning.
+    let matched = false;
+    for (const sig of signatures) {
+      if (sig.length === expected.length) {
+        const result = crypto.timingSafeEqual(expectedBuf, Buffer.from(sig));
+        matched = matched || result;
+      }
+    }
+    return matched;
   } catch {
     return false;
   }

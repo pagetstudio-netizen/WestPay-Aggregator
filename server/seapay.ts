@@ -19,7 +19,9 @@ export function buildSeapaySign(params: Record<string, any>, key: string): strin
 
 export function verifySeapaySign(params: Record<string, any>, key: string, receivedSign: string): boolean {
   const expected = buildSeapaySign(params, key);
-  return expected === receivedSign?.toLowerCase();
+  const received = receivedSign?.toLowerCase() ?? "";
+  return expected.length === received.length &&
+    crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(received));
 }
 
 /* ── Currency → pay_type mapping ───────────────────────────────────── */

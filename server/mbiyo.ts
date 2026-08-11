@@ -204,7 +204,8 @@ export function verifyWebhookSignature(secret: string, signature: string, rawBod
     .createHmac("sha256", secret)
     .update(rawBody)
     .digest("hex");
-  return computed === signature;
+  return computed.length === signature.length &&
+    crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(signature));
 }
 
 // ==================== PAYOUT (Send) ====================

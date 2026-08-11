@@ -224,7 +224,8 @@ export function verifyWebhook(callbackKey: string, payload: OxaPayWebhookPayload
     .update(concatenated)
     .digest("hex");
 
-  return computed === hmac;
+  return computed.length === hmac.length &&
+    crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(hmac));
 }
 
 export function generateOxaPayReference(): string {

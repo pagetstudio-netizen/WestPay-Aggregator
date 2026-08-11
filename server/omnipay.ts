@@ -229,7 +229,9 @@ export function verifyCallbackSignature(callbackKey: string, payload: OmniPayCal
     .update(concatenated)
     .digest("hex");
 
-  return computed === payload.signature;
+  const sig = payload.signature ?? "";
+  return computed.length === sig.length &&
+    crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(sig));
 }
 
 export function generateReference(): string {

@@ -160,7 +160,8 @@ export interface SendavaWebhookPayload {
 export function verifyWebhookSignature(webhookSecret: string, signature: string, rawBody: Buffer | string): boolean {
   const data = typeof rawBody === "string" ? Buffer.from(rawBody) : rawBody;
   const expected = `sha256=${crypto.createHmac("sha256", webhookSecret).update(data).digest("hex")}`;
-  return expected === signature;
+  return expected.length === signature.length &&
+    crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
 }
 
 async function sendavaRequest<T>(
