@@ -865,21 +865,7 @@ export async function registerRoutes(
     res.type("text/plain").send("User-agent: *\nDisallow: /\n");
   });
 
-  // ── Vérification sécurisée du chemin admin ────────────────────────────────────
-  // Utilisé comme fallback par le client quand window.__ADMIN_PATH__ n'est pas
-  // injecté (Apache/Nginx sert index.html en statique, bypassant Node.js).
-  // Ne révèle JAMAIS le slug — répond uniquement { isAdminPath: true|false }.
-  // Protégé par le rate-limiter /api/auth (30 req / 5 min / IP).
-  app.post("/api/auth/admin/verify-path", (req, res) => {
-    const { path } = req.body || {};
-    if (typeof path !== "string" || !path.startsWith("/")) {
-      return res.status(400).json({ isAdminPath: false });
-    }
-    const slug = process.env.ADMIN_SLUG || "";
-    const adminPath = slug ? `/${slug}` : null;
-    res.setHeader("Cache-Control", "no-store");
-    res.json({ isAdminPath: !!adminPath && path === adminPath });
-  });
+  // NOTE: /api/auth/admin/verify-path is registered AFTER the /api/auth rate-limiter below.
 
   // ── Route Telegram webhook PERMANENTE ─────────────────────────────────────────────────
   // Enregistrée ici (avant tout autre middleware) pour éviter les fenêtres de 404 pendant
@@ -952,6 +938,21 @@ export async function registerRoutes(
       return res.status(429).json({ message: "Trop de requêtes. Veuillez patienter." });
     }
     next();
+  });
+
+  // ── Vérification sécurisée du chemin admin ────────────────────────────────────
+  // Enregistrée ICI, après le middleware app.use("/api/auth", ...) pour bénéficier
+  // du rate-limiter /api/auth (30 req / 5 min / IP).
+  // Ne révèle JAMAIS le slug — répond uniquement { isAdminPath: true|false }.
+  app.post("/api/auth/admin/verify-path", (req, res) => {
+    const { path } = req.body || {};
+    if (typeof path !== "string" || !path.startsWith("/")) {
+      return res.status(400).json({ isAdminPath: false });
+    }
+    const slug = process.env.ADMIN_SLUG || "";
+    const adminPath = slug ? `/${slug}` : null;
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ isAdminPath: !!adminPath && path === adminPath });
   });
 
   // ==================== IP SECURITY ====================
@@ -1679,6 +1680,20 @@ export async function registerRoutes(
   const verifyTxRateLimit   = makeRateLimit({ max: 10, windowMs: 60 * 1000, label: "verify_tx", autoBlock: true });
   // report-failure : max 10 req/min — signalement d'échec de paiement
   const reportFailureRateLimit = makeRateLimit({ max: 10, windowMs: 60 * 1000, label: "report_failure" });
+
+  // ── Per-account rate limiter for docs/access (defeats IP rotation) ────────
+  // Tracks failed PIN attempts per merchant email globally (not per IP).
+  // After 10 failed attempts in a 15-minute window the account is temporarily locked.
+  const docsAccountLockStore = new Map<string, { count: number; firstAttempt: number }>();
+  const DOCS_ACCOUNT_MAX = 10;
+  const DOCS_ACCOUNT_WINDOW = 15 * 60 * 1000;
+
+  // ── Per-paymentId attempt tracker for /api/payment/validate ──────────────
+  // Limits how many times a single paymentId can be submitted (regardless of IP).
+  // After 5 attempts the paymentId is soft-locked for the validation window.
+  const validatePaymentIdStore = new Map<string, { count: number; firstReq: number }>();
+  const VALIDATE_PER_ID_MAX = 5;
+  const VALIDATE_PER_ID_WINDOW = 10 * 60 * 1000;
 
   // Compteur d'alertes bad-origin pour Telegram (évite le spam : 1 alerte par IP/5min)
   const badOriginAlertCache = new Map<string, number>();
@@ -2794,8 +2809,14 @@ export async function registerRoutes(
 
   app.put("/api/admin/merchant/:id/country/:countryId/active", authMiddleware("admin"), async (req, res) => {
     try {
-      const countryId = parseInt(req.params.countryId);
+      const merchantId = parseInt(req.params.id as string);
+      const countryId = parseInt(req.params.countryId as string);
       const { active } = req.body;
+      // Ownership verification: ensure the country record belongs to the specified merchant
+      const mc = await storage.getMerchantCountryById(countryId);
+      if (!mc || mc.merchantId !== merchantId) {
+        return res.status(404).json({ message: "Pays introuvable pour ce marchand" });
+      }
       await storage.updateMerchantCountryActive(countryId, !!active);
       res.json({ success: true });
     } catch (err: any) {
@@ -3602,6 +3623,17 @@ export async function registerRoutes(
       const { email, pin } = req.body;
       if (!email || !pin) return res.status(400).json({ message: "Email et code PIN requis" });
 
+      // Per-account lockout (defeats IP rotation): check global failed-attempt count for this email
+      const emailKey = (email as string).toLowerCase().trim();
+      const now = Date.now();
+      const acctEntry = docsAccountLockStore.get(emailKey) || { count: 0, firstAttempt: now };
+      if (now - acctEntry.firstAttempt > DOCS_ACCOUNT_WINDOW) { acctEntry.count = 0; acctEntry.firstAttempt = now; }
+      if (acctEntry.count >= DOCS_ACCOUNT_MAX) {
+        const retryAfterMs = DOCS_ACCOUNT_WINDOW - (now - acctEntry.firstAttempt);
+        const retryMins = Math.ceil(retryAfterMs / 60000);
+        return res.status(429).json({ message: `Trop de tentatives échouées. Réessayez dans ${retryMins} minute(s).` });
+      }
+
       const merchant = await storage.getMerchantByEmail(email);
       if (!merchant) return res.status(401).json({ message: "Acces refuse. Veuillez contacter l'administrateur." });
 
@@ -3610,6 +3642,9 @@ export async function registerRoutes(
 
       const valid = await bcrypt.compare(pin, merchantPin.pinHash);
       if (!valid) {
+        // Increment per-account failed attempt counter
+        acctEntry.count++;
+        docsAccountLockStore.set(emailKey, acctEntry);
         await storage.createApiLog({
           merchantId: merchant.id,
           action: "docs_access_failed",
@@ -3618,6 +3653,9 @@ export async function registerRoutes(
         });
         return res.status(401).json({ message: "Acces refuse. Code PIN incorrect." });
       }
+
+      // Successful auth: clear the per-account lockout counter
+      docsAccountLockStore.delete(emailKey);
 
       await storage.createApiLog({
         merchantId: merchant.id,
@@ -4583,6 +4621,17 @@ export async function registerRoutes(
       const { paymentId, txId } = req.body;
       if (!paymentId || !txId) {
         return res.status(400).json({ success: false, message: "ID de paiement et ID de transaction requis" });
+      }
+
+      // Per-paymentId attempt limiter (defeats distributed per-IP rate limit bypass)
+      const pidKey = String(parseInt(paymentId) || 0);
+      const now = Date.now();
+      const pidEntry = validatePaymentIdStore.get(pidKey) || { count: 0, firstReq: now };
+      if (now - pidEntry.firstReq > VALIDATE_PER_ID_WINDOW) { pidEntry.count = 0; pidEntry.firstReq = now; }
+      pidEntry.count++;
+      validatePaymentIdStore.set(pidKey, pidEntry);
+      if (pidEntry.count > VALIDATE_PER_ID_MAX) {
+        return res.status(429).json({ success: false, message: "Trop de tentatives pour ce paiement. Réessayez plus tard." });
       }
 
       const pending = await storage.getPendingPaymentById(parseInt(paymentId));
@@ -6470,8 +6519,14 @@ export async function registerRoutes(
 
   app.put("/api/admin/merchant/:id/country/:countryId/omnipay", authMiddleware("admin"), async (req, res) => {
     try {
+      const merchantId = parseInt(req.params.id as string);
       const { omnipayEnabled } = req.body;
-      const countryId = parseInt(req.params.countryId);
+      const countryId = parseInt(req.params.countryId as string);
+      // Ownership verification: ensure the country record belongs to the specified merchant
+      const mc = await storage.getMerchantCountryById(countryId);
+      if (!mc || mc.merchantId !== merchantId) {
+        return res.status(404).json({ message: "Pays introuvable pour ce marchand" });
+      }
       await storage.updateMerchantCountryOmnipay(countryId, !!omnipayEnabled);
       res.json({ success: true });
     } catch (err: any) {
@@ -8032,9 +8087,9 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/merchant/withdrawal-operators/:country", async (req, res) => {
+  app.get("/api/merchant/withdrawal-operators/:country", authMiddleware("merchant"), async (req, res) => {
     try {
-      const country = req.params.country;
+      const country = req.params.country as string;
       const ops = await storage.getWithdrawalOperators(country, true);
       const available = ops.filter(op => !op.maintenanceAll && !op.maintenanceWithdrawals);
       res.json(available);
