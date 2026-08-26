@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ArrowLeft,
   Check,
+  ChevronLeft,
   ChevronRight,
   ExternalLink,
   Loader2,
@@ -485,7 +485,7 @@ export default function Bank2PaymentPage() {
 
                 <div className="bank2-actions">
                   <button type="button" className="bank2-button secondary" onClick={() => setScreen("operators")}>
-                    <ArrowLeft size={18} /> Retour
+                    <ChevronLeft size={22} /> Retour
                   </button>
                   <button
                     type="button"
@@ -600,7 +600,6 @@ function Bank2Styles() {
       .bank2-amount>span{display:block;font-size:26px;font-weight:400;margin-bottom:2px}
       .bank2-amount>strong{font-size:50px;line-height:1;font-weight:700;letter-spacing:.01em}
       .bank2-amount small{font-size:.55em;font-weight:400}
-      .bank2-country-lock{display:inline-flex;align-items:center;border:1px solid rgba(255,255,255,.38);background:rgba(255,255,255,.12);border-radius:999px;padding:6px 12px;font-size:13px;font-weight:700;margin-bottom:14px}
       .bank2-operator-section h1{font-size:26px;color:#fff;font-weight:400;margin:0 4px 30px}
       .bank2-operator-list{display:flex;flex-direction:column;gap:16px}
       .bank2-operator{width:100%;min-height:86px;border:0;border-radius:14px;background:#fff;padding:0 26px;display:flex;align-items:center;justify-content:space-between;color:#18507d;font-size:24px;font-weight:700;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.13);transition:transform .12s,box-shadow .12s}
@@ -608,7 +607,7 @@ function Bank2Styles() {
       .bank2-operator:active{transform:scale(.985)}
       .bank2-operator svg{color:#a8adb2}
       .bank2-empty{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.4);border-radius:14px;color:#fff;padding:20px;text-align:center}
-      .bank2-card{background:#fff;border-radius:22px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.12)}
+      .bank2-card{background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.12)}
       .bank2-error-card{width:min(440px,100%);padding:36px;text-align:center}
       .bank2-error-card h1{font-size:22px;margin:18px 0 8px}.bank2-error-card p{color:#667085;line-height:1.5}
       .bank2-stepper{display:grid;grid-template-columns:repeat(3,1fr);padding:32px 26px 20px;position:relative}
