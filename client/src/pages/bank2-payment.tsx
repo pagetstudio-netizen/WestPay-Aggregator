@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
+import { sanitizePaymentMessage } from "@/lib/sanitize-payment-message";
 
 type MerchantInfo = {
   name: string;
@@ -234,7 +235,7 @@ export default function Bank2PaymentPage() {
             if (data.paymentId) startPolling(data.paymentId);
           }
         })
-        .catch((caught) => setError(caught.message))
+        .catch((caught) => setError(sanitizePaymentMessage(caught.message, "Paiement introuvable")))
         .finally(() => setLoading(false));
       return;
     }
@@ -258,7 +259,7 @@ export default function Bank2PaymentPage() {
         setMerchant(info);
         setCountry(matchedCountry);
       })
-      .catch((caught) => setError(caught.message))
+      .catch((caught) => setError(sanitizePaymentMessage(caught.message, "Page de paiement indisponible")))
       .finally(() => setLoading(false));
   }, [amountParam, completeParam, countryParam, merchantSlug, referenceParam, startPolling]);
 
@@ -341,7 +342,7 @@ export default function Bank2PaymentPage() {
         if (data.paymentId) startPolling(data.paymentId);
       }
     } catch (caught: any) {
-      setError(caught.message || "Une erreur est survenue.");
+      setError(sanitizePaymentMessage(caught.message, "Une erreur est survenue."));
     } finally {
       setSubmitting(false);
     }
@@ -365,7 +366,7 @@ export default function Bank2PaymentPage() {
       setScreen("pending");
       if (paymentId) startPolling(paymentId);
     } catch (caught: any) {
-      setError(caught.message || "Code OTP invalide");
+      setError(sanitizePaymentMessage(caught.message, "Code OTP invalide"));
     } finally {
       setSubmitting(false);
     }

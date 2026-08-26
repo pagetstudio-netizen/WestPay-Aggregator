@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Smartphone, ExternalLink, Bitcoin, X, RefreshCw, Clock } from "lucide-react";
 import { useLanguage, detectLangFromCountry } from "@/lib/language";
+import { sanitizePaymentMessage } from "@/lib/sanitize-payment-message";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 
 import waveIcon      from "@assets/zOMoVcU_1779635321598.png";
@@ -389,7 +390,7 @@ export default function PaymentPage() {
       }
       if (d.paymentUrl) { setPaymentUrl(d.paymentUrl); setStep(2); }
       else { setStep(2); startPolling(d.paymentId); }
-    } catch (e: any) { toast({ title: t("payFailed"), description: e?.message || t("payFailedDesc"), variant:"destructive" }); }
+    } catch (e: any) { toast({ title: t("payFailed"), description: sanitizePaymentMessage(e?.message, t("payFailedDesc")), variant:"destructive" }); }
     finally { setIsSubmitting(false); }
   };
 
@@ -453,7 +454,7 @@ export default function PaymentPage() {
       setSndOtpRequired(false);
       if (paymentId) startPolling(paymentId);
     } catch (e: any) {
-      toast({ title: t("otpInvalidCode"), description: e.message, variant: "destructive" });
+      toast({ title: t("otpInvalidCode"), description: sanitizePaymentMessage(e.message, t("otpInvalidCode")), variant: "destructive" });
     } finally {
       setSndOtpSubmitting(false);
     }
@@ -476,7 +477,7 @@ export default function PaymentPage() {
           <X style={{ width:26, height:26, color:"#dc2626" }} />
         </div>
         <p style={{ fontWeight:700, color:"#111", fontSize:16, marginBottom:6 }}>{t("payLinkNotFound")}</p>
-        <p style={{ color:"#6b7280", fontSize:14 }}>{loadError || t("payLinkNotFound")}</p>
+        <p style={{ color:"#6b7280", fontSize:14 }}>{sanitizePaymentMessage(loadError, t("payLinkNotFound"))}</p>
       </div>
     </div>
   );
@@ -706,7 +707,7 @@ export default function PaymentPage() {
                       </div>
                     </div>
                     <p style={{ fontWeight:700, color:"#991b1b", fontSize:16 }}>{t("payFailed")}</p>
-                    <p style={{ color:"#6b7280", fontSize:13 }}>{failReason}</p>
+                    <p style={{ color:"#6b7280", fontSize:13 }}>{sanitizePaymentMessage(failReason, t("payFailedDesc"))}</p>
                     <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:12, padding:"12px 14px", textAlign:"left" }}>
                       <p style={{ fontSize:12, color:"#7f1d1d" }}>• {t("payFailedDesc")}</p>
                     </div>

@@ -768,6 +768,18 @@ function sanitizeAdmin(a: Record<string, any>) {
   return safe;
 }
 
+const INTERNAL_PAYMENT_PROVIDER_PATTERN =
+  /\b(?:clapay|nowallet|mbiyopay|mbiyo|sendavapay|sendava\s*pay|seapay|sea\s*pay|omnipay|omni\s*pay|oxapay|oxa\s*pay)\b/i;
+
+function sanitizePublicPaymentMessage(
+  value: unknown,
+  fallback = "Le service de paiement est momentanément indisponible. Veuillez réessayer.",
+): string {
+  const message = typeof value === "string" ? value.trim() : "";
+  if (!message || INTERNAL_PAYMENT_PROVIDER_PATTERN.test(message)) return fallback;
+  return message;
+}
+
 /**
  * Renvoie un message d'erreur sûr pour le client.
  * - En production  : message générique pour les 5xx (évite de fuiter des détails internes
@@ -776,9 +788,11 @@ function sanitizeAdmin(a: Record<string, any>) {
  * - En développement : message complet pour faciliter le debug.
  */
 function safeErrMsg(err: any): string {
-  if (process.env.NODE_ENV !== "production") return err?.message || "Erreur interne";
+  if (process.env.NODE_ENV !== "production") {
+    return sanitizePublicPaymentMessage(err?.message, "Erreur interne");
+  }
   // Messages métier explicitement définis dans le code (courts, sans détail technique)
-  const msg: string = err?.message || "";
+  const msg = sanitizePublicPaymentMessage(err?.message, "Erreur interne du serveur");
   const isSafe = msg.length > 0 && msg.length < 120 && !/sql|column|table|relation|constraint|syntax|pool|drizzle|pg\b|Error:/i.test(msg);
   return isSafe ? msg : "Erreur interne du serveur";
 }
@@ -3409,6 +3423,9 @@ export async function registerRoutes(
       const sanitized = txs.map((t: any) => ({
         ...t,
         provider: "westpay",
+        errorMessage: t.errorMessage
+          ? sanitizePublicPaymentMessage(t.errorMessage)
+          : t.errorMessage,
         omnipayTxId: undefined,
         omnipayReference: t.omnipayReference ? `WP-${t.id}` : undefined,
         gateway: undefined,

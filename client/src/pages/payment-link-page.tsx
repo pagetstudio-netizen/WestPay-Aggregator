@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Loader2, Smartphone, ExternalLink, Bitcoin, X, RefreshCw, Clock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage, detectLangFromCountry } from "@/lib/language";
+import { sanitizePaymentMessage } from "@/lib/sanitize-payment-message";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 
 import waveIcon      from "@assets/zOMoVcU_1779635321598.png";
@@ -386,7 +387,7 @@ export default function PaymentLinkPage() {
         startPolling(pId);
       }
     } catch (e: any) {
-      const reason = e.message || "Erreur de connexion au service de paiement";
+      const reason = sanitizePaymentMessage(e.message, "Erreur de connexion au service de paiement");
       setFailed(true); setFailReason(reason); sndReportFailure(pId, reason);
     }
   };
@@ -404,7 +405,7 @@ export default function PaymentLinkPage() {
       setSndOtpRequired(false);
       if (paymentId) startPolling(paymentId);
     } catch (e: any) {
-      toast({ title: "OTP invalide", description: e.message, variant: "destructive" });
+      toast({ title: "OTP invalide", description: sanitizePaymentMessage(e.message, "Code OTP invalide"), variant: "destructive" });
     } finally { setSndOtpSubmitting(false); }
   };
 
@@ -455,7 +456,7 @@ export default function PaymentLinkPage() {
       if (d.paymentUrl) { setPaymentUrl(d.paymentUrl); setStep(2); }
       else { setStep(2); startPolling(d.paymentId); }
     } catch (e: any) {
-      toast({ title: "Paiement non abouti", description: e.message || "Vérifiez vos informations et réessayez.", variant: "destructive" });
+      toast({ title: "Paiement non abouti", description: sanitizePaymentMessage(e.message, "Vérifiez vos informations et réessayez."), variant: "destructive" });
     } finally { setIsSubmitting(false); }
   };
 
@@ -483,7 +484,7 @@ export default function PaymentLinkPage() {
           <X style={{ width: 26, height: 26, color: "#dc2626" }} />
         </div>
         <p style={{ fontWeight: 700, color: "#111", fontSize: 16, marginBottom: 6 }}>{t("payInvalidLink")}</p>
-        <p style={{ color: "#6b7280", fontSize: 14 }}>{(error as Error)?.message || t("payLinkExpired")}</p>
+        <p style={{ color: "#6b7280", fontSize: 14 }}>{sanitizePaymentMessage((error as Error)?.message, t("payLinkExpired"))}</p>
       </div>
     </div>
   );
@@ -695,7 +696,7 @@ export default function PaymentLinkPage() {
                       </div>
                     </div>
                     <p style={{ fontWeight: 700, color: "#991b1b", fontSize: 16 }}>{t("payFailed")}</p>
-                    <p style={{ color: "#6b7280", fontSize: 13 }}>{failReason}</p>
+                    <p style={{ color: "#6b7280", fontSize: 13 }}>{sanitizePaymentMessage(failReason, t("payFailedDesc"))}</p>
                     <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 12, padding: "12px 14px", textAlign: "left" }}>
                       {[t("payFailedDesc")].map(text =>
                         <p key={text} style={{ fontSize: 12, color: "#7f1d1d" }}>• {text}</p>)}

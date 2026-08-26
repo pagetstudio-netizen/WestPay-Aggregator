@@ -29,6 +29,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry, Withdrawal } from "@shared/schema";
 import { useLanguage, LANGUAGES } from "@/lib/language";
+import { sanitizePaymentMessage } from "@/lib/sanitize-payment-message";
 import imgSidebarBg from "@assets/IMG-20260524-WA0032_1779626216477.jpg";
 import icnOverview from "@assets/homeBarActive_1779626310103.png";
 import icnTransactions from "@assets/a90f54732fab3ff150753cf117ce6a24_1779626310067.png";
@@ -672,7 +673,7 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
   const downloadCSV = () => {
     const header = "TXID,Nom payeur,Numéro,Montant,Pays,Statut,Mode,Date\n";
     const rows = filtered.map((tx) =>
-      `${tx.txId},"${(tx as any).payerName || ""}",${tx.payerNumber || ""},${tx.amount},${tx.country},${tx.status},${tx.provider},${new Date(tx.createdAt).toLocaleString("fr-FR")}`
+      `${tx.txId},"${(tx as any).payerName || ""}",${tx.payerNumber || ""},${tx.amount},${tx.country},${tx.status},${providerLabel(tx.provider)},${new Date(tx.createdAt).toLocaleString("fr-FR")}`
     ).join("\n");
     const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -1671,7 +1672,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
       }
       toast({
         title: "Retrait non abouti",
-        description: err?.message || "Une erreur est survenue. Votre solde a été restitué.",
+        description: sanitizePaymentMessage(err?.message, "Une erreur est survenue. Votre solde a été restitué."),
         variant: "destructive",
       });
     },
@@ -2113,7 +2114,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                       </div>
                       {w.adminNote && (
                         <p className="text-xs mt-1.5 px-2.5 py-1.5 rounded-lg italic" style={{ background: "#fffbea", color: "#78350f", border: "1px solid #fef3c7" }}>
-                          💬 {w.adminNote}
+                           💬 {sanitizePaymentMessage(w.adminNote, "Information de traitement indisponible.")}
                         </p>
                       )}
                     </div>
@@ -2184,7 +2185,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
       });
       setFromCountryId(""); setToCountryId(""); setAmount("");
     },
-    onError: (err: any) => toast({ title: "Action non effectuée", description: err.message || "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" }),
+    onError: (err: any) => toast({ title: "Action non effectuée", description: sanitizePaymentMessage(err.message), variant: "destructive" }),
   });
 
   const handleSubmit = (e: { preventDefault: () => void }) => {
@@ -2519,7 +2520,7 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
       toast({ title: t("passwordChanged") });
       setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
     } catch (err: any) {
-      toast({ title: "Action non effectuée", description: err.message || "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" });
+      toast({ title: "Action non effectuée", description: sanitizePaymentMessage(err.message), variant: "destructive" });
     } finally { setIsChanging(false); }
   };
 
@@ -2900,7 +2901,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
       setView("list"); setForm(mkForm()); setShowAdvanced(false);
       toast({ title: t("linkCreated") });
     },
-    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Erreur", description: sanitizePaymentMessage(e.message), variant: "destructive" }),
   });
 
   const updateMutation = useMutation({
@@ -2918,7 +2919,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
       setView("list"); setEditLink(null); setForm(mkForm()); setShowAdvanced(false);
       toast({ title: t("linkUpdated") });
     },
-    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Erreur", description: sanitizePaymentMessage(e.message), variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
@@ -3707,7 +3708,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
       if (!res.ok) throw new Error("Échec de la régénération");
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/crypto/api-key"] });
     } catch (e: any) {
-      toast({ title: "Erreur", description: e.message, variant: "destructive" });
+      cryptoToast({ title: "Erreur", description: sanitizePaymentMessage(e.message), variant: "destructive" });
     } finally {
       setIsRegenerating(false);
     }
@@ -3732,7 +3733,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook"] });
       cryptoToast({ title: "Webhook enregistré" });
     } catch (e: any) {
-      cryptoToast({ title: "Erreur", description: e.message, variant: "destructive" });
+      cryptoToast({ title: "Erreur", description: sanitizePaymentMessage(e.message), variant: "destructive" });
     } finally {
       setIsSavingWebhook(false);
     }
@@ -3775,7 +3776,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
       setWithdrawModal(null);
       setCryptoTab("withdrawals");
     } catch (e: any) {
-      setWdError(e.message);
+      setWdError(sanitizePaymentMessage(e.message));
     } finally {
       setWdLoading(false);
     }
@@ -3831,12 +3832,12 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
           }),
         });
         const data = await res.json();
-        if (!res.ok) { setInvError(data.message || "Erreur de création"); setInvLoading(false); return; }
+        if (!res.ok) { setInvError(sanitizePaymentMessage(data.message, "Erreur de création")); setInvLoading(false); return; }
         results.push({ currency, paymentUrl: data.url, name: invDescription.trim() });
       }
       setInvResults(results);
     } catch (e: any) {
-      setInvError(e.message || "Erreur inattendue");
+      setInvError(sanitizePaymentMessage(e.message, "Erreur inattendue"));
     } finally {
       setInvLoading(false);
     }
@@ -4191,7 +4192,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                                   {s.label}
                                 </span>
                                 {wr.adminNote && (
-                                  <p className="text-xs mt-1" style={{ color: "#78909c" }}>{wr.adminNote}</p>
+                                  <p className="text-xs mt-1" style={{ color: "#78909c" }}>{sanitizePaymentMessage(wr.adminNote, "Information de traitement indisponible.")}</p>
                                 )}
                               </td>
                             </tr>
