@@ -103,7 +103,7 @@ export default function MerchantLogin() {
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Erreur de connexion");
+      if (!res.ok) throw new Error(data.message || "Unable to connect.");
 
       if (data.requiresOtp) {
         setOtpToken(data.tempToken);
@@ -115,8 +115,8 @@ export default function MerchantLogin() {
         toast({
           title: t("authCodeSent"),
           description: data.otpVia === "telegram"
-            ? "Votre code de vérification a été envoyé dans votre groupe Telegram."
-            : `Un code de vérification a été envoyé à ${email}`,
+            ? "Your verification code was sent to your Telegram group."
+            : `A verification code was sent to ${email}`,
         });
         return;
       }
@@ -149,7 +149,7 @@ export default function MerchantLogin() {
         body: JSON.stringify({ tempToken: otpToken, code: otpCode.trim() }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Code invalide");
+       if (!res.ok) throw new Error(data.message || "Invalid code.");
       login(data.token, {
         id: data.user.id,
         email: data.user.email,
@@ -178,7 +178,7 @@ export default function MerchantLogin() {
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Erreur");
+       if (!res.ok) throw new Error(data.message || "Unable to resend the code.");
       if (data.requiresOtp) {
         setOtpToken(data.tempToken);
         setOtpCode("");
@@ -187,8 +187,8 @@ export default function MerchantLogin() {
         toast({
           title: t("authCodeResent"),
           description: data.otpVia === "telegram"
-            ? "Nouveau code envoyé dans votre groupe Telegram."
-            : `Nouveau code envoyé à ${otpEmail}`,
+            ? "A new code was sent to your Telegram group."
+            : `A new code was sent to ${otpEmail}`,
         });
       }
     } catch (err: any) {
@@ -202,13 +202,13 @@ export default function MerchantLogin() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg"
-            style={{ background: "linear-gradient(135deg,#00b050,#005c2e)" }}>
+          <div className="w-14 h-14 flex items-center justify-center shadow-lg"
+            style={{ background: "#0963e8" }}>
             <Shield className="w-7 h-7 text-white" />
           </div>
           <div className="flex items-center gap-2">
-            <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
-            <span className="text-sm font-medium text-slate-500">Vérification de sécurité...</span>
+            <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+            <span className="text-sm font-medium text-slate-500">Checking security...</span>
           </div>
         </div>
       </div>
@@ -216,295 +216,411 @@ export default function MerchantLogin() {
   }
 
   return (
-    <div className="min-h-screen flex bg-white">
+    <div className="wp-merchant-reference-gate">
       <style>{`
-        .ml-input {
-          width:100%;padding:0.7rem 0.9rem;font-size:0.9rem;
-          border:1.5px solid #e2e8f0;border-radius:10px;
-          background:#fafafa;color:#1a1a1a;outline:none;
-          transition:border-color 0.15s,box-shadow 0.15s,background 0.15s;
+        .wp-merchant-reference-gate {
+          min-height: 100dvh;
+          box-sizing: border-box;
+          padding-top: 93px;
+          overflow-x: hidden;
+          background: #0963e8;
+          color: #000;
+          font-family: Arial, Helvetica, sans-serif;
         }
-        .ml-input:focus { border-color:#00b050;box-shadow:0 0 0 3px rgba(0,176,80,0.1);background:#fff; }
-        .ml-input::placeholder { color:#b0bec5; }
-        .ml-input-error { border-color:#ef4444 !important; box-shadow:0 0 0 3px rgba(239,68,68,0.1) !important; }
-        .ml-btn {
-          width:100%;padding:0.8rem;font-size:0.95rem;font-weight:700;
-          background:linear-gradient(135deg,#00b050,#009a45);color:#fff;
-          border:none;border-radius:10px;cursor:pointer;
-          transition:opacity 0.15s,transform 0.1s,box-shadow 0.15s;
-          display:flex;align-items:center;justify-content:center;gap:0.5rem;
-          box-shadow:0 4px 14px rgba(0,176,80,0.3);letter-spacing:0.01em;
+        .wp-merchant-reference-brand {
+          width: 328px;
+          height: 105px;
+          margin: 0 auto;
+          box-sizing: border-box;
+          display: flex;
+          align-items: center;
+          padding: 0 20px 0 22px;
+          gap: 22px;
+          background: #fff;
         }
-        .ml-btn:hover:not(:disabled) { opacity:0.92;box-shadow:0 6px 20px rgba(0,176,80,0.35); }
-        .ml-btn:active:not(:disabled) { transform:scale(0.98); }
-        .ml-btn:disabled { opacity:0.45;cursor:not-allowed;box-shadow:none; }
-        .ml-otp {
-          width:100%;padding:0.9rem 1rem;font-size:1.75rem;font-weight:800;
-          letter-spacing:0.5em;text-align:center;
-          border:2px solid #e2e8f0;border-radius:12px;
-          background:#fafafa;color:#1a1a1a;outline:none;
-          transition:border-color 0.15s,box-shadow 0.15s;
+        .wp-merchant-reference-brand img {
+          width: 78px;
+          height: 78px;
+          flex: 0 0 78px;
+          display: block;
+          object-fit: cover;
         }
-        .ml-otp:focus { border-color:#00b050;box-shadow:0 0 0 3px rgba(0,176,80,0.1);background:#fff; }
+        .wp-merchant-reference-brand-name {
+          color: #061126;
+          font-size: 39px;
+          line-height: 1;
+          font-weight: 700;
+          letter-spacing: -1.6px;
+          white-space: nowrap;
+        }
+        .wp-merchant-reference-card {
+          width: min(553px, calc(100% - 24px));
+          min-height: calc(100dvh - 198px);
+          margin: 0 auto;
+          box-sizing: border-box;
+          padding: 54px 16px 80px 31px;
+          background: #fff;
+        }
+        .wp-merchant-reference-content {
+          width: 100%;
+          max-width: 506px;
+        }
+        .wp-merchant-reference-title {
+          margin: 0;
+          color: #000;
+          font-size: 28px;
+          line-height: 1.18;
+          font-weight: 700;
+          text-align: center;
+        }
+        .wp-merchant-reference-description {
+          margin: 0 auto;
+          color: #000;
+          font-size: 27px;
+          line-height: 1.2;
+          font-weight: 700;
+          text-align: center;
+        }
+        .wp-merchant-reference-form {
+          margin-top: 49px;
+        }
+        .wp-merchant-reference-input {
+          width: 100%;
+          height: 80px;
+          box-sizing: border-box;
+          padding: 0 19px;
+          border: 2px solid #b8b8b8;
+          border-radius: 7px;
+          outline: none;
+          background: #fff;
+          color: #000;
+          font-family: Arial, Helvetica, sans-serif;
+          font-size: 25px;
+          line-height: 1;
+        }
+        .wp-merchant-reference-input::placeholder {
+          color: #777;
+          opacity: 1;
+        }
+        .wp-merchant-reference-input:focus {
+          border-color: #8d8d8d;
+          box-shadow: 0 0 0 2px rgba(9, 99, 232, .16);
+        }
+        .wp-merchant-reference-password {
+          position: relative;
+          margin-top: 18px;
+        }
+        .wp-merchant-reference-password .wp-merchant-reference-input {
+          padding-right: 66px;
+        }
+        .wp-merchant-reference-eye {
+          position: absolute;
+          top: 50%;
+          right: 18px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 30px;
+          height: 30px;
+          padding: 0;
+          border: 0;
+          transform: translateY(-50%);
+          color: #000;
+          background: transparent;
+          cursor: pointer;
+        }
+        .wp-merchant-reference-eye svg {
+          width: 27px;
+          height: 27px;
+          stroke-width: 2.3;
+        }
+        .wp-merchant-reference-captcha {
+          display: flex;
+          align-items: center;
+          width: 100%;
+          height: 78px;
+          box-sizing: border-box;
+          margin-top: 33px;
+          overflow: hidden;
+          border: 2px solid #b8b8b8;
+          border-radius: 7px;
+          background: #fff;
+        }
+        .wp-merchant-reference-captcha > div {
+          display: flex;
+          align-items: center;
+          flex: 0 0 199px;
+          width: 199px;
+          height: 100%;
+          padding-left: 9px;
+          box-sizing: border-box;
+        }
+        .wp-merchant-reference-captcha canvas {
+          width: 176px !important;
+          height: 52px !important;
+          border-radius: 0 !important;
+        }
+        .wp-merchant-reference-captcha > div > button {
+          display: none;
+        }
+        .wp-merchant-reference-captcha-input {
+          min-width: 0;
+          width: 100%;
+          height: 100%;
+          padding: 0 12px 0 0;
+          box-sizing: border-box;
+          border: 0;
+          outline: 0;
+          color: #777;
+          background: transparent;
+          font-family: Arial, Helvetica, sans-serif;
+          font-size: 25px;
+          font-weight: 700;
+        }
+        .wp-merchant-reference-captcha-input::placeholder {
+          color: #777;
+          opacity: 1;
+        }
+        .wp-merchant-reference-captcha-input:focus {
+          box-shadow: none;
+        }
+        .wp-merchant-reference-captcha-error {
+          margin: 6px 0 -19px;
+          color: #dc2626;
+          font-size: 13px;
+          font-weight: 600;
+        }
+        .wp-merchant-reference-submit {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: calc(100% - 8px);
+          height: 80px;
+          margin: 65px 0 0 8px;
+          box-sizing: border-box;
+          border: 2px solid #456b8d;
+          border-radius: 7px;
+          color: #fff;
+          background: #6083a8;
+          font-family: Arial, Helvetica, sans-serif;
+          font-size: 37px;
+          line-height: 1;
+          font-weight: 700;
+          cursor: pointer;
+          transition: background-color .12s ease, transform .1s ease;
+        }
+        .wp-merchant-reference-submit:hover:not(:disabled) {
+          background: #56799d;
+        }
+        .wp-merchant-reference-submit:active:not(:disabled) {
+          transform: scale(.99);
+        }
+        .wp-merchant-reference-submit:disabled {
+          cursor: not-allowed;
+          opacity: .58;
+        }
+        .wp-merchant-reference-otp {
+          width: 100%;
+          height: 80px;
+          box-sizing: border-box;
+          padding: 0 15px;
+          border: 2px solid #b8b8b8;
+          border-radius: 7px;
+          outline: none;
+          background: #fff;
+          color: #000;
+          font-size: 29px;
+          font-weight: 700;
+          letter-spacing: .45em;
+          text-align: center;
+        }
+        @media (max-width: 500px) {
+          .wp-merchant-reference-gate {
+            padding-top: 48px;
+          }
+          .wp-merchant-reference-brand {
+            width: 286px;
+            height: 92px;
+            padding-left: 18px;
+            gap: 18px;
+          }
+          .wp-merchant-reference-brand img {
+            width: 66px;
+            height: 66px;
+            flex-basis: 66px;
+          }
+          .wp-merchant-reference-brand-name {
+            font-size: 33px;
+          }
+          .wp-merchant-reference-card {
+            min-height: calc(100dvh - 140px);
+            padding: 42px 13px 56px 20px;
+          }
+          .wp-merchant-reference-title {
+            font-size: 24px;
+          }
+          .wp-merchant-reference-description {
+            font-size: 22px;
+          }
+          .wp-merchant-reference-form {
+            margin-top: 35px;
+          }
+          .wp-merchant-reference-input {
+            height: 68px;
+            font-size: 21px;
+          }
+          .wp-merchant-reference-captcha {
+            height: 68px;
+          }
+          .wp-merchant-reference-captcha > div {
+            flex-basis: 148px;
+            width: 148px;
+            padding-left: 5px;
+          }
+          .wp-merchant-reference-captcha canvas {
+            width: 136px !important;
+            height: 46px !important;
+          }
+          .wp-merchant-reference-captcha-input {
+            font-size: 20px;
+          }
+          .wp-merchant-reference-submit {
+            height: 68px;
+            margin-top: 48px;
+            font-size: 30px;
+          }
+        }
       `}</style>
 
-      {/* Left brand panel */}
-      <div className="hidden lg:flex lg:w-[52%] xl:w-[55%] flex-col justify-between p-12 relative overflow-hidden"
-        style={{ background: "linear-gradient(145deg,#00b050 0%,#005c2e 60%,#003d1e 100%)" }}>
-        <div className="absolute inset-0 opacity-10"
-          style={{ backgroundImage: "radial-gradient(circle at 25% 75%,#ffffff 0%,transparent 55%),radial-gradient(circle at 75% 25%,#ffffff 0%,transparent 45%)" }} />
-
-        <div className="relative z-10">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-white/20 backdrop-blur flex items-center justify-center">
-              <img src="/robotpay-logo.jpg" alt="WestPay" className="w-9 h-9 rounded-lg object-cover"
-                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-            </div>
-            <span className="text-2xl font-black text-white tracking-tight">WestPay</span>
-          </div>
-          <p className="text-white/60 text-sm mt-2">Espace Marchand</p>
-        </div>
-
-        <div className="relative z-10 space-y-6">
-          <div>
-            <h2 className="text-3xl xl:text-4xl font-black text-white leading-tight mb-3">
-              Gérez vos encaissements Mobile Money en toute simplicité
-            </h2>
-            <p className="text-white/70 text-base leading-relaxed">
-              Suivez vos transactions, gérez vos retraits et intégrez nos API de paiement depuis votre tableau de bord.
-            </p>
-          </div>
-
-          <div className="space-y-3">
-            {FEATURES.map(({ icon: Icon, label }) => (
-              <div key={label} className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center flex-shrink-0">
-                  <Icon className="w-4 h-4 text-white" />
-                </div>
-                <span className="text-white/85 text-sm font-medium">{label}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="bg-white/10 backdrop-blur rounded-2xl p-5 border border-white/15">
-            <p className="text-white/70 text-xs font-medium uppercase tracking-widest mb-2">Sécurité</p>
-            <p className="text-white text-sm font-semibold">Vérification par email à chaque connexion pour protéger votre compte.</p>
-          </div>
-        </div>
-
-        <div className="relative z-10 flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse" />
-          <span className="text-white/50 text-xs">Plateforme sécurisée</span>
-        </div>
+      <div className="wp-merchant-reference-brand">
+        <img src="/robotpay-logo.jpg" alt="WestPay" />
+        <span className="wp-merchant-reference-brand-name">WestPay</span>
       </div>
 
-      {/* Right form panel */}
-      <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-10 bg-white">
-        <div className="w-full max-w-[420px]">
-          {/* Mobile logo */}
-          <div className="flex lg:hidden items-center justify-center gap-3 mb-8">
-            <div className="w-10 h-10 rounded-xl overflow-hidden shadow">
-              <img src="/robotpay-logo.jpg" alt="WestPay" className="w-full h-full object-cover"
-                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-            </div>
-            <span className="text-xl font-black text-slate-900">WestPay</span>
-          </div>
-
+      <main className="wp-merchant-reference-card">
+        <div className="wp-merchant-reference-content">
           {!otpStep ? (
             <>
-              <div className="mb-8">
-                <h1 className="text-2xl font-black text-slate-900 mb-1">Connexion Marchand</h1>
-                <p className="text-slate-500 text-sm">Accédez à votre espace de gestion.</p>
-              </div>
+              <h1 className="wp-merchant-reference-title">Merchant Login</h1>
+              <p className="wp-merchant-reference-description">Access your management area.</p>
 
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="block text-sm font-semibold text-slate-700">Adresse email</label>
+              <form onSubmit={handleSubmit} className="wp-merchant-reference-form">
+                <input
+                  type="email"
+                  className="wp-merchant-reference-input"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Email"
+                  aria-label="Email"
+                  required
+                  autoComplete="username"
+                  data-testid="input-merchant-email"
+                />
+
+                <div className="wp-merchant-reference-password">
                   <input
-                    type="email"
-                    className="ml-input"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="vous@exemple.com"
+                    type={showPassword ? "text" : "password"}
+                    className="wp-merchant-reference-input"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Password"
+                    aria-label="Password"
                     required
-                    autoComplete="username"
-                    data-testid="input-merchant-email"
+                    autoComplete="current-password"
+                    data-testid="input-merchant-password"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="wp-merchant-reference-eye"
+                    data-testid="button-toggle-merchant-password"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff /> : <Eye />}
+                  </button>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="block text-sm font-semibold text-slate-700">Mot de passe</label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      className="ml-input"
-                      style={{ paddingRight: "2.75rem" }}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••••••"
-                      required
-                      autoComplete="current-password"
-                      data-testid="input-merchant-password"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
-                      style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
-                      data-testid="button-toggle-merchant-password"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 transition-colors"
-                      style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 0" }}
-                      onClick={() => toast({ title: "Mot de passe oublié", description: "Contactez le support pour réinitialiser votre mot de passe." })}
-                      data-testid="link-forgot-password"
-                    >
-                      Mot de passe oublié ?
-                    </button>
-                  </div>
-                </div>
-
-                {/* CAPTCHA */}
-                <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-slate-700">Code de sécurité</label>
+                <div className={`wp-merchant-reference-captcha ${captchaError ? "border-red-500" : ""}`}>
                   <Captcha code={captchaCode} onRefresh={refreshCaptcha} />
                   <input
                     type="text"
-                    className={`ml-input ${captchaError ? "ml-input-error" : ""}`}
+                    className="wp-merchant-reference-captcha-input"
                     value={captchaInput}
                     onChange={(e) => { setCaptchaInput(e.target.value.toUpperCase()); setCaptchaError(false); }}
-                    placeholder="Entrez le code ci-dessus"
+                    placeholder="Enter code"
+                    aria-label="Security code"
                     maxLength={5}
                     autoComplete="off"
                     spellCheck={false}
                     required
                     data-testid="input-captcha"
                   />
-                  {captchaError && (
-                    <p className="text-xs text-red-500 font-medium">Code incorrect, un nouveau code a été généré.</p>
-                  )}
                 </div>
+                {captchaError && <p className="wp-merchant-reference-captcha-error">The security code is incorrect.</p>}
 
                 <button
                   type="submit"
                   disabled={isLoading || !email || !password || captchaInput.length < 5}
-                  className="ml-btn"
-                  style={{ marginTop: "0.75rem" }}
+                  className="wp-merchant-reference-submit"
                   data-testid="button-merchant-login"
                 >
-                  {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
-                  {isLoading ? "Connexion..." : "Se connecter"}
+                  {isLoading ? <Loader2 className="w-7 h-7 animate-spin" /> : "connect to Westpay"}
                 </button>
               </form>
-
-              <div className="mt-6 pt-5 border-t border-slate-100">
-                <p className="text-center text-sm text-slate-400">
-                  Pas encore de compte ?{" "}
-                  <button
-                    type="button"
-                    className="text-emerald-600 hover:text-emerald-700 font-semibold transition-colors"
-                    style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
-                    onClick={() => toast({ title: "Créer un compte", description: "Contactez notre équipe pour créer votre compte marchand." })}
-                    data-testid="button-merchant-signup"
-                  >
-                    Contactez-nous
-                  </button>
-                </p>
-              </div>
             </>
           ) : (
             <>
-              <div className="mb-8">
-                <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-5 mx-auto"
-                  style={{ background: "linear-gradient(135deg,#229ED9,#0d6fa8)" }}>
-                  <SiTelegram className="w-9 h-9 text-white" />
-                </div>
-                <h1 className="text-2xl font-black text-slate-900 text-center mb-2">
-                  Vérification Telegram
-                </h1>
-                <p className="text-slate-500 text-sm text-center leading-relaxed">
-                  Un code à 6 chiffres a été envoyé dans le groupe Telegram de<br />
-                  <span className="font-semibold text-slate-700">{otpMerchantName || "votre compte"}</span>
-                </p>
-              </div>
+              <h1 className="wp-merchant-reference-title">Verification code</h1>
+              <p className="wp-merchant-reference-description">Enter the 6-digit code sent to your account.</p>
 
-              <form onSubmit={handleVerifyOtp} className="space-y-5">
-                <div className="flex items-start gap-3 p-4 rounded-xl bg-emerald-50 border border-emerald-100">
-                  <Lock className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-semibold text-emerald-800">Vérification à deux facteurs</p>
-                    <p className="text-xs text-emerald-700 mt-0.5">Code valable 5 minutes · usage unique</p>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="block text-sm font-semibold text-slate-700 text-center">Votre code à 6 chiffres</label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={6}
-                    className="ml-otp"
-                    value={otpCode}
-                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                    placeholder="000000"
-                    autoFocus
-                    data-testid="input-merchant-otp"
-                  />
-                </div>
+              <form onSubmit={handleVerifyOtp} className="wp-merchant-reference-form">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  className="wp-merchant-reference-otp"
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="000000"
+                  aria-label="Verification code"
+                  autoFocus
+                  data-testid="input-merchant-otp"
+                />
 
                 <button
                   type="submit"
                   disabled={otpLoading || otpCode.length !== 6}
-                  className="ml-btn"
+                  className="wp-merchant-reference-submit"
                   data-testid="button-merchant-verify-otp"
                 >
-                  {otpLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
-                  {otpLoading ? "Vérification..." : "Confirmer ma connexion"}
+                  {otpLoading ? <Loader2 className="w-7 h-7 animate-spin" /> : "connect to Westpay"}
                 </button>
 
-                <div className="flex flex-col items-center gap-3">
+                <div className="flex flex-col items-center gap-3 mt-5">
                   <button
                     type="button"
                     disabled={otpCountdown > 0 || otpResendLoading}
                     onClick={handleResendOtp}
-                    className="text-sm font-semibold text-emerald-600 hover:text-emerald-700 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors"
-                    style={{ background: "none", border: "none", cursor: otpCountdown > 0 ? "not-allowed" : "pointer", padding: "2px 0" }}
+                    className="text-sm font-semibold text-blue-700 hover:text-blue-900 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors"
                     data-testid="button-resend-otp"
                   >
-                    {otpResendLoading ? (
-                      <span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" />Envoi...</span>
-                    ) : otpCountdown > 0 ? (
-                      `Renvoyer dans ${otpCountdown}s`
-                    ) : (
-                      "Renvoyer le code"
-                    )}
+                    {otpResendLoading ? "Sending..." : otpCountdown > 0 ? `Resend in ${otpCountdown}s` : "Resend code"}
                   </button>
-
                   <button
                     type="button"
                     onClick={() => { setOtpStep(false); setOtpCode(""); setOtpToken(""); refreshCaptcha(); }}
-                    className="text-sm text-slate-400 hover:text-slate-600 transition-colors font-medium"
-                    style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 0" }}
+                    className="text-sm text-slate-500 hover:text-slate-700 transition-colors font-medium"
                     data-testid="button-back-merchant-login"
                   >
-                    ← Retour à la connexion
+                    ← Back to login
                   </button>
                 </div>
               </form>
             </>
           )}
-
-          <p className="text-center text-xs text-slate-300 mt-8">
-            © {new Date().getFullYear()} WestPay · Connexion sécurisée
-          </p>
         </div>
-      </div>
+      </main>
     </div>
   );
 }
