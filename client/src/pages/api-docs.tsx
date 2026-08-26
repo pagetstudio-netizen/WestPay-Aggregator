@@ -55,7 +55,7 @@ function CodeBlock({ code, label, lang }: { code: string; label?: string; lang?:
           <CopyButton text={code} />
         </div>
         <div className="wp-code-body p-4 overflow-x-auto bg-muted/20">
-          <pre className="wp-code-pre text-xs sm:text-sm font-mono text-foreground whitespace-pre">{code}</pre>
+          <pre className="wp-code-pre text-xs sm:text-sm font-mono whitespace-pre">{code}</pre>
         </div>
       </CardContent>
     </Card>
@@ -662,7 +662,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
         .wp-code-toolbar { border-color: rgba(255,255,255,.1) !important; background: #1d244b !important; }
         .wp-code-toolbar .text-muted-foreground { color: #aab3d5 !important; }
         .wp-code-body { background: #151a3b !important; }
-        .wp-code-pre { color: #e4e8ff !important; line-height: 1.75; }
+        .wp-docs-main .wp-code-pre { color: #e4e8ff !important; opacity: 1 !important; line-height: 1.75; }
         .wp-lang-tab { border: 1px solid transparent; }
         .wp-lang-tab-active { background: var(--wp-indigo) !important; box-shadow: 0 4px 12px rgba(48,37,185,.22); }
         .wp-docs-main table thead { background: #f4f5ff; }
