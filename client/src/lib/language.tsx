@@ -98,6 +98,16 @@ const translations: Record<Lang, Record<string, string>> = {
     total: "Total",
     copy: "Copier",
     copied: "Copié !",
+    copyFailed: "Copie impossible",
+    copyFailedDesc: "Votre navigateur n’a pas autorisé la copie. Veuillez réessayer.",
+    authLoginSuccess: "Connexion réussie",
+    authRedirecting: "Redirection vers votre espace...",
+    authLoginError: "Erreur de connexion",
+    authInvalidCode: "Code invalide",
+    authInvalidCaptcha: "Code de sécurité incorrect",
+    authInvalidCaptchaDesc: "Veuillez entrer le nouveau code affiché.",
+    authCodeSent: "Code de vérification envoyé",
+    authCodeResent: "Code de vérification renvoyé",
     active: "Actif",
     inactive: "Inactif",
     activate: "Activer",
@@ -734,6 +744,16 @@ const translations: Record<Lang, Record<string, string>> = {
     total: "Total",
     copy: "Copy",
     copied: "Copied!",
+    copyFailed: "Unable to copy",
+    copyFailedDesc: "Your browser did not allow copying. Please try again.",
+    authLoginSuccess: "Login successful",
+    authRedirecting: "Redirecting to your account...",
+    authLoginError: "Login error",
+    authInvalidCode: "Invalid code",
+    authInvalidCaptcha: "Incorrect security code",
+    authInvalidCaptchaDesc: "Please enter the new code displayed.",
+    authCodeSent: "Verification code sent",
+    authCodeResent: "Verification code resent",
     active: "Active",
     inactive: "Inactive",
     activate: "Activate",
@@ -1370,6 +1390,16 @@ const translations: Record<Lang, Record<string, string>> = {
     total: "总计",
     copy: "复制",
     copied: "已复制！",
+    copyFailed: "无法复制",
+    copyFailedDesc: "浏览器未允许复制，请重试。",
+    authLoginSuccess: "登录成功",
+    authRedirecting: "正在跳转到您的账户...",
+    authLoginError: "登录错误",
+    authInvalidCode: "验证码无效",
+    authInvalidCaptcha: "安全码错误",
+    authInvalidCaptchaDesc: "请输入新显示的安全码。",
+    authCodeSent: "验证码已发送",
+    authCodeResent: "验证码已重新发送",
     active: "启用",
     inactive: "禁用",
     activate: "启用",
@@ -1898,6 +1928,16 @@ const translations: Record<Lang, Record<string, string>> = {
     total: "Total",
     copy: "Copiar",
     copied: "Copiado!",
+    copyFailed: "Não foi possível copiar",
+    copyFailedDesc: "O navegador não autorizou a cópia. Tente novamente.",
+    authLoginSuccess: "Login efetuado com sucesso",
+    authRedirecting: "Redirecionando para sua conta...",
+    authLoginError: "Erro de login",
+    authInvalidCode: "Código inválido",
+    authInvalidCaptcha: "Código de segurança incorreto",
+    authInvalidCaptchaDesc: "Digite o novo código exibido.",
+    authCodeSent: "Código de verificação enviado",
+    authCodeResent: "Código de verificação reenviado",
     active: "Ativo",
     inactive: "Inativo",
     activate: "Ativar",
@@ -2426,6 +2466,16 @@ const translations: Record<Lang, Record<string, string>> = {
     total: "कुल",
     copy: "कॉपी करें",
     copied: "कॉपी हो गया!",
+    copyFailed: "कॉपी नहीं हो सका",
+    copyFailedDesc: "आपके ब्राउज़र ने कॉपी करने की अनुमति नहीं दी। कृपया पुनः प्रयास करें।",
+    authLoginSuccess: "लॉगिन सफल",
+    authRedirecting: "आपके खाते पर भेजा जा रहा है...",
+    authLoginError: "लॉगिन त्रुटि",
+    authInvalidCode: "अमान्य कोड",
+    authInvalidCaptcha: "सुरक्षा कोड गलत है",
+    authInvalidCaptchaDesc: "कृपया दिखाया गया नया कोड दर्ज करें।",
+    authCodeSent: "सत्यापन कोड भेजा गया",
+    authCodeResent: "सत्यापन कोड फिर भेजा गया",
     active: "सक्रिय",
     inactive: "निष्क्रिय",
     activate: "सक्रिय करें",
@@ -2924,9 +2974,15 @@ interface LanguageContextType {
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
 function readStoredLang(): Lang | null {
+  if (typeof window === "undefined") return null;
   const saved = localStorage.getItem("westpay_lang");
   if (saved === "fr" || saved === "en" || saved === "pt" || saved === "zh" || saved === "hi") return saved;
   return null;
+}
+
+export function translateForCurrentLanguage(key: string): string {
+  const lang = readStoredLang() || "en";
+  return translations[lang][key] || translations.en[key] || translations.fr[key] || key;
 }
 
 export function LanguageProvider({ children }: { children: ReactNode }) {

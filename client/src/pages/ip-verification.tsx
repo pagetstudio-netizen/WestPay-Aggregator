@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { Shield, Copy, CheckCircle, Loader2, Lock, Wifi, RefreshCw } from "lucide-react";
+import { useLanguage } from "@/lib/language";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 export default function IpVerificationPage() {
   const [ip, setIp] = useState<string | null>(null);
@@ -7,6 +9,7 @@ export default function IpVerificationPage() {
   const [checking, setChecking] = useState(true);
   const [polling, setPolling] = useState(false);
   const [countdown, setCountdown] = useState(30);
+  const { t } = useLanguage();
 
   useEffect(() => {
     fetch("/api/auth/my-ip")
@@ -50,12 +53,13 @@ export default function IpVerificationPage() {
     return () => clearInterval(tick);
   }, []);
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     if (!ip) return;
-    navigator.clipboard.writeText(ip).then(() => {
+    try {
+      await copyTextToClipboard(ip, { successTitle: t("copied") });
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
-    });
+    } catch {}
   };
 
   const handleManualCheck = async () => {

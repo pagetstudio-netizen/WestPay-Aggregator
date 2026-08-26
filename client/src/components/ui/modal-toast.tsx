@@ -1,6 +1,8 @@
 import * as React from "react"
+import { createPortal } from "react-dom"
 import { CheckCircle2, XCircle, Info, AlertTriangle } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useLanguage } from "@/lib/language"
 
 // ─── Animations ───────────────────────────────────────────────────────────────
 const ANIM = `
@@ -8,7 +10,31 @@ const ANIM = `
   from { opacity: 0; transform: scale(0.91) translateY(10px); }
   to   { opacity: 1; transform: scale(1)    translateY(0);    }
 }
+@keyframes modalBackdropIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
 `
+
+function useModalEnvironment(open: boolean, initialFocusRef: React.RefObject<HTMLButtonElement>) {
+  React.useEffect(() => {
+    if (!open) return
+    const previousOverflow = document.body.style.overflow
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    document.body.style.overflow = "hidden"
+    const timer = window.setTimeout(() => initialFocusRef.current?.focus(), 30)
+    return () => {
+      window.clearTimeout(timer)
+      document.body.style.overflow = previousOverflow
+      previousFocus?.focus()
+    }
+  }, [open, initialFocusRef])
+}
+
+function stopEvent(event: React.SyntheticEvent) {
+  event.preventDefault()
+  event.stopPropagation()
+}
 
 // ─── Modal Toast ──────────────────────────────────────────────────────────────
 // Remplace les petits bandeaux de coin — affiche un modal centré.
@@ -23,11 +49,9 @@ interface ModalToastProps {
 
 export function ModalToast({ open, variant = "default", title, description, onDismiss }: ModalToastProps) {
   const btnRef = React.useRef<HTMLButtonElement>(null)
+  const { t } = useLanguage()
 
-  // Focus sur le bouton dès l'ouverture
-  React.useEffect(() => {
-    if (open) { setTimeout(() => btnRef.current?.focus(), 50) }
-  }, [open])
+  useModalEnvironment(open, btnRef)
 
   // Fermeture sur Échap
   React.useEffect(() => {
@@ -45,26 +69,36 @@ export function ModalToast({ open, variant = "default", title, description, onDi
   const Icon = isSuccess ? CheckCircle2 : isError ? XCircle : Info
   const iconColor = isSuccess ? "text-green-500" : isError ? "text-red-500" : "text-blue-500"
   const iconBg = isSuccess ? "bg-green-50" : isError ? "bg-red-50" : "bg-blue-50"
-  const btnLabel = isSuccess ? "Super !" : isError ? "OK" : "Compris !"
+  const btnLabel = t("confirm")
 
-  return (
+  if (typeof document === "undefined") return null
+
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={typeof title === "string" ? title : "Notification"}
-      className="fixed inset-0 z-[9998] flex items-center justify-center p-4"
+      aria-label={typeof title === "string" ? title : t("notifications")}
+      className="fixed inset-0 z-[2147483646] flex items-center justify-center p-4 pointer-events-auto"
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
     >
       <style>{ANIM}</style>
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/40"
-        style={{ backdropFilter: "blur(2px)" }}
-        onClick={onDismiss}
+        style={{ backdropFilter: "blur(2px)", animation: "modalBackdropIn 0.15s ease-out" }}
+        onClick={(event) => {
+          stopEvent(event)
+          onDismiss()
+        }}
+        onPointerDown={stopEvent}
       />
       {/* Card */}
       <div
         className="relative bg-white rounded-[28px] px-8 py-9 w-full max-w-[320px] text-center shadow-2xl"
         style={{ animation: "modalIn 0.18s ease-out" }}
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
       >
         {/* Icône */}
         <div className={cn("mx-auto mb-5 w-[72px] h-[72px] rounded-[20px] flex items-center justify-center", iconBg)}>
@@ -79,14 +113,20 @@ export function ModalToast({ open, variant = "default", title, description, onDi
         {!description && title && <div className="mb-7" />}
         {/* Bouton */}
         <button
+          type="button"
           ref={btnRef}
-          onClick={onDismiss}
+          onClick={(event) => {
+            stopEvent(event)
+            onDismiss()
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
           className="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.97] text-white rounded-full py-[14px] font-semibold text-[15px] transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
         >
           {btnLabel}
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -138,6 +178,7 @@ export function ConfirmModal() {
   const [state, setState] = React.useState<ConfirmState>(_confirmState)
   const confirmBtnRef = React.useRef<HTMLButtonElement>(null)
   const cancelBtnRef = React.useRef<HTMLButtonElement>(null)
+  const { t } = useLanguage()
 
   React.useEffect(() => {
     _confirmListeners.push(setState)
@@ -147,10 +188,7 @@ export function ConfirmModal() {
     }
   }, [])
 
-  // Focus initial sur bouton annuler (plus sûr pour les actions destructives)
-  React.useEffect(() => {
-    if (state.open) { setTimeout(() => cancelBtnRef.current?.focus(), 50) }
-  }, [state.open])
+  useModalEnvironment(state.open, cancelBtnRef)
 
   // Fermeture sur Échap = annulation
   React.useEffect(() => {
@@ -160,33 +198,42 @@ export function ConfirmModal() {
     return () => document.removeEventListener("keydown", h)
   }, [state.open])
 
-  const handle = (result: boolean) => {
-    _setConfirmState({ ..._confirmState, open: false })
-    _confirmResolver?.(result)
+  const handle = React.useCallback((result: boolean) => {
+    const resolver = _confirmResolver
     _confirmResolver = null
-  }
+    _setConfirmState({ ..._confirmState, open: false })
+    resolver?.(result)
+  }, [])
 
-  if (!state.open) return null
+  if (!state.open || typeof document === "undefined") return null
 
   const isDestructive = state.variant === "destructive"
 
-  return (
+  return createPortal(
     // z-index 9999 > ModalToast (9998) pour toujours s'afficher au-dessus
     <div
       role="dialog"
       aria-modal="true"
       aria-label={state.title}
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[2147483647] flex items-center justify-center p-4 pointer-events-auto"
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
     >
       <style>{ANIM}</style>
       <div
         className="absolute inset-0 bg-black/40"
-        style={{ backdropFilter: "blur(2px)" }}
-        onClick={() => handle(false)}
+        style={{ backdropFilter: "blur(2px)", animation: "modalBackdropIn 0.15s ease-out" }}
+        onClick={(event) => {
+          stopEvent(event)
+          handle(false)
+        }}
+        onPointerDown={stopEvent}
       />
       <div
         className="relative bg-white rounded-[28px] px-8 py-9 w-full max-w-[320px] text-center shadow-2xl"
         style={{ animation: "modalIn 0.18s ease-out" }}
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
       >
         {/* Icône */}
         <div className={cn(
@@ -205,8 +252,13 @@ export function ConfirmModal() {
         {!state.message && <div className="mb-7" />}
         <div className="flex flex-col gap-3">
           <button
+            type="button"
             ref={confirmBtnRef}
-            onClick={() => handle(true)}
+            onClick={(event) => {
+              stopEvent(event)
+              handle(true)
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
             className={cn(
               "w-full text-white rounded-full py-[14px] font-semibold text-[15px] transition-all duration-150 active:scale-[0.97] focus:outline-none focus:ring-2 focus:ring-offset-2",
               isDestructive
@@ -214,17 +266,23 @@ export function ConfirmModal() {
                 : "bg-blue-600 hover:bg-blue-700 focus:ring-blue-400"
             )}
           >
-            {state.confirmLabel ?? "Confirmer"}
+            {state.confirmLabel ?? t("confirm")}
           </button>
           <button
+            type="button"
             ref={cancelBtnRef}
-            onClick={() => handle(false)}
+            onClick={(event) => {
+              stopEvent(event)
+              handle(false)
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
             className="w-full bg-gray-100 hover:bg-gray-200 active:scale-[0.97] text-gray-700 rounded-full py-[14px] font-semibold text-[15px] transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2"
           >
-            {state.cancelLabel ?? "Annuler"}
+            {state.cancelLabel ?? t("cancel")}
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

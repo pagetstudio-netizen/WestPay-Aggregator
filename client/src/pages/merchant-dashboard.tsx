@@ -30,6 +30,7 @@ import { Switch } from "@/components/ui/switch";
 import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry, Withdrawal } from "@shared/schema";
 import { useLanguage, LANGUAGES } from "@/lib/language";
 import { sanitizePaymentMessage } from "@/lib/sanitize-payment-message";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import imgSidebarBg from "@assets/IMG-20260524-WA0032_1779626216477.jpg";
 import icnOverview from "@assets/homeBarActive_1779626310103.png";
 import icnTransactions from "@assets/a90f54732fab3ff150753cf117ce6a24_1779626310067.png";
@@ -522,9 +523,9 @@ function TransactionDetailDrawer({ tx, onClose }: { tx: any; onClose: () => void
   };
 
   const copyToClipboard = (text: string, label: string) => {
-    navigator.clipboard.writeText(text).then(() =>
+    copyTextToClipboard(text).then(() =>
       toast({ title: `${label} copié`, description: text.substring(0, 40) })
-    );
+    ).catch(() => {});
   };
 
   const DetailRow = ({ label, value, mono = false, copyable = false }: { label: string; value: string; mono?: boolean; copyable?: boolean }) => (
@@ -1025,7 +1026,7 @@ function ApiKeysPanel({ token }: { token: string | null }) {
                       {key.apiKey}
                     </code>
                     <button
-                      onClick={() => { navigator.clipboard.writeText(key.apiKey); toast({ title: "Clé copiée !" }); }}
+                      onClick={() => { copyTextToClipboard(key.apiKey).then(() => toast({ title: t("copied"), variant: "success" })).catch(() => {}); }}
                       className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all active:scale-90"
                       style={{ background: "#e8eaf6", color: "#3949ab" }}
                       data-testid={`button-copy-key-${key.id}`}
@@ -1215,7 +1216,7 @@ function WebhookPanel({ token }: { token: string | null }) {
             <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: "#f9fafb", border: "1px solid #e2e8f0" }}>
               <code className="text-xs font-mono flex-1 break-all" style={{ color: "#555" }} data-testid="text-webhook-secret">{webhookData.webhookSecret}</code>
               <button
-                onClick={() => { navigator.clipboard.writeText(webhookData.webhookSecret); toast({ title: t("copied") }); }}
+                onClick={() => { copyTextToClipboard(webhookData.webhookSecret, { successTitle: t("copied") }).catch(() => {}); }}
                 className="p-1.5 rounded-lg hover:bg-gray-200"
                 style={{ color: "#888" }}
                 data-testid="button-copy-webhook-secret"
@@ -2931,11 +2932,11 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] }); toast({ title: t("linkDeleted") }); },
   });
 
-  const copyLink = (uniqueId: string) => { navigator.clipboard.writeText(`${baseUrl}/link/${uniqueId}`); toast({ title: t("copied") }); };
+  const copyLink = (uniqueId: string) => { copyTextToClipboard(`${baseUrl}/link/${uniqueId}`, { successTitle: t("copied") }).catch(() => {}); };
   const shareLink = (uniqueId: string) => {
     const url = `${baseUrl}/link/${uniqueId}`;
     if (navigator.share) navigator.share({ title: "Lien de paiement WestPay", url });
-    else { navigator.clipboard.writeText(url); toast({ title: "Lien copié !" }); }
+    else { copyTextToClipboard(url, { successTitle: t("copied") }).catch(() => {}); }
   };
 
   const [openActionsId, setOpenActionsId] = useState<number | null>(null);
@@ -3689,10 +3690,10 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
   const { toast: cryptoToast } = useToast();
 
   const copyToClipboard = (text: string, key: string) => {
-    navigator.clipboard.writeText(text).then(() => {
+    copyTextToClipboard(text).then(() => {
       setCopiedKey(key);
       setTimeout(() => setCopiedKey(null), 2000);
-    });
+    }).catch(() => {});
   };
 
   const handleRegenerateKey = async () => {
@@ -4690,8 +4691,9 @@ function MerchantSidebarContent({
 
 function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
   const { toast } = useToast();
+  const { t } = useLanguage();
   const [showKey, setShowKey] = useState(false);
-  const copy = (text: string, label = "Copié") => { navigator.clipboard.writeText(text); toast({ title: label }); };
+  const copy = (text: string, label = t("copied")) => { copyTextToClipboard(text, { successTitle: label }).catch(() => {}); };
   const BASE_URL = "https://westpay.cfd";
   const KEY_DISPLAY = sdkApiKey ? (showKey ? sdkApiKey : sdkApiKey.slice(0, 10) + "••••••••••••••••••••••••••••••••••••••") : "WP-SDK-...";
 

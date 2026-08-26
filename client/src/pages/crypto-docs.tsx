@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { useLanguage } from "@/lib/language";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import {
   Shield, Lock, Loader2, BookOpen, Code, Server, Key,
   ArrowRight, CheckCircle, AlertTriangle, Globe, Bell, Menu, X,
@@ -23,18 +24,11 @@ function CopyButton({ text }: { text: string }) {
   const { toast } = useToast();
   const handleCopy = useCallback(async () => {
     try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const ta = document.createElement("textarea");
-        ta.value = text; ta.style.position = "fixed"; ta.style.left = "-9999px";
-        document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta);
-      }
+      await copyTextToClipboard(text, { successTitle: t("copied") });
       setCopied(true);
-      toast({ title: t("copied") });
       setTimeout(() => setCopied(false), 2000);
-    } catch { toast({ title: t("error"), variant: "destructive" }); }
-  }, [text, toast, t]);
+    } catch {}
+  }, [text, t]);
   return (
     <Button size="icon" variant="ghost" onClick={handleCopy} className="shrink-0 h-7 w-7" data-testid="button-copy-code">
       {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
@@ -87,10 +81,8 @@ function InfoBadge({ children, color = "blue" }: { children: string; color?: "bl
 }
 
 function CredentialBox({ label, value, mono = true }: { label: string; value: string; mono?: boolean }) {
-  const { toast } = useToast();
-  const copy = () => {
-    navigator.clipboard?.writeText(value).then(() => toast({ title: "Copié !" }));
-  };
+  const { t } = useLanguage();
+  const copy = () => { copyTextToClipboard(value, { successTitle: t("copied") }).catch(() => {}); };
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 border" style={{ background: "hsl(var(--muted)/0.3)" }}>
       <div className="min-w-0">

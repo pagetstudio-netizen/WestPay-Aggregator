@@ -5,6 +5,7 @@ import { Loader2, Check, Copy, CheckCircle2, XCircle, Clock, RefreshCw, AlertTri
 import QRCode from "react-qr-code";
 import { useLanguage } from "@/lib/language";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 type LinkInfo = {
   uniqueId: string;
@@ -39,7 +40,8 @@ function CopyBtn({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
-      onClick={() => { navigator.clipboard.writeText(value).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }); }}
+      type="button"
+      onClick={() => { copyTextToClipboard(value, { successTitle: t("copied") }).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }).catch(() => {}); }}
       className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
       style={{ background: copied ? "#dcfce7" : "#f0f4f8", color: copied ? "#166534" : "#1976d2", border: `1px solid ${copied ? "#bbf7d0" : "#bbdefb"}` }}
     >

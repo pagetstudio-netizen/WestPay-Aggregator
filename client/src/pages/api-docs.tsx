@@ -15,6 +15,7 @@ import {
   Eye, EyeOff
 } from "lucide-react";
 import Captcha, { generateCaptchaCode } from "@/components/Captcha";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import docsPaymentIllustration from "@assets/Screenshot_20260826-170313_1787764599668.png";
 import docsFlowIllustration from "@assets/Screenshot_20260826-170419_1787764599628.png";
 import docsSecurityIllustration from "@assets/IMG_20260826_171328_925_1787764614017.jpg";
@@ -29,18 +30,11 @@ function CopyButton({ text }: { text: string }) {
   const { toast } = useToast();
   const handleCopy = useCallback(async () => {
     try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const ta = document.createElement("textarea");
-        ta.value = text; ta.style.position = "fixed"; ta.style.left = "-9999px";
-        document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta);
-      }
+      await copyTextToClipboard(text, { successTitle: t("copied") });
       setCopied(true);
-      toast({ title: t("copied") });
       setTimeout(() => setCopied(false), 2000);
-    } catch { toast({ title: t("error"), variant: "destructive" }); }
-  }, [text, toast, t]);
+    } catch {}
+  }, [text, t]);
   return (
     <Button size="icon" variant="ghost" onClick={handleCopy} className="shrink-0 h-7 w-7" data-testid="button-copy-code">
       {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
@@ -88,7 +82,6 @@ function LangTabs({ tabs }: { tabs: { lang: string; label: string; code: string 
 }
 
 function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { name: string; email: string } }) => void }) {
-  const { t } = useLanguage();
   const [email, setEmail] = useState("");
   const [pin, setPin] = useState("");
   const [showPin, setShowPin] = useState(false);
@@ -97,13 +90,6 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
   const [captchaInput, setCaptchaInput] = useState("");
   const [captchaError, setCaptchaError] = useState(false);
   const { toast } = useToast();
-
-  const docFeatures = [
-    { icon: BookOpen, label: t("docsFeature1") },
-    { icon: Code, label: t("docsFeature2") },
-    { icon: Key, label: t("docsFeature3") },
-    { icon: Shield, label: t("docsFeature4") },
-  ];
 
   const refreshCaptcha = useCallback(() => {
     setCaptchaCode(generateCaptchaCode());
@@ -116,6 +102,11 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
     if (captchaInput.toUpperCase() !== captchaCode) {
       setCaptchaError(true);
       refreshCaptcha();
+      toast({
+        title: "Incorrect security code",
+        description: "Please enter the new code shown.",
+        variant: "destructive",
+      });
       return;
     }
     setIsLoading(true);
@@ -126,10 +117,10 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
         body: JSON.stringify({ email, pin }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || t("docsInvalidPin"));
+      if (!res.ok) throw new Error(data.message || "The email or documentation PIN is invalid.");
       onAccess(data);
     } catch (err: any) {
-      toast({ title: t("docsInvalidPin"), description: err.message, variant: "destructive" });
+      toast({ title: "Unable to access documentation", description: err.message, variant: "destructive" });
       refreshCaptcha();
     } finally {
       setIsLoading(false);
@@ -137,204 +128,346 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
   };
 
   return (
-      <div className="wp-docs-gate min-h-screen flex bg-white relative">
-      {/* Absolute positioned switcher for PinGate */}
-      <div className="absolute top-4 right-4 z-50">
-        <LanguageSwitcher />
-      </div>
-       <style>{`
-         .wp-docs-gate { background: #f4f6fb !important; color: #17213d; font-family: Inter, system-ui, sans-serif; }
-         .wp-docs-gate .pg-input { border-color: #dfe4f0; background: #fbfcff; color: #17213d; border-radius: 12px; min-height: 48px; }
-         .wp-docs-gate .pg-input:focus { border-color: #5549e8; box-shadow: 0 0 0 4px rgba(85,73,232,.12); background: #fff; }
-         .wp-docs-gate .pg-btn { background: linear-gradient(135deg,#5b52ef,#3025b9); box-shadow: 0 10px 24px rgba(66,55,207,.24); border-radius: 12px; min-height: 50px; }
-         .wp-docs-gate .pg-btn:hover:not(:disabled) { box-shadow: 0 14px 28px rgba(66,55,207,.32); }
-         .wp-docs-gate .wp-gate-side { background: linear-gradient(145deg,#3326b7 0%,#211875 58%,#151047 100%) !important; }
-         .wp-docs-gate .wp-gate-glow { opacity: .15; }
-         .wp-docs-gate .wp-gate-brand-mark { border-radius: 18px; }
-         .wp-docs-gate .wp-gate-card { border-radius: 18px; background: rgba(255,255,255,.10); border-color: rgba(255,255,255,.18); }
-         .wp-docs-gate .wp-gate-form { background: rgba(255,255,255,.84); }
-        .pg-input {
-          width:100%;padding:0.7rem 0.9rem;font-size:0.9rem;
-          border:1.5px solid #e2e8f0;border-radius:10px;
-          background:#fafafa;color:#1a1a1a;outline:none;
-          transition:border-color 0.15s,box-shadow 0.15s,background 0.15s;
-          font-family:inherit;
+    <div className="wp-docs-reference-gate">
+      <style>{`
+        .wp-docs-reference-gate {
+          min-height: 100dvh;
+          box-sizing: border-box;
+          padding-top: 93px;
+          overflow-x: hidden;
+          background: #0963e8;
+          color: #000;
+          font-family: Arial, Helvetica, sans-serif;
         }
-        .pg-input:focus { border-color:#00b050;box-shadow:0 0 0 3px rgba(0,176,80,0.1);background:#fff; }
-        .pg-input::placeholder { color:#b0bec5; }
-        .pg-input-error { border-color:#ef4444 !important; box-shadow:0 0 0 3px rgba(239,68,68,0.1) !important; }
-        .pg-btn {
-          width:100%;padding:0.8rem;font-size:0.95rem;font-weight:700;
-          background:linear-gradient(135deg,#00b050,#009a45);color:#fff;
-          border:none;border-radius:10px;cursor:pointer;
-          transition:opacity 0.15s,transform 0.1s,box-shadow 0.15s;
-          display:flex;align-items:center;justify-content:center;gap:0.5rem;
-          box-shadow:0 4px 14px rgba(0,176,80,0.3);letter-spacing:0.01em;
+        .wp-docs-reference-brand {
+          width: 328px;
+          height: 106px;
+          margin: 0 auto;
+          box-sizing: border-box;
+          display: flex;
+          align-items: center;
+          padding: 0 20px 0 22px;
+          gap: 22px;
+          background: #fff;
         }
-        .pg-btn:hover:not(:disabled) { opacity:0.92;box-shadow:0 6px 20px rgba(0,176,80,0.35); }
-        .pg-btn:active:not(:disabled) { transform:scale(0.98); }
-        .pg-btn:disabled { opacity:0.45;cursor:not-allowed;box-shadow:none; }
+        .wp-docs-reference-brand img {
+          width: 78px;
+          height: 78px;
+          flex: 0 0 78px;
+          display: block;
+          object-fit: cover;
+        }
+        .wp-docs-reference-brand-name {
+          color: #061126;
+          font-size: 39px;
+          line-height: 1;
+          font-weight: 700;
+          letter-spacing: -1.6px;
+          white-space: nowrap;
+        }
+        .wp-docs-reference-card {
+          width: min(553px, calc(100% - 24px));
+          min-height: calc(100dvh - 199px);
+          margin: 0 auto;
+          box-sizing: border-box;
+          padding: 54px 16px 80px 31px;
+          background: #fff;
+        }
+        .wp-docs-reference-content {
+          width: 100%;
+          max-width: 506px;
+        }
+        .wp-docs-reference-title {
+          margin: 0;
+          color: #000;
+          font-size: 28px;
+          line-height: 1.18;
+          font-weight: 700;
+          text-align: center;
+        }
+        .wp-docs-reference-description {
+          max-width: 525px;
+          margin: 0 auto;
+          color: #000;
+          font-size: 27px;
+          line-height: 1.2;
+          font-weight: 700;
+          text-align: center;
+        }
+        .wp-docs-reference-form {
+          margin-top: 29px;
+        }
+        .wp-docs-reference-input {
+          width: 100%;
+          height: 80px;
+          box-sizing: border-box;
+          padding: 0 19px;
+          border: 2px solid #b8b8b8;
+          border-radius: 7px;
+          outline: none;
+          background: #fff;
+          color: #000;
+          font-family: Arial, Helvetica, sans-serif;
+          font-size: 25px;
+          line-height: 1;
+        }
+        .wp-docs-reference-input::placeholder {
+          color: #777;
+          opacity: 1;
+        }
+        .wp-docs-reference-input:focus {
+          border-color: #8d8d8d;
+          box-shadow: 0 0 0 2px rgba(9, 99, 232, .16);
+        }
+        .wp-docs-reference-pin {
+          position: relative;
+          margin-top: 18px;
+        }
+        .wp-docs-reference-pin .wp-docs-reference-input {
+          padding-right: 66px;
+        }
+        .wp-docs-reference-pin input::placeholder {
+          font-weight: 700;
+        }
+        .wp-docs-reference-eye {
+          position: absolute;
+          top: 50%;
+          right: 18px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 30px;
+          height: 30px;
+          padding: 0;
+          border: 0;
+          transform: translateY(-50%);
+          color: #000;
+          background: transparent;
+          cursor: pointer;
+        }
+        .wp-docs-reference-eye svg {
+          width: 27px;
+          height: 27px;
+          stroke-width: 2.3;
+        }
+        .wp-docs-reference-captcha {
+          display: flex;
+          align-items: center;
+          width: 100%;
+          height: 78px;
+          box-sizing: border-box;
+          margin-top: 33px;
+          overflow: hidden;
+          border: 2px solid #b8b8b8;
+          border-radius: 7px;
+          background: #fff;
+        }
+        .wp-docs-reference-captcha > div {
+          display: flex;
+          align-items: center;
+          flex: 0 0 199px;
+          width: 199px;
+          height: 100%;
+          padding-left: 9px;
+          box-sizing: border-box;
+        }
+        .wp-docs-reference-captcha canvas {
+          width: 176px !important;
+          height: 52px !important;
+          border-radius: 0 !important;
+        }
+        .wp-docs-reference-captcha > div > button {
+          display: none;
+        }
+        .wp-docs-reference-captcha-input {
+          min-width: 0;
+          width: 100%;
+          height: 100%;
+          padding: 0 12px 0 0;
+          box-sizing: border-box;
+          border: 0;
+          outline: 0;
+          color: #777;
+          background: transparent;
+          font-family: Arial, Helvetica, sans-serif;
+          font-size: 25px;
+          font-weight: 700;
+        }
+        .wp-docs-reference-captcha-input::placeholder {
+          color: #777;
+          opacity: 1;
+        }
+        .wp-docs-reference-captcha-input:focus {
+          box-shadow: none;
+        }
+        .wp-docs-reference-captcha-error {
+          margin: 6px 0 -19px;
+          color: #dc2626;
+          font-size: 13px;
+          font-weight: 600;
+        }
+        .wp-docs-reference-submit {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: calc(100% - 8px);
+          height: 80px;
+          margin: 65px 0 0 8px;
+          box-sizing: border-box;
+          border: 2px solid #456b8d;
+          border-radius: 7px;
+          color: #fff;
+          background: #6083a8;
+          font-family: Arial, Helvetica, sans-serif;
+          font-size: 37px;
+          line-height: 1;
+          font-weight: 700;
+          cursor: pointer;
+          transition: background-color .12s ease, transform .1s ease;
+        }
+        .wp-docs-reference-submit:hover:not(:disabled) {
+          background: #56799d;
+        }
+        .wp-docs-reference-submit:active:not(:disabled) {
+          transform: scale(.99);
+        }
+        .wp-docs-reference-submit:disabled {
+          cursor: not-allowed;
+          opacity: .58;
+        }
+        @media (max-width: 500px) {
+          .wp-docs-reference-gate {
+            padding-top: 48px;
+          }
+          .wp-docs-reference-brand {
+            width: 286px;
+            height: 92px;
+            padding-left: 18px;
+            gap: 18px;
+          }
+          .wp-docs-reference-brand img {
+            width: 66px;
+            height: 66px;
+            flex-basis: 66px;
+          }
+          .wp-docs-reference-brand-name {
+            font-size: 33px;
+          }
+          .wp-docs-reference-card {
+            min-height: calc(100dvh - 140px);
+            padding: 42px 13px 56px 20px;
+          }
+          .wp-docs-reference-title {
+            font-size: 24px;
+          }
+          .wp-docs-reference-description {
+            font-size: 22px;
+          }
+          .wp-docs-reference-input {
+            height: 68px;
+            font-size: 21px;
+          }
+          .wp-docs-reference-captcha {
+            height: 68px;
+          }
+          .wp-docs-reference-captcha > div {
+            flex-basis: 148px;
+            width: 148px;
+            padding-left: 5px;
+          }
+          .wp-docs-reference-captcha canvas {
+            width: 136px !important;
+            height: 46px !important;
+          }
+          .wp-docs-reference-captcha-input {
+            font-size: 20px;
+          }
+          .wp-docs-reference-submit {
+            height: 68px;
+            margin-top: 48px;
+            font-size: 30px;
+          }
+        }
       `}</style>
 
-      {/* Left brand panel */}
-       <div className="wp-gate-side hidden lg:flex lg:w-[52%] xl:w-[55%] flex-col justify-between p-12 relative overflow-hidden"
-         style={{ background: "linear-gradient(145deg,#3326b7 0%,#211875 58%,#151047 100%)" }}>
-         <div className="wp-gate-glow absolute inset-0 opacity-10"
-          style={{ backgroundImage: "radial-gradient(circle at 25% 75%,#ffffff 0%,transparent 55%),radial-gradient(circle at 75% 25%,#ffffff 0%,transparent 45%)" }} />
-
-        <div className="relative z-10">
-          <div className="flex items-center gap-4">
-             <div className="wp-gate-brand-mark w-16 h-16 rounded-2xl bg-white shadow-lg flex items-center justify-center overflow-hidden flex-shrink-0"
-              style={{ boxShadow: "0 4px 20px rgba(0,0,0,0.25)" }}>
-              <img src="/robotpay-logo.jpg" alt="WestPay" className="w-full h-full object-cover" />
-            </div>
-            <div>
-              <span className="text-3xl font-black text-white tracking-tight leading-none block">WestPay</span>
-              <p className="text-white/60 text-sm mt-1">{t("apiDocumentation")}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="relative z-10 space-y-6">
-          <div>
-            <h2 className="text-3xl xl:text-4xl font-black text-white leading-tight mb-3">
-              {t("docsIntegrationTitle")}
-            </h2>
-            <p className="text-white/70 text-base leading-relaxed">
-              {t("docsIntegrationDesc")}
-            </p>
-          </div>
-
-          <div className="space-y-3">
-            {docFeatures.map(({ icon: Icon, label }) => (
-              <div key={label} className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center flex-shrink-0">
-                  <Icon className="w-4 h-4 text-white" />
-                </div>
-                <span className="text-white/85 text-sm font-medium">{label}</span>
-              </div>
-            ))}
-          </div>
-
-           <div className="wp-gate-card bg-white/10 backdrop-blur rounded-2xl p-5 border border-white/15">
-            <p className="text-white/70 text-xs font-medium uppercase tracking-widest mb-2">{t("docsSecuredAccess")}</p>
-            <p className="text-white text-sm font-semibold">{t("docsPinConfigured")}</p>
-          </div>
-        </div>
-
-        <div className="relative z-10 flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse" />
-          <span className="text-white/50 text-xs">{t("docsSecuredDocs")}</span>
-        </div>
+      <div className="wp-docs-reference-brand">
+        <img src="/robotpay-logo.jpg" alt="WestPay" />
+        <span className="wp-docs-reference-brand-name">WestPay</span>
       </div>
 
-      {/* Right form panel */}
-       <div className="wp-gate-form flex-1 flex flex-col items-center justify-center p-6 sm:p-10 bg-white">
-        <div className="w-full max-w-[420px]">
-          {/* Mobile logo */}
-          <div className="flex lg:hidden flex-col items-center gap-3 mb-8">
-            <div className="w-20 h-20 rounded-2xl overflow-hidden shadow-lg border border-slate-100">
-              <img src="/robotpay-logo.jpg" alt="WestPay" className="w-full h-full object-cover" />
-            </div>
-            <div className="text-center">
-              <span className="text-2xl font-black text-slate-900 block">WestPay</span>
-              <span className="text-sm text-slate-400">{t("apiDocumentation")}</span>
-            </div>
-          </div>
+      <main className="wp-docs-reference-card">
+        <div className="wp-docs-reference-content">
+          <h1 className="wp-docs-reference-title" data-testid="text-docs-title">Access Documentation</h1>
+          <p className="wp-docs-reference-description">
+            Enter your merchant credentials to access<br className="hidden sm:block" /> the API documentation.
+          </p>
 
-          <div className="mb-8">
-            <h1 className="text-2xl font-black text-slate-900 mb-1" data-testid="text-docs-title">{t("docsAccessTitle")}</h1>
-            <p className="text-slate-500 text-sm">{t("docsAccessDesc")}</p>
-          </div>
+          <form onSubmit={handleSubmit} className="wp-docs-reference-form">
+            <input
+              type="email"
+              className="wp-docs-reference-input"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Email"
+              aria-label="Email"
+              required
+              autoComplete="username"
+              data-testid="input-docs-email"
+            />
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Email */}
-            <div className="space-y-1.5">
-              <label className="block text-sm font-semibold text-slate-700">{t("docsEmailLabel")}</label>
+            <div className="wp-docs-reference-pin">
               <input
-                type="email"
-                className="pg-input"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="vous@exemple.com"
+                type={showPin ? "text" : "password"}
+                className="wp-docs-reference-input"
+                value={pin}
+                onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="doc code pin"
+                aria-label="Documentation PIN"
+                maxLength={6}
                 required
-                autoComplete="username"
-                data-testid="input-docs-email"
+                autoComplete="current-password"
+                data-testid="input-docs-pin"
               />
+              <button
+                type="button"
+                onClick={() => setShowPin(!showPin)}
+                className="wp-docs-reference-eye"
+                data-testid="button-toggle-pin-visibility"
+                aria-label={showPin ? "Hide documentation PIN" : "Show documentation PIN"}
+              >
+                {showPin ? <EyeOff /> : <Eye />}
+              </button>
             </div>
 
-            {/* PIN */}
-            <div className="space-y-1.5">
-              <label className="block text-sm font-semibold text-slate-700">{t("docsPinLabel")}</label>
-              <div className="relative">
-                <input
-                  type={showPin ? "text" : "password"}
-                  className="pg-input"
-                  style={{ paddingRight: "2.75rem", letterSpacing: showPin ? "normal" : "0.3em" }}
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                  placeholder="••••••"
-                  maxLength={6}
-                  required
-                  autoComplete="current-password"
-                  data-testid="input-docs-pin"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPin(!showPin)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
-                  style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
-                  data-testid="button-toggle-pin-visibility"
-                  title={showPin ? t("docsHidePin") : t("docsShowPin")}
-                >
-                  {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            {/* CAPTCHA */}
-            <div className="space-y-2">
-              <label className="block text-sm font-semibold text-slate-700">{t("docsSecurityCode")}</label>
+            <div className={`wp-docs-reference-captcha ${captchaError ? "border-red-500" : ""}`}>
               <Captcha code={captchaCode} onRefresh={refreshCaptcha} />
               <input
                 type="text"
-                className={`pg-input ${captchaError ? "pg-input-error" : ""}`}
+                className="wp-docs-reference-captcha-input"
                 value={captchaInput}
                 onChange={(e) => { setCaptchaInput(e.target.value.toUpperCase()); setCaptchaError(false); }}
-                placeholder={t("docsCaptchaPlaceholder")}
+                placeholder="Enter code"
+                aria-label="Security code"
                 maxLength={5}
                 autoComplete="off"
                 spellCheck={false}
                 required
                 data-testid="input-docs-captcha"
               />
-              {captchaError && (
-                <p className="text-xs text-red-500 font-medium">{t("docsCaptchaError")}</p>
-              )}
             </div>
+            {captchaError && <p className="wp-docs-reference-captcha-error">The security code is incorrect.</p>}
 
             <button
               type="submit"
               disabled={isLoading || !email || pin.length !== 6 || captchaInput.length < 5}
-              className="pg-btn"
-              style={{ marginTop: "0.75rem" }}
+              className="wp-docs-reference-submit"
               data-testid="button-docs-access"
             >
-              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
-              {isLoading ? t("docsVerifying") : t("docsAccessBtn")}
+              {isLoading ? <Loader2 className="w-7 h-7 animate-spin" /> : "connect to Westpay"}
             </button>
           </form>
-
-          <div className="mt-6 pt-5 border-t border-slate-100">
-            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-100">
-              <Lock className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
-              <p className="text-xs text-slate-500 leading-relaxed">
-                {t("docsPinConfigured")}
-              </p>
-            </div>
-          </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { showConfirm } from "@/components/ui/modal-toast";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -256,7 +257,7 @@ function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string
                   <code className="flex-1 bg-primary/10 text-primary font-bold rounded p-3 text-center text-xl tracking-widest" data-testid={`text-telegram-code-${merchant.id}`}>
                     {generatedCode}
                   </code>
-                  <Button variant="outline" size="icon" onClick={() => { navigator.clipboard.writeText(generatedCode); toast({ title: "Code copié !" }); }} data-testid={`button-copy-code-${merchant.id}`}>
+                  <Button variant="outline" size="icon" onClick={() => { copyTextToClipboard(generatedCode, { successTitle: "Code copié !" }).catch(() => {}); }} data-testid={`button-copy-code-${merchant.id}`}>
                     <Copy className="w-4 h-4" />
                   </Button>
                 </div>
@@ -1146,7 +1147,7 @@ function MerchantDetailsDialog({ merchantId, onClose }: { merchantId: number; on
                         <div className="flex items-center gap-2">
                           <p className="font-mono break-all">{merchant.webhookSecret}</p>
                           <Button size="icon" variant="ghost" className="h-5 w-5 shrink-0"
-                            onClick={() => { navigator.clipboard?.writeText?.(merchant.webhookSecret ?? ""); toast({ title: "Secret copié" }); }}>
+                            onClick={() => { copyTextToClipboard(merchant.webhookSecret ?? "", { successTitle: "Secret copié" }).catch(() => {}); }}>
                             <Copy className="w-3 h-3" />
                           </Button>
                         </div>
@@ -1198,8 +1199,7 @@ function AdminPaymentLinksPanel() {
   });
 
   const copyLink = (uniqueId: string) => {
-    navigator.clipboard.writeText(`${baseUrl}/link/${uniqueId}`);
-    toast({ title: "Lien copié !" });
+    copyTextToClipboard(`${baseUrl}/link/${uniqueId}`, { successTitle: "Lien copié !" }).catch(() => {});
   };
 
   const getLinkStatus = (link: any) => {
@@ -1718,8 +1718,7 @@ function TransactionsPanel() {
   });
 
   const copyToClipboard = (text: string, label: string) => {
-    navigator.clipboard.writeText(text);
-    toast({ title: "Copié", description: `${label} copié dans le presse-papiers` });
+    copyTextToClipboard(text, { successTitle: "Copié", successDescription: `${label} copié dans le presse-papiers` }).catch(() => {});
   };
 
   const downloadCSV = () => {
@@ -2217,7 +2216,7 @@ function CountriesPanel() {
                     <div className="flex items-center gap-2 mt-2 flex-wrap">
                       <Key className="w-3 h-3 text-muted-foreground" />
                       <code className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-md font-mono">{mc.apiKey}</code>
-                      <Button variant="ghost" size="icon" onClick={() => { navigator.clipboard.writeText(mc.apiKey); toast({ title: "Copie !" }); }}>
+                      <Button variant="ghost" size="icon" onClick={() => { copyTextToClipboard(mc.apiKey, { successTitle: "Copié !" }).catch(() => {}); }}>
                         <Copy className="w-3 h-3" />
                       </Button>
                     </div>
@@ -2724,8 +2723,10 @@ function ApiKeysManagementPanel() {
                     const text = (apiLogs as any[]).slice(0, 20).map((log: any) =>
                       `[${new Date(log.createdAt).toLocaleString("fr-FR")}] ${log.action} | ${log.description} | IP: ${log.ip || "-"}`
                     ).join("\n");
-                    navigator.clipboard.writeText(text);
-                    toast({ title: "Requetes copiees", description: `${Math.min((apiLogs as any[]).length, 20)} entrees copiees` });
+                    copyTextToClipboard(text, {
+                      successTitle: "Requêtes copiées",
+                      successDescription: `${Math.min((apiLogs as any[]).length, 20)} entrées copiées`,
+                    }).catch(() => {});
                   }}
                 >
                   <Copy className="w-3 h-3" />Copier tout
@@ -2755,8 +2756,7 @@ function ApiKeysManagementPanel() {
                         data-testid={`button-copy-log-${log.id}`}
                         onClick={() => {
                           const text = `[${new Date(log.createdAt).toLocaleString("fr-FR")}] ${log.action} | ${log.description} | IP: ${log.ip || "-"}`;
-                          navigator.clipboard.writeText(text);
-                          toast({ title: "Requete copiee" });
+                          copyTextToClipboard(text, { successTitle: "Requête copiée" }).catch(() => {});
                         }}
                       >
                         <Copy className="w-3 h-3" />
@@ -2797,7 +2797,7 @@ function ApiKeysManagementPanel() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => { navigator.clipboard.writeText(c.apiKey); toast({ title: "Cle copiee" }); }}
+                      onClick={() => { copyTextToClipboard(c.apiKey, { successTitle: "Clé copiée" }).catch(() => {}); }}
                       data-testid={`button-admin-copy-key-${c.id}`}
                     >
                       <Copy className="w-3 h-3" />
@@ -2963,7 +2963,7 @@ function OmniPayPanel() {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => { navigator.clipboard.writeText(callbackUrl); toast({ title: "URL copiee" }); }}
+                onClick={() => { copyTextToClipboard(callbackUrl, { successTitle: "URL copiée" }).catch(() => {}); }}
                 data-testid="button-copy-callback-url"
               >
                 <Copy className="w-3 h-3" />
@@ -3100,7 +3100,7 @@ function MbiyoPanel() {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => { navigator.clipboard.writeText(payinCallbackUrl); toast({ title: "URL copiee" }); }}
+                onClick={() => { copyTextToClipboard(payinCallbackUrl, { successTitle: "URL copiée" }).catch(() => {}); }}
                 data-testid="button-copy-mbiyo-callback-url"
               >
                 <Copy className="w-3 h-3" />
@@ -3126,7 +3126,7 @@ function MbiyoPanel() {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => { navigator.clipboard.writeText(payoutCallbackUrl); toast({ title: "URL copiee" }); }}
+                onClick={() => { copyTextToClipboard(payoutCallbackUrl, { successTitle: "URL copiée" }).catch(() => {}); }}
                 data-testid="button-copy-mbiyo-payout-callback-url"
               >
                 <Copy className="w-3 h-3" />
@@ -3411,7 +3411,7 @@ function SeaPayPanel() {
               <p className="text-xs text-muted-foreground mb-1">Pay-in (dépôts)</p>
               <div className="flex items-center gap-2">
                 <code className="text-xs bg-muted px-2 py-1 rounded font-mono flex-1 break-all text-foreground" data-testid="text-seapay-callback-url">{callbackUrl}</code>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { navigator.clipboard.writeText(callbackUrl); toast({ title: "URL copiée" }); }} data-testid="button-copy-seapay-callback-url">
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { copyTextToClipboard(callbackUrl, { successTitle: "URL copiée" }).catch(() => {}); }} data-testid="button-copy-seapay-callback-url">
                   <Copy className="w-3 h-3" />
                 </Button>
               </div>
@@ -3420,7 +3420,7 @@ function SeaPayPanel() {
               <p className="text-xs text-muted-foreground mb-1">Pay-out (retraits)</p>
               <div className="flex items-center gap-2">
                 <code className="text-xs bg-muted px-2 py-1 rounded font-mono flex-1 break-all text-foreground" data-testid="text-seapay-payout-callback-url">{payoutCallbackUrl}</code>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { navigator.clipboard.writeText(payoutCallbackUrl); toast({ title: "URL copiée" }); }} data-testid="button-copy-seapay-payout-callback-url">
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { copyTextToClipboard(payoutCallbackUrl, { successTitle: "URL copiée" }).catch(() => {}); }} data-testid="button-copy-seapay-payout-callback-url">
                   <Copy className="w-3 h-3" />
                 </Button>
               </div>
@@ -3658,7 +3658,7 @@ function SendavaPayPanel() {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => { navigator.clipboard.writeText(callbackUrl); toast({ title: "URL copiee" }); }}
+                onClick={() => { copyTextToClipboard(callbackUrl, { successTitle: "URL copiée" }).catch(() => {}); }}
                 data-testid="button-copy-sendavapay-callback-url"
               >
                 <Copy className="w-3 h-3" />
@@ -5385,7 +5385,7 @@ function AdminWithdrawalsPanel() {
                             <div className="flex items-center gap-1.5 mt-0.5">
                               <span className="text-xs text-muted-foreground">Réf Westpay :</span>
                               <code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded text-foreground">{wd.omnipayRef}</code>
-                              <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => { navigator.clipboard.writeText(wd.omnipayRef!); }} title="Copier la référence" data-testid={`button-copy-ref-${wd.id}`}>
+                              <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => { copyTextToClipboard(wd.omnipayRef!, { successTitle: "Référence copiée" }).catch(() => {}); }} title="Copier la référence" data-testid={`button-copy-ref-${wd.id}`}>
                                 <Copy className="w-3 h-3" />
                               </Button>
                             </div>
@@ -5496,7 +5496,7 @@ function AdminWithdrawalsPanel() {
                   <div className="flex gap-2 items-center">
                     <span className="text-muted-foreground w-32 shrink-0">Réf Westpay :</span>
                     <code className="font-mono text-xs bg-muted px-2 py-1 rounded flex-1 break-all">{selectedWd.omnipayRef}</code>
-                    <Button variant="outline" size="sm" className="h-7 text-xs shrink-0" onClick={() => { navigator.clipboard.writeText(selectedWd.omnipayRef!); }} data-testid="button-copy-omnipayref-dialog">
+                    <Button variant="outline" size="sm" className="h-7 text-xs shrink-0" onClick={() => { copyTextToClipboard(selectedWd.omnipayRef!, { successTitle: "Référence copiée" }).catch(() => {}); }} data-testid="button-copy-omnipayref-dialog">
                       <Copy className="w-3 h-3 mr-1" />Copier
                     </Button>
                   </div>
@@ -5746,7 +5746,7 @@ function SettingsPanel() {
                 size="icon"
                 onClick={() => {
                   const key = (profile as any)?.apiKey;
-                  if (key) { navigator.clipboard.writeText(`/setgroup ${key}`); toast({ title: "Commande copiée !" }); }
+                  if (key) { copyTextToClipboard(`/setgroup ${key}`, { successTitle: "Commande copiée !" }).catch(() => {}); }
                 }}
                 data-testid="button-copy-apikey"
               >
@@ -8864,7 +8864,7 @@ function SdkPanel() {
                         <Eye className="w-3 h-3" />
                       </Button>
                       <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0"
-                        onClick={() => { navigator.clipboard.writeText(m.sdkApiKey!); toast({ title: "Clé SDK copiée" }); }}
+                        onClick={() => { copyTextToClipboard(m.sdkApiKey!, { successTitle: "Clé SDK copiée" }).catch(() => {}); }}
                         data-testid={`button-copy-sdk-key-${m.id}`}>
                         <Copy className="w-3 h-3" />
                       </Button>

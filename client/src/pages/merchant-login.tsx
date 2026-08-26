@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Eye, EyeOff, Loader2, Shield, Lock, Mail, CheckCircle2, Zap, Globe, ArrowRight } from "lucide-react";
 import { SiTelegram } from "react-icons/si";
 import Captcha, { generateCaptchaCode } from "@/components/Captcha";
+import { useLanguage } from "@/lib/language";
 
 const FEATURES = [
   { icon: Zap, label: "Encaissements Mobile Money en temps réel" },
@@ -57,6 +58,7 @@ export default function MerchantLogin() {
   const { login } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { t } = useLanguage();
 
   useEffect(() => {
     fetch("/api/auth/check-ip")
@@ -88,7 +90,7 @@ export default function MerchantLogin() {
     if (captchaInput.toUpperCase().trim() !== captchaCode.toUpperCase()) {
       setCaptchaError(true);
       refreshCaptcha();
-      toast({ title: "Code de sécurité incorrect", description: "Veuillez entrer le code affiché.", variant: "destructive" });
+      toast({ title: t("authInvalidCaptcha"), description: t("authInvalidCaptchaDesc"), variant: "destructive" });
       return;
     }
 
@@ -111,7 +113,7 @@ export default function MerchantLogin() {
         setOtpCountdown(60);
         setOtpVia(data.otpVia || "email");
         toast({
-          title: "Code envoyé",
+          title: t("authCodeSent"),
           description: data.otpVia === "telegram"
             ? "Votre code de vérification a été envoyé dans votre groupe Telegram."
             : `Un code de vérification a été envoyé à ${email}`,
@@ -126,10 +128,10 @@ export default function MerchantLogin() {
         name: data.user.name,
         slug: data.user.slug,
       });
-      toast({ title: "Connexion réussie", description: "Redirection vers votre espace..." });
+      toast({ title: t("authLoginSuccess"), description: t("authRedirecting"), variant: "success" });
       setTimeout(() => setLocation(`/merchant/${data.user.slug}`), 300);
     } catch (err: any) {
-      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+      toast({ title: t("authLoginError"), description: err.message || t("authLoginError"), variant: "destructive" });
       refreshCaptcha();
     } finally {
       setIsLoading(false);
@@ -155,10 +157,10 @@ export default function MerchantLogin() {
         name: data.user.name,
         slug: data.user.slug,
       });
-      toast({ title: "Connexion réussie" });
+      toast({ title: t("authLoginSuccess"), variant: "success" });
       setTimeout(() => setLocation(`/merchant/${data.user.slug}`), 300);
     } catch (err: any) {
-      toast({ title: "Code invalide", description: err.message, variant: "destructive" });
+      toast({ title: t("authInvalidCode"), description: err.message || t("authInvalidCode"), variant: "destructive" });
       setOtpCode("");
     } finally {
       setOtpLoading(false);
@@ -183,14 +185,14 @@ export default function MerchantLogin() {
         setOtpCountdown(60);
         if (data.otpVia) setOtpVia(data.otpVia);
         toast({
-          title: "Code renvoyé",
+          title: t("authCodeResent"),
           description: data.otpVia === "telegram"
             ? "Nouveau code envoyé dans votre groupe Telegram."
             : `Nouveau code envoyé à ${otpEmail}`,
         });
       }
     } catch (err: any) {
-      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+      toast({ title: t("authLoginError"), description: err.message || t("authLoginError"), variant: "destructive" });
     } finally {
       setOtpResendLoading(false);
     }

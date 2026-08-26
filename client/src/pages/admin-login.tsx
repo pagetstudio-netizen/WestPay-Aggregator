@@ -4,6 +4,8 @@ import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { Eye, EyeOff, Loader2, Shield, KeyRound, Lock, CheckCircle2, Zap, Globe, Smartphone, QrCode, AlertTriangle, Copy, Check } from "lucide-react";
 import { adminConfig } from "@/lib/admin-config";
+import { useLanguage } from "@/lib/language";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 async function buildDeviceFingerprint(): Promise<string> {
   try {
@@ -131,6 +133,7 @@ export default function AdminLogin() {
   const { login } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { t } = useLanguage();
 
   useEffect(() => {
     fetch("/api/auth/check-ip")
@@ -191,10 +194,10 @@ export default function AdminLogin() {
         return;
       }
       login(data.token, { id: data.user.id, email: data.user.email, role: "admin" });
-      toast({ title: "Connexion réussie", description: "Redirection..." });
+      toast({ title: t("authLoginSuccess"), description: t("authRedirecting"), variant: "success" });
       setTimeout(() => setLocation(`${adminConfig.base}/dashboard`), 300);
     } catch (err: any) {
-      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+      toast({ title: t("authLoginError"), description: err.message || t("authLoginError"), variant: "destructive" });
     } finally {
       setIsLoading(false);
     }
@@ -213,10 +216,10 @@ export default function AdminLogin() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Code invalide");
       login(data.token, { id: data.user.id, email: data.user.email, role: "admin" });
-      toast({ title: "Authentification réussie" });
+      toast({ title: t("authLoginSuccess"), variant: "success" });
       setTimeout(() => setLocation(`${adminConfig.base}/dashboard`), 300);
     } catch (err: any) {
-      toast({ title: "Erreur 2FA", description: err.message, variant: "destructive" });
+      toast({ title: t("authInvalidCode"), description: err.message || t("authInvalidCode"), variant: "destructive" });
     } finally {
       setOtpLoading(false);
     }
@@ -235,10 +238,10 @@ export default function AdminLogin() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Code invalide");
       login(data.token, { id: data.user.id, email: data.user.email, role: "admin" });
-      toast({ title: "Authentification réussie" });
+      toast({ title: t("authLoginSuccess"), variant: "success" });
       setTimeout(() => setLocation(`${adminConfig.base}/dashboard`), 300);
     } catch (err: any) {
-      toast({ title: "Erreur TOTP", description: err.message, variant: "destructive" });
+      toast({ title: t("authInvalidCode"), description: err.message || t("authInvalidCode"), variant: "destructive" });
       setTotpCode("");
     } finally {
       setTotpLoading(false);
@@ -274,12 +277,13 @@ export default function AdminLogin() {
     setTotpSetupStep(false); setSetupQrCode(""); setSetupSecret(""); setSetupToken(""); setSetupCode(""); setSetupCodeStep(false); setSecretCopied(false);
   };
 
-  const copySecret = () => {
+  const copySecret = async () => {
     if (!setupSecret) return;
-    navigator.clipboard.writeText(setupSecret).then(() => {
+    try {
+      await copyTextToClipboard(setupSecret, { successTitle: t("copied") });
       setSecretCopied(true);
       setTimeout(() => setSecretCopied(false), 2000);
-    });
+    } catch {}
   };
 
   if (ipStatus === "checking") {
