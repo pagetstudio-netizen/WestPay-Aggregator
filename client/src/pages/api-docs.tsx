@@ -15,6 +15,10 @@ import {
   Eye, EyeOff
 } from "lucide-react";
 import Captcha, { generateCaptchaCode } from "@/components/Captcha";
+import docsPaymentIllustration from "@assets/Screenshot_20260826-170313_1787764599668.png";
+import docsFlowIllustration from "@assets/Screenshot_20260826-170419_1787764599628.png";
+import docsSecurityIllustration from "@assets/IMG_20260826_171328_925_1787764614017.jpg";
+import docsApiIllustration from "@assets/IMG_20260826_171326_814_1787764614055.jpg";
 
 const BASE_URL = "https://westpay.cfd";
 const BANK2_URL = "https://payment.bank2.westpay.cfd";
@@ -47,17 +51,17 @@ function CopyButton({ text }: { text: string }) {
 function CodeBlock({ code, label, lang }: { code: string; label?: string; lang?: string }) {
   const langColor: Record<string, string> = { JavaScript: "text-yellow-400", PHP: "text-indigo-400", Python: "text-blue-400" };
   return (
-    <Card className="overflow-hidden">
+    <Card className="wp-code-card overflow-hidden">
       <CardContent className="p-0">
-        <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b bg-muted/50">
+        <div className="wp-code-toolbar flex items-center justify-between gap-2 px-3 py-1.5 border-b bg-muted/50">
           <div className="flex items-center gap-2">
             {lang && <span className={`text-xs font-bold ${langColor[lang] || "text-muted-foreground"}`}>{lang}</span>}
             {label && <span className="text-xs text-muted-foreground truncate">{label}</span>}
           </div>
           <CopyButton text={code} />
         </div>
-        <div className="p-4 overflow-x-auto bg-muted/20">
-          <pre className="text-xs sm:text-sm font-mono text-foreground whitespace-pre">{code}</pre>
+        <div className="wp-code-body p-4 overflow-x-auto bg-muted/20">
+          <pre className="wp-code-pre text-xs sm:text-sm font-mono text-foreground whitespace-pre">{code}</pre>
         </div>
       </CardContent>
     </Card>
@@ -72,7 +76,7 @@ function LangTabs({ tabs }: { tabs: { lang: string; label: string; code: string 
       <div className="flex gap-1 flex-wrap">
         {tabs.map(t => (
           <button key={t.lang} onClick={() => setActive(t.lang)}
-            className={`px-3 py-1 rounded text-xs font-medium transition-colors ${active === t.lang ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}
+            className={`wp-lang-tab px-3 py-1 rounded text-xs font-medium transition-colors ${active === t.lang ? "wp-lang-tab-active bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}
             data-testid={`tab-lang-${t.lang.toLowerCase()}`}>
             {t.lang}
           </button>
@@ -133,12 +137,22 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
   };
 
   return (
-    <div className="min-h-screen flex bg-white relative">
+      <div className="wp-docs-gate min-h-screen flex bg-white relative">
       {/* Absolute positioned switcher for PinGate */}
       <div className="absolute top-4 right-4 z-50">
         <LanguageSwitcher />
       </div>
-      <style>{`
+       <style>{`
+         .wp-docs-gate { background: #f4f6fb !important; color: #17213d; font-family: Inter, system-ui, sans-serif; }
+         .wp-docs-gate .pg-input { border-color: #dfe4f0; background: #fbfcff; color: #17213d; border-radius: 12px; min-height: 48px; }
+         .wp-docs-gate .pg-input:focus { border-color: #5549e8; box-shadow: 0 0 0 4px rgba(85,73,232,.12); background: #fff; }
+         .wp-docs-gate .pg-btn { background: linear-gradient(135deg,#5b52ef,#3025b9); box-shadow: 0 10px 24px rgba(66,55,207,.24); border-radius: 12px; min-height: 50px; }
+         .wp-docs-gate .pg-btn:hover:not(:disabled) { box-shadow: 0 14px 28px rgba(66,55,207,.32); }
+         .wp-docs-gate .wp-gate-side { background: linear-gradient(145deg,#3326b7 0%,#211875 58%,#151047 100%) !important; }
+         .wp-docs-gate .wp-gate-glow { opacity: .15; }
+         .wp-docs-gate .wp-gate-brand-mark { border-radius: 18px; }
+         .wp-docs-gate .wp-gate-card { border-radius: 18px; background: rgba(255,255,255,.10); border-color: rgba(255,255,255,.18); }
+         .wp-docs-gate .wp-gate-form { background: rgba(255,255,255,.84); }
         .pg-input {
           width:100%;padding:0.7rem 0.9rem;font-size:0.9rem;
           border:1.5px solid #e2e8f0;border-radius:10px;
@@ -163,14 +177,14 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
       `}</style>
 
       {/* Left brand panel */}
-      <div className="hidden lg:flex lg:w-[52%] xl:w-[55%] flex-col justify-between p-12 relative overflow-hidden"
-        style={{ background: "linear-gradient(145deg,#00b050 0%,#005c2e 60%,#003d1e 100%)" }}>
-        <div className="absolute inset-0 opacity-10"
+       <div className="wp-gate-side hidden lg:flex lg:w-[52%] xl:w-[55%] flex-col justify-between p-12 relative overflow-hidden"
+         style={{ background: "linear-gradient(145deg,#3326b7 0%,#211875 58%,#151047 100%)" }}>
+         <div className="wp-gate-glow absolute inset-0 opacity-10"
           style={{ backgroundImage: "radial-gradient(circle at 25% 75%,#ffffff 0%,transparent 55%),radial-gradient(circle at 75% 25%,#ffffff 0%,transparent 45%)" }} />
 
         <div className="relative z-10">
           <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-2xl bg-white shadow-lg flex items-center justify-center overflow-hidden flex-shrink-0"
+             <div className="wp-gate-brand-mark w-16 h-16 rounded-2xl bg-white shadow-lg flex items-center justify-center overflow-hidden flex-shrink-0"
               style={{ boxShadow: "0 4px 20px rgba(0,0,0,0.25)" }}>
               <img src="/robotpay-logo.jpg" alt="WestPay" className="w-full h-full object-cover" />
             </div>
@@ -202,7 +216,7 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
             ))}
           </div>
 
-          <div className="bg-white/10 backdrop-blur rounded-2xl p-5 border border-white/15">
+           <div className="wp-gate-card bg-white/10 backdrop-blur rounded-2xl p-5 border border-white/15">
             <p className="text-white/70 text-xs font-medium uppercase tracking-widest mb-2">{t("docsSecuredAccess")}</p>
             <p className="text-white text-sm font-semibold">{t("docsPinConfigured")}</p>
           </div>
@@ -215,7 +229,7 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
       </div>
 
       {/* Right form panel */}
-      <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-10 bg-white">
+       <div className="wp-gate-form flex-1 flex flex-col items-center justify-center p-6 sm:p-10 bg-white">
         <div className="w-full max-w-[420px]">
           {/* Mobile logo */}
           <div className="flex lg:hidden flex-col items-center gap-3 mb-8">
@@ -332,15 +346,15 @@ function EndpointCard({ method, path, description, requestBody, responseBody, au
   const [open, setOpen] = useState(false);
   const colors: Record<string, string> = { GET: "bg-blue-500", POST: "bg-green-500", PUT: "bg-amber-500", DELETE: "bg-red-500", PATCH: "bg-purple-500" };
   return (
-    <div className="border rounded-lg overflow-hidden">
-      <button onClick={() => setOpen(!open)} className="w-full flex items-center gap-3 p-3 hover:bg-muted/30 transition-colors text-left" data-testid={`endpoint-${method}-${path.replace(/\//g, "-")}`}>
+    <div className="wp-endpoint-card border rounded-lg overflow-hidden">
+      <button onClick={() => setOpen(!open)} className="wp-endpoint-trigger w-full flex items-center gap-3 p-3 hover:bg-muted/30 transition-colors text-left" data-testid={`endpoint-${method}-${path.replace(/\//g, "-")}`}>
         <span className={`text-white text-xs font-bold px-2 py-0.5 rounded shrink-0 ${colors[method] || "bg-gray-500"}`}>{method}</span>
         <code className="text-xs sm:text-sm font-mono text-foreground flex-1 min-w-0 break-all">{path}</code>
         {authRequired && <Lock className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
         <span className="text-muted-foreground text-xs shrink-0">{open ? "▲" : "▼"}</span>
       </button>
       {open && (
-        <div className="border-t px-3 pb-3 space-y-3">
+          <div className="wp-endpoint-details border-t px-3 pb-3 space-y-3">
           <p className="text-sm text-muted-foreground pt-3">{description}</p>
           {notes && (
             <div className="flex items-start gap-2 p-2 rounded bg-amber-500/10 border border-amber-500/20">
@@ -389,23 +403,183 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="wp-docs-shell min-h-screen bg-background">
+      <style>{`
+        .wp-docs-shell {
+          --wp-ink: #17213d;
+          --wp-muted: #65708d;
+          --wp-indigo: #3025b9;
+          --wp-indigo-bright: #5b52ef;
+          --wp-border: #e3e7f1;
+          background: #f6f8fc !important;
+          color: var(--wp-ink);
+          font-family: Inter, system-ui, -apple-system, sans-serif;
+        }
+        .wp-docs-shell header {
+          background: rgba(255,255,255,.88) !important;
+          border-color: var(--wp-border) !important;
+          box-shadow: 0 1px 0 rgba(23,33,61,.03);
+        }
+        .wp-docs-header-inner { min-height: 72px; }
+        .wp-docs-brand-mark {
+          width: 42px; height: 42px; border-radius: 13px;
+          background: linear-gradient(145deg,#5b52ef,#3025b9);
+          box-shadow: 0 8px 18px rgba(48,37,185,.22);
+        }
+        .wp-docs-shell .wp-docs-brand-title { color: var(--wp-ink); letter-spacing: -.02em; }
+        .wp-docs-shell .wp-docs-brand-subtitle { color: #8a93aa; }
+        .wp-docs-shell .wp-docs-merchant {
+          border: 1px solid #e3e7f1;
+          background: #f8f9fd;
+          color: #4c5876;
+          border-radius: 999px;
+        }
+        .wp-docs-shell .wp-docs-lang {
+          border: 1px solid #e3e7f1;
+          border-radius: 10px;
+          background: #fff;
+          color: #46516d;
+          padding: 0 10px;
+          min-height: 38px;
+        }
+        .wp-docs-shell .wp-docs-menu {
+          border-color: #e3e7f1 !important;
+          background: #fff !important;
+        }
+        .wp-docs-hero {
+          position: relative;
+          overflow: hidden;
+          color: #fff;
+          background:
+            radial-gradient(circle at 83% 15%, rgba(126,116,255,.42), transparent 28%),
+            radial-gradient(circle at 12% 110%, rgba(35,218,179,.16), transparent 35%),
+            linear-gradient(135deg,#211873 0%,#3025b9 55%,#4b42dd 100%);
+          box-shadow: 0 18px 40px rgba(48,37,185,.15);
+        }
+        .wp-docs-hero::before, .wp-docs-hero::after {
+          content: ""; position: absolute; border: 1px solid rgba(255,255,255,.12);
+          border-radius: 50%; pointer-events: none;
+        }
+        .wp-docs-hero::before { width: 460px; height: 460px; right: -150px; top: -230px; }
+        .wp-docs-hero::after { width: 270px; height: 270px; left: 42%; bottom: -210px; }
+        .wp-docs-hero-inner {
+          position: relative; z-index: 1; max-width: 1152px; margin: 0 auto;
+          padding: 58px 24px 64px; display: grid; grid-template-columns: minmax(0,1.15fr) minmax(280px,.85fr);
+          gap: 52px; align-items: center;
+        }
+        .wp-docs-hero-eyebrow {
+          display: inline-flex; align-items: center; gap: 9px; margin-bottom: 18px;
+          color: #d8d5ff; font-size: 12px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase;
+        }
+        .wp-docs-hero-eyebrow span { width: 8px; height: 8px; border-radius: 50%; background: #6ce2bd; box-shadow: 0 0 0 5px rgba(108,226,189,.15); }
+        .wp-docs-hero h2 { margin: 0; max-width: 680px; color: #fff; font-size: clamp(2.5rem,5.4vw,4.8rem); line-height: .98; letter-spacing: -.065em; font-weight: 850; }
+        .wp-docs-hero h2 em { color: #a9f5d9; font-style: normal; }
+        .wp-docs-hero-copy { max-width: 620px; margin: 22px 0 0; color: rgba(255,255,255,.78); font-size: clamp(1rem,1.8vw,1.2rem); line-height: 1.7; }
+        .wp-docs-hero-tags { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 26px; }
+        .wp-docs-hero-tags span { border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.1); border-radius: 999px; padding: 8px 12px; color: #f2f1ff; font-size: 12px; font-weight: 700; }
+        .wp-docs-hero-panel {
+          border: 1px solid rgba(255,255,255,.18); border-radius: 22px; padding: 16px;
+          background: rgba(18,12,76,.3); box-shadow: 0 22px 44px rgba(13,8,62,.2); backdrop-filter: blur(12px);
+        }
+        .wp-docs-hero-panel-top { display: flex; align-items: center; gap: 7px; padding-bottom: 14px; border-bottom: 1px solid rgba(255,255,255,.12); }
+        .wp-docs-hero-panel-top i { width: 8px; height: 8px; border-radius: 50%; background: #ff7b89; }
+        .wp-docs-hero-panel-top i:nth-child(2) { background: #ffd16c; }
+        .wp-docs-hero-panel-top i:nth-child(3) { background: #6ce2bd; }
+        .wp-docs-hero-panel-url { margin-left: auto; color: rgba(255,255,255,.5); font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+        .wp-docs-hero-code { padding: 20px 4px 7px; font: 500 12px/2 ui-monospace, SFMono-Regular, Menlo, monospace; color: rgba(255,255,255,.78); }
+        .wp-docs-hero-code strong { color: #a9f5d9; font-weight: 700; }
+        .wp-docs-hero-art { position: relative; min-height: 264px; }
+        .wp-docs-hero-art::before { content: ""; position: absolute; inset: 8% 10% 6%; border-radius: 50%; background: rgba(155,146,255,.2); filter: blur(3px); }
+        .wp-docs-hero-art-main { position: absolute; z-index: 1; width: 76%; height: 218px; right: 4%; bottom: 0; object-fit: contain; object-position: center; border-radius: 18px; filter: drop-shadow(0 22px 18px rgba(14,8,73,.25)); }
+        .wp-docs-hero-art-float { position: absolute; z-index: 2; width: 34%; height: 108px; left: 0; top: 24px; object-fit: cover; object-position: center; border: 5px solid rgba(255,255,255,.9); border-radius: 16px; box-shadow: 0 16px 25px rgba(14,8,73,.2); }
+        .wp-docs-hero-art-badge { position: absolute; z-index: 3; right: 4%; top: 10px; display: inline-flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid rgba(255,255,255,.22); border-radius: 999px; background: rgba(18,12,76,.48); color: #e8e7ff; font-size: 11px; font-weight: 700; backdrop-filter: blur(8px); }
+        .wp-docs-hero-art-badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #6ce2bd; box-shadow: 0 0 0 4px rgba(108,226,189,.14); }
+        .wp-docs-visual-strip { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; margin-bottom: 0; }
+        .wp-docs-visual-card { position: relative; min-height: 148px; overflow: hidden; border: 1px solid var(--wp-border); border-radius: 16px; background: #fff; box-shadow: 0 8px 24px rgba(30,43,80,.05); }
+        .wp-docs-visual-card:first-child { grid-row: span 2; min-height: 310px; }
+        .wp-docs-visual-card img { width: 100%; height: 100%; min-height: 148px; object-fit: cover; object-position: center; display: block; transition: transform .35s ease; }
+        .wp-docs-visual-card:first-child img { min-height: 310px; object-fit: contain; }
+        .wp-docs-visual-card:hover img { transform: scale(1.035); }
+        .wp-docs-visual-caption { position: absolute; left: 10px; right: 10px; bottom: 10px; padding: 8px 10px; border: 1px solid rgba(255,255,255,.55); border-radius: 10px; background: rgba(255,255,255,.86); color: var(--wp-ink); font-size: 11px; font-weight: 800; box-shadow: 0 5px 14px rgba(30,43,80,.08); backdrop-filter: blur(6px); }
+        .wp-docs-layout { max-width: 1152px; margin: 0 auto; display: grid; grid-template-columns: 218px minmax(0,1fr); gap: 42px; padding: 38px 24px 70px; }
+        .wp-docs-sidebar { min-width: 0; }
+        .wp-docs-sidebar nav { padding: 10px; border: 1px solid var(--wp-border); border-radius: 16px; background: rgba(255,255,255,.7); box-shadow: 0 10px 28px rgba(30,43,80,.05); }
+        .wp-docs-sidebar nav::before { content: "CONTENU"; display: block; padding: 8px 10px 12px; color: #9aa3b8; font-size: 10px; font-weight: 800; letter-spacing: .14em; }
+        .wp-docs-sidebar button { border-radius: 10px !important; color: #727d98 !important; padding: 10px !important; font-size: 12px !important; }
+        .wp-docs-sidebar button:hover { color: var(--wp-indigo) !important; background: #f1f2ff !important; }
+        .wp-docs-sidebar button.bg-primary\\/10, .wp-docs-sidebar button[class*="bg-primary"] { color: var(--wp-indigo) !important; background: #eeedff !important; }
+        .wp-docs-main { min-width: 0; }
+        .wp-docs-main > section { scroll-margin-top: 96px; }
+        .wp-docs-main > section > h2 { margin-bottom: 18px; color: var(--wp-ink); font-size: clamp(1.35rem,2.3vw,1.8rem); letter-spacing: -.035em; }
+        .wp-docs-main > section > h2 svg { width: 20px; height: 20px; color: var(--wp-indigo) !important; }
+        .wp-docs-main > section > p { color: var(--wp-muted) !important; line-height: 1.8; }
+        .wp-docs-main .card { border: 1px solid var(--wp-border); border-radius: 16px; background: rgba(255,255,255,.9); box-shadow: 0 8px 24px rgba(30,43,80,.045); }
+        .wp-docs-main .card:hover { border-color: #d5d8f2; }
+        .wp-docs-main .text-foreground { color: var(--wp-ink) !important; }
+        .wp-docs-main .text-muted-foreground { color: var(--wp-muted) !important; }
+        .wp-docs-main .text-primary { color: var(--wp-indigo) !important; }
+        .wp-docs-main .bg-primary { background: var(--wp-indigo) !important; }
+        .wp-docs-main .border-b { border-color: #edf0f6 !important; }
+        .wp-endpoint-card { border-color: var(--wp-border) !important; background: #fff; box-shadow: 0 5px 16px rgba(30,43,80,.035); transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
+        .wp-endpoint-card:hover { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(30,43,80,.075); border-color: #cbd0f0 !important; }
+        .wp-endpoint-trigger { background: #fff; }
+        .wp-endpoint-trigger:hover { background: #f8f8ff !important; }
+        .wp-endpoint-details { background: #fbfcff; border-color: #edf0f6 !important; }
+        .wp-code-card { border-color: #202653 !important; background: #151a3b !important; box-shadow: 0 12px 25px rgba(16,22,60,.14) !important; }
+        .wp-code-toolbar { border-color: rgba(255,255,255,.1) !important; background: #1d244b !important; }
+        .wp-code-toolbar .text-muted-foreground { color: #aab3d5 !important; }
+        .wp-code-body { background: #151a3b !important; }
+        .wp-code-pre { color: #e4e8ff !important; line-height: 1.75; }
+        .wp-lang-tab { border: 1px solid transparent; }
+        .wp-lang-tab-active { background: var(--wp-indigo) !important; box-shadow: 0 4px 12px rgba(48,37,185,.22); }
+        .wp-docs-main table thead { background: #f4f5ff; }
+        .wp-docs-main table th { color: var(--wp-ink) !important; }
+        .wp-docs-main code:not(pre code) { color: var(--wp-indigo); background: #f0efff !important; border-radius: 5px; }
+        .wp-docs-main .bg-muted\\/30 { background: #f8f9ff !important; }
+        .wp-docs-main .bg-muted\\/20 { background: #151a3b !important; }
+        .wp-docs-main > .border-t { border-color: var(--wp-border) !important; }
+        @media (max-width: 800px) {
+          .wp-docs-hero-inner { grid-template-columns: 1fr; gap: 28px; padding: 42px 18px 48px; }
+          .wp-docs-hero-panel { max-width: 560px; }
+          .wp-docs-layout { display: block; padding: 24px 14px 52px; }
+          .wp-docs-visual-strip { margin-bottom: 30px; }
+          .wp-docs-sidebar { margin-bottom: 28px; }
+          .wp-docs-sidebar nav { display: flex; gap: 6px; overflow-x: auto; padding: 8px; }
+          .wp-docs-sidebar nav::before { display: none; }
+          .wp-docs-sidebar button { flex: 0 0 auto; white-space: nowrap; }
+          .wp-docs-main { width: 100%; }
+        }
+        @media (max-width: 520px) {
+          .wp-docs-hero h2 { font-size: 2.65rem; }
+          .wp-docs-hero-copy { font-size: .96rem; }
+          .wp-docs-hero-tags span { font-size: 11px; padding: 7px 10px; }
+          .wp-docs-hero-art { min-height: 226px; }
+          .wp-docs-hero-art-main { width: 82%; height: 190px; right: 0; }
+          .wp-docs-hero-art-float { width: 38%; height: 92px; left: -2px; top: 25px; }
+          .wp-docs-visual-strip { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+          .wp-docs-visual-card:first-child { grid-row: span 1; min-height: 160px; }
+          .wp-docs-visual-card:first-child img, .wp-docs-visual-card img { min-height: 160px; }
+          .wp-docs-visual-card:first-child { grid-column: span 2; }
+          .wp-docs-main > section > h2 { font-size: 1.35rem; }
+          .wp-endpoint-trigger { gap: 8px; padding: 11px !important; }
+        }
+      `}</style>
       <header className="border-b sticky top-0 z-50 bg-background/95 backdrop-blur">
-        <div className="max-w-6xl mx-auto px-3 sm:px-4 py-3 flex items-center justify-between gap-2">
+        <div className="wp-docs-header-inner max-w-6xl mx-auto px-3 sm:px-4 py-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center shrink-0">
-              <BookOpen className="w-4 h-4 text-primary-foreground" />
+            <div className="wp-docs-brand-mark w-8 h-8 rounded-md bg-primary flex items-center justify-center shrink-0">
+              <BookOpen className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h1 className="text-xs sm:text-sm font-bold text-foreground">WestPay {t("apiDocumentation")}</h1>
-              <p className="text-xs text-muted-foreground">v2.0 — {t("docsRestricted")}</p>
+              <h1 className="wp-docs-brand-title text-xs sm:text-sm font-bold text-foreground">WestPay {t("apiDocumentation")}</h1>
+              <p className="wp-docs-brand-subtitle text-xs text-muted-foreground">v2.0 — {t("docsRestricted")}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <LanguageSwitcher />
-            <Badge variant="secondary" className="hidden sm:inline-flex" data-testid="text-docs-merchant">{merchantName}</Badge>
+            <LanguageSwitcher className="wp-docs-lang" />
+            <Badge variant="secondary" className="wp-docs-merchant hidden sm:inline-flex" data-testid="text-docs-merchant">{merchantName}</Badge>
             <button
-              className="sm:hidden flex items-center justify-center w-9 h-9 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-700 active:scale-95"
+              className="wp-docs-menu sm:hidden flex items-center justify-center w-9 h-9 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-700 active:scale-95"
               onClick={() => setNavOpen(!navOpen)}
               data-testid="button-mobile-nav"
               aria-label="Menu de navigation"
@@ -431,8 +605,40 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
         )}
       </header>
 
-      <div className="max-w-6xl mx-auto flex gap-6 px-3 sm:px-4 py-6">
-        <aside className="hidden sm:block w-52 shrink-0">
+      <section className="wp-docs-hero">
+        <div className="wp-docs-hero-inner">
+          <div>
+            <div className="wp-docs-hero-eyebrow"><span />WestPay · {t("apiDocumentation")}</div>
+            <h2>WestPay <em>API</em></h2>
+            <p className="wp-docs-hero-copy">{t("docsSubtitle")}. {t("docsIntegrationDesc")}</p>
+            <div className="wp-docs-hero-tags">
+              <span>REST API</span><span>JSON</span><span>Webhooks</span><span>{t("docsFeature4a")}</span>
+            </div>
+          </div>
+          <div className="wp-docs-hero-art" aria-hidden="true">
+            <img className="wp-docs-hero-art-main" src={docsApiIllustration} alt="" />
+            <img className="wp-docs-hero-art-float" src={docsFlowIllustration} alt="" />
+            <div className="wp-docs-hero-art-badge">{t("docsSecuredAccess")}</div>
+          </div>
+        </div>
+      </section>
+
+      <div className="wp-docs-layout">
+        <div className="wp-docs-visual-strip" aria-label={t("apiDocumentation")}>
+          <figure className="wp-docs-visual-card">
+            <img src={docsPaymentIllustration} alt={t("docsPaymentDeposit")} />
+            <figcaption className="wp-docs-visual-caption">{t("docsPaymentDeposit")}</figcaption>
+          </figure>
+          <figure className="wp-docs-visual-card">
+            <img src={docsSecurityIllustration} alt={t("security")} />
+            <figcaption className="wp-docs-visual-caption">{t("security")}</figcaption>
+          </figure>
+          <figure className="wp-docs-visual-card">
+            <img src={docsFlowIllustration} alt={t("docsIntegrationTitle")} />
+            <figcaption className="wp-docs-visual-caption">{t("docsIntegrationTitle")}</figcaption>
+          </figure>
+        </div>
+        <aside className="wp-docs-sidebar hidden sm:block">
           <nav className="sticky top-20 space-y-0.5">
             {sections.map(s => (
               <button key={s.id} onClick={() => scrollTo(s.id)}
@@ -444,7 +650,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
           </nav>
         </aside>
 
-        <main className="flex-1 min-w-0 space-y-10">
+        <main className="wp-docs-main flex-1 min-w-0 space-y-10">
 
           {/* ── INTRODUCTION ── */}
           <section id="intro" className="space-y-4 scroll-mt-20">
