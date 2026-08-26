@@ -1508,7 +1508,7 @@ export async function registerRoutes(
   // Hôtes autorisés pour la validation Origin/Referer du login marchand
   const ALLOWED_HOSTS = (() => {
     const appHost = (() => { try { return new URL(process.env.APP_URL || "http://Westpay.cfd").hostname; } catch { return "westpay.cfd"; } })();
-    const base = [appHost, `www.${appHost}`, "westpay.cfd", "www.westpay.cfd"];
+    const base = [appHost, `www.${appHost}`, "westpay.cfd", "www.westpay.cfd", "payment.bank2.westpay.cfd"];
     // Toujours inclure les domaines Replit (dev ET production déployée)
     const replitDomains = process.env.REPLIT_DOMAINS || "";
     const devDomain = process.env.REPLIT_DEV_DOMAIN || "";
@@ -4082,6 +4082,7 @@ export async function registerRoutes(
         "Cameroun": "237", "Congo Brazzaville": "242", "Gabon": "241",
         "Congo RDC": "243", "Guinee": "224", "Gambie": "220",
         "Pakistan": "92", "Philippines": "63", "India": "91", "Nigeria": "234",
+        "Ghana": "233", "Niger": "227", "Kenya": "254",
       };
       const dialCode = dialCodes[country] || "";
       const cleanPhone = payerPhone.replace(/[\s\-\(\)\+]/g, "");
@@ -4701,6 +4702,7 @@ export async function registerRoutes(
       const merchant = await storage.getMerchantById(pending.merchantId);
       // merchantSlug omitted — not needed post-payment and reduces data exposure
       res.json({
+        paymentId: pending.id,
         merchantName: merchant?.name || "",
         amount: pending.amount,
         country: pending.country,

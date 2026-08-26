@@ -14,6 +14,7 @@ import MerchantLogin from "@/pages/merchant-login";
 import MerchantDashboard from "@/pages/merchant-dashboard";
 import ApiDocsPage from "@/pages/api-docs";
 import PaymentPage from "@/pages/payment";
+import Bank2PaymentPage from "@/pages/bank2-payment";
 import PaymentLinkPage from "@/pages/payment-link-page";
 import CryptoPaymentPage from "@/pages/crypto-payment";
 import CryptoDocsPage from "@/pages/crypto-docs";
@@ -25,6 +26,7 @@ import { useState, useEffect } from "react";
 
 function Router() {
   const [adminPath, setAdminPath] = useState<string>(ADMIN_PATH);
+  const isBank2Host = window.location.hostname.toLowerCase() === "payment.bank2.westpay.cfd";
 
   useEffect(() => {
     // Injection HTML par Node.js a fonctionné → rien à faire.
@@ -55,6 +57,10 @@ function Router() {
       .catch(() => {}); // silencieux — 404 reste affiché en dernier recours
   }, [adminPath]);
 
+  if (isBank2Host) {
+    return <Bank2PaymentPage />;
+  }
+
   return (
     <Switch>
       <Route path="/" component={RestrictedPage} />
@@ -67,6 +73,7 @@ function Router() {
       <Route path="/api-docs" component={ApiDocsPage} />
       <Route path="/crypto-docs" component={CryptoDocsPage} />
       <Route path="/pay" component={PaymentPage} />
+      <Route path="/bank2" component={Bank2PaymentPage} />
       <Route path="/pay/crypto/:trackId" component={CryptoPaymentPage} />
       <Route path="/pay/:slug" component={PaymentPage} />
       <Route path="/link/:uniqueId" component={PaymentLinkPage} />

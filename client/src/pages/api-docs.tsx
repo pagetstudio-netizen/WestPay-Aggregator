@@ -17,6 +17,7 @@ import {
 import Captcha, { generateCaptchaCode } from "@/components/Captcha";
 
 const BASE_URL = "https://westpay.cfd";
+const BANK2_URL = "https://payment.bank2.westpay.cfd";
 
 function CopyButton({ text }: { text: string }) {
   const { t } = useLanguage();
@@ -650,13 +651,17 @@ Content-Type: application/json`} />
 
             <Card className="bg-muted/30">
               <CardContent className="p-4">
-                <p className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2"><Zap className="w-4 h-4 text-primary" />Page de paiement hebergee RobotPay</p>
+                <p className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2"><Zap className="w-4 h-4 text-primary" />Choisissez votre page de paiement hebergee RobotPay</p>
                 <ol className="text-sm text-muted-foreground space-y-2 list-decimal pl-4">
-                  <li>Redirigez votre utilisateur vers l'URL de paiement :</li>
+                  <li>Redirigez votre utilisateur vers l'une des deux pages de paiement :</li>
                 </ol>
-                <CodeBlock code={`${BASE_URL}/pay?merchant=votre-slug&amount=5000&country=Togo&redirect=${encodeURIComponent("https://votresite.com/merci")}`} label="URL de paiement" />
+                <div className="space-y-3 mt-3">
+                  <CodeBlock code={`${BASE_URL}/pay?merchant=votre-slug&amount=5000&country=Togo&redirect=${encodeURIComponent("https://votresite.com/merci")}`} label="Page standard" />
+                  <CodeBlock code={`${BANK2_URL}/?merchant=votre-slug&amount=5000&country=Togo&redirect=${encodeURIComponent("https://votresite.com/merci")}`} label="Page Bank2 — interface bleue simplifiee" />
+                </div>
                 <ol className="text-sm text-muted-foreground space-y-1 list-decimal pl-4 mt-3" start={2}>
-                  <li>Le client entre son numero et valide le paiement USSD sur son telephone</li>
+                  <li>Le montant et le pays sont transmis par votre site et ne sont pas modifiables sur la page Bank2</li>
+                  <li>Le client choisit son operateur, entre son numero et valide le paiement sur son telephone</li>
                   <li>Votre URL de redirection recoit : <code className="bg-muted px-1 rounded">?status=success&amount=5000&ref=OP-abc123</code></li>
                 </ol>
               </CardContent>
@@ -675,7 +680,7 @@ Content-Type: application/json`} />
                     <tbody className="text-muted-foreground text-xs sm:text-sm">
                       <tr className="border-b"><td className="p-2 font-mono">merchant</td><td className="p-2 text-green-500">{t("yes")}</td><td className="p-2">Votre slug marchand (ex: ecomat)</td></tr>
                       <tr className="border-b"><td className="p-2 font-mono">amount</td><td className="p-2 text-green-500">{t("yes")}</td><td className="p-2">Montant en F CFA (entier positif)</td></tr>
-                      <tr className="border-b"><td className="p-2 font-mono">country</td><td className="p-2 text-muted-foreground">{t("no")}</td><td className="p-2">Pays (ex: Togo). Premier pays actif si omis</td></tr>
+                      <tr className="border-b"><td className="p-2 font-mono">country</td><td className="p-2 text-amber-500">Bank2</td><td className="p-2">Pays actif du marchand (ex: Togo). Obligatoire et verrouille sur Bank2 ; optionnel sur la page standard</td></tr>
                       <tr><td className="p-2 font-mono">redirect</td><td className="p-2 text-muted-foreground">{t("no")}</td><td className="p-2">URL de retour apres paiement (encoder avec encodeURIComponent)</td></tr>
                     </tbody>
                   </table>
