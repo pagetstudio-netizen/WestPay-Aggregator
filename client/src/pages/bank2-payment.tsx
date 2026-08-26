@@ -102,12 +102,6 @@ function currencyForCountry(country: string) {
   return "XOF";
 }
 
-function displayCountry(country: string) {
-  if (country === "Cote d'Ivoire") return "Côte d’Ivoire";
-  if (country === "Guinee") return "Guinée";
-  return country;
-}
-
 function Stepper({ screen }: { screen: Screen }) {
   const stage = screen === "success" ? 3 : ["pending", "otp"].includes(screen) ? 2 : 1;
   const steps = ["Numéro de téléphone", "Informations de confirmation", "Paiement terminé"];
@@ -413,7 +407,6 @@ export default function Bank2PaymentPage() {
       <Bank2Styles />
       <main className="bank2-shell">
         <header className="bank2-amount">
-          <div className="bank2-country-lock">{displayCountry(country)}</div>
           <span>Montant :</span>
           <strong>{formatAmount(amount)} <small>{currency}</small></strong>
         </header>
@@ -565,7 +558,7 @@ export default function Bank2PaymentPage() {
 
             {screen === "success" && (
               <div className="bank2-content bank2-success">
-                <h2>ROBOTPAY - {displayCountry(country)}</h2>
+                <h2>ROBOTPAY</h2>
                 <div className="bank2-divider" />
                 <div className="bank2-success-amount">{formatAmount(amount)} {currency}</div>
                 <div className="bank2-check-circle"><Check size={70} strokeWidth={2.5} /></div>
