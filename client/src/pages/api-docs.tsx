@@ -627,11 +627,11 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
         .wp-docs-hero-art-float { position: absolute; z-index: 2; width: 34%; height: 108px; left: 0; top: 24px; object-fit: cover; object-position: center; border: 5px solid rgba(255,255,255,.9); border-radius: 16px; box-shadow: 0 16px 25px rgba(14,8,73,.2); }
         .wp-docs-hero-art-badge { position: absolute; z-index: 3; right: 4%; top: 10px; display: inline-flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid rgba(255,255,255,.22); border-radius: 999px; background: rgba(18,12,76,.48); color: #e8e7ff; font-size: 11px; font-weight: 700; backdrop-filter: blur(8px); }
         .wp-docs-hero-art-badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #6ce2bd; box-shadow: 0 0 0 4px rgba(108,226,189,.14); }
-        .wp-docs-visual-strip { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; margin-bottom: 0; }
-        .wp-docs-visual-card { position: relative; min-height: 148px; overflow: hidden; border: 1px solid var(--wp-border); border-radius: 16px; background: #fff; box-shadow: 0 8px 24px rgba(30,43,80,.05); }
-        .wp-docs-visual-card:first-child { grid-row: span 2; min-height: 310px; }
-        .wp-docs-visual-card img { width: 100%; height: 100%; min-height: 148px; object-fit: cover; object-position: center; display: block; transition: transform .35s ease; }
-        .wp-docs-visual-card:first-child img { min-height: 310px; object-fit: contain; }
+        .wp-docs-visual-strip { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0,1fr); gap: 24px; margin-bottom: 8px; }
+        .wp-docs-visual-card { position: relative; width: min(100%, 760px); min-height: 250px; margin: 0 auto; overflow: hidden; border: 1px solid var(--wp-border); border-radius: 16px; background: #fff; box-shadow: 0 8px 24px rgba(30,43,80,.05); }
+        .wp-docs-visual-card:first-child { grid-row: auto; min-height: 290px; }
+        .wp-docs-visual-card img { width: 100%; height: 100%; min-height: 250px; padding: 12px; object-fit: contain; object-position: center; display: block; background: #f8f9fd; transition: transform .35s ease; }
+        .wp-docs-visual-card:first-child img { min-height: 290px; }
         .wp-docs-visual-card:hover img { transform: scale(1.035); }
         .wp-docs-visual-caption { position: absolute; left: 10px; right: 10px; bottom: 10px; padding: 8px 10px; border: 1px solid rgba(255,255,255,.55); border-radius: 10px; background: rgba(255,255,255,.86); color: var(--wp-ink); font-size: 11px; font-weight: 800; box-shadow: 0 5px 14px rgba(30,43,80,.08); backdrop-filter: blur(6px); }
         .wp-docs-layout { max-width: 1152px; margin: 0 auto; display: grid; grid-template-columns: 218px minmax(0,1fr); gap: 42px; padding: 38px 24px 70px; }
@@ -646,6 +646,35 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
         .wp-docs-main > section > h2 { margin-bottom: 18px; color: var(--wp-ink); font-size: clamp(1.35rem,2.3vw,1.8rem); letter-spacing: -.035em; }
         .wp-docs-main > section > h2 svg { width: 20px; height: 20px; color: var(--wp-indigo) !important; }
         .wp-docs-main > section > p { color: var(--wp-muted) !important; line-height: 1.8; }
+        /* Keep the documentation text close to the reference: dark, larger and easy to scan.
+           The security section is intentionally excluded from these typography overrides. */
+        .wp-docs-main > section:not(#security) > h2 {
+          color: #1d2c63 !important;
+          font-size: clamp(1.55rem, 2.7vw, 2rem) !important;
+          font-weight: 800;
+          line-height: 1.2;
+          letter-spacing: -.03em;
+        }
+        .wp-docs-main > section:not(#security) > p {
+          color: #3f4962 !important;
+          font-size: 1.05rem !important;
+          line-height: 1.75;
+        }
+        .wp-docs-main > section:not(#security) .text-sm:not(.font-mono) {
+          color: #252d42 !important;
+          font-size: 1rem !important;
+          line-height: 1.65;
+        }
+        .wp-docs-main > section:not(#security) .text-sm.text-muted-foreground {
+          color: #3f4962 !important;
+        }
+        .wp-docs-main > section:not(#security) ol,
+        .wp-docs-main > section:not(#security) ul {
+          color: #252d42;
+        }
+        .wp-docs-main > section:not(#security) li {
+          line-height: 1.65;
+        }
         .wp-docs-main .card { border: 1px solid var(--wp-border); border-radius: 16px; background: rgba(255,255,255,.9); box-shadow: 0 8px 24px rgba(30,43,80,.045); }
         .wp-docs-main .card:hover { border-color: #d5d8f2; }
         .wp-docs-main .text-foreground { color: var(--wp-ink) !important; }
@@ -689,10 +718,9 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
           .wp-docs-hero-art { min-height: 226px; }
           .wp-docs-hero-art-main { width: 82%; height: 190px; right: 0; }
           .wp-docs-hero-art-float { width: 38%; height: 92px; left: -2px; top: 25px; }
-          .wp-docs-visual-strip { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
-          .wp-docs-visual-card:first-child { grid-row: span 1; min-height: 160px; }
-          .wp-docs-visual-card:first-child img, .wp-docs-visual-card img { min-height: 160px; }
-          .wp-docs-visual-card:first-child { grid-column: span 2; }
+           .wp-docs-visual-strip { grid-template-columns: minmax(0,1fr); gap: 16px; }
+           .wp-docs-visual-card, .wp-docs-visual-card:first-child { grid-column: auto; min-height: 220px; }
+           .wp-docs-visual-card:first-child img, .wp-docs-visual-card img { min-height: 220px; padding: 8px; }
           .wp-docs-main > section > h2 { font-size: 1.35rem; }
           .wp-endpoint-trigger { gap: 8px; padding: 11px !important; }
         }
