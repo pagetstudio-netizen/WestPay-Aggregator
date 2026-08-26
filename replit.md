@@ -130,6 +130,12 @@ admins, merchants, merchant_countries, transactions, sms_logs, numbers, settings
 - Payment URL format: https://westpay.cfd/pay/crypto/{trackId}
 - Merchant API contract: POST /api/merchant/crypto/invoice { amount, currency, description?, orderId?, returnUrl? }
 
+## Replit setup
+- Install dependencies with `npm install`, then start the preview with `npm run dev` on port 5000.
+- The server requires the existing PostgreSQL databases before it can initialize routes and the frontend: `AUTH_DATABASE_URL` (auth/config database), `FINANCIAL_DATABASE_URL` (financial database), and `SESSION_SECRET`.
+- Optional provider credentials (OmniPay, Mbiyo, SendavaPay, SeaPay, OxaPay, Telegram, and AI services) can be added later through Replit Secrets or the admin settings where supported.
+- If the database variables are missing, the server remains listening on port 5000 and exposes `/api/healthz-boot`, but intentionally does not register application routes.
+
 ## Déploiement Plesk
 - **Build** : `npm run build` → génère `dist/index.cjs` (serveur) + `dist/public/` (frontend)
 - **Dossier racine Plesk** : `dist/` (Plesk pointe sur ce dossier)
