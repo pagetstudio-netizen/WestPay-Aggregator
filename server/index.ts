@@ -222,14 +222,33 @@ httpServer.listen(port, "0.0.0.0", () => {
 let routesReady = false;
 let resolveRoutesReady: () => void = () => {};
 const routesReadyPromise = new Promise<void>((r) => { resolveRoutesReady = r; });
-app.use("/api", async (_req, res, next) => {
+
+app.get("/api/healthz-boot", (_req, res) => {
+  const statusCode = bootState.status === "error" ? 503 : 200;
+  return res.status(statusCode).json({
+    status: bootState.status,
+    steps: bootState.steps,
+  });
+});
+
+app.use("/api", async (req, res, next) => {
+  if (req.path === "/healthz-boot") return next();
   if (routesReady) return next();
+  if (bootState.status === "error") {
+    return res.status(503).json({
+      message: "Serveur indisponible : sa configuration n'est pas terminée. Contactez l'administrateur.",
+    });
+  }
   const timedOut = await Promise.race([
     routesReadyPromise.then(() => false),
     new Promise<boolean>((r) => setTimeout(() => r(true), 30_000)),
   ]);
   if (timedOut && !routesReady) {
-    return res.status(503).json({ message: "Serveur en cours de démarrage, réessayez dans quelques secondes." });
+    return res.status(503).json({
+      message: bootState.status === "error"
+        ? "Serveur indisponible : sa configuration n'est pas terminée. Contactez l'administrateur."
+        : "Serveur en cours de démarrage, réessayez dans quelques secondes.",
+    });
   }
   next();
 });
@@ -262,6 +281,7 @@ if (process.env.NODE_ENV === "production") {
     bootState.errors.push(`Missing env vars: ${missingEnv.join(", ")}`);
     bootState.status = "error";
     console.error("[FATAL] Variables manquantes:", missingEnv.join(", "));
+    resolveRoutesReady();
     return; // Ne pas appeler process.exit — le serveur reste up pour /api/healthz-boot
   }
   bootState.steps.env = "ok";
@@ -276,6 +296,7 @@ if (process.env.NODE_ENV === "production") {
     bootState.errors.push(`DB module load: ${err.message}`);
     bootState.status = "error";
     console.error("[FATAL] DB module load failed:", err.message);
+    resolveRoutesReady();
     return;
   }
 
@@ -287,6 +308,7 @@ if (process.env.NODE_ENV === "production") {
     bootState.errors.push(`Migrations: ${err.message}`);
     bootState.status = "error";
     console.error("[FATAL] Migration failed:", err.message);
+    resolveRoutesReady();
     return;
   }
 
@@ -318,6 +340,7 @@ if (process.env.NODE_ENV === "production") {
     bootState.errors.push(`Routes: ${err.message}`);
     bootState.status = "error";
     console.error("[FATAL] Routes registration failed:", err.message);
+    resolveRoutesReady();
     return;
   }
 
