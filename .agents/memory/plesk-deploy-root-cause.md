@@ -15,6 +15,13 @@ npm prune --omit=dev
 ```
 The `dist/` comes from git, not from a server-side rebuild.
 
+## Plesk domain configuration
+In this project's Plesk setup, the main domain and `payment.bank2.westpay.cfd` can share the same `Document Root` and `Application Root`; the second Node.js entry works with those shared paths.
+
+**Why:** The user confirmed that Plesk serves both domains successfully with the shared roots, so an alias-only setup is not required for this hosting configuration.
+
+**How to apply:** Preserve the working shared-root configuration for future Bank2 deployments. The application code must continue recognizing the exact Bank2 hostname `payment.bank2.westpay.cfd`.
+
 ## Passenger cold-start lessons (Plesk)
 - Passenger spawns the Node process on demand: requests can arrive at uptime 0, before async init finishes. Static SPA must be registered immediately after `listen()`; `/api` requests are gated by a middleware that awaits init (max 30s) instead of 404-ing HTML (which broke JSON clients with "Unexpected token '<'").
 - The SPA catch-all must `next()` for `/api` paths since API routes are registered later.
