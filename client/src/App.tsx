@@ -20,6 +20,7 @@ import CryptoPaymentPage from "@/pages/crypto-payment";
 import CryptoDocsPage from "@/pages/crypto-docs";
 import CryptoLinkPage from "@/pages/crypto-link-page";
 import NotFound from "@/pages/not-found";
+import Bank2UnavailablePage from "@/pages/bank2-unavailable";
 import IpVerificationPage from "@/pages/ip-verification";
 import AdminCreateMerchant from "@/pages/admin-create-merchant";
 import { useState, useEffect } from "react";
@@ -29,6 +30,7 @@ function Router() {
   const hostname = window.location.hostname.toLowerCase();
   const isBank2Host = hostname === "payment.bank2.westpay.cfd";
   const isSecureDocsHost = hostname === "secure.docs.westpay.cfd";
+  const isBank2Root = window.location.pathname === "/" && window.location.search === "";
 
   useEffect(() => {
     // Injection HTML par Node.js a fonctionné → rien à faire.
@@ -60,6 +62,9 @@ function Router() {
   }, [adminPath]);
 
   if (isBank2Host) {
+    if (isBank2Root) {
+      return <Bank2UnavailablePage />;
+    }
     return <Bank2PaymentPage />;
   }
 
