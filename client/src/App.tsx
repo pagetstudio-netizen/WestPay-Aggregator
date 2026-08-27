@@ -26,7 +26,9 @@ import { useState, useEffect } from "react";
 
 function Router() {
   const [adminPath, setAdminPath] = useState<string>(ADMIN_PATH);
-  const isBank2Host = window.location.hostname.toLowerCase() === "payment.bank2.westpay.cfd";
+  const hostname = window.location.hostname.toLowerCase();
+  const isBank2Host = hostname === "payment.bank2.westpay.cfd";
+  const isSecureDocsHost = hostname === "secure.docs.westpay.cfd";
 
   useEffect(() => {
     // Injection HTML par Node.js a fonctionné → rien à faire.
@@ -59,6 +61,10 @@ function Router() {
 
   if (isBank2Host) {
     return <Bank2PaymentPage />;
+  }
+
+  if (isSecureDocsHost && (window.location.pathname === "/" || window.location.pathname === "")) {
+    return <ApiDocsPage />;
   }
 
   return (
