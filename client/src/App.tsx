@@ -26,8 +26,7 @@ import { useState, useEffect } from "react";
 
 function Router() {
   const [adminPath, setAdminPath] = useState<string>(ADMIN_PATH);
-  const bank2Hostnames = new Set(["payment.bank2.westpay.cfd", "bank2.westpay.cfd"]);
-  const isBank2Host = bank2Hostnames.has(window.location.hostname.toLowerCase());
+  const isBank2Host = window.location.hostname.toLowerCase() === "payment.bank2.westpay.cfd";
 
   useEffect(() => {
     // Injection HTML par Node.js a fonctionné → rien à faire.
