@@ -44,9 +44,11 @@ async function getFeeExemptIds(): Promise<number[]> {
   return rows.map(r => r.id);
 }
 
-/** Clause SQL "merchant_id IN (...)" ou "FALSE" si liste vide */
-function exemptClause(ids: number[]): string {
-  return ids.length > 0 ? `merchant_id IN (${ids.join(",")})` : "FALSE";
+/** Clause SQL paramétrée "merchant_id IN (...)" ou "FALSE" si liste vide */
+function exemptClause(ids: number[]) {
+  const safeIds = ids.filter(Number.isSafeInteger);
+  if (safeIds.length === 0) return sql`FALSE`;
+  return sql`merchant_id IN (${sql.join(safeIds.map(id => sql`${id}`), sql`, `)})`;
 }
 
 /** Map id → { name, website } de tous les marchands (depuis Auth) */
@@ -582,7 +584,7 @@ export class DatabaseStorage implements IStorage {
 
     // fee_exempt depuis Auth DB
     const feeIds   = await getFeeExemptIds();
-    const exemptSql = sql.raw(exemptClause(feeIds));
+    const exemptSql = exemptClause(feeIds);
 
     const [wdResult, txResult, wtFees, apiPay, linkPay, wdStats] = await Promise.all([
       financialDb.execute<FeeRow>(sql`
@@ -1172,7 +1174,7 @@ export class DatabaseStorage implements IStorage {
     const merchantRows = await authDb.select({ id: merchants.id, name: merchants.name, feeExempt: merchants.feeExempt }).from(merchants);
     const mMap         = new Map(merchantRows.map(m => [m.id, m]));
     const feeIds       = merchantRows.filter(m => m.feeExempt).map(m => m.id);
-    const exemptSql    = sql.raw(exemptClause(feeIds));
+    const exemptSql    = exemptClause(feeIds);
 
     const txCutoff = cutoff ? sql` AND created_at >= ${cutoff}::timestamp` : sql``;
     const wdCutoff = cutoff ? sql` AND processed_at >= ${cutoff}::timestamp` : sql``;
@@ -1233,7 +1235,7 @@ export class DatabaseStorage implements IStorage {
     const cutoff   = period === "today" ? todayIso : period === "month" ? monthIso : null;
 
     const feeIds    = await getFeeExemptIds();
-    const exemptSql = sql.raw(exemptClause(feeIds));
+    const exemptSql = exemptClause(feeIds);
 
     const txCutoff = cutoff ? sql` AND t.created_at >= ${cutoff}::timestamp` : sql``;
     const wdCutoff = cutoff ? sql` AND w.processed_at >= ${cutoff}::timestamp` : sql``;

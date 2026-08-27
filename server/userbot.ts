@@ -13,7 +13,7 @@ import { storage } from "./storage";
 
 const API_ID = parseInt(process.env.TELEGRAM_API_ID || "0", 10);
 const API_HASH = process.env.TELEGRAM_API_HASH || "";
-const PHONE_NUMBER = process.env.USERBOT_PHONE || "+15843334306";
+const PHONE_NUMBER = process.env.USERBOT_PHONE || "";
 
 let client: TelegramClient | null = null;
 let isConnected = false;

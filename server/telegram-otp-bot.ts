@@ -39,7 +39,7 @@ export async function initOtpBot(): Promise<void> {
     const me = await bot.telegram.getMe();
     otpBotUsername = me.username || null;
     otpBot = bot;
-    console.log(`[OTP BOT] Started as @${otpBotUsername} — ready to deliver OTP codes`);
+    console.log("[OTP BOT] Started — ready to deliver OTP codes");
   } catch (err: any) {
     console.error("[OTP BOT] Failed to initialize:", err.message);
     otpBot = null;

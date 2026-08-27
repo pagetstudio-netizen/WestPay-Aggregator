@@ -146,7 +146,7 @@ export async function initiatePayin(params: MbiyoPayinRequest): Promise<MbiyoPay
     body.metadata.om_otp = params.otp;
   }
 
-  console.log(`[MBIYO] Demande de paiement: ${params.amount} ${params.currency} - Ref: ${params.orderId} - Tel: ${maskPhoneForLog(params.phoneNumber)} - Network: ${params.network} - Country: ${params.countryCode}`);
+  console.log(`[MBIYO] Demande de paiement: ${params.amount} ${params.currency} - Network: ${params.network} - Country: ${params.countryCode}`);
 
   try {
     const response = await fetch(`${MBIYO_BASE_URL}/merchant/payin`, {

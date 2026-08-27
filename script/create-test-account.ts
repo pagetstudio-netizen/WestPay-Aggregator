@@ -5,8 +5,7 @@ import { merchants, merchantCountries, paymentLinks } from "../shared/schema";
 import { eq } from "drizzle-orm";
 
 const email = process.env.DEMO_EMAIL || "demo@westpay.dev";
-// Le mot de passe est généré aléatoirement à chaque exécution — aucun credential hardcodé
-const password = process.env.DEMO_PASSWORD || crypto.randomBytes(16).toString("hex");
+const password = process.env.DEMO_PASSWORD;
 const slug = "demo-westpay";
 
 function genKey(country: string): string {
@@ -20,6 +19,10 @@ function genKey(country: string): string {
 }
 
 async function main() {
+  if (!password || password.length < 12) {
+    throw new Error("DEMO_PASSWORD doit être fourni via les secrets et contenir au moins 12 caractères.");
+  }
+
   const existing = await db.select().from(merchants).where(eq(merchants.email, email));
   if (existing.length > 0) {
     console.log("Compte test déjà existant, ID:", existing[0].id, "slug:", existing[0].slug);
@@ -72,15 +75,9 @@ async function main() {
     collectBillingAddress: false,
   }).returning();
 
-  console.log("Lien créé:", `/link/${link.uniqueId}`);
+  console.log("Lien de paiement de test créé.");
   console.log("---");
-  console.log("Email:", email);
-  // Affiche le mot de passe UNIQUEMENT à la création (usage local/admin uniquement)
-  if (process.env.DEMO_PASSWORD) {
-    console.log("Mot de passe: (défini via DEMO_PASSWORD)");
-  } else {
-    console.log("Mot de passe (généré, noter immédiatement):", password);
-  }
+  console.log("Identifiants fournis via les variables d'environnement (valeurs non affichées).");
   console.log("Slug:", slug);
   process.exit(0);
 }

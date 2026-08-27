@@ -4217,7 +4217,7 @@ export async function registerRoutes(
             const opsResult = await sendavaGetOperators(sendavaApiKey, countryCode);
             const ops: any[] = Array.isArray(opsResult.data) ? opsResult.data : [];
             operatorId = resolveOpId(ops, paymentMethod);
-            console.log(`[SENDAVAPAY] Opérateurs ${countryCode}: ${ops.length} — résolu: ${operatorId}`);
+            console.log(`[SENDAVAPAY] Liste des opérateurs chargée (${ops.length})`);
           } catch (opsErr: any) {
             console.error("[SENDAVAPAY] Erreur récupération opérateurs:", opsErr.message);
             // Continuer sans operatorId — le push pourrait quand même fonctionner
@@ -4255,7 +4255,7 @@ export async function registerRoutes(
           // ── Étape 3 (serveur) : déclencher le push USSD ─────────────────
           if (!operatorId) {
             // Pas d'opérateur trouvé → polling, le webhook confirmera
-            console.warn(`[SENDAVAPAY] Opérateur introuvable pour "${paymentMethod}" — passage en polling`);
+            console.warn("[SENDAVAPAY] Opérateur introuvable — passage en polling");
             return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, proxyToken: spProxyToken, polling: true, fees: 0 });
           }
 
@@ -7978,7 +7978,7 @@ export async function registerRoutes(
           const network = payoutOpRecord?.mbiyoCode || mbiyoNetwork(operator || "");
           const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
           const callbackUrl = `${callbackBaseUrl}/api/mbiyo/payout-callback`;
-          console.log(`[WITHDRAWAL MBIYO] Params: msisdn=${maskPhoneForLog(msisdnFull)} network=${network} country=${countryCode} currency=${currency}`);
+          console.log(`[WITHDRAWAL MBIYO] Requête préparée: network=${network} country=${countryCode} currency=${currency}`);
 
           const result = await mbiyoInitiatePayout({
             apiKey: mbiyoApiKey,
@@ -8092,7 +8092,7 @@ export async function registerRoutes(
           const countryCode = SENDAVAPAY_COUNTRY_CODES[mc.country] || "";
           const currency = SENDAVAPAY_CURRENCY_MAP[countryCode] || "XOF";
           const sendavaOperator = toSendavaOperator(operator || "", countryCode);
-          console.log(`[WITHDRAWAL SENDAVAPAY] Params: msisdn=${maskPhoneForLog(msisdnFull)} op=${sendavaOperator} country=${countryCode}`);
+          console.log(`[WITHDRAWAL SENDAVAPAY] Requête préparée: op=${sendavaOperator} country=${countryCode}`);
 
           const result = await sendavaInitiateWithdraw(sendavaApiKey, {
             amount: netAmount,
@@ -10414,7 +10414,10 @@ export async function registerRoutes(
   app.post("/api/admin/userbot/start-auth", authMiddleware("admin"), async (req, res) => {
     try {
       const { startUbotAuth } = await import("./userbot");
-      const phone = (req.body.phone as string) || process.env.USERBOT_PHONE || "+15843334306";
+      const phone = String(req.body.phone || process.env.USERBOT_PHONE || "").trim();
+      if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
+        return res.status(400).json({ success: false, message: "Numéro Telegram requis au format international." });
+      }
       const result = await startUbotAuth(phone);
       res.json(result);
     } catch (err: any) {

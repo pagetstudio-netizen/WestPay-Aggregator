@@ -8368,7 +8368,7 @@ function UserbotPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
   const [step, setStep] = useState<"idle" | "sending" | "code" | "password" | "connecting">("idle");
-  const [phone, setPhone] = useState("+15843334306");
+  const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [delayValue, setDelayValue] = useState("auto");
@@ -8541,7 +8541,7 @@ function UserbotPanel() {
             <div className="space-y-3">
               <div>
                 <label className="text-xs text-muted-foreground mb-1.5 block">Numéro de téléphone</label>
-                <input type="text" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+15843334306"
+                <input type="text" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+228XXXXXXXX"
                   className="w-full px-3 py-2 rounded-lg border bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
                   data-testid="input-userbot-phone" />
               </div>
