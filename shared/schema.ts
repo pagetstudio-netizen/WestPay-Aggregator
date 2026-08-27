@@ -169,6 +169,7 @@ export const paymentLinks = pgTable("payment_links", {
   merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),
   uniqueId: text("unique_id").notNull().unique(),
   name: text("name").notNull(),
+  bank: text("bank").notNull().default("bank1"),
   description: text("description"),
   amountType: text("amount_type").notNull().default("fixed"),
   amount: integer("amount"),

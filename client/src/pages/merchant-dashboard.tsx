@@ -2845,12 +2845,14 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
   const { t } = useLanguage();
   const { toast } = useToast();
   const baseUrl = "https://westpay.cfd";
+  const bank2BaseUrl = "https://payment.bank2.westpay.cfd";
   const [view, setView] = useState<"list" | "create" | "edit">("list");
   const [editLink, setEditLink] = useState<PaymentLink | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const mkForm = () => ({
     name: "", description: "", countries: [] as string[],
+    bank: "bank1" as "bank1" | "bank2",
     amountType: "flexible" as "fixed" | "flexible", amount: "",
     notificationEmail: "", confirmationMessage: "", redirectUrl: "",
     collectBillingAddress: false, showShareButton: true,
@@ -2877,6 +2879,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
 
   const buildPayload = (f: ReturnType<typeof mkForm>) => ({
     name: f.name, description: f.description || undefined,
+    bank: f.bank,
     amountType: f.amountType, amount: f.amount ? Number(f.amount) : undefined,
     redirectUrl: f.redirectUrl || undefined,
     paymentLimit: f.paymentLimit ? Number(f.paymentLimit) : undefined,
@@ -2935,9 +2938,13 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/merchant/payment-links"] }); toast({ title: t("linkDeleted") }); },
   });
 
-  const copyLink = (uniqueId: string) => { copyTextToClipboard(`${baseUrl}/link/${uniqueId}`, { successTitle: t("copied") }).catch(() => {}); };
-  const shareLink = (uniqueId: string) => {
-    const url = `${baseUrl}/link/${uniqueId}`;
+  const getPaymentLinkUrl = (link: Pick<PaymentLink, "uniqueId" | "bank">) =>
+    link.bank === "bank2"
+      ? `${bank2BaseUrl}/?link=${encodeURIComponent(link.uniqueId)}`
+      : `${baseUrl}/link/${link.uniqueId}`;
+  const copyLink = (link: PaymentLink) => { copyTextToClipboard(getPaymentLinkUrl(link), { successTitle: t("copied") }).catch(() => {}); };
+  const shareLink = (link: PaymentLink) => {
+    const url = getPaymentLinkUrl(link);
     if (navigator.share) navigator.share({ title: "Lien de paiement WestPay", url });
     else { copyTextToClipboard(url, { successTitle: t("copied") }).catch(() => {}); }
   };
@@ -2950,6 +2957,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
     setEditLink(link);
     setForm({
       name: link.name, description: l.description || "",
+      bank: l.bank === "bank2" ? "bank2" : "bank1",
       countries: l.countries || [], amountType: link.amountType as "fixed" | "flexible",
       amount: link.amount?.toString() || "", notificationEmail: l.notificationEmail || "",
       confirmationMessage: l.confirmationMessage || "", redirectUrl: link.redirectUrl || "",
@@ -3045,6 +3053,41 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
                   data-testid="input-link-description"
                 />
               </div>
+            </div>
+          </div>
+
+          {/* ── Banque de paiement ── */}
+          <div className="bg-white rounded-2xl overflow-hidden" style={{ border: "1.5px solid #e8ecf0" }}>
+            <div className="px-4 py-3 flex items-center gap-2.5" style={{ borderBottom: "1px solid #f5f5f5" }}>
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#eef2ff" }}>
+                <Building2 className="w-4 h-4" style={{ color: "#4f46e5" }} />
+              </div>
+              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Banque de paiement</span>
+            </div>
+            <div className="p-4 grid grid-cols-2 gap-3">
+              {(["bank1", "bank2"] as const).map((bank) => {
+                const selected = form.bank === bank;
+                return (
+                  <button
+                    type="button"
+                    key={bank}
+                    onClick={() => setField("bank", bank)}
+                    className="rounded-xl px-3 py-4 text-left transition-all active:scale-95"
+                    style={{
+                      border: `2px solid ${selected ? (bank === "bank1" ? "#00b050" : "#3d7cf5") : "#e5e7eb"}`,
+                      background: selected ? (bank === "bank1" ? "#f0fff4" : "#eff6ff") : "#fafafa",
+                    }}
+                    data-testid={`button-link-${bank}`}
+                  >
+                    <span className="block text-sm font-black" style={{ color: selected ? (bank === "bank1" ? "#00963f" : "#2563eb") : "#333" }}>
+                      {bank === "bank1" ? "Bank 1" : "Bank 2"}
+                    </span>
+                    <span className="block text-xs mt-1" style={{ color: "#777" }}>
+                      {bank === "bank1" ? "Parcours WestPay actuel" : "Interface de paiement bleue"}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -3368,7 +3411,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
         ) : (
           /* ── Cards ── */
           links.map((link) => {
-            const url = `${baseUrl}/link/${link.uniqueId}`;
+            const url = getPaymentLinkUrl(link);
             const isExpired = link.expiresAt && new Date() > new Date(link.expiresAt as any);
             const isLimited = link.paymentLimit && link.paymentCount >= link.paymentLimit;
             const inactive = !link.active || isExpired || isLimited;
@@ -3416,6 +3459,12 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
                       <span className="font-bold" style={{ color: "#1db954" }}>PROD</span>
                     </div>
                     <div className="flex items-center justify-between">
+                      <span style={{ color: "#555" }}>Banque :</span>
+                      <span className="font-bold" style={{ color: link.bank === "bank2" ? "#2563eb" : "#00963f" }}>
+                        {link.bank === "bank2" ? "Bank 2" : "Bank 1"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
                       <span style={{ color: "#555" }}>Balance Prod :</span>
                       <span className="font-bold" style={{ color: "#1a1a1a" }}>
                         {link.totalRevenue > 0 ? link.totalRevenue.toLocaleString("fr-FR", { minimumFractionDigits: 2 }) : "0,00"} XOF
@@ -3454,7 +3503,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
                       <div className="absolute right-0 top-full mt-1 z-50 bg-white rounded-xl overflow-hidden"
                         style={{ border: "1px solid #e0e4ea", boxShadow: "0 8px 24px rgba(0,0,0,0.14)", minWidth: "160px" }}>
                         <button
-                          onClick={() => { setOpenActionsId(null); copyLink(link.uniqueId); }}
+                          onClick={() => { setOpenActionsId(null); copyLink(link); }}
                           className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors"
                           style={{ color: "#333" }}
                           data-testid={`button-copy-link-${link.id}`}>
@@ -3468,7 +3517,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
                           <ExternalLink className="w-4 h-4 text-indigo-500" /> Ouvrir
                         </button>
                         <button
-                          onClick={() => { setOpenActionsId(null); shareLink(link.uniqueId); }}
+                          onClick={() => { setOpenActionsId(null); shareLink(link); }}
                           className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors"
                           style={{ color: "#333" }}
                           data-testid={`button-share-link-${link.id}`}>

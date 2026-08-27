@@ -7,6 +7,7 @@ import {
   Loader2,
   Phone,
   RefreshCw,
+  Search,
   ShieldCheck,
   X,
 } from "lucide-react";
@@ -22,7 +23,21 @@ type PaymentMethod = {
   name: string;
 };
 
-type Screen = "operators" | "phone" | "otp" | "pending" | "success" | "failed";
+type Screen = "countries" | "operators" | "phone" | "otp" | "pending" | "success" | "failed";
+
+type PaymentLinkInfo = {
+  link: {
+    uniqueId: string;
+    name: string;
+    bank: string;
+    amountType: string;
+    amount: number | null;
+    redirectUrl: string | null;
+  };
+  merchantName: string;
+  merchantSlug: string;
+  countries: string[];
+};
 
 const FALLBACK_METHODS: Record<string, string[]> = {
   Togo: ["Moov Money", "TMoney"],
@@ -65,6 +80,35 @@ const DIAL_CODES: Record<string, string> = {
   Ghana: "+233",
   Niger: "+227",
   Kenya: "+254",
+};
+
+const COUNTRY_FLAGS: Record<string, string> = {
+  Togo: "🇹🇬",
+  Benin: "🇧🇯",
+  "Burkina Faso": "🇧🇫",
+  Cameroun: "🇨🇲",
+  "Congo Brazzaville": "🇨🇬",
+  "Congo RDC": "🇨🇩",
+  Gabon: "🇬🇦",
+  "Cote d'Ivoire": "🇨🇮",
+  Mali: "🇲🇱",
+  Senegal: "🇸🇳",
+  Guinee: "🇬🇳",
+  Gambie: "🇬🇲",
+  Philippines: "🇵🇭",
+  Pakistan: "🇵🇰",
+  India: "🇮🇳",
+  Nigeria: "🇳🇬",
+  Ghana: "🇬🇭",
+  Niger: "🇳🇪",
+  Kenya: "🇰🇪",
+};
+
+const COUNTRY_LABELS: Record<string, string> = {
+  Benin: "Bénin",
+  "Cote d'Ivoire": "Côte d'Ivoire",
+  Guinee: "Guinée",
+  Senegal: "Sénégal",
 };
 
 const PHONE_PLACEHOLDERS: Record<string, string> = {
@@ -129,16 +173,19 @@ function Stepper({ screen }: { screen: Screen }) {
 export default function Bank2PaymentPage() {
   const params = new URLSearchParams(window.location.search);
   const merchantSlug = params.get("merchant") || "";
+  const paymentLinkUniqueId = params.get("link") || params.get("linkId") || "";
   const amountParam = Number.parseInt(params.get("amount") || "0", 10);
   const countryParam = params.get("country") || "";
   const redirectParam = params.get("redirect") || "";
   const referenceParam = params.get("ref") || "";
   const completeParam = params.get("omnipay_status") === "complete";
 
-  const [screen, setScreen] = useState<Screen>(completeParam ? "pending" : "operators");
+  const [screen, setScreen] = useState<Screen>(completeParam ? "pending" : paymentLinkUniqueId ? "countries" : "operators");
   const [merchant, setMerchant] = useState<MerchantInfo | null>(null);
   const [country, setCountry] = useState(countryParam);
   const [amount, setAmount] = useState(Number.isFinite(amountParam) ? amountParam : 0);
+  const [amountType, setAmountType] = useState<"fixed" | "flexible">("fixed");
+  const [countrySearch, setCountrySearch] = useState("");
   const [methods, setMethods] = useState<PaymentMethod[]>([]);
   const [method, setMethod] = useState("");
   const [phone, setPhone] = useState(params.get("phone") || params.get("payerPhone") || "");
@@ -165,6 +212,10 @@ export default function Bank2PaymentPage() {
     (country === "Burkina Faso" || country === "Cote d'Ivoire");
 
   const formatAmount = (value: number) => value.toLocaleString("fr-FR");
+  const visibleCountries = (merchant?.countries || []).filter((item) => {
+    const label = COUNTRY_LABELS[item] || item;
+    return `${label} ${DIAL_CODES[item] || ""}`.toLowerCase().includes(countrySearch.trim().toLowerCase());
+  });
 
   const buildRedirectUrl = useCallback(() => {
     const raw = redirectRef.current;
@@ -240,6 +291,30 @@ export default function Bank2PaymentPage() {
       return;
     }
 
+    if (paymentLinkUniqueId) {
+      setLoading(true);
+      fetch(`/api/payment-link/${encodeURIComponent(paymentLinkUniqueId)}`)
+        .then(async (response) => {
+          const data = await response.json() as PaymentLinkInfo & { message?: string };
+          if (!response.ok) throw new Error(data.message || "Lien de paiement introuvable");
+          if (data.link.bank !== "bank2") {
+            throw new Error("Ce lien utilise Bank 1 et doit être ouvert sur westpay.cfd.");
+          }
+          setMerchant({
+            name: data.merchantName,
+            slug: data.merchantSlug,
+            countries: data.countries,
+          });
+          setAmountType(data.link.amountType === "flexible" ? "flexible" : "fixed");
+          setAmount(data.link.amount || 0);
+          if (data.link.redirectUrl) redirectRef.current = data.link.redirectUrl;
+          setScreen("countries");
+        })
+        .catch((caught) => setError(sanitizePaymentMessage(caught.message, "Page de paiement indisponible")))
+        .finally(() => setLoading(false));
+      return;
+    }
+
     if (!merchantSlug || !countryParam || !amountParam || amountParam <= 0) {
       setError("Le marchand, le pays et le montant doivent être fournis par le site marchand.");
       setLoading(false);
@@ -258,13 +333,15 @@ export default function Bank2PaymentPage() {
         if (!matchedCountry) throw new Error("Ce pays n’est pas activé pour ce marchand.");
         setMerchant(info);
         setCountry(matchedCountry);
+        setScreen("operators");
       })
       .catch((caught) => setError(sanitizePaymentMessage(caught.message, "Page de paiement indisponible")))
       .finally(() => setLoading(false));
-  }, [amountParam, completeParam, countryParam, merchantSlug, referenceParam, startPolling]);
+  }, [amountParam, completeParam, countryParam, merchantSlug, paymentLinkUniqueId, referenceParam, startPolling]);
 
   useEffect(() => {
     if (!country || completeParam) return;
+    setMethods([]);
     fetch(`/api/public/payment-methods/${encodeURIComponent(country)}?type=api`)
       .then(async (response) => {
         const data = await response.json();
@@ -300,7 +377,7 @@ export default function Bank2PaymentPage() {
   }, [buildRedirectUrl, screen]);
 
   const initiatePayment = async () => {
-    if (!method || !phone.trim()) return;
+    if (!method || !phone.trim() || amount <= 0 || !merchant?.slug) return;
     if (needsPreOtp && !otp.trim()) {
       setError("Le code OTP est requis pour cet opérateur.");
       return;
@@ -313,7 +390,7 @@ export default function Bank2PaymentPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          merchantSlug,
+          merchantSlug: merchant.slug,
           country,
           amount,
           payerPhone: phone.trim(),
@@ -324,6 +401,7 @@ export default function Bank2PaymentPage() {
           lastName: "RobotPay",
           operator: method.toLowerCase().includes("wave") ? "wave" : undefined,
           otp: needsPreOtp ? otp.trim() : undefined,
+          paymentLinkUniqueId: paymentLinkUniqueId || undefined,
         }),
       });
       const data = await response.json();
@@ -409,12 +487,77 @@ export default function Bank2PaymentPage() {
       <main className="bank2-shell">
         <header className="bank2-amount">
           <span>Montant :</span>
-          <strong>{formatAmount(amount)} <small>{currency}</small></strong>
+          <strong>{amount > 0 ? formatAmount(amount) : "—"} <small>{currency}</small></strong>
         </header>
 
-        {screen === "operators" ? (
+        {screen === "countries" ? (
+          <section className="bank2-country-card">
+            <h1>Sélectionnez votre pays</h1>
+            <p>Choisissez le pays depuis lequel vous souhaitez effectuer le paiement.</p>
+
+            <div className="bank2-country-search">
+              <Search size={20} />
+              <input
+                type="search"
+                value={countrySearch}
+                onChange={(event) => setCountrySearch(event.target.value)}
+                placeholder="Rechercher un pays ou un indicatif"
+                aria-label="Rechercher un pays"
+                data-testid="bank2-country-search"
+              />
+            </div>
+
+            <div className="bank2-country-list">
+              {visibleCountries.length === 0 ? (
+                <div className="bank2-country-empty">Aucun pays ne correspond à votre recherche.</div>
+              ) : visibleCountries.map((item) => (
+                <button
+                  type="button"
+                  className="bank2-country"
+                  key={item}
+                  onClick={() => {
+                    setCountry(item);
+                    setMethod("");
+                    setError("");
+                    setScreen("operators");
+                  }}
+                  data-testid={`bank2-country-${item.replace(/[\s']/g, "-").toLowerCase()}`}
+                >
+                  <span className="bank2-country-flag">{COUNTRY_FLAGS[item] || "🌍"}</span>
+                  <span className="bank2-country-name">{COUNTRY_LABELS[item] || item}</span>
+                  <span className="bank2-country-code">{DIAL_CODES[item] || ""}</span>
+                  <ChevronRight size={23} />
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : screen === "operators" ? (
           <section className="bank2-operator-section">
-            <h1>Sélectionnez le mode de paiement :</h1>
+            <div className="bank2-operator-heading">
+              {paymentLinkUniqueId && (
+                <button type="button" onClick={() => setScreen("countries")} aria-label="Changer de pays">
+                  <ChevronLeft size={23} />
+                </button>
+              )}
+              <h1>Sélectionnez le mode de paiement :</h1>
+            </div>
+            {amountType === "flexible" && (
+              <label className="bank2-flexible-amount bank2-flexible-amount-on-blue">
+                <span>Montant du paiement en {currency}</span>
+                <div>
+                  <input
+                    type="number"
+                    min="1"
+                    inputMode="numeric"
+                    value={amount || ""}
+                    onChange={(event) => setAmount(Math.max(0, Number.parseInt(event.target.value || "0", 10) || 0))}
+                    placeholder="Entrez le montant"
+                    data-testid="bank2-link-amount"
+                  />
+                  <strong>{currency}</strong>
+                </div>
+              </label>
+            )}
             <div className="bank2-operator-list">
               {methods.length === 0 ? (
                 <div className="bank2-empty">Aucun opérateur disponible pour ce pays.</div>
@@ -423,6 +566,7 @@ export default function Bank2PaymentPage() {
                   type="button"
                   className="bank2-operator"
                   key={item.name}
+                  disabled={amountType === "flexible" && amount <= 0}
                   onClick={() => {
                     setMethod(item.name);
                     setScreen("phone");
@@ -601,11 +745,29 @@ function Bank2Styles() {
       .bank2-amount>span{display:block;font-size:26px;font-weight:400;margin-bottom:2px}
       .bank2-amount>strong{font-size:50px;line-height:1;font-weight:700;letter-spacing:.01em}
       .bank2-amount small{font-size:.55em;font-weight:400}
+      .bank2-country-card{background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 8px 26px rgba(20,68,112,.18);padding:28px}
+      .bank2-country-card h1{font-size:25px;color:#183b5b;margin:0 0 7px}
+      .bank2-country-card>p{font-size:15px;color:#718096;margin:0 0 22px;line-height:1.45}
+      .bank2-country-search{height:52px;border:1.5px solid #d8e2ec;background:#f8fafc;border-radius:12px;display:flex;align-items:center;padding:0 15px;gap:10px;color:#8ca0b3;margin-bottom:16px}
+      .bank2-country-search:focus-within{border-color:#4b91e8;box-shadow:0 0 0 3px rgba(75,145,232,.12);background:#fff}
+      .bank2-country-search input{border:0;outline:0;background:transparent;flex:1;min-width:0;font-size:16px;color:#243b53}
+      .bank2-country-list{display:flex;flex-direction:column;border:1px solid #e5edf4;border-radius:13px;overflow:hidden}
+      .bank2-country{border:0;border-bottom:1px solid #e8eef4;background:#fff;min-height:68px;padding:0 17px;display:grid;grid-template-columns:42px 1fr auto 24px;gap:10px;align-items:center;text-align:left;cursor:pointer;color:#183b5b}
+      .bank2-country:last-child{border-bottom:0}.bank2-country:hover{background:#f2f8ff}.bank2-country:disabled{opacity:.48;cursor:not-allowed}
+      .bank2-country-flag{font-size:27px}.bank2-country-name{font-size:17px;font-weight:700}.bank2-country-code{font-size:15px;color:#6b7f91;font-weight:600}.bank2-country svg{color:#a8b6c3}
+      .bank2-country-empty{padding:26px 18px;text-align:center;color:#7c8d9d}
+      .bank2-flexible-amount{display:block;margin-bottom:18px}.bank2-flexible-amount>span{display:block;font-size:14px;font-weight:700;color:#34495e;margin-bottom:7px}
+      .bank2-flexible-amount>div{height:54px;border:1.5px solid #d8e2ec;border-radius:12px;display:flex;align-items:center;overflow:hidden}
+      .bank2-flexible-amount input{border:0;outline:0;flex:1;min-width:0;height:100%;padding:0 15px;font-size:18px}.bank2-flexible-amount strong{padding:0 15px;color:#4b91e8}
+      .bank2-flexible-amount-on-blue>span{color:#fff}.bank2-flexible-amount-on-blue>div{background:#fff;border-color:#fff}
+      .bank2-operator-heading{display:flex;align-items:flex-start;gap:9px;margin:0 4px 25px}.bank2-operator-heading h1{margin:0;flex:1}
+      .bank2-operator-heading button{width:36px;height:36px;border:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.14);color:#fff;border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer}
       .bank2-operator-section h1{font-size:26px;color:#fff;font-weight:400;margin:0 4px 30px}
       .bank2-operator-list{display:flex;flex-direction:column;gap:16px}
       .bank2-operator{width:100%;min-height:86px;border:0;border-radius:14px;background:#fff;padding:0 26px;display:flex;align-items:center;justify-content:space-between;color:#18507d;font-size:24px;font-weight:700;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.13);transition:transform .12s,box-shadow .12s}
       .bank2-operator:hover{transform:translateY(-1px);box-shadow:0 5px 16px rgba(0,0,0,.15)}
       .bank2-operator:active{transform:scale(.985)}
+      .bank2-operator:disabled{opacity:.55;cursor:not-allowed;transform:none}
       .bank2-operator svg{color:#a8adb2}
       .bank2-empty{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.4);border-radius:14px;color:#fff;padding:20px;text-align:center}
       .bank2-card{background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.12)}
@@ -643,6 +805,7 @@ function Bank2Styles() {
       .bank2-success>.bank2-button{margin:0 auto}.bank2-countdown{text-align:center;color:#6b7280;font-size:13px;margin:10px 0 0}
       @media(max-width:560px){
         .bank2-page{padding:0 15px 32px}.bank2-amount{padding:24px 26px 24px}.bank2-amount>span{font-size:20px}.bank2-amount>strong{font-size:42px}
+        .bank2-country-card{padding:21px 16px;border-radius:15px}.bank2-country-card h1{font-size:22px}.bank2-country{padding:0 12px;grid-template-columns:38px 1fr auto 20px}.bank2-country-name{font-size:15px}.bank2-country-code{font-size:14px}.bank2-country-flag{font-size:24px}
         .bank2-operator-section h1{font-size:20px;margin-bottom:22px}.bank2-operator{min-height:68px;font-size:18px;padding:0 20px}
         .bank2-stepper{padding:26px 12px 18px}.bank2-stepper:before{top:51px}.bank2-step{width:48px;height:48px;font-size:18px}.bank2-step-wrap{font-size:11px}
         .bank2-content{padding:10px 22px 24px}.bank2-notice{font-size:14px}.bank2-label{font-size:15px}.bank2-actions{gap:14px}.bank2-button{font-size:16px;min-height:52px}

@@ -4065,7 +4065,7 @@ export async function registerRoutes(
   // ==================== PAYMENT WIZARD (public) ====================
   app.post("/api/payment/initiate", paymentRateLimit, async (req, res) => {
     try {
-      const { merchantSlug, country, amount, payerPhone, payerName, paymentMethod, redirectUrl, firstName, lastName, otp, operator } = req.body;
+      const { merchantSlug, country, amount, payerPhone, payerName, paymentMethod, redirectUrl, firstName, lastName, otp, operator, paymentLinkUniqueId } = req.body;
       if (!merchantSlug || !country || !amount || !paymentMethod) {
         return res.status(400).json({ message: "Marchand, pays, montant et methode de paiement requis" });
       }
@@ -4084,6 +4084,26 @@ export async function registerRoutes(
       const merchantCountry = countries.find(c => c.country === country && c.active);
       if (!merchantCountry) {
         return res.status(400).json({ message: "Pays non disponible pour ce marchand" });
+      }
+
+      if (paymentLinkUniqueId) {
+        const paymentLink = await storage.getPaymentLinkByUniqueId(String(paymentLinkUniqueId));
+        const linkCountries = Array.isArray(paymentLink?.countries) && paymentLink.countries.length > 0
+          ? paymentLink.countries
+          : null;
+        const linkIsValid = paymentLink
+          && paymentLink.active
+          && paymentLink.bank === "bank2"
+          && paymentLink.merchantId === merchant.id
+          && (!paymentLink.expiresAt || new Date() <= paymentLink.expiresAt)
+          && (!paymentLink.paymentLimit || paymentLink.paymentCount < paymentLink.paymentLimit)
+          && (!linkCountries || linkCountries.includes(country));
+        if (!linkIsValid) {
+          return res.status(403).json({ message: "Ce pays ou ce lien n'est pas autorisé pour ce paiement" });
+        }
+        if (paymentLink.amountType === "fixed" && paymentLink.amount !== parsedAmount) {
+          return res.status(400).json({ message: "Le montant ne correspond pas à ce lien de paiement" });
+        }
       }
 
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
@@ -7219,14 +7239,18 @@ export async function registerRoutes(
   app.post("/api/merchant/payment-links", authMiddleware("merchant"), async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
-      const { name, description, amountType, amount, redirectUrl, expiresAt, paymentLimit, active, countries, confirmationMessage, collectBillingAddress, showShareButton, notificationEmail } = req.body;
+      const { name, description, amountType, amount, redirectUrl, expiresAt, paymentLimit, active, countries, confirmationMessage, collectBillingAddress, showShareButton, notificationEmail, bank: requestedBank } = req.body;
       if (!name || !amountType) return res.status(400).json({ message: "name et amountType requis" });
       if (amountType === "fixed" && !amount) return res.status(400).json({ message: "amount requis pour un lien fixe" });
+      if (requestedBank !== undefined && !["bank1", "bank2"].includes(String(requestedBank))) {
+        return res.status(400).json({ message: "Banque de paiement invalide" });
+      }
       const uniqueId = Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
       const link = await storage.createPaymentLink({
         merchantId: merchantId,
         uniqueId,
         name,
+        bank: requestedBank === "bank2" ? "bank2" : "bank1",
         description: description || null,
         amountType,
         amount: amount ? Number(amount) : null,
@@ -7252,9 +7276,13 @@ export async function registerRoutes(
       const id = Number(req.params.id);
       const existing = await storage.getPaymentLinkById(id);
       if (!existing || existing.merchantId !== merchantId) return res.status(404).json({ message: "Lien introuvable" });
-      const { name, description, amountType, amount, redirectUrl, expiresAt, paymentLimit, active, countries, confirmationMessage, collectBillingAddress, showShareButton, notificationEmail } = req.body;
+      const { name, description, amountType, amount, redirectUrl, expiresAt, paymentLimit, active, countries, confirmationMessage, collectBillingAddress, showShareButton, notificationEmail, bank: requestedBank } = req.body;
+      if (requestedBank !== undefined && !["bank1", "bank2"].includes(String(requestedBank))) {
+        return res.status(400).json({ message: "Banque de paiement invalide" });
+      }
       const updated = await storage.updatePaymentLink(id, {
         ...(name !== undefined && { name }),
+        ...(requestedBank !== undefined && { bank: requestedBank }),
         ...(description !== undefined && { description: description || null }),
         ...(amountType !== undefined && { amountType }),
         ...(amount !== undefined && { amount: amount ? Number(amount) : null }),
@@ -7299,7 +7327,14 @@ export async function registerRoutes(
       if (!merchant || merchant.suspended) return res.status(404).json({ message: "Marchand introuvable" });
       const countries = await storage.getMerchantCountries(merchant.id);
       const activeCountries = countries.filter(c => c.active).map(c => c.country);
-      res.json({ link, merchantName: merchant.name, merchantSlug: merchant.slug, countries: activeCountries });
+      const configuredCountries = Array.isArray(link.countries) && link.countries.length > 0 ? link.countries : null;
+      const allowedCountries = link.bank === "bank2" && configuredCountries
+        ? activeCountries.filter(country => configuredCountries.includes(country))
+        : activeCountries;
+      if (link.bank === "bank2" && allowedCountries.length === 0) {
+        return res.status(409).json({ message: "Aucun pays actif n'est disponible pour ce lien de paiement." });
+      }
+      res.json({ link, merchantName: merchant.name, merchantSlug: merchant.slug, countries: allowedCountries });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }

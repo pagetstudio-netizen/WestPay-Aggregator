@@ -137,6 +137,7 @@ type LinkInfo = {
     id: number;
     uniqueId: string;
     name: string;
+    bank: string;
     amountType: string;
     amount: number | null;
     redirectUrl: string | null;
@@ -244,6 +245,10 @@ export default function PaymentLinkPage() {
   });
 
   useEffect(() => {
+    if (data?.link.bank === "bank2") {
+      window.location.replace(`https://payment.bank2.westpay.cfd/?link=${encodeURIComponent(data.link.uniqueId)}`);
+      return;
+    }
     if (data?.countries?.length && !country) {
       setCountry(data.countries[0]);
 

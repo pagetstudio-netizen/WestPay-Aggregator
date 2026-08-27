@@ -493,6 +493,7 @@ export async function runFinancialMigrations() {
         merchant_id integer NOT NULL,
         unique_id text NOT NULL UNIQUE,
         name text NOT NULL,
+         bank text NOT NULL DEFAULT 'bank1',
         description text,
         amount_type text NOT NULL DEFAULT 'fixed',
         amount integer,
@@ -633,6 +634,12 @@ export async function runFinancialMigrations() {
         withdrawals_total integer NOT NULL DEFAULT 0
       );
     `);
+
+      // Compatibilité avec les bases qui possèdent déjà la table payment_links.
+      await client.query(`
+        ALTER TABLE payment_links
+        ADD COLUMN IF NOT EXISTS bank text NOT NULL DEFAULT 'bank1';
+      `);
 
     // pgvector (knowledge_chunks — RAG)
     try {
