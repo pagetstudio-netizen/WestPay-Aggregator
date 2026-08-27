@@ -40,7 +40,10 @@ export async function getGeoInfo(ip: string): Promise<GeoInfo> {
     if (cleanIp === "127.0.0.1" || cleanIp === "::1" || cleanIp.startsWith("192.168.") || cleanIp.startsWith("10.")) {
       return { ...fallback, ip: cleanIp, city: "Local" };
     }
-    const res = await fetch(`http://ip-api.com/json/${cleanIp}?fields=status,city,regionName,country,isp,query,proxy,hosting,mobile`, { signal: AbortSignal.timeout(4000) });
+    // La géolocalisation est une couche de défense supplémentaire et le code
+    // appelant applique un fail-open si le service est indisponible. Une limite
+    // courte évite de bloquer la première connexion pendant plusieurs secondes.
+    const res = await fetch(`http://ip-api.com/json/${cleanIp}?fields=status,city,regionName,country,isp,query,proxy,hosting,mobile`, { signal: AbortSignal.timeout(2000) });
     if (!res.ok) return { ...fallback, ip: cleanIp };
     const data = await res.json() as any;
     if (data.status !== "success") return { ...fallback, ip: cleanIp };

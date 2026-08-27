@@ -975,6 +975,25 @@ export async function registerRoutes(
     res.json({ ip });
   });
 
+  // Cache partagé entre le contrôle IP de la page de login et le POST de
+  // connexion. Sans ce cache, la première visite puis le clic sur "Connexion"
+  // déclenchent deux appels séquentiels vers ip-api.com.
+  const merchantGeoLoginCache = new Map<string, { country: string; isHosting: boolean; ts: number }>();
+  const MERCHANT_GEO_LOGIN_CACHE_TTL = 6 * 60 * 60 * 1000;
+  const getCachedMerchantGeo = async (ip: string) => {
+    const cached = merchantGeoLoginCache.get(ip);
+    if (cached && Date.now() - cached.ts < MERCHANT_GEO_LOGIN_CACHE_TTL) return cached;
+
+    const geo = await getGeoInfo(ip).catch(() => null);
+    const result = {
+      country: geo?.country || "",
+      isHosting: geo?.isHosting || false,
+      ts: Date.now(),
+    };
+    merchantGeoLoginCache.set(ip, result);
+    return result;
+  };
+
   app.get("/api/auth/check-ip", async (req, res) => {
     try {
       const rawIp = req.ip || req.socket.remoteAddress || "";
@@ -1011,8 +1030,8 @@ export async function registerRoutes(
 
       // 1. Geo check FIRST — si le pays est supporté, autoriser même si l'IP est dans blocked_ips
       // (les FAI africains mobiles sont souvent faussement flaggés "datacenter" par ip-api.com)
-      const geo = await getGeoInfo(cleanIp).catch(() => null);
-      const country = geo?.country || "";
+      const geo = await getCachedMerchantGeo(cleanIp);
+      const country = geo.country;
 
       if (!country || PLATFORM_COUNTRIES.has(country)) {
         // Pays supporté ou géoloc impossible → autorisé (bénéfice du doute)
@@ -1575,10 +1594,6 @@ export async function registerRoutes(
   // Charger immédiatement au démarrage
   loadBlockedEmails();
 
-  // Cache géo pour le login marchand (évite de surcharger ip-api.com)
-  const geoLoginCache = new Map<string, { country: string; ts: number }>();
-  const GEO_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 heures par IP
-
   // Helper : extrait le hostname d'une Origin ou Referer (strict, pas de startsWith)
   function parseHost(headerValue: string): string | null {
     try {
@@ -1779,16 +1794,9 @@ export async function registerRoutes(
       if (!isLocalIp) {
         let geoCountry = "";
         let isDatacenter = false;
-        const cached = geoLoginCache.get(clientIp);
-        if (cached && Date.now() - cached.ts < GEO_CACHE_TTL) {
-          geoCountry = cached.country;
-          isDatacenter = (cached as any).isHosting || false;
-        } else {
-          const geo = await getGeoInfo(clientIp).catch(() => null);
-          geoCountry = geo?.country || "";
-          isDatacenter = geo?.isHosting || false;
-          if (geoCountry) geoLoginCache.set(clientIp, { country: geoCountry, ts: Date.now(), isHosting: isDatacenter } as any);
-        }
+        const geo = await getCachedMerchantGeo(clientIp);
+        geoCountry = geo.country;
+        isDatacenter = geo.isHosting;
 
         // Bloquer les IPs de datacenter / VPS — SAUF si le pays est supporté
         // (les FAI mobiles africains sont souvent faussement flaggés "hosting" par ip-api.com)
@@ -1897,7 +1905,8 @@ export async function registerRoutes(
           emailLoginAttempts.set(emailKey, emailEntry);
         }
 
-        await storage.createLoginLog({ userId: merchant.id, role: "merchant", ip: clientIp, device: ua, success: false });
+        void storage.createLoginLog({ userId: merchant.id, role: "merchant", ip: clientIp, device: ua, success: false })
+          .catch((err) => console.error("[AUTH] Failed to write merchant login log:", err.message));
         notifyAdminMerchantLogin({ email: merchant.email, merchantName: merchant.name, ip: clientIp, device: ua, success: false }).catch(() => {});
         return res.status(401).json({ message: "Identifiants invalides" });
       }
@@ -1907,22 +1916,23 @@ export async function registerRoutes(
       emailLoginAttempts.delete(email.toLowerCase().trim());
 
       // Vérifier AVANT d'enregistrer le log si l'IP a déjà été vue pour ce compte
-      const seenBefore = await storage.hasMerchantSeenIp(merchant.id, clientIp).catch(() => true);
-
-      await storage.createLoginLog({ userId: merchant.id, role: "merchant", ip: clientIp, device: ua, success: true });
-
-      if (!seenBefore) {
-        storage.createSecurityLog({ eventType: "new_ip_login", ip: clientIp, userEmail: merchant.email, action: "new_merchant_ip", details: merchant.name }).catch(() => {});
-        notifyAdminNewMerchantIp({ email: merchant.email, merchantName: merchant.name, merchantId: merchant.id, ip: clientIp, device: ua }).catch(() => {});
-      } else {
-        notifyAdminMerchantLogin({ email: merchant.email, merchantName: merchant.name, ip: clientIp, device: ua, success: true }).catch(() => {});
-      }
+      const seenBeforePromise = storage.hasMerchantSeenIp(merchant.id, clientIp).catch(() => true);
+      void storage.createLoginLog({ userId: merchant.id, role: "merchant", ip: clientIp, device: ua, success: true })
+        .catch((err) => console.error("[AUTH] Failed to write merchant login log:", err.message));
 
       // ── Bypass OTP pour les comptes de test internes ─────────────────────────
       // Liste gérée via le paramètre DB "otp_bypass_emails" (virgule-séparés) — aucun email hardcodé
       const otpBypassRaw = await storage.getSetting("otp_bypass_emails").catch(() => "");
       const OTP_BYPASS_EMAILS = (otpBypassRaw || "").split(",").map((e: string) => e.trim().toLowerCase()).filter(Boolean);
       if (OTP_BYPASS_EMAILS.includes(merchant.email.toLowerCase())) {
+        seenBeforePromise.then((seenBefore) => {
+          if (!seenBefore) {
+            storage.createSecurityLog({ eventType: "new_ip_login", ip: clientIp, userEmail: merchant.email, action: "new_merchant_ip", details: merchant.name }).catch(() => {});
+            notifyAdminNewMerchantIp({ email: merchant.email, merchantName: merchant.name, merchantId: merchant.id, ip: clientIp, device: ua }).catch(() => {});
+          } else {
+            notifyAdminMerchantLogin({ email: merchant.email, merchantName: merchant.name, ip: clientIp, device: ua, success: true }).catch(() => {});
+          }
+        }).catch(() => {});
         const token = jwt.sign(
           { merchantId: merchant.id, email: merchant.email, role: "merchant", slug: merchant.slug, name: merchant.name },
           JWT_SECRET,
@@ -1947,29 +1957,35 @@ export async function registerRoutes(
       await storage.createMerchantLoginOtp(merchant.email, otpHash, tempToken, expiresAt);
 
       // Envoyer l'OTP — bot OTP dédié → bot principal → email (fallback chain)
-      let otpVia: "telegram" | "email" = "email";
-      if (merchant.telegramChatId) {
-        try {
-          // 1st priority: dedicated OTP bot (separate token, single responsibility)
-          const { sendOtpViaDedicatedBot } = await import("./telegram-otp-bot");
-          const sent = await sendOtpViaDedicatedBot(merchant.telegramChatId, otpValue, merchant.name);
-          if (sent) {
-            otpVia = "telegram";
-          } else {
+      const otpVia: "telegram" | "email" = merchant.telegramChatId ? "telegram" : "email";
+      void (async () => {
+        if (merchant.telegramChatId) {
+          try {
+            // 1st priority: dedicated OTP bot (separate token, single responsibility)
+            const { sendOtpViaDedicatedBot } = await import("./telegram-otp-bot");
+            const sent = await sendOtpViaDedicatedBot(merchant.telegramChatId, otpValue, merchant.name);
+            if (sent) return;
+
             // 2nd priority: main notification bot fallback
             const { sendMerchantOtpTelegram } = await import("./telegram-bot");
             const sentFallback = await sendMerchantOtpTelegram(merchant.telegramChatId, otpValue, merchant.name);
-            if (sentFallback) otpVia = "telegram";
+            if (sentFallback) return;
+          } catch (err) {
+            console.error("[MERCHANT OTP] Telegram error, falling back to email:", err);
           }
-        } catch (err) {
-          console.error("[MERCHANT OTP] Telegram error, falling back to email:", err);
         }
-      }
-      if (otpVia === "email") {
-        sendMerchantOtpEmail(merchant.email, otpValue, merchant.name).catch((err) => {
-          console.error("[MERCHANT OTP] Email error:", err);
-        });
-      }
+        await sendMerchantOtpEmail(merchant.email, otpValue, merchant.name);
+      })().catch((err) => console.error("[MERCHANT OTP] Delivery error:", err));
+
+      // Les journaux et alertes ne doivent pas retarder l'écran OTP.
+      seenBeforePromise.then((seenBefore) => {
+        if (!seenBefore) {
+          storage.createSecurityLog({ eventType: "new_ip_login", ip: clientIp, userEmail: merchant.email, action: "new_merchant_ip", details: merchant.name }).catch(() => {});
+          notifyAdminNewMerchantIp({ email: merchant.email, merchantName: merchant.name, merchantId: merchant.id, ip: clientIp, device: ua }).catch(() => {});
+        } else {
+          notifyAdminMerchantLogin({ email: merchant.email, merchantName: merchant.name, ip: clientIp, device: ua, success: true }).catch(() => {});
+        }
+      }).catch(() => {});
 
       return res.json({ requiresOtp: true, tempToken, otpVia, merchantName: merchant.name });
     } catch (err: any) {
