@@ -14,6 +14,19 @@ const FEATURES = [
   { icon: Shield, label: "Sécurité bancaire & 2FA email" },
 ];
 
+async function readApiJson(response: Response, fallbackMessage: string): Promise<any> {
+  const rawBody = await response.text();
+  try {
+    return JSON.parse(rawBody);
+  } catch {
+    console.error("[MerchantLogin] Réponse API non JSON", {
+      status: response.status,
+      contentType: response.headers.get("content-type"),
+    });
+    throw new Error(fallbackMessage);
+  }
+}
+
 const getDeviceFingerprint = (): string => {
   try {
     const stored = localStorage.getItem("_wp_dfp");
@@ -62,7 +75,7 @@ export default function MerchantLogin() {
 
   useEffect(() => {
     fetch("/api/auth/check-ip")
-      .then((r) => r.json())
+      .then((r) => readApiJson(r, "Le contrôle de sécurité est momentanément indisponible."))
       .then((d) => {
         if (d.allowed === false) setLocation("/ip-verify");
         else setIpStatus("allowed");
@@ -102,7 +115,10 @@ export default function MerchantLogin() {
         headers: { "Content-Type": "application/json", ...(fp ? { "X-Device-FP": fp } : {}) },
         body: JSON.stringify({ email, password }),
       });
-      const data = await res.json();
+      const data = await readApiJson(
+        res,
+        "Le serveur de connexion est momentanément indisponible. Veuillez réessayer dans quelques secondes.",
+      );
       if (!res.ok) throw new Error(data.message || "Unable to connect.");
 
       if (data.requiresOtp) {
@@ -148,7 +164,10 @@ export default function MerchantLogin() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tempToken: otpToken, code: otpCode.trim() }),
       });
-      const data = await res.json();
+      const data = await readApiJson(
+        res,
+        "Le serveur de vérification est momentanément indisponible. Veuillez réessayer dans quelques secondes.",
+      );
        if (!res.ok) throw new Error(data.message || "Invalid code.");
       login(data.token, {
         id: data.user.id,
@@ -177,7 +196,10 @@ export default function MerchantLogin() {
         headers: { "Content-Type": "application/json", ...(fp ? { "X-Device-FP": fp } : {}) },
         body: JSON.stringify({ email, password }),
       });
-      const data = await res.json();
+      const data = await readApiJson(
+        res,
+        "Le serveur de connexion est momentanément indisponible. Veuillez réessayer dans quelques secondes.",
+      );
        if (!res.ok) throw new Error(data.message || "Unable to resend the code.");
       if (data.requiresOtp) {
         setOtpToken(data.tempToken);
