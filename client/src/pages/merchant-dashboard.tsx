@@ -53,6 +53,9 @@ import icnSettingsPassword from "@assets/mine-mod-change-pwd-D4tL_Aft_1779628273
 import icnSettingsContact from "@assets/téléchargement_(59)_1779628273158.png";
 import { getAvatarUrl, getInitials, getAvatarColor } from "@/lib/avatar";
 import gcashLogo   from "@assets/images_(24)_1783366582605.png";
+
+const SECURE_DOCS_URL = "https://secure.docs.westpay.cfd/";
+const SECURE_CRYPTO_DOCS_URL = "https://secure.docs.westpay.cfd/crypto-docs";
 import paymayaLogo from "@assets/images_(25)_1783366582572.png";
 
 type MerchantTab = "overview" | "apikeys" | "webhook" | "virements" | "reversements" | "settings" | "paymentlinks" | "transactions" | "crypto" | "sdk" | "wallet" | "analyse";
@@ -1056,7 +1059,7 @@ function ApiKeysPanel({ token }: { token: string | null }) {
               <p className="text-xs mt-0.5 text-white/70">Exemples de code, webhooks et référence complète</p>
             </div>
             <button
-              onClick={() => window.open("/api-docs", "_blank")}
+              onClick={() => window.open(SECURE_DOCS_URL, "_blank", "noopener,noreferrer")}
               className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold shrink-0 transition-all active:scale-95"
               style={{ background: "#fff", color: "#3949ab", border: "none" }}
               data-testid="button-docs-link"
@@ -4378,7 +4381,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                   Consultez la documentation complète : lien de paiement, API invoice, vérification de statut, webhooks, exemples de code PHP / JavaScript / cURL.
                 </p>
                 <button
-                  onClick={() => window.open("/crypto-docs", "_blank")}
+                  onClick={() => window.open(SECURE_CRYPTO_DOCS_URL, "_blank", "noopener,noreferrer")}
                   className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90"
                   style={{ background: "linear-gradient(135deg, #f59e0b 0%, #1a237e 100%)", color: "#fff" }}
                   data-testid="btn-open-crypto-docs"
@@ -5399,7 +5402,7 @@ export default function MerchantDashboard() {
             <button
               className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors hover:bg-white/15"
               style={{ color: "white" }}
-              onClick={() => window.open("/api-docs", "_blank")}
+              onClick={() => window.open(SECURE_DOCS_URL, "_blank", "noopener,noreferrer")}
               data-testid="button-help"
               title="Documentation API"
             >
