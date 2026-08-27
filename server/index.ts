@@ -395,7 +395,7 @@ if (process.env.NODE_ENV === "production") {
         webhookSecret = randomBytes(24).toString("hex");
         await storage.setSetting("telegram_webhook_secret", webhookSecret);
       }
-      const appUrl = process.env.APP_URL || "http://Westpay.cfd";
+      const appUrl = process.env.APP_URL || "https://westpay.cfd";
       const webhookUrl = `${appUrl}/api/telegram/webhook/${webhookSecret}`;
 
       // Enregistrer la route Express webhook SYSTÉMATIQUEMENT (peu importe le mode).
