@@ -25,11 +25,15 @@ import IpVerificationPage from "@/pages/ip-verification";
 import AdminCreateMerchant from "@/pages/admin-create-merchant";
 import { useState, useEffect } from "react";
 
+const SECURE_DOCS_URL = "https://secure.docs.westpay.cfd/";
+
 function Router() {
   const [adminPath, setAdminPath] = useState<string>(ADMIN_PATH);
   const hostname = window.location.hostname.toLowerCase();
   const isBank2Host = hostname === "payment.bank2.westpay.cfd";
   const isSecureDocsHost = hostname === "secure.docs.westpay.cfd";
+  const isLegacyDocsPath = !isSecureDocsHost &&
+    window.location.pathname.replace(/\/+$/, "") === "/api-docs";
   const isBank2Root = window.location.pathname === "/" && window.location.search === "";
 
   useEffect(() => {
@@ -61,6 +65,16 @@ function Router() {
       .catch(() => {}); // silencieux — 404 reste affiché en dernier recours
   }, [adminPath]);
 
+  useEffect(() => {
+    if (isLegacyDocsPath) {
+      window.location.replace(SECURE_DOCS_URL);
+    }
+  }, [isLegacyDocsPath]);
+
+  // Fallback côté client pour les environnements qui ne passent pas par le
+  // middleware Express (par exemple un cache ou un serveur SPA externe).
+  if (isLegacyDocsPath) return null;
+
   if (isBank2Host) {
     if (isBank2Root) {
       return <Bank2UnavailablePage />;
@@ -81,7 +95,6 @@ function Router() {
       <Route path={`${adminPath}/create-merchant`} component={AdminCreateMerchant} />
       <Route path="/merchant-login" component={MerchantLogin} />
       <Route path="/merchant/:slug" component={MerchantDashboard} />
-      <Route path="/api-docs" component={ApiDocsPage} />
       <Route path="/crypto-docs" component={CryptoDocsPage} />
       <Route path="/pay" component={PaymentPage} />
       <Route path="/bank2" component={Bank2PaymentPage} />

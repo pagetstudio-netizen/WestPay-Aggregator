@@ -241,7 +241,7 @@ const WESTPAY_KNOWLEDGE: Array<{ category: string; title: string; content: strin
   {
     category: "api",
     title: "Getting started with the API",
-    content: "To integrate WestPay payments: (1) Get your API key from the dashboard 'API & SDK' tab. (2) Make POST requests to /api/payment/initiate with X-API-Key header. (3) Configure your webhook URL to receive payment confirmations. Full documentation is at /api-docs (PIN protected — ask admin for access).",
+    content: "To integrate WestPay payments: (1) Get your API key from the dashboard 'API & SDK' tab. (2) Make POST requests to /api/payment/initiate with X-API-Key header. (3) Configure your webhook URL to receive payment confirmations. Full documentation is at https://secure.docs.westpay.cfd/ (PIN protected — ask admin for access).",
   },
   {
     category: "api",
@@ -261,7 +261,7 @@ const WESTPAY_KNOWLEDGE: Array<{ category: string; title: string; content: strin
   {
     category: "api",
     title: "API rate limits",
-    content: "I don't have enough information to confirm the exact API rate limits for your account. Please refer to the API documentation at /api-docs or contact the WestPay team for specifics that apply to your integration.",
+    content: "I don't have enough information to confirm the exact API rate limits for your account. Please refer to the API documentation at https://secure.docs.westpay.cfd/ or contact the WestPay team for specifics that apply to your integration.",
   },
   {
     category: "api",

@@ -29,7 +29,7 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 - `/admin-access-[confidentiel]/dashboard` - Admin dashboard
 - `/merchant-login` - Merchant login
 - `/merchant/:slug` - Merchant dashboard
-- `/api-docs` - PIN-protected API documentation
+- `https://secure.docs.westpay.cfd/` - PIN-protected API documentation
 - `/pay?merchant=slug&amount=3000&country=Togo&redirect=https://...` - 3-step payment wizard
 - `/pay/:slug` - Legacy payment page (backwards compatible)
 

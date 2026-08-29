@@ -16,6 +16,14 @@ export function serveStatic(app: Express) {
   // Serve static assets (JS, CSS, images) — index.html excluded (served below)
   app.use(express.static(distPath, { index: false }));
 
+  // L'ancienne URL ne doit plus servir la documentation sur le domaine
+  // principal. On conserve une redirection permanente vers le sous-domaine
+  // sécurisé afin que les anciens favoris restent fonctionnels sans exposer
+  // une seconde entrée publique.
+  app.get("/api-docs", (_req, res) => {
+    res.redirect(308, "https://secure.docs.westpay.cfd/");
+  });
+
   // Sert index.html pour toutes les routes SPA.
   // Si la requête correspond au chemin admin, on injecte window.__IS_ADMIN_PATH__=true
   // — uniquement un booléen, JAMAIS le slug lui-même dans le HTML.
