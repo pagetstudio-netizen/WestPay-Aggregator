@@ -42,6 +42,20 @@ export function serveStatic(app: Express) {
     // Le checkout API Bank 1 a été déplacé vers checkout1.westpay.cfd.
     // Bank 2 utilise un autre domaine et n'est pas concernée par ce blocage.
     const requestHost = (req.hostname || "").toLowerCase();
+
+    // Les sous-domaines sont réservés à leurs routes fonctionnelles.
+    // Leur racine seule ne doit pas exposer la page d'accueil générale.
+    const isReservedSubdomainRoot =
+      reqPath === "/" &&
+      (
+        requestHost === "checkout1.westpay.cfd" ||
+        requestHost === "dashboard.westpay.cfd" ||
+        requestHost === "link.westpay.cfd"
+      );
+    if (isReservedSubdomainRoot) {
+      return res.status(404).type("text").send("Not Found");
+    }
+
     const isLegacyBank1CheckoutHost =
       requestHost === "westpay.cfd" || requestHost === "www.westpay.cfd";
     const isLegacyBank1CheckoutPath =
