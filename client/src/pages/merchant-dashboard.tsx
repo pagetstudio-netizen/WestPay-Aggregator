@@ -2844,7 +2844,7 @@ const LINK_COUNTRY_FLAGS: Record<string, { flag: string; currency: string; label
 function PaymentLinksPanel({ token }: { token: string | null }) {
   const { t } = useLanguage();
   const { toast } = useToast();
-  const baseUrl = "https://westpay.cfd";
+  const baseUrl = "https://link.westpay.cfd";
   const bank2BaseUrl = "https://payment.bank2.westpay.cfd";
   const [view, setView] = useState<"list" | "create" | "edit">("list");
   const [editLink, setEditLink] = useState<PaymentLink | null>(null);

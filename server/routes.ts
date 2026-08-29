@@ -7346,6 +7346,17 @@ export async function registerRoutes(
       if (!link || !link.active) return res.status(404).json({ message: "Lien de paiement introuvable ou inactif" });
       if (link.expiresAt && new Date() > link.expiresAt) return res.status(410).json({ message: "Ce lien de paiement a expiré" });
       if (link.paymentLimit && link.paymentCount >= link.paymentLimit) return res.status(410).json({ message: "Ce lien a atteint sa limite de paiements" });
+
+      // Les liens Bank 1 utilisent désormais link.westpay.cfd. On bloque
+      // uniquement les anciens liens Bank 1 sur le domaine principal.
+      // Les anciens liens Bank 2 restent volontairement autorisés afin de
+      // conserver leur redirection vers payment.bank2.westpay.cfd.
+      const requestHost = (req.hostname || "").toLowerCase();
+      const isLegacyBank1Host = requestHost === "westpay.cfd" || requestHost === "www.westpay.cfd";
+      if (isLegacyBank1Host && link.bank !== "bank2") {
+        return res.status(404).json({ message: "Ce lien de paiement n'est plus disponible à cette adresse." });
+      }
+
       const merchant = await storage.getMerchantById(link.merchantId);
       if (!merchant || merchant.suspended) return res.status(404).json({ message: "Marchand introuvable" });
       const countries = await storage.getMerchantCountries(merchant.id);
