@@ -31,8 +31,8 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
 - `https://dashboard.westpay.cfd/merchant/index/login` - Merchant login (official URL)
 - `/merchant/:slug` - Merchant dashboard
 - `https://secure.docs.westpay.cfd/` - PIN-protected API documentation
-- `/pay?merchant=slug&amount=3000&country=Togo&redirect=https://...` - 3-step payment wizard
-- `/pay/:slug` - Legacy payment page (backwards compatible)
+- `https://checkout1.westpay.cfd/pay?merchant=slug&amount=3000&country=Togo&redirect=https://...` - Bank 1 hosted payment wizard
+- `https://westpay.cfd/pay` and `/pay/:slug` - anciens chemins Bank 1 désactivés (404)
 
 ## Default Credentials
 ⚠️ Les credentials de démo ont été supprimés de ce fichier pour des raisons de sécurité.
@@ -65,7 +65,7 @@ Les comptes de démonstration sont suspendus. Contactez l'admin pour créer un n
 - Payment flow: USSD push sent to customer phone automatically
 - Customer validates on phone, OmniPay sends callback to `/api/omnipay/callback`
 - System verifies HMAC-SHA3-512 signature, credits merchant balance, creates transaction
-- Wave operator: redirects customer to payment_url for validation; return_url uses simple format `/pay?ref={reference}&omnipay_status=complete` (no country/amount/redirect params to avoid URL complexity issues with OmniPay operators)
+- Wave operator: redirects customer to payment_url for validation; return_url uses `https://checkout1.westpay.cfd/pay?ref={reference}&omnipay_status=complete` (no country/amount/redirect params to avoid URL complexity issues with OmniPay operators)
 - Merchants can transfer money to customers via OmniPay ("Transfers" tab)
 - Transactions tagged with provider field: "omnipay"
 - OmniPay references prefixed: OP- (payments), TR- (transfers), WP (internal refs)

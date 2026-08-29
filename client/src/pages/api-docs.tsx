@@ -22,6 +22,7 @@ import docsSecurityIllustration from "@assets/IMG_20260826_171328_925_1787764614
 import docsApiIllustration from "@assets/IMG_20260826_171326_814_1787764614055.jpg";
 
 const BASE_URL = "https://westpay.cfd";
+const CHECKOUT1_URL = "https://checkout1.westpay.cfd";
 const BANK2_URL = "https://payment.bank2.westpay.cfd";
 
 function CopyButton({ text }: { text: string }) {
@@ -1023,7 +1024,7 @@ Content-Type: application/json`} />
                   <li>Redirigez votre utilisateur vers l'une des deux pages de paiement :</li>
                 </ol>
                 <div className="space-y-3 mt-3">
-                  <CodeBlock code={`${BASE_URL}/pay?merchant=votre-slug&amount=5000&country=Togo&redirect=${encodeURIComponent("https://votresite.com/merci")}`} label="Page standard" />
+                  <CodeBlock code={`${CHECKOUT1_URL}/pay?merchant=votre-slug&amount=5000&country=Togo&redirect=${encodeURIComponent("https://votresite.com/merci")}`} label="Page Bank 1 — checkout sécurisé" />
                   <CodeBlock code={`${BANK2_URL}/?merchant=votre-slug&amount=5000&country=Togo&redirect=${encodeURIComponent("https://votresite.com/merci")}`} label="Page Bank2 — interface bleue simplifiee" />
                 </div>
                 <ol className="text-sm text-muted-foreground space-y-1 list-decimal pl-4 mt-3" start={2}>
@@ -1341,10 +1342,10 @@ print("Soldes:", soldes)`
                   lang: "JavaScript",
                   label: "Redirection page de paiement",
                   code: `// ── JavaScript ──────────────────────────────────────────────
-const BASE = "${BASE_URL}";
+const CHECKOUT = "${CHECKOUT1_URL}";
 
 // Construire l'URL de paiement et rediriger le client
-const url = new URL(\`\${BASE}/pay\`);
+const url = new URL(\`\${CHECKOUT}/pay\`);
 url.searchParams.set("merchant", "votre-slug");
 url.searchParams.set("amount", "5000");        // Montant en F CFA
 url.searchParams.set("country", "Togo");       // Pays (optionnel)
@@ -1360,7 +1361,7 @@ window.location.href = url.toString();
                   label: "Redirection page de paiement",
                   code: `<?php
 // ── PHP ─────────────────────────────────────────────────────
-$BASE = "${BASE_URL}";
+$CHECKOUT = "${CHECKOUT1_URL}";
 
 // Construire l'URL et rediriger le client
 $params = http_build_query([
@@ -1370,7 +1371,7 @@ $params = http_build_query([
   "redirect" => "https://votresite.com/merci" // URL de retour
 ]);
 
-header("Location: $BASE/pay?$params");
+header("Location: $CHECKOUT/pay?$params");
 exit;
 
 // Apres paiement, le client est redirige vers :
@@ -1384,7 +1385,7 @@ exit;
 from flask import redirect
 from urllib.parse import urlencode
 
-BASE = "${BASE_URL}"
+CHECKOUT = "${CHECKOUT1_URL}"
 
 @app.route("/payer")
 def payer():
@@ -1394,7 +1395,7 @@ def payer():
         "country": "Togo",        # Pays (optionnel)
         "redirect": "https://votresite.com/merci"  # URL de retour
     })
-    return redirect(f"{BASE}/pay?{params}")
+    return redirect(f"{CHECKOUT}/pay?{params}")
 
 # Apres paiement, le client est redirige vers :
 # https://votresite.com/merci?status=success&amount=5000&ref=OP-abc123`

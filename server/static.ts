@@ -38,6 +38,18 @@ export function serveStatic(app: Express) {
     if (req.path.startsWith("/api/") || req.path === "/api") return next();
     const slug = process.env.ADMIN_SLUG || "";
     const reqPath = req.path.replace(/\/+$/, "") || "/"; // normalise le trailing slash
+
+    // Le checkout API Bank 1 a été déplacé vers checkout1.westpay.cfd.
+    // Bank 2 utilise un autre domaine et n'est pas concernée par ce blocage.
+    const requestHost = (req.hostname || "").toLowerCase();
+    const isLegacyBank1CheckoutHost =
+      requestHost === "westpay.cfd" || requestHost === "www.westpay.cfd";
+    const isLegacyBank1CheckoutPath =
+      reqPath === "/pay" || /^\/pay\/[^/]+$/.test(reqPath);
+    if (isLegacyBank1CheckoutHost && isLegacyBank1CheckoutPath) {
+      return res.status(404).type("text").send("Not Found");
+    }
+
     const isAdminPath =
       slug !== "" &&
       (reqPath === `/${slug}` || reqPath.startsWith(`/${slug}/`));

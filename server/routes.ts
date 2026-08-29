@@ -97,6 +97,8 @@ import {
   FLAT_PAYIN_FEE, loadFeeConfig, saveFeeConfig, getFeeSnapshot,
 } from "./feeConfig";
 
+const BANK1_CHECKOUT_URL = "https://checkout1.westpay.cfd";
+
 // ── Multer — logo opérateur ───────────────────────────────────────────────────
 const LOGOS_DIR = path.resolve(process.cwd(), "uploads", "operator-logos");
 if (!fs.existsSync(LOGOS_DIR)) fs.mkdirSync(LOGOS_DIR, { recursive: true });
@@ -4038,6 +4040,11 @@ export async function registerRoutes(
 
   app.get("/api/payment/:slug/info", async (req, res) => {
     try {
+      const requestHost = (req.hostname || "").toLowerCase();
+      if (requestHost === "westpay.cfd" || requestHost === "www.westpay.cfd") {
+        return res.status(404).json({ message: "Cette page de paiement n'est plus disponible à cette adresse." });
+      }
+
       const merchant = await storage.getMerchantBySlug(req.params.slug);
       if (!merchant || merchant.suspended) {
         return res.status(404).json({ message: "Marchand introuvable ou suspendu" });
@@ -4088,6 +4095,11 @@ export async function registerRoutes(
   // ==================== PAYMENT WIZARD (public) ====================
   app.post("/api/payment/initiate", paymentRateLimit, async (req, res) => {
     try {
+      const requestHost = (req.hostname || "").toLowerCase();
+      if (requestHost === "westpay.cfd" || requestHost === "www.westpay.cfd") {
+        return res.status(404).json({ message: "Cette page de paiement n'est plus disponible à cette adresse." });
+      }
+
       const { merchantSlug, country, amount, payerPhone, payerName, paymentMethod, redirectUrl, firstName, lastName, otp, operator, paymentLinkUniqueId } = req.body;
       if (!merchantSlug || !country || !amount || !paymentMethod) {
         return res.status(400).json({ message: "Marchand, pays, montant et methode de paiement requis" });
@@ -4174,10 +4186,9 @@ export async function registerRoutes(
         try {
           // Étape 1 (backend) : créer le paiement → obtenir paymentToken + reference
           const returnRef = reference;
-          const returnBase = callbackBaseUrl;
           const sendavaReturnUrl = redirectUrl
-            ? `${returnBase}/api/payment/sendavapay/return?ref=${encodeURIComponent(returnRef)}&redirect=${encodeURIComponent(redirectUrl)}`
-            : `${returnBase}/api/payment/sendavapay/return?ref=${encodeURIComponent(returnRef)}`;
+            ? `${BANK1_CHECKOUT_URL}/api/payment/sendavapay/return?ref=${encodeURIComponent(returnRef)}&redirect=${encodeURIComponent(redirectUrl)}`
+            : `${BANK1_CHECKOUT_URL}/api/payment/sendavapay/return?ref=${encodeURIComponent(returnRef)}`;
           const sendavaResult = await sendavaCreatePayment(sendavaApiKey, {
             amount: parsedAmount,
             currency,
@@ -4355,7 +4366,7 @@ export async function registerRoutes(
         const currency = mbiyoCurrency(country);
         const network = operatorRecord?.mbiyoCode || mbiyoNetwork(operator || paymentMethod);
         const callbackUrl = `${callbackBaseUrl}/api/mbiyo/callback`;
-        const returnUrl = `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
+        const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
 
         try {
           const mbiyoResult = await mbiyoInitiatePayin({
@@ -4437,8 +4448,8 @@ export async function registerRoutes(
         const currency = SEAPAY_CURRENCY_COUNTRY[country] || "USD";
         const callbackUrl = `${callbackBaseUrl}/api/seapay/callback`;
         const returnUrl = redirectUrl
-          ? `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`
-          : `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
+          ? `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`
+          : `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
         const channelCode = operatorRecord?.seapayCode || undefined;
 
         try {
@@ -4514,7 +4525,7 @@ export async function registerRoutes(
         const countryCode = clapayCountryCode(country);
         const currency = clapayCurrency(country);
         const callbackUrl = `${callbackBaseUrl}/api/clapay/callback`;
-        const returnUrl = `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
+        const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
 
         try {
           const clapayOpCode = (operatorRecord as any)?.clapayCode || paymentMethod || "";
@@ -4617,7 +4628,7 @@ export async function registerRoutes(
         const fName = firstName || nameParts[0] || "Client";
         const lName = lastName || nameParts.slice(1).join(" ") || "WestPay";
         const omnipayOperator = toOmnipayOperatorCode(operator) || (paymentMethod.toLowerCase().includes("wave") ? "wave" : paymentMethod.toLowerCase().includes("mixx") || paymentMethod.toLowerCase().includes("yas") ? "mixx" : undefined);
-        const returnUrl = `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
+        const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
         const autoOtp = otp || String(Math.floor(1000 + Math.random() * 9000));
 
         try {
@@ -6493,7 +6504,9 @@ export async function registerRoutes(
           return res.redirect(u.toString());
         } catch {}
       }
-      const target = ref ? `/pay?ref=${encodeURIComponent(ref)}&sendava_status=${status}` : `/`;
+      const target = ref
+        ? `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(ref)}&sendava_status=${status}`
+        : `${BANK1_CHECKOUT_URL}/`;
       res.redirect(target);
     } catch (err: any) {
       res.redirect("/");
@@ -8251,7 +8264,7 @@ export async function registerRoutes(
             method: "CASHIN",
             tunnel: "API",
             callback_url: cpCallbackUrl,
-            return_url: `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
+            return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
             additional_infos: {
               customer_phone: cpLocalPhone,
               customer_firstname: merchant.name,
@@ -8387,7 +8400,7 @@ export async function registerRoutes(
               method: "CASHIN",
               tunnel: "API",
               callback_url: callbackUrl,
-              return_url: `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
+              return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
               additional_infos: {
                 customer_phone: cpAdminLocalPhone,
                 customer_firstname: w.recipientName || merchant.name,
@@ -9113,7 +9126,7 @@ export async function registerRoutes(
         const fName = nameParts[0] || "Client";
         const lName = nameParts.slice(1).join(" ") || "WestPay";
         const omnipayOperator = toOmnipayOperatorCode(pp.paymentMethod) || undefined;
-        const returnUrl = `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
+        const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
         const autoOtp = String(Math.floor(1000 + Math.random() * 9000));
         const result = await omnipayInitiatePayment({
           apikey: omnipayApiKey,
@@ -9208,7 +9221,7 @@ export async function registerRoutes(
         const currency = SEAPAY_CURRENCY_COUNTRY[pp.country] || "USD";
         const operatorRecord = pp.paymentMethod ? await storage.getWithdrawalOperatorByNameAndCountry(pp.paymentMethod, pp.country) : null;
         const channelCode = operatorRecord?.seapayCode || undefined;
-        const returnUrl = `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
+        const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
         const result = await seapayPayin({
           merchantId: spMerchantId,
           currency,
@@ -9270,7 +9283,7 @@ export async function registerRoutes(
           method: "MERCHANT",
           tunnel: adminTunnel,
           callback_url: `${callbackBaseUrl}/api/clapay/callback`,
-          return_url: `${callbackBaseUrl}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
+          return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
           additional_infos: adminAdditionalInfos,
         });
         if (!result.success) {

@@ -197,7 +197,7 @@ const WESTPAY_KNOWLEDGE: Array<{ category: string; title: string; content: strin
   {
     category: "payments",
     title: "Payment page URL format",
-    content: "WestPay payment pages can be accessed at: /pay?merchant=SLUG&amount=3000&country=Togo&redirect=https://... or the legacy /pay/SLUG format. The 3-step wizard guides the customer through selecting their operator and entering their phone number.",
+    content: "The Bank 1 WestPay payment page is available at https://checkout1.westpay.cfd/pay?merchant=SLUG&amount=3000&country=Togo&redirect=https://... . The former westpay.cfd/pay and /pay/SLUG addresses are disabled. The 3-step wizard guides the customer through selecting their operator and entering their phone number.",
   },
 
   // ── WITHDRAWALS / PAYOUTS ──
