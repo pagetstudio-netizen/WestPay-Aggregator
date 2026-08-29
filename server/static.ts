@@ -16,12 +16,15 @@ export function serveStatic(app: Express) {
   // Serve static assets (JS, CSS, images) — index.html excluded (served below)
   app.use(express.static(distPath, { index: false }));
 
-  // L'ancienne URL ne doit plus servir la documentation sur le domaine
-  // principal. On conserve une redirection permanente vers le sous-domaine
-  // sécurisé afin que les anciens favoris restent fonctionnels sans exposer
-  // une seconde entrée publique.
+  // L'ancienne URL est définitivement désactivée sur le domaine principal.
+  // La documentation est disponible uniquement via secure.docs.westpay.cfd.
   app.get("/api-docs", (_req, res) => {
-    res.redirect(308, "https://secure.docs.westpay.cfd/");
+    res.status(404).type("text").send("Not Found");
+  });
+
+  // Ancienne URL de connexion marchand définitivement désactivée.
+  app.get("/merchant/login", (_req, res) => {
+    res.status(404).type("text").send("Not Found");
   });
 
   // Sert index.html pour toutes les routes SPA.

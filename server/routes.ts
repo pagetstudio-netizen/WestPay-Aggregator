@@ -1541,7 +1541,14 @@ export async function registerRoutes(
   // Hôtes autorisés pour la validation Origin/Referer du login marchand
   const ALLOWED_HOSTS = (() => {
     const appHost = (() => { try { return new URL(process.env.APP_URL || "http://Westpay.cfd").hostname; } catch { return "westpay.cfd"; } })();
-    const base = [appHost, `www.${appHost}`, "westpay.cfd", "www.westpay.cfd", "payment.bank2.westpay.cfd"];
+    const base = [
+      appHost,
+      `www.${appHost}`,
+      "westpay.cfd",
+      "www.westpay.cfd",
+      "dashboard.westpay.cfd",
+      "payment.bank2.westpay.cfd",
+    ];
     // Toujours inclure les domaines Replit (dev ET production déployée)
     const replitDomains = process.env.REPLIT_DOMAINS || "";
     const devDomain = process.env.REPLIT_DEV_DOMAIN || "";
