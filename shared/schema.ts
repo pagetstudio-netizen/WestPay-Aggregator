@@ -204,6 +204,7 @@ export const withdrawals = pgTable("withdrawals", {
   fees: integer("fees").default(0),
   providerPayoutFee: integer("provider_payout_fee"),
   gateway: text("gateway").notNull().default("omnipay"),
+  providerTxId: text("provider_tx_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   processedAt: timestamp("processed_at"),
 });

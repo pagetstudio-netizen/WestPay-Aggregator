@@ -528,6 +528,7 @@ export async function runFinancialMigrations() {
         fees integer DEFAULT 0,
         provider_payout_fee integer,
         gateway text NOT NULL DEFAULT 'omnipay',
+         provider_tx_id text,
         created_at timestamp DEFAULT now() NOT NULL,
         processed_at timestamp
       );
@@ -639,6 +640,10 @@ export async function runFinancialMigrations() {
       await client.query(`
         ALTER TABLE payment_links
         ADD COLUMN IF NOT EXISTS bank text NOT NULL DEFAULT 'bank1';
+      `);
+      await client.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS provider_tx_id text;
       `);
 
     // pgvector (knowledge_chunks — RAG)

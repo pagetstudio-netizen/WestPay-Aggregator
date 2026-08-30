@@ -3101,7 +3101,7 @@ export async function registerRoutes(
         merchantName: w.merchantName,
         payerNumber: w.phone,
         operator: w.operator,
-        provider: null,
+         provider: w.gateway,
         omnipayReference: w.omnipayRef,
         errorMessage: w.adminNote,
         createdAt: w.createdAt,
