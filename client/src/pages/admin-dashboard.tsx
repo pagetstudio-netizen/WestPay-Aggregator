@@ -1540,7 +1540,13 @@ function MerchantsPanel() {
   );
 }
 
-const PROVIDER_CHOICES: [string, string][] = [["sendavapay", "SendavaPay"], ["mbiyo", "Mbiyo"], ["omnipay", "OmniPay"]];
+const PROVIDER_CHOICES: [string, string][] = [
+  ["sendavapay", "SendavaPay"],
+  ["mbiyo", "Mbiyo"],
+  ["omnipay", "OmniPay"],
+  ["clapay", "ClaPay"],
+  ["seapay", "SeaPay"],
+];
 
 function ProviderPickerButton({ label, icon: Icon, colorClass, disabled, onPick, testId }: { label: string; icon: any; colorClass: string; disabled?: boolean; onPick: (provider: string) => void; testId: string }) {
   const [open, setOpen] = useState(false);
@@ -1757,6 +1763,8 @@ function TransactionsPanel() {
     if (p === "sendavapay" || r.startsWith("sdk_") || r.startsWith("SP-")) return "SendavaPay";
     if (p === "mbiyo" || r.startsWith("MBY") || r.startsWith("MB-")) return "Mbiyo";
     if (p === "omnipay" || r.startsWith("OP-") || r.startsWith("TR-")) return "OmniPay";
+    if (p === "clapay" || r.startsWith("CP-")) return "ClaPay";
+    if (p === "seapay" || r.startsWith("SP-")) return "SeaPay";
     if (p === "westpay") return "Mbiyo";
     if (p === "sms") return "SMS";
     return "WestPay";
