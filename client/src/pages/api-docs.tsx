@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -83,6 +83,7 @@ function LangTabs({ tabs }: { tabs: { lang: string; label: string; code: string 
 }
 
 function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { name: string; email: string } }) => void }) {
+  const { t } = useLanguage();
   const [email, setEmail] = useState("");
   const [pin, setPin] = useState("");
   const [showPin, setShowPin] = useState(false);
@@ -104,8 +105,8 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
       setCaptchaError(true);
       refreshCaptcha();
       toast({
-        title: "Incorrect security code",
-        description: "Please enter the new code shown.",
+        title: t("docsIncorrectSecurity"),
+        description: t("docsCaptchaError"),
         variant: "destructive",
       });
       return;
@@ -118,10 +119,10 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
         body: JSON.stringify({ email, pin }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "The email or documentation PIN is invalid.");
+      if (!res.ok) throw new Error(data.message || t("docsInvalidCredentials"));
       onAccess(data);
     } catch (err: any) {
-      toast({ title: "Unable to access documentation", description: err.message, variant: "destructive" });
+      toast({ title: t("docsUnableAccess"), description: err.message, variant: "destructive" });
       refreshCaptcha();
     } finally {
       setIsLoading(false);
@@ -130,6 +131,9 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
 
   return (
     <div className="wp-docs-reference-gate">
+      <div className="absolute top-3 right-3 z-10">
+        <LanguageSwitcher className="wp-docs-gate-lang" />
+      </div>
       <style>{`
         .wp-docs-reference-gate {
           min-height: 100dvh;
@@ -398,9 +402,9 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
 
       <main className="wp-docs-reference-card">
         <div className="wp-docs-reference-content">
-          <h1 className="wp-docs-reference-title" data-testid="text-docs-title">Access Documentation</h1>
+          <h1 className="wp-docs-reference-title" data-testid="text-docs-title">{t("docsAccessTitle")}</h1>
           <p className="wp-docs-reference-description">
-            Enter your merchant credentials to access<br className="hidden sm:block" /> the API documentation.
+            {t("docsAccessDesc")}
           </p>
 
           <form onSubmit={handleSubmit} className="wp-docs-reference-form">
@@ -409,8 +413,8 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
               className="wp-docs-reference-input"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="Email"
-              aria-label="Email"
+              placeholder={t("docsEmailPlaceholder")}
+              aria-label={t("docsEmailLabel")}
               required
               autoComplete="username"
               data-testid="input-docs-email"
@@ -422,8 +426,8 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
                 className="wp-docs-reference-input"
                 value={pin}
                 onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                placeholder="doc code pin"
-                aria-label="Documentation PIN"
+                placeholder={t("docsPinPlaceholder")}
+                aria-label={t("docsPinLabel")}
                 maxLength={6}
                 required
                 autoComplete="current-password"
@@ -434,7 +438,7 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
                 onClick={() => setShowPin(!showPin)}
                 className="wp-docs-reference-eye"
                 data-testid="button-toggle-pin-visibility"
-                aria-label={showPin ? "Hide documentation PIN" : "Show documentation PIN"}
+                aria-label={showPin ? t("docsHidePinLabel") : t("docsShowPinLabel")}
               >
                 {showPin ? <EyeOff /> : <Eye />}
               </button>
@@ -447,8 +451,8 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
                 className="wp-docs-reference-captcha-input"
                 value={captchaInput}
                 onChange={(e) => { setCaptchaInput(e.target.value.toUpperCase()); setCaptchaError(false); }}
-                placeholder="Enter code"
-                aria-label="Security code"
+                placeholder={t("docsEnterCode")}
+                aria-label={t("docsSecurityCodeLabel")}
                 maxLength={5}
                 autoComplete="off"
                 spellCheck={false}
@@ -456,7 +460,7 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
                 data-testid="input-docs-captcha"
               />
             </div>
-            {captchaError && <p className="wp-docs-reference-captcha-error">The security code is incorrect.</p>}
+            {captchaError && <p className="wp-docs-reference-captcha-error">{t("docsIncorrectSecurity")}</p>}
 
             <button
               type="submit"
@@ -464,7 +468,7 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
               className="wp-docs-reference-submit"
               data-testid="button-docs-access"
             >
-              {isLoading ? <Loader2 className="w-7 h-7 animate-spin" /> : "connect to Westpay"}
+              {isLoading ? <Loader2 className="w-7 h-7 animate-spin" /> : t("docsConnect")}
             </button>
           </form>
         </div>
@@ -477,6 +481,7 @@ function EndpointCard({ method, path, description, requestBody, responseBody, au
   method: string; path: string; description: string;
   requestBody?: string; responseBody: string; authRequired?: boolean; notes?: string;
 }) {
+  const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const colors: Record<string, string> = { GET: "bg-blue-500", POST: "bg-green-500", PUT: "bg-amber-500", DELETE: "bg-red-500", PATCH: "bg-purple-500" };
   return (
@@ -498,13 +503,13 @@ function EndpointCard({ method, path, description, requestBody, responseBody, au
           )}
           {requestBody && (
             <div>
-              <p className="text-xs font-semibold text-muted-foreground mb-1.5 flex items-center gap-1"><ArrowRight className="w-3 h-3" />Corps de la requete</p>
-              <CodeBlock code={requestBody} label="Request Body (JSON)" />
+              <p className="text-xs font-semibold text-muted-foreground mb-1.5 flex items-center gap-1"><ArrowRight className="w-3 h-3" />{t("docsRequestBody")}</p>
+      <CodeBlock code={requestBody} label={`${t("docsRequestBody")} (JSON)`} />
             </div>
           )}
           <div>
-            <p className="text-xs font-semibold text-muted-foreground mb-1.5 flex items-center gap-1"><CheckCircle className="w-3 h-3 text-green-500" />Reponse (200 OK)</p>
-            <CodeBlock code={responseBody} label="Response (JSON)" />
+            <p className="text-xs font-semibold text-muted-foreground mb-1.5 flex items-center gap-1"><CheckCircle className="w-3 h-3 text-green-500" />{t("docsResponse")} (200 OK)</p>
+      <CodeBlock code={responseBody} label={`${t("docsResponse")} (JSON)`} />
           </div>
         </div>
       )}
@@ -518,7 +523,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
   const [navOpen, setNavOpen] = useState(false);
 
   const sections = [
-    { id: "intro", label: t("intro"), icon: BookOpen },
+    { id: "intro", label: t("docsIntro"), icon: BookOpen },
     { id: "auth", label: t("authentication"), icon: Key },
     { id: "endpoints", label: t("docsEndpoints"), icon: Server },
     { id: "payment", label: t("payTitle"), icon: Globe },
@@ -817,18 +822,18 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
           {/* ── INTRODUCTION ── */}
           <section id="intro" className="space-y-4 scroll-mt-20">
             <h2 className="text-xl sm:text-2xl font-bold text-foreground flex items-center gap-2">
-              <BookOpen className="w-5 h-5 text-primary shrink-0" />{t("intro")}
+              <BookOpen className="w-5 h-5 text-primary shrink-0" />{t("docsIntro")}
             </h2>
             <p className="text-sm sm:text-base text-muted-foreground leading-relaxed">
               {t("docsIntro")}
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <Card><CardContent className="p-3 space-y-2">
-                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">URL de base</p>
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">{t("docsBaseUrlLabel")}</p>
                 <code className="text-sm font-mono text-foreground">{BASE_URL}</code>
               </CardContent></Card>
               <Card><CardContent className="p-3 space-y-2">
-                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Format</p>
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">{t("docsFormatLabel")}</p>
                 <p className="text-sm text-foreground">JSON (application/json)</p>
               </CardContent></Card>
               <Card><CardContent className="p-3 space-y-2">
@@ -836,7 +841,7 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
                 <p className="text-sm text-foreground">GET · POST · PUT · PATCH · DELETE</p>
               </CardContent></Card>
               <Card><CardContent className="p-3 space-y-2">
-                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Auth</p>
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">{t("docsAuthLabelMerchant")}</p>
                 <p className="text-sm text-foreground">JWT Bearer Token + {t("apiKey")}</p>
               </CardContent></Card>
             </div>
@@ -861,8 +866,8 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
               <CardContent className="p-3 flex items-start gap-3">
                 <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-sm font-semibold text-foreground">Important</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">Ne partagez jamais vos cles API ni votre secret webhook. Regenerez-les immediatement si vous suspectez une compromission.</p>
+                  <p className="text-sm font-semibold text-foreground">{t("docsImportantLabel")}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{t("docsImportantWarning")}</p>
                 </div>
               </CardContent>
             </Card>
@@ -875,17 +880,14 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
               <Key className="w-5 h-5 text-primary shrink-0" />{t("authentication")}
             </h2>
-            <p className="text-sm text-muted-foreground">
-              L'API utilise deux niveaux d'authentification : un <strong>token JWT</strong> obtenu apres connexion,
-              et une <strong>cle API par pays</strong> disponible dans votre tableau de bord.
-            </p>
+            <p className="text-sm text-muted-foreground">{t("docsAuthDesc")}</p>
             <div className="space-y-4">
               <div>
-                <p className="text-sm font-semibold text-foreground mb-2">1. Obtenir un token JWT</p>
+                <p className="text-sm font-semibold text-foreground mb-2">{t("docsAuthStep1")}</p>
                 <EndpointCard
                   method="POST"
                   path="/api/auth/merchant/login"
-                  description="Authentification du marchand. Retourne un token JWT valide 24 heures."
+                  description={t("docsAuthLoginDesc")}
                   requestBody={`{
   "email": "contact@votreentreprise.com",
   "password": "votre_mot_de_passe"
@@ -903,20 +905,16 @@ function ApiDocumentation({ merchantName }: { merchantName: string }) {
                 />
               </div>
               <div>
-                <p className="text-sm font-semibold text-foreground mb-2">2. Inclure le token dans chaque requete</p>
-                <CodeBlock label="Headers requis" code={`Authorization: Bearer <VOTRE_JWT_TOKEN>
+                <p className="text-sm font-semibold text-foreground mb-2">{t("docsAuthStep2")}</p>
+                <CodeBlock label={t("docsHeadersRequired")} code={`Authorization: Bearer <VOTRE_JWT_TOKEN>
 Content-Type: application/json`} />
               </div>
               <div>
-                <p className="text-sm font-semibold text-foreground mb-2">3. Cle API par pays (methode simplifiee pour les retraits)</p>
-                <p className="text-sm text-muted-foreground mb-2">
-                  Pour les retraits via <code className="bg-muted px-1 rounded text-xs">POST /api/merchant/transfer</code>,
-                  vous pouvez utiliser directement votre <strong>cle API pays</strong> sans passer par la connexion JWT.
-                  Disponible dans votre dashboard sous "Cles API". Format : <code className="bg-muted px-1 rounded text-xs">PREFIX-[40 caracteres]</code>
-                </p>
-                <CodeBlock label="Header X-API-KEY (suffit pour les retraits)" code={`X-API-KEY: TGO-a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0
+                <p className="text-sm font-semibold text-foreground mb-2">{t("docsAuthStep3")}</p>
+                <p className="text-sm text-muted-foreground mb-2">{t("docsAuthApiKeyDesc")}</p>
+                <CodeBlock label={t("docsHeaderApiKey")} code={`X-API-KEY: TGO-a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0
 Content-Type: application/json`} />
-                <p className="text-xs text-muted-foreground mt-2">Chaque cle est liee a un pays precis — utilisez la cle du pays concerne par le retrait.</p>
+                <p className="text-xs text-muted-foreground mt-2">{t("docsApiKeyNote")}</p>
               </div>
             </div>
           </section>
@@ -926,11 +924,11 @@ Content-Type: application/json`} />
           {/* ── ENDPOINTS ── */}
           <section id="endpoints" className="space-y-4 scroll-mt-20">
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-              <Server className="w-5 h-5 text-primary shrink-0" />{t("docsEndpoints")} — Consultation
+              <Server className="w-5 h-5 text-primary shrink-0" />{t("docsEndpoints")}
             </h2>
-            <p className="text-xs text-muted-foreground mb-2">Cliquez sur un endpoint pour voir les details.</p>
+            <p className="text-xs text-muted-foreground mb-2">{t("docsClickEndpointLabel")}</p>
             <div className="space-y-2">
-              <EndpointCard method="GET" path="/api/merchant/balance" description="Recupere les soldes du marchand par pays." authRequired
+              <EndpointCard method="GET" path="/api/merchant/balance" description={t("docsBalanceDesc")} authRequired
                 responseBody={`[
   {
     "id": 1,
@@ -952,8 +950,8 @@ Content-Type: application/json`} />
   }
 ]`} />
 
-              <EndpointCard method="GET" path="/api/merchant/transactions" description="Liste toutes les transactions du marchand (paiements et transferts). Limite a 100 resultats recents." authRequired
-                notes="Les transactions de type transfert (retrait) ont un txId prefixe par TR-"
+              <EndpointCard method="GET" path="/api/merchant/transactions" description={t("docsTransactionsDesc")} authRequired
+                notes={t("docsTransactionsNote")}
                 responseBody={`[
   {
     "id": 101,
@@ -979,13 +977,13 @@ Content-Type: application/json`} />
   }
 ]`} />
 
-              <EndpointCard method="GET" path="/api/merchant/stats" description="Statistiques du marchand : nombre de transactions et volume total confirme." authRequired
+              <EndpointCard method="GET" path="/api/merchant/stats" description={t("docsStatsDesc")} authRequired
                 responseBody={`{
   "transactionCount": 42,
   "totalVolume": 875000
 }`} />
 
-              <EndpointCard method="GET" path="/api/merchant/api-keys" description="Liste les cles API du marchand par pays actif." authRequired
+              <EndpointCard method="GET" path="/api/merchant/api-keys" description={t("docsApiKeysListDesc")} authRequired
                 responseBody={`[
   {
     "id": 1,
@@ -996,8 +994,8 @@ Content-Type: application/json`} />
   }
 ]`} />
 
-              <EndpointCard method="POST" path="/api/merchant/regenerate-api" description="Regenere la cle API d'un pays. L'ancienne cle est invalidee immediatement." authRequired
-                notes="Attention : toutes les integrations utilisant l'ancienne cle cesseront de fonctionner."
+              <EndpointCard method="POST" path="/api/merchant/regenerate-api" description={t("docsRegenerateDesc")} authRequired
+                notes={t("docsRegenerateNote")}
                 requestBody={`{ "merchantCountryId": 1 }`}
                 responseBody={`{
   "success": true,
@@ -1011,45 +1009,44 @@ Content-Type: application/json`} />
           {/* ── PAIEMENT ── */}
           <section id="payment" className="space-y-4 scroll-mt-20">
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-              <Globe className="w-5 h-5 text-primary shrink-0" />{t("payTitle")} (Depot)
+              <Globe className="w-5 h-5 text-primary shrink-0" />{t("docsPaymentDeposit")}
             </h2>
             <p className="text-sm text-muted-foreground">
-              WestPay fourni une page de paiement hebergee et securisee. Redirigez simplement vos utilisateurs vers cette URL — ils entrent leur numero Mobile Money et valident le paiement directement sur leur telephone via USSD.
+              {t("docsPaymentDesc")}
             </p>
 
             <Card className="bg-muted/30">
               <CardContent className="p-4">
-                <p className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2"><Zap className="w-4 h-4 text-primary" />Choisissez votre page de paiement hebergee RobotPay</p>
+                <p className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2"><Zap className="w-4 h-4 text-primary" />{t("docsHostedPaymentLabel")}</p>
                 <ol className="text-sm text-muted-foreground space-y-2 list-decimal pl-4">
-                  <li>Redirigez votre utilisateur vers l'une des deux pages de paiement :</li>
+                  <li>{t("docsPayStep1")}</li>
                 </ol>
                 <div className="space-y-3 mt-3">
-                  <CodeBlock code={`${CHECKOUT1_URL}/pay?merchant=votre-slug&amount=5000&country=Togo&redirect=${encodeURIComponent("https://votresite.com/merci")}`} label="Page Bank 1 — checkout sécurisé" />
-                  <CodeBlock code={`${BANK2_URL}/?merchant=votre-slug&amount=5000&country=Togo&redirect=${encodeURIComponent("https://votresite.com/merci")}`} label="Page Bank2 — interface bleue simplifiee" />
+                  <CodeBlock code={`${CHECKOUT1_URL}/pay?merchant=votre-slug&amount=5000&country=Togo&redirect=${encodeURIComponent("https://votresite.com/merci")}`} label={t("docsBank1Label")} />
+                  <CodeBlock code={`${BANK2_URL}/?merchant=votre-slug&amount=5000&country=Togo&redirect=${encodeURIComponent("https://votresite.com/merci")}`} label={t("docsBank2Label")} />
                 </div>
                 <ol className="text-sm text-muted-foreground space-y-1 list-decimal pl-4 mt-3" start={2}>
-                  <li>Le montant et le pays sont transmis par votre site et ne sont pas modifiables sur la page Bank2</li>
-                  <li>Le client choisit son operateur, entre son numero et valide le paiement sur son telephone</li>
-                  <li>Votre URL de redirection recoit : <code className="bg-muted px-1 rounded">?status=success&amount=5000&ref=OP-abc123</code></li>
+                  <li>{t("docsPayStep2")}</li>
+                  <li>{t("docsPayStep3")}</li>
                 </ol>
               </CardContent>
             </Card>
 
             <Card>
               <CardContent className="p-4">
-                <p className="text-sm font-semibold text-foreground mb-2">Parametres de l'URL de paiement</p>
+                <p className="text-sm font-semibold text-foreground mb-2">{t("docsPaymentParamsLabel")}</p>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead><tr className="border-b">
-                      <th className="text-left p-2 text-foreground font-semibold">Parametre</th>
+                      <th className="text-left p-2 text-foreground font-semibold">{t("docsColParam")}</th>
                       <th className="text-left p-2 text-foreground font-semibold">{t("docsRequired")}</th>
-                      <th className="text-left p-2 text-foreground font-semibold">Description</th>
+                      <th className="text-left p-2 text-foreground font-semibold">{t("docsColDesc")}</th>
                     </tr></thead>
                     <tbody className="text-muted-foreground text-xs sm:text-sm">
-                      <tr className="border-b"><td className="p-2 font-mono">merchant</td><td className="p-2 text-green-500">{t("yes")}</td><td className="p-2">Votre slug marchand (ex: ecomat)</td></tr>
-                      <tr className="border-b"><td className="p-2 font-mono">amount</td><td className="p-2 text-green-500">{t("yes")}</td><td className="p-2">Montant en F CFA (entier positif)</td></tr>
-                      <tr className="border-b"><td className="p-2 font-mono">country</td><td className="p-2 text-amber-500">Bank2</td><td className="p-2">Pays actif du marchand (ex: Togo). Obligatoire et verrouille sur Bank2 ; optionnel sur la page standard</td></tr>
-                      <tr><td className="p-2 font-mono">redirect</td><td className="p-2 text-muted-foreground">{t("no")}</td><td className="p-2">URL de retour apres paiement (encoder avec encodeURIComponent)</td></tr>
+                      <tr className="border-b"><td className="p-2 font-mono">merchant</td><td className="p-2 text-green-500">{t("yes")}</td><td className="p-2">{t("docsParamMerchantDesc")}</td></tr>
+                      <tr className="border-b"><td className="p-2 font-mono">amount</td><td className="p-2 text-green-500">{t("yes")}</td><td className="p-2">{t("docsParamAmountDesc")}</td></tr>
+                      <tr className="border-b"><td className="p-2 font-mono">country</td><td className="p-2 text-amber-500">Bank2</td><td className="p-2">{t("docsParamCountryDesc")}</td></tr>
+                      <tr><td className="p-2 font-mono">redirect</td><td className="p-2 text-muted-foreground">{t("no")}</td><td className="p-2">{t("docsParamRedirectDesc")}</td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -1058,14 +1055,14 @@ Content-Type: application/json`} />
 
             <Card>
               <CardContent className="p-4">
-                <p className="text-sm font-semibold text-foreground mb-3">Operateurs disponibles par pays</p>
+                <p className="text-sm font-semibold text-foreground mb-3">{t("docsOperatorsLabel")}</p>
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs sm:text-sm">
                     <thead><tr className="border-b">
-                      <th className="text-left p-2 text-foreground font-semibold">Pays</th>
-                      <th className="text-left p-2 text-foreground font-semibold">Code</th>
-                      <th className="text-left p-2 text-foreground font-semibold">Devise</th>
-                      <th className="text-left p-2 text-foreground font-semibold">Operateurs</th>
+                      <th className="text-left p-2 text-foreground font-semibold">{t("docsColCountry")}</th>
+                      <th className="text-left p-2 text-foreground font-semibold">{t("docsColCode")}</th>
+                      <th className="text-left p-2 text-foreground font-semibold">{t("docsColCurrency")}</th>
+                      <th className="text-left p-2 text-foreground font-semibold">{t("docsColOperators")}</th>
                     </tr></thead>
                     <tbody className="text-muted-foreground">
                       {[
@@ -1102,13 +1099,13 @@ Content-Type: application/json`} />
               <CardContent className="p-4 flex gap-3">
                 <span className="text-orange-500 text-lg shrink-0">⚠️</span>
                 <div className="text-sm text-orange-800 dark:text-orange-300 space-y-1">
-                  <p className="font-semibold">Orange Money — Burkina Faso : code OTP obligatoire</p>
-                  <p>Pour payer via Orange Money au Burkina Faso, le client doit d'abord <strong>générer un code OTP</strong> depuis son téléphone, puis le saisir sur la page de paiement.</p>
+                  <p className="font-semibold">{t("docsOrangeTitle")}</p>
+                  <p>{t("docsOrangeDesc")}</p>
                   <p className="font-mono text-xs bg-orange-100 dark:bg-orange-900 px-2 py-1 rounded mt-1">
                     Composer sur le téléphone : <strong>*144*4*6*montant#</strong><br />
                     Ex. pour 5 000 F CFA : <strong>*144*4*6*5000#</strong>
                   </p>
-                  <p>Un champ de saisie OTP s'affiche automatiquement sur la page de paiement RobotPay lorsque Orange Money Burkina Faso est sélectionné.</p>
+                  <p>{t("docsOrangeAuto")}</p>
                 </div>
               </CardContent>
             </Card>
@@ -1119,21 +1116,18 @@ Content-Type: application/json`} />
           {/* ── TRANSFERTS ── */}
           <section id="transfer" className="space-y-4 scroll-mt-20">
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-              <ArrowDownCircle className="w-5 h-5 text-primary shrink-0" />{t("transfers")} (Transferts)
+              <ArrowDownCircle className="w-5 h-5 text-primary shrink-0" />{t("docsTransferDeposit")}
             </h2>
-            <p className="text-sm text-muted-foreground">
-              Envoyez de l'argent directement vers n'importe quel portefeuille Mobile Money. Le montant est debite
-              de votre solde et transfere instantanement au destinataire.
-            </p>
+            <p className="text-sm text-muted-foreground">{t("docsTransferDesc")}</p>
             <Card className="bg-muted/30">
               <CardContent className="p-4">
-                <p className="text-sm font-semibold text-foreground mb-2">Flux de retrait</p>
+                <p className="text-sm font-semibold text-foreground mb-2">{t("docsWithdrawalFlowLabel")}</p>
                 <ol className="text-sm text-muted-foreground space-y-1 list-decimal pl-4">
-                  <li>Appelez l'endpoint avec le numero, le montant et le nom du destinataire</li>
-                  <li>WestPay verifie votre solde disponible</li>
-                  <li>Le montant est transfere sur le portefeuille Mobile Money du destinataire</li>
-                  <li>Votre solde est debite (montant + frais eventuels)</li>
-                  <li>La transaction est enregistree avec un txId prefixe <code className="bg-muted px-1 rounded">TR-</code></li>
+                  <li>{t("docsTransferStep1")}</li>
+                  <li>{t("docsTransferStep2")}</li>
+                  <li>{t("docsTransferStep3")}</li>
+                  <li>{t("docsTransferStep4")}</li>
+                  <li>{t("docsTransferStep5")}</li>
                 </ol>
               </CardContent>
             </Card>
@@ -1141,8 +1135,8 @@ Content-Type: application/json`} />
               <CardContent className="p-4 flex gap-3">
                 <span className="text-amber-500 text-lg shrink-0">⚠️</span>
                 <div className="text-sm text-amber-800 dark:text-amber-300 space-y-1">
-                  <p className="font-semibold">Format du numero de telephone (msisdn)</p>
-                  <p>Le numero doit toujours inclure l'indicatif pays, sans le <code className="bg-amber-100 dark:bg-amber-900 px-1 rounded">+</code>.</p>
+                  <p className="font-semibold">{t("docsPhoneTitle")}</p>
+                  <p>{t("docsPhoneDesc")}</p>
                   <p className="font-mono text-xs bg-amber-100 dark:bg-amber-900 px-2 py-1 rounded mt-1">
                     228 + 90123456 → <strong>22890123456</strong> &nbsp;(Togo)<br />
                     225 + 0789012345 → <strong>2250789012345</strong> &nbsp;(Côte d'Ivoire)<br />
@@ -1152,8 +1146,8 @@ Content-Type: application/json`} />
                 </div>
               </CardContent>
             </Card>
-            <EndpointCard method="POST" path="/api/merchant/transfer" description="Effectue un retrait automatique vers un portefeuille Mobile Money. Debite votre solde marchand." authRequired
-              notes="Le numero msisdn doit inclure l'indicatif pays (ex: 228 pour Togo, 225 pour Cote d'Ivoire). Le champ operator est optionnel — auto-detecte depuis le numero."
+            <EndpointCard method="POST" path="/api/merchant/transfer" description={t("docsTransferEndpointDesc")} authRequired
+              notes={t("docsTransferEndpointNote")}
               requestBody={`{
   "country": "Togo",
   "msisdn": "22890123456",
@@ -1177,25 +1171,22 @@ Content-Type: application/json`} />
           {/* ── WEBHOOKS ── */}
           <section id="webhook" className="space-y-4 scroll-mt-20">
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-              <Bell className="w-5 h-5 text-primary shrink-0" />{t("webhook")} & Notifications
+              <Bell className="w-5 h-5 text-primary shrink-0" />{t("webhook")} & {t("notifications")}
             </h2>
-            <p className="text-sm text-muted-foreground">
-              Configurez une URL webhook pour recevoir des notifications en temps reel a chaque paiement confirme.
-              WestPay envoie un POST signe avec votre secret via HMAC-SHA256.
-            </p>
+            <p className="text-sm text-muted-foreground">{t("docsWebhookDesc2")}</p>
             <Card className="bg-muted/30">
               <CardContent className="p-4">
-                <p className="text-sm font-semibold text-foreground mb-2">Configuration en 4 etapes</p>
+                <p className="text-sm font-semibold text-foreground mb-2">{t("docsWebhookConfigLabel")}</p>
                 <ol className="text-sm text-muted-foreground space-y-1 list-decimal pl-4">
-                  <li>Allez dans votre dashboard, onglet "Webhook"</li>
-                  <li>Entrez votre URL (ex : <code className="bg-muted px-1 rounded text-xs">https://votresite.com/api/webhook</code>)</li>
-                  <li>Copiez et sauvegardez votre secret webhook</li>
-                  <li>Cliquez "Tester" pour valider la configuration</li>
+                  <li>{t("docsWebhookStep1")}</li>
+                  <li>{t("docsWebhookStep2")}</li>
+                  <li>{t("docsWebhookStep3")}</li>
+                  <li>{t("docsWebhookStep4")}</li>
                 </ol>
               </CardContent>
             </Card>
             <div>
-              <p className="text-sm font-semibold text-foreground mb-2">Payload recu sur votre endpoint</p>
+              <p className="text-sm font-semibold text-foreground mb-2">{t("docsWebhookPayloadTitle")}</p>
               <CodeBlock label="POST votre-url-webhook" code={`// Headers envoyes par WestPay
 X-RobotPay-Signature: a3f8c2d1e4b7...  (HMAC-SHA256)
 X-RobotPay-Event: payment.confirmed
@@ -1215,22 +1206,22 @@ Content-Type: application/json
 }`} />
             </div>
             <div className="space-y-2">
-              <EndpointCard method="GET" path="/api/merchant/webhook" description="Recupere la configuration webhook actuelle." authRequired
+              <EndpointCard method="GET" path="/api/merchant/webhook" description={t("docsGetWebhookDesc")} authRequired
                 responseBody={`{
   "webhookUrl": "https://votresite.com/api/webhook",
   "webhookSecret": "votre_secret_hmac_sha256...",
   "hasWebhook": true
 }`} />
-              <EndpointCard method="PUT" path="/api/merchant/webhook" description="Met a jour l'URL de webhook. Un secret est genere automatiquement." authRequired
+              <EndpointCard method="PUT" path="/api/merchant/webhook" description={t("docsPutWebhookDesc")} authRequired
                 requestBody={`{ "webhookUrl": "https://votresite.com/api/webhook" }`}
                 responseBody={`{
   "success": true,
   "webhookUrl": "https://votresite.com/api/webhook",
   "webhookSecret": "secret_genere_automatiquement_32chars"
 }`} />
-              <EndpointCard method="POST" path="/api/merchant/webhook/test" description="Envoie une notification de test a votre URL pour verifier la configuration." authRequired
+              <EndpointCard method="POST" path="/api/merchant/webhook/test" description={t("docsTestWebhookDesc")} authRequired
                 responseBody={`{ "success": true, "statusCode": 200, "message": "Notification test envoyee" }`} />
-              <EndpointCard method="GET" path="/api/merchant/webhook/logs" description="Historique des 20 dernieres notifications webhook envoyees." authRequired
+              <EndpointCard method="GET" path="/api/merchant/webhook/logs" description={t("docsLogsWebhookDesc")} authRequired
                 responseBody={`[
   {
     "id": 1,
@@ -1252,11 +1243,11 @@ Content-Type: application/json
             </h2>
 
             <div className="space-y-2">
-              <p className="text-sm font-semibold text-foreground flex items-center gap-2"><Hash className="w-4 h-4 text-muted-foreground" />1. Connexion et recuperation du solde</p>
+              <p className="text-sm font-semibold text-foreground flex items-center gap-2"><Hash className="w-4 h-4 text-muted-foreground" />{t("docsEx1")}</p>
               <LangTabs tabs={[
                 {
                   lang: "JavaScript",
-                  label: "Connexion + Solde",
+                  label: t("docsExampleLoginLabel"),
                   code: `// ── JavaScript (Node.js / Browser) ──────────────────────────
 const BASE = "${BASE_URL}";
 
@@ -1281,7 +1272,7 @@ console.log("Soldes:", soldes);
                 },
                 {
                   lang: "PHP",
-                  label: "Connexion + Solde",
+                  label: t("docsExampleLoginLabel"),
                   code: `<?php
 // ── PHP (cURL) ──────────────────────────────────────────────
 $BASE = "${BASE_URL}";
@@ -1314,7 +1305,7 @@ print_r($soldes);
                 },
                 {
                   lang: "Python",
-                  label: "Connexion + Solde",
+                  label: t("docsExampleLoginLabel"),
                   code: `# ── Python (requests) ──────────────────────────────────────
 import requests
 
@@ -1336,11 +1327,11 @@ print("Soldes:", soldes)`
             </div>
 
             <div className="space-y-2">
-              <p className="text-sm font-semibold text-foreground flex items-center gap-2"><Hash className="w-4 h-4 text-muted-foreground" />2. Rediriger vers la page de paiement</p>
+              <p className="text-sm font-semibold text-foreground flex items-center gap-2"><Hash className="w-4 h-4 text-muted-foreground" />{t("docsEx2")}</p>
               <LangTabs tabs={[
                 {
                   lang: "JavaScript",
-                  label: "Redirection page de paiement",
+                  label: t("docsExamplePaymentLabel"),
                   code: `// ── JavaScript ──────────────────────────────────────────────
 const CHECKOUT = "${CHECKOUT1_URL}";
 
@@ -1358,7 +1349,7 @@ window.location.href = url.toString();
                 },
                 {
                   lang: "PHP",
-                  label: "Redirection page de paiement",
+                  label: t("docsExamplePaymentLabel"),
                   code: `<?php
 // ── PHP ─────────────────────────────────────────────────────
 $CHECKOUT = "${CHECKOUT1_URL}";
@@ -1380,7 +1371,7 @@ exit;
                 },
                 {
                   lang: "Python",
-                  label: "Redirection page de paiement",
+                  label: t("docsExamplePaymentLabel"),
                   code: `# ── Python (Flask) ──────────────────────────────────────────
 from flask import redirect
 from urllib.parse import urlencode
@@ -1404,11 +1395,11 @@ def payer():
             </div>
 
             <div className="space-y-2">
-              <p className="text-sm font-semibold text-foreground flex items-center gap-2"><Hash className="w-4 h-4 text-muted-foreground" />3. Effectuer un retrait (transfert)</p>
+              <p className="text-sm font-semibold text-foreground flex items-center gap-2"><Hash className="w-4 h-4 text-muted-foreground" />{t("docsEx3")}</p>
               <LangTabs tabs={[
                 {
                   lang: "JavaScript",
-                  label: "Retrait Mobile Money",
+                  label: t("docsExampleTransferLabel"),
                   code: `// ── JavaScript ──────────────────────────────────────────────
 const BASE = "${BASE_URL}";
 
@@ -1447,7 +1438,7 @@ try {
                 },
                 {
                   lang: "PHP",
-                  label: "Retrait Mobile Money",
+                  label: t("docsExampleTransferLabel"),
                   code: `<?php
 // ── PHP ─────────────────────────────────────────────────────
 $BASE = "${BASE_URL}";
@@ -1491,7 +1482,7 @@ try {
                 },
                 {
                   lang: "Python",
-                  label: "Retrait Mobile Money",
+                  label: t("docsExampleTransferLabel"),
                   code: `# ── Python ──────────────────────────────────────────────────
 import requests
 
@@ -1528,11 +1519,11 @@ except requests.exceptions.HTTPError as e:
             </div>
 
             <div className="space-y-2">
-              <p className="text-sm font-semibold text-foreground flex items-center gap-2"><Hash className="w-4 h-4 text-muted-foreground" />4. Recevoir et verifier un webhook</p>
+              <p className="text-sm font-semibold text-foreground flex items-center gap-2"><Hash className="w-4 h-4 text-muted-foreground" />{t("docsEx4")}</p>
               <LangTabs tabs={[
                 {
                   lang: "JavaScript",
-                  label: "Webhook (Express.js)",
+                  label: t("docsExampleWebhookLabel"),
                   code: `// ── JavaScript (Express.js) ─────────────────────────────────
 const express = require("express");
 const crypto = require("crypto");
@@ -1573,7 +1564,7 @@ app.post("/api/webhook", (req, res) => {
                 },
                 {
                   lang: "PHP",
-                  label: "Webhook (PHP)",
+                  label: t("docsExampleWebhookLabel"),
                   code: `<?php
 // ── PHP ─────────────────────────────────────────────────────
 // Fichier: webhook.php
@@ -1617,7 +1608,7 @@ echo json_encode(["received" => true]);
                 },
                 {
                   lang: "Python",
-                  label: "Webhook (Flask)",
+                  label: t("docsExampleWebhookLabel"),
                   code: `# ── Python (Flask) ──────────────────────────────────────────
 import hmac
 import hashlib
@@ -1671,9 +1662,9 @@ if __name__ == "__main__":
               <AlertTriangle className="w-5 h-5 text-primary shrink-0" />{t("error")}
             </h2>
             <p className="text-sm text-muted-foreground">
-              L'API retourne toujours un objet JSON avec un champ <code className="bg-muted px-1 rounded">message</code> en cas d'erreur.
+              {t("docsErrorDesc")}
             </p>
-            <CodeBlock label="Format d'erreur" code={`{
+            <CodeBlock label={t("docsErrorFormat")} code={`{
   "message": "Description de l'erreur",
   "code": "ERROR_CODE"  // optionnel
 }`} />
@@ -1682,22 +1673,22 @@ if __name__ == "__main__":
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead><tr className="border-b bg-muted/30">
-                      <th className="text-left p-3 text-foreground font-semibold">Code HTTP</th>
-                      <th className="text-left p-3 text-foreground font-semibold">Cause</th>
-                      <th className="text-left p-3 text-foreground font-semibold">Solution</th>
+                      <th className="text-left p-3 text-foreground font-semibold">{t("docsErrorColCode")}</th>
+                      <th className="text-left p-3 text-foreground font-semibold">{t("docsErrorColCause")}</th>
+                      <th className="text-left p-3 text-foreground font-semibold">{t("docsErrorColSolution")}</th>
                     </tr></thead>
                     <tbody>
                       {[
-                        ["200", "Succes", "Requete traitee correctement", ""],
-                        ["400", "Requete invalide", "Verifier les champs requis et leur format", "destructive"],
-                        ["400 — Solde insuffisant", "Balance trop faible", "Verifier votre solde avant le transfert", "destructive"],
-                        ["401", "Non autorise", "Token JWT expire ou invalide — se reconnecter", "destructive"],
-                        ["401 — Signature invalide", "Webhook falsifie", "Verifier la generation HMAC avec le bon secret", "destructive"],
-                        ["403", "Acces refuse", "Role insuffisant ou marchand suspendu", "destructive"],
-                        ["404", "Ressource introuvable", "Verifier l'ID ou le slug utilise", "destructive"],
-                        ["409", "Conflit", "Transaction deja existante (txId duplique)", "destructive"],
-                        ["429", "Trop de requetes", "Respecter les limites de debit (rate limiting)", "destructive"],
-                        ["500", "Erreur serveur", "Reessayer apres quelques secondes", "destructive"],
+                        ["200", t("docsErrorOkCause"), t("docsErrorOkSolution"), ""],
+                        ["400", t("docsErrorBadRequest"), t("docsErrorBadRequestSolution"), "destructive"],
+                        ["400 — " + t("insufficientFunds"), t("docsErrorLowBalance"), t("docsErrorLowBalanceSolution"), "destructive"],
+                        ["401", t("docsErrorUnauthorized"), t("docsErrorUnauthorizedSolution"), "destructive"],
+                        ["401 — " + t("docsErrorWebhook"), t("docsErrorWebhook"), t("docsErrorWebhookSolution"), "destructive"],
+                        ["403", t("docsErrorForbidden"), t("docsErrorForbiddenSolution"), "destructive"],
+                        ["404", t("docsErrorNotFound"), t("docsErrorNotFoundSolution"), "destructive"],
+                        ["409", t("docsErrorConflict"), t("docsErrorConflictSolution"), "destructive"],
+                        ["429", t("docsErrorRateLimit"), t("docsErrorRateLimitSolution"), "destructive"],
+                        ["500", t("docsErrorServer"), t("docsErrorServerSolution"), "destructive"],
                       ].map(([code, label, solution]) => (
                         <tr key={code} className="border-b last:border-0">
                           <td className="p-3"><code className="text-xs bg-muted px-1.5 py-0.5 rounded">{code}</code></td>
@@ -1712,11 +1703,11 @@ if __name__ == "__main__":
             </Card>
 
             <div>
-              <p className="text-sm font-semibold text-foreground mb-2">Exemple de gestion d'erreur robuste</p>
+              <p className="text-sm font-semibold text-foreground mb-2">{t("docsErrorExampleLabel")}</p>
               <LangTabs tabs={[
                 {
                   lang: "JavaScript",
-                  label: "Gestion des erreurs",
+                  label: t("docsErrorExampleLabel"),
                   code: `async function appelAPI(url, options = {}) {
   try {
     const res = await fetch(url, {
@@ -1757,7 +1748,7 @@ if __name__ == "__main__":
                 },
                 {
                   lang: "PHP",
-                  label: "Gestion des erreurs",
+                  label: t("docsErrorExampleLabel"),
                   code: `<?php
 function appelAPI($url, $method = "GET", $data = null, $token = null) {
   $headers = ["Content-Type: application/json"];
@@ -1791,7 +1782,7 @@ function appelAPI($url, $method = "GET", $data = null, $token = null) {
                 },
                 {
                   lang: "Python",
-                  label: "Gestion des erreurs",
+                  label: t("docsErrorExampleLabel"),
                   code: `import requests
 import time
 
@@ -1841,39 +1832,27 @@ def appel_api(endpoint, method="GET", data=None, token=None, retry=3):
             <div className="space-y-3">
               {[
                 {
-                  title: "Proteger la cle API et le token JWT",
+                  title: t("docsSec1Title"),
                   items: [
-                    "Ne jamais inclure la cle API directement dans le code source versionne (GitHub, etc.)",
-                    "Utiliser des variables d'environnement : process.env.WESTPAY_API_KEY / os.getenv('WESTPAY_API_KEY')",
-                    "Regenerer la cle API immediatement si vous suspectez une compromission",
-                    "Le token JWT expire apres 24h — prevoir un mecanisme de re-connexion automatique",
+                    t("docsSec1I1"), t("docsSec1I2"), t("docsSec1I3"), t("docsSec1I4"),
                   ]
                 },
                 {
-                  title: "Securiser votre endpoint webhook",
+                  title: t("docsSec2Title"),
                   items: [
-                    "Toujours verifier la signature HMAC-SHA256 avant de traiter un webhook",
-                    "Utiliser crypto.timingSafeEqual (JS) ou hash_equals (PHP) pour eviter les timing attacks",
-                    "Repondre 200 rapidement, puis traiter en arriere-plan (eviter les timeouts)",
-                    "Enregistrer tous les webhooks recus dans une file d'attente (queue) pour le traitement",
+                    t("docsSec2I1"), t("docsSec2I2"), t("docsSec2I3"), t("docsSec2I4"),
                   ]
                 },
                 {
-                  title: "Valider les donnees recues",
+                  title: t("docsSec3Title"),
                   items: [
-                    "Toujours verifier que le montant dans le webhook correspond au montant attendu",
-                    "Verifier que le merchantSlug correspond bien a votre compte",
-                    "Implementer une protection contre la rejouabilite (stocker les txId traites)",
-                    "Valider le format des numeros de telephone avant de lancer un retrait",
+                    t("docsSec3I1"), t("docsSec3I2"), t("docsSec3I3"), t("docsSec3I4"),
                   ]
                 },
                 {
-                  title: "Pratiques de code",
+                  title: t("docsSec4Title"),
                   items: [
-                    "Utiliser HTTPS uniquement pour votre URL webhook (HTTP sera refuse)",
-                    "Implenter un mecanisme de retry avec backoff exponentiel pour les erreurs 5xx",
-                    "Limiter les appels API avec du rate limiting cote client",
-                    "Logger les appels API avec l'ID de transaction pour faciliter le support",
+                    t("docsSec4I1"), t("docsSec4I2"), t("docsSec4I3"), t("docsSec4I4"),
                   ]
                 }
               ].map(({ title, items }) => (
@@ -1895,7 +1874,7 @@ def appel_api(endpoint, method="GET", data=None, token=None, retry=3):
             </div>
 
             <div>
-              <p className="text-sm font-semibold text-foreground mb-2">Exemple : stocker les secrets en variables d'environnement</p>
+              <p className="text-sm font-semibold text-foreground mb-2">{t("docsEnvExample")}</p>
               <LangTabs tabs={[
                 {
                   lang: "JavaScript",
@@ -1961,7 +1940,7 @@ if not API_KEY or not WEBHOOK_SECRET:
 
           <div className="py-8 text-center border-t">
             <p className="text-xs text-muted-foreground">WestPay API Documentation v2.0</p>
-            <p className="text-xs text-muted-foreground mt-1">Pour toute question : contactez votre gestionnaire de compte</p>
+            <p className="text-xs text-muted-foreground mt-1">{t("docsFooterHelp")}</p>
           </div>
 
         </main>
@@ -1971,13 +1950,7 @@ if not API_KEY or not WEBHOOK_SECRET:
 }
 
 export default function ApiDocsPage() {
-  const { lang, setLang, setDefaultLang } = useLanguage();
   const [accessData, setAccessData] = useState<{ token: string; merchant: { name: string; email: string } } | null>(null);
-
-  useEffect(() => {
-    // Default to English for API docs if not explicitly set
-    setDefaultLang("en");
-  }, [setDefaultLang]);
 
   if (!accessData) return <PinGate onAccess={setAccessData} />;
   return <ApiDocumentation merchantName={accessData.merchant.name} />;

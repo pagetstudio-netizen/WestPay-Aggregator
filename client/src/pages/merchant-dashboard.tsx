@@ -88,6 +88,10 @@ function countryToCurrency(country: string): string {
   return "FCFA";
 }
 
+function localeForLanguage(lang: string): string {
+  return lang === "pt" ? "pt-BR" : lang === "en" ? "en-US" : lang === "zh" ? "zh-CN" : lang === "hi" ? "hi-IN" : "fr-FR";
+}
+
 const WITHDRAWAL_OPERATOR_LOGOS: Record<string, string> = {
   "GCash":          gcashLogo,
   "Maya (PayMaya)": paymayaLogo,
@@ -508,40 +512,35 @@ function AnalysePanel({ token }: { token: string | null }) {
 }
 
 function TransactionDetailDrawer({ tx, onClose }: { tx: any; onClose: () => void }) {
-  const { toast, t: _t } = { toast: useToast().toast, t: useLanguage().t };
+  const { toast } = useToast();
+  const { t, lang } = useLanguage();
   const isTransfer = tx.amount < 0 || tx.txId?.startsWith("TR-");
   const fee = (tx.providerFee != null && tx.providerFee > 0) ? tx.providerFee : Math.round(Math.abs(tx.amount) * 0.055);
   const net = Math.abs(tx.amount) - fee;
 
   const statusCfg = tx.status === "confirmed"
-    ? { label: _t("confirmedLabel2"), bg: "#f0fdf4", color: "#16a34a", border: "#bbf7d0", dot: "#22c55e" }
+      ? { label: t("confirmedLabel2"), title: t("transactionSuccessful"), bg: "#f0fdf4", color: "#16a34a", border: "#bbf7d0", iconBg: "#22b968", dot: "#22c55e" }
     : tx.status === "pending"
-    ? { label: _t("pendingLabel"), bg: "#fffbeb", color: "#d97706", border: "#fde68a", dot: "#f59e0b" }
-    : { label: _t("failedLabel"), bg: "#fef2f2", color: "#dc2626", border: "#fecaca", dot: "#ef4444" };
+      ? { label: t("pendingLabel"), title: t("transactionPending"), bg: "#fffbeb", color: "#d97706", border: "#fde68a", iconBg: "#f59e0b", dot: "#f59e0b" }
+      : { label: t("failedLabel"), title: t("transactionFailed"), bg: "#fef2f2", color: "#dc2626", border: "#fecaca", iconBg: "#dc2626", dot: "#ef4444" };
 
   const providerLabel = (p: string) => {
-    if (p === "crypto") return "Crypto";
-    if (p === "sms") return "SMS";
-    return "Mobile Money";
+    if (p === "crypto") return t("cryptoProvider");
+    if (p === "sms") return t("smsProvider");
+    return t("mobileMoney");
   };
 
-  const copyToClipboard = (text: string, label: string) => {
-    copyTextToClipboard(text).then(() =>
-      toast({ title: `${label} copié`, description: text.substring(0, 40) })
-    ).catch(() => {});
-  };
+  const transactionCurrency = tx.currency || countryToCurrency(tx.country || "");
+  const transactionNumber = tx.payerNumber || tx.payer_number || tx.phone || tx.msisdn || "—";
+  const transactionOperator = tx.operator || tx.paymentMethod || providerLabel(tx.provider) || "—";
+  const transactionAmount = Math.abs(Number(tx.amount) || 0);
+  const transactionNet = Math.max(0, transactionAmount - (isTransfer ? 0 : fee));
+  const StatusIcon = tx.status === "confirmed" ? CheckCircle2 : tx.status === "pending" ? Clock : XCircle;
 
-  const DetailRow = ({ label, value, mono = false, copyable = false }: { label: string; value: string; mono?: boolean; copyable?: boolean }) => (
-    <div className="flex items-center justify-between gap-3 py-3 border-b border-gray-50 last:border-0">
-      <span className="text-xs font-medium text-gray-400 flex-shrink-0 w-28">{label}</span>
-      <div className="flex items-center gap-2 flex-1 justify-end min-w-0">
-        <span className={`text-sm font-semibold text-gray-800 text-right truncate ${mono ? "font-mono text-xs" : ""}`}>{value}</span>
-        {copyable && (
-          <button onClick={() => copyToClipboard(value, label)} className="flex-shrink-0 p-1 rounded hover:bg-gray-100 transition-colors" data-testid={`button-copy-${label}`}>
-            <Copy className="w-3.5 h-3.5 text-gray-400" />
-          </button>
-        )}
-      </div>
+  const InfoCell = ({ label, value, mono = false, wide = false }: { label: string; value: string; mono?: boolean; wide?: boolean }) => (
+    <div className={`px-5 py-4 ${wide ? "col-span-2" : ""}`}>
+      <p className="text-xs font-semibold text-gray-500 mb-1">{label}</p>
+      <p className={`text-sm font-medium text-gray-800 break-words ${mono ? "font-mono text-xs" : ""}`}>{value}</p>
     </div>
   );
 
@@ -552,106 +551,57 @@ function TransactionDetailDrawer({ tx, onClose }: { tx: any; onClose: () => void
       onClick={onClose}
     >
       <div
-        className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl overflow-hidden shadow-2xl"
-        style={{ maxHeight: "92vh", overflowY: "auto" }}
+        className="w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl overflow-y-auto shadow-2xl p-4 sm:p-6"
+        style={{ maxHeight: "94vh", background: "#eba911" }}
         onClick={(e) => e.stopPropagation()}
         data-testid="drawer-transaction-detail"
       >
-        {/* Drag handle (mobile) */}
-        <div className="flex justify-center pt-3 pb-1 sm:hidden">
-          <div className="w-10 h-1 rounded-full bg-gray-200" />
+        <div className="flex justify-center pb-2 sm:hidden">
+          <div className="w-10 h-1 rounded-full bg-white/60" />
         </div>
 
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ background: isTransfer ? "#fef2f2" : "#f0fdf4" }}>
-              {isTransfer
-                ? <ArrowUpRight className="w-5 h-5" style={{ color: "#dc2626" }} />
-                : <ArrowUpRight className="w-5 h-5 rotate-180" style={{ color: "#16a34a" }} />
-              }
-            </div>
-            <div>
-              <p className="text-sm font-bold text-gray-900">{isTransfer ? "Transfert envoyé" : "Paiement reçu"}</p>
-              <p className="text-xs text-gray-400 font-mono">{tx.txId?.substring(0, 20)}…</p>
-            </div>
+        <div className="text-center pt-2 pb-5">
+          <div className="mx-auto w-24 h-24 rounded-full flex items-center justify-center shadow-lg"
+            style={{ background: statusCfg.iconBg, border: "5px solid rgba(255,255,255,0.85)" }}>
+            <StatusIcon className="w-14 h-14 text-white" strokeWidth={2.5} />
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors" data-testid="button-close-detail">
-            <X className="w-4 h-4 text-gray-500" />
-          </button>
-        </div>
-
-        {/* Amount block */}
-        <div className="px-5 py-5 text-center border-b border-gray-50">
-          <p className="text-4xl font-black text-gray-900 tracking-tight">
-            <span style={{ color: isTransfer ? "#dc2626" : "#16a34a" }}>{isTransfer ? "−" : "+"}</span>
-            {Math.abs(tx.amount).toLocaleString("fr-FR")}
-            <span className="text-lg font-semibold text-gray-400 ml-2">FCFA</span>
+          <h2 className="mt-4 text-2xl sm:text-3xl font-black tracking-tight text-white">{statusCfg.title}</h2>
+          <p className="mt-2 text-xs sm:text-sm font-mono text-white/80 break-all">
+            {t("transactionId")}: {tx.txId || "—"}
           </p>
-          <div className="flex items-center justify-center gap-2 mt-3 flex-wrap">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold"
-              style={{ background: statusCfg.bg, color: statusCfg.color, border: `1px solid ${statusCfg.border}` }}>
-              <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: statusCfg.dot }} />
-              {statusCfg.label}
-            </span>
-            <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-              {isTransfer ? "Transfert" : "Encaissement"}
-            </span>
+        </div>
+
+        <div className="bg-white rounded-3xl overflow-hidden shadow-xl" data-testid="transaction-detail-card">
+          <div className="grid grid-cols-2 divide-x divide-gray-100">
+            <InfoCell label={t("reference")} value={tx.txId || "—"} mono wide />
+            <InfoCell label={t("phone")} value={String(transactionNumber)} mono />
+            <InfoCell label={t("country")} value={tx.country || "—"} />
+            <InfoCell label={t("operator")} value={String(transactionOperator)} />
+            <InfoCell
+              label={t("date")}
+              value={new Date(tx.createdAt).toLocaleString(localeForLanguage(lang), { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+              wide
+            />
+            <InfoCell label={t("amount")} value={`${transactionAmount.toLocaleString(localeForLanguage(lang))} ${transactionCurrency}`} />
+            <InfoCell label={t("netReceived")} value={`${transactionNet.toLocaleString(localeForLanguage(lang))} ${transactionCurrency}`} />
           </div>
         </div>
 
-        {/* Fee summary */}
-        {!isTransfer && (
-          <div className="mx-5 mt-4 rounded-xl p-4 grid grid-cols-3 gap-2 text-center" style={{ background: "#f8fafc", border: "1px solid #e2e8f0" }}>
-            <div>
-              <p className="text-xs text-gray-400 mb-1">Montant brut</p>
-              <p className="text-sm font-bold text-gray-800">{Math.abs(tx.amount).toLocaleString("fr-FR")} F</p>
-            </div>
-            <div style={{ borderLeft: "1px solid #e2e8f0", borderRight: "1px solid #e2e8f0" }}>
-              <p className="text-xs text-gray-400 mb-1">Frais WestPay</p>
-              <p className="text-sm font-bold" style={{ color: "#f59e0b" }}>{fee.toLocaleString("fr-FR")} F</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-400 mb-1">Net reçu</p>
-              <p className="text-sm font-bold" style={{ color: "#16a34a" }}>{net.toLocaleString("fr-FR")} F</p>
-            </div>
-          </div>
-        )}
-
-        {/* Details */}
-        <div className="px-5 py-2 mt-2">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Détails</p>
-          <DetailRow label="Référence" value={tx.txId || "—"} mono copyable />
-          {(tx.payerName || tx.payer_name) && <DetailRow label="Payeur" value={tx.payerName || tx.payer_name} />}
-          {(tx.payerNumber || tx.payer_number) && <DetailRow label="Téléphone" value={tx.payerNumber || tx.payer_number} copyable />}
-          <DetailRow label="Pays" value={tx.country || "—"} />
-          <DetailRow label="Mode" value={providerLabel(tx.provider)} />
-          <DetailRow label="Date" value={new Date(tx.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })} />
-        </div>
-
-        {/* Footer */}
-        <div className="px-5 pb-6 pt-4">
-          <div className="flex items-center justify-center gap-1.5 mb-4">
-            <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-            <span className="text-xs text-gray-400">Transaction WestPay · Sécurisée</span>
-            <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-          </div>
-          <button
-            onClick={onClose}
-            className="w-full py-3 rounded-xl text-sm font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
-            data-testid="button-close-receipt"
-          >
-            Fermer
-          </button>
-        </div>
+        <button
+          onClick={onClose}
+          className="w-full mt-5 py-4 rounded-full text-base font-black uppercase tracking-wide text-white shadow-lg transition-transform active:scale-[0.98] hover:brightness-105"
+          style={{ background: "#2939b9" }}
+          data-testid="button-close-receipt"
+        >
+          {t("back")}
+        </button>
       </div>
     </div>
   );
 }
 
 function MerchantTransactionsPanel({ token }: { token: string | null }) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const { data: transactions = [], isLoading } = useMerchantFetch("/api/merchant/transactions", ["/api/merchant/transactions"], token);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -675,9 +625,10 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
   });
 
   const downloadCSV = () => {
-    const header = "TXID,Nom payeur,Numéro,Montant,Pays,Statut,Mode,Date\n";
+    const header = `TXID,${t("payer")},${t("phone")},${t("amount")},${t("country")},${t("status")},${t("provider")},${t("date")}\n`;
+    const locale = lang === "fr" ? "fr-FR" : lang === "zh" ? "zh-CN" : lang === "pt" ? "pt-PT" : lang === "hi" ? "hi-IN" : "en-US";
     const rows = filtered.map((tx) =>
-      `${tx.txId},"${(tx as any).payerName || ""}",${tx.payerNumber || ""},${tx.amount},${tx.country},${tx.status},${providerLabel(tx.provider)},${new Date(tx.createdAt).toLocaleString("fr-FR")}`
+      `${tx.txId},"${(tx as any).payerName || ""}",${tx.payerNumber || ""},${tx.amount},${tx.country},${tx.status},${providerLabel(tx.provider)},${new Date(tx.createdAt).toLocaleString(locale)}`
     ).join("\n");
     const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -691,15 +642,15 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
 
   const getStatusCfg = (status: string) =>
     status === "confirmed"
-      ? { label: "Confirmé", bg: "#f0fdf4", color: "#16a34a", border: "#bbf7d0", dot: "#22c55e" }
+      ? { label: t("confirmed"), bg: "#f0fdf4", color: "#16a34a", border: "#bbf7d0", dot: "#22c55e" }
       : status === "pending"
-      ? { label: "En attente", bg: "#fffbeb", color: "#d97706", border: "#fde68a", dot: "#f59e0b" }
-      : { label: "Échoué", bg: "#fef2f2", color: "#dc2626", border: "#fecaca", dot: "#ef4444" };
+      ? { label: t("pending"), bg: "#fffbeb", color: "#d97706", border: "#fde68a", dot: "#f59e0b" }
+      : { label: t("failed"), bg: "#fef2f2", color: "#dc2626", border: "#fecaca", dot: "#ef4444" };
 
   const providerLabel = (p: string) => {
-    if (p === "crypto") return "Crypto";
-    if (p === "sms") return "SMS";
-    return "Mobile Money";
+    if (p === "crypto") return t("cryptoProvider");
+    if (p === "sms") return t("smsProvider");
+    return t("mobileMoney");
   };
 
   return (
@@ -708,15 +659,15 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
       <div className="px-4 pt-5 pb-4 border-b border-gray-100">
         <div className="flex items-center justify-between gap-2">
           <div>
-            <h2 className="text-lg font-bold text-gray-900">Historique des transactions</h2>
-            <p className="text-xs text-gray-400 mt-0.5">{allTx.length} transaction{allTx.length !== 1 ? "s" : ""} au total</p>
+            <h2 className="text-lg font-bold text-gray-900">{t("transactionHistory")}</h2>
+            <p className="text-xs text-gray-400 mt-0.5">{allTx.length} {t("transactionsTotal")}</p>
           </div>
           <button
             onClick={downloadCSV}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors"
             data-testid="button-merchant-export-csv"
           >
-            <Download className="w-3.5 h-3.5" /> Exporter
+            <Download className="w-3.5 h-3.5" /> {t("export")}
           </button>
         </div>
       </div>
@@ -730,10 +681,10 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
               <img src={icnStatVolume} alt="volume" className="w-6 h-6 object-contain"
                 style={{ filter: "brightness(0) saturate(100%) invert(39%) sepia(94%) saturate(729%) hue-rotate(199deg) brightness(105%) contrast(93%)" }} />
             </div>
-            <span className="text-xs font-semibold text-blue-500 uppercase tracking-wide">Volume</span>
+            <span className="text-xs font-semibold text-blue-500 uppercase tracking-wide">{t("volumeLabel")}</span>
           </div>
-          <p className="text-lg font-black text-gray-900 leading-tight">{confirmedTotal.toLocaleString("fr-FR")}</p>
-          <p className="text-xs text-gray-400 mt-0.5">FCFA confirmés</p>
+          <p className="text-lg font-black text-gray-900 leading-tight">{confirmedTotal.toLocaleString(localeForLanguage(lang))}</p>
+          <p className="text-xs text-gray-400 mt-0.5">{t("confirmedVolumeLabel")}</p>
         </div>
         {/* Confirmées */}
         <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(22,163,74,0.08)" }}>
@@ -742,10 +693,10 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
               <img src={icnStatConfirmed} alt="confirmées" className="w-6 h-6 object-contain"
                 style={{ filter: "brightness(0) saturate(100%) invert(44%) sepia(72%) saturate(543%) hue-rotate(89deg) brightness(93%) contrast(88%)" }} />
             </div>
-            <span className="text-xs font-semibold text-green-600 uppercase tracking-wide">Confirmées</span>
+            <span className="text-xs font-semibold text-green-600 uppercase tracking-wide">{t("confirmed")}</span>
           </div>
           <p className="text-lg font-black text-gray-900">{confirmedCount}</p>
-          <p className="text-xs text-gray-400 mt-0.5">transactions</p>
+          <p className="text-xs text-gray-400 mt-0.5">{t("transactionCountLabel")}</p>
         </div>
         {/* En attente */}
         <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(217,119,6,0.08)" }}>
@@ -754,10 +705,10 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
               <img src={icnStatPending} alt="en attente" className="w-6 h-6 object-contain"
                 style={{ filter: "brightness(0) saturate(100%) invert(54%) sepia(100%) saturate(432%) hue-rotate(12deg) brightness(96%) contrast(97%)" }} />
             </div>
-            <span className="text-xs font-semibold text-amber-600 uppercase tracking-wide">En attente</span>
+            <span className="text-xs font-semibold text-amber-600 uppercase tracking-wide">{t("pending")}</span>
           </div>
           <p className="text-lg font-black text-gray-900">{pendingCount}</p>
-          <p className="text-xs text-gray-400 mt-0.5">transactions</p>
+          <p className="text-xs text-gray-400 mt-0.5">{t("transactionCountLabel")}</p>
         </div>
         {/* Échouées */}
         <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(220,38,38,0.08)" }}>
@@ -766,10 +717,10 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
               <img src={icnStatFailed} alt="échouées" className="w-6 h-6 object-contain"
                 style={{ filter: "brightness(0) saturate(100%) invert(22%) sepia(93%) saturate(1354%) hue-rotate(344deg) brightness(96%) contrast(98%)" }} />
             </div>
-            <span className="text-xs font-semibold text-red-600 uppercase tracking-wide">Échouées</span>
+            <span className="text-xs font-semibold text-red-600 uppercase tracking-wide">{t("failed")}</span>
           </div>
           <p className="text-lg font-black text-gray-900">{failedCount}</p>
-          <p className="text-xs text-gray-400 mt-0.5">transactions</p>
+          <p className="text-xs text-gray-400 mt-0.5">{t("transactionCountLabel")}</p>
         </div>
       </div>
 
@@ -779,7 +730,7 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300" />
           <input
             className="w-full rounded-xl pl-9 pr-3 py-2.5 text-sm outline-none border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-400 focus:border-green-400 focus:bg-white transition-colors"
-            placeholder="Référence, téléphone, payeur…"
+            placeholder={`${t("reference")}, ${t("phone").toLowerCase()}, ${t("payer").toLowerCase()}…`}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             data-testid="input-merchant-search-tx"
@@ -792,10 +743,10 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
             className="rounded-xl px-3 py-2.5 text-sm border border-gray-200 bg-gray-50 text-gray-700 outline-none focus:border-green-400 focus:bg-white transition-colors"
             data-testid="select-filter-status"
           >
-            <option value="all">Tous les statuts</option>
-            <option value="confirmed">Confirmé</option>
-            <option value="pending">En attente</option>
-            <option value="failed">Échoué</option>
+            <option value="all">{t("allStatuses")}</option>
+            <option value="confirmed">{t("confirmed")}</option>
+            <option value="pending">{t("pending")}</option>
+            <option value="failed">{t("failed")}</option>
           </select>
           <select
             value={filterProvider}
@@ -803,8 +754,8 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
             className="rounded-xl px-3 py-2.5 text-sm border border-gray-200 bg-gray-50 text-gray-700 outline-none focus:border-green-400 focus:bg-white transition-colors"
             data-testid="select-filter-provider"
           >
-            <option value="all">Tous</option>
-            <option value="omnipay">Mobile Money</option>
+            <option value="all">{t("all")}</option>
+            <option value="omnipay">{t("mobileMoney")}</option>
             <option value="sms">SMS</option>
             <option value="crypto">Crypto</option>
           </select>
@@ -825,17 +776,17 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
             <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center mb-4">
               <CreditCard className="w-7 h-7 text-gray-200" />
             </div>
-            <p className="text-sm font-medium text-gray-400">Aucune transaction trouvée</p>
-            {searchTerm && <p className="text-xs text-gray-300 mt-1">Essayez un autre terme de recherche</p>}
+            <p className="text-sm font-medium text-gray-400">{t("noTransactionsFound")}</p>
+            {searchTerm && <p className="text-xs text-gray-300 mt-1">{t("tryAnotherSearch")}</p>}
           </div>
         ) : (
           <div className="border border-gray-100 rounded-2xl overflow-hidden bg-white" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
             {/* Table header — desktop */}
             <div className="hidden sm:grid grid-cols-[1fr_auto_auto_auto] gap-4 px-4 py-3 border-b border-gray-100 bg-gray-50">
-              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Référence / Payeur</span>
-              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider text-center">Pays</span>
-              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider text-center">Statut</span>
-              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider text-right">Montant</span>
+              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{t("reference")} / {t("payer")}</span>
+              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider text-center">{t("country")}</span>
+              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider text-center">{t("status")}</span>
+              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider text-right">{t("amount")}</span>
             </div>
 
             {/* Rows */}
@@ -867,7 +818,7 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
                       <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                         {txPayerName && <span className="text-xs text-gray-500 font-medium" data-testid={`text-payer-name-${tx.id}`}>{txPayerName}</span>}
                         {tx.payerNumber && <span className="text-xs text-gray-400" data-testid={`text-payer-number-${tx.id}`}>· {tx.payerNumber}</span>}
-                        <span className="text-xs text-gray-300">· {new Date(tx.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</span>
+                        <span className="text-xs text-gray-300">· {new Date(tx.createdAt).toLocaleDateString(localeForLanguage(lang), { day: "2-digit", month: "short" })}</span>
                       </div>
                     </div>
                   </div>
@@ -888,7 +839,7 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
                   {/* Amount — always visible */}
                   <div className="text-right flex-shrink-0">
                     <p className="text-sm font-bold" style={{ color: isTransfer ? "#dc2626" : "#16a34a" }} data-testid={`text-tx-amount-${tx.id}`}>
-                      {isTransfer ? "−" : "+"}{Math.abs(tx.amount).toLocaleString("fr-FR")}
+                      {isTransfer ? "−" : "+"}{Math.abs(tx.amount).toLocaleString(localeForLanguage(lang))}
                     </p>
                     <p className="text-xs text-gray-300">FCFA</p>
                     {/* Mobile status dot */}
@@ -929,7 +880,7 @@ function ApiKeysPanel({ token }: { token: string | null }) {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/api-keys"] });
       toast({ title: t("apiKey"), description: t("keyActive") });
     },
-    onError: () => toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" }),
+    onError: () => toast({ title: t("actionFailed"), description: t("errorRetry"), variant: "destructive" }),
   });
 
   if (isLoading) return <MerchantLoadingSkeleton />;
@@ -958,7 +909,7 @@ function ApiKeysPanel({ token }: { token: string | null }) {
         style={{ background: "#fffbea", border: "1.5px solid #fef3c7" }}>
         <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "#d97706" }} />
         <p className="text-xs leading-relaxed" style={{ color: "#92400e" }}>
-          Vos clés API sont <strong>confidentielles</strong>. Ne les partagez jamais publiquement. En cas de compromission, régénérez-les immédiatement.
+          {t("apiKeysDesc")}. <strong>{t("security")}</strong> — {t("noApiKeysDesc")}.
         </p>
       </div>
 
@@ -970,7 +921,7 @@ function ApiKeysPanel({ token }: { token: string | null }) {
               <Key className="w-7 h-7" style={{ color: "#c5cae9" }} />
             </div>
             <p className="font-bold text-sm mb-1" style={{ color: "#1a1a1a" }}>{t("noApiKeys")}</p>
-            <p className="text-xs" style={{ color: "#aaa" }}>Contactez votre administrateur pour activer des pays</p>
+            <p className="text-xs" style={{ color: "#aaa" }}>{t("noApiKeysDesc")}</p>
           </div>
         ) : (
           keyList.map((key, idx) => {
@@ -1013,13 +964,13 @@ function ApiKeysPanel({ token }: { token: string | null }) {
                     {regenerateMutation.isPending
                       ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                       : <RefreshCw className="w-3.5 h-3.5" />}
-                    Régénérer
+                    {t("regenerate")}
                   </button>
                 </div>
 
                 {/* Key display */}
                 <div className="px-5 py-4">
-                  <p className="text-xs font-bold mb-2" style={{ color: "#888" }}>CLÉ API</p>
+                  <p className="text-xs font-bold mb-2" style={{ color: "#888" }}>{t("apiKeyLabel")}</p>
                   <div className="flex items-center gap-2 rounded-xl px-3.5 py-3"
                     style={{ background: "#f8f9fc", border: "1.5px solid #e8ecf0" }}>
                     <Lock className="w-3.5 h-3.5 shrink-0" style={{ color: "#bbb" }} />
@@ -1039,7 +990,7 @@ function ApiKeysPanel({ token }: { token: string | null }) {
                   </div>
                   <p className="text-xs mt-2 flex items-center gap-1" style={{ color: "#bbb" }}>
                     <Shield className="w-3 h-3" />
-                    Incluez cette clé dans le header <code className="font-mono" style={{ color: "#888" }}>X-API-Key</code> de vos requêtes
+                    {t("includeApiKey")}
                   </p>
                 </div>
               </div>
@@ -1056,7 +1007,7 @@ function ApiKeysPanel({ token }: { token: string | null }) {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-bold text-white leading-tight">{t("integrationGuide")}</p>
-              <p className="text-xs mt-0.5 text-white/70">Exemples de code, webhooks et référence complète</p>
+              <p className="text-xs mt-0.5 text-white/70">{t("integrationGuideDesc")}</p>
             </div>
             <button
               onClick={() => window.open(SECURE_DOCS_URL, "_blank", "noopener,noreferrer")}
@@ -1065,7 +1016,7 @@ function ApiKeysPanel({ token }: { token: string | null }) {
               data-testid="button-docs-link"
             >
               <ExternalLink className="w-3.5 h-3.5" />
-              Ouvrir
+              {t("open")}
             </button>
           </div>
         </div>
@@ -1075,7 +1026,7 @@ function ApiKeysPanel({ token }: { token: string | null }) {
 }
 
 function WebhookPanel({ token }: { token: string | null }) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const { toast } = useToast();
   const [webhookUrl, setWebhookUrl] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -1103,7 +1054,7 @@ function WebhookPanel({ token }: { token: string | null }) {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook"] });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook/logs"] });
     } catch (err: any) {
-      toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" });
+      toast({ title: t("actionFailed"), description: t("errorRetry"), variant: "destructive" });
     } finally { setIsSaving(false); }
   };
 
@@ -1118,10 +1069,10 @@ function WebhookPanel({ token }: { token: string | null }) {
       });
       const data = await res.json();
       if (data.success) toast({ title: t("webhookTested"), description: `HTTP ${data.statusCode}` });
-      else toast({ title: "Test non concluant", description: "Le webhook n'a pas répondu correctement. Vérifiez votre URL.", variant: "destructive" });
+      else toast({ title: t("testInconclusive"), description: t("webhookIncorrect"), variant: "destructive" });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook/logs"] });
     } catch (err: any) {
-      toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" });
+      toast({ title: t("actionFailed"), description: t("errorRetry"), variant: "destructive" });
     } finally { setIsTesting(false); }
   };
 
@@ -1140,7 +1091,7 @@ function WebhookPanel({ token }: { token: string | null }) {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook"] });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook/logs"] });
     } catch (err: any) {
-      toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" });
+      toast({ title: t("actionFailed"), description: t("errorRetry"), variant: "destructive" });
     } finally { setIsSaving(false); }
   };
 
@@ -1267,7 +1218,7 @@ function WebhookPanel({ token }: { token: string | null }) {
                 <p className="text-xs font-semibold truncate" style={{ color: "#1a1a1a" }}>
                   {log.statusCode ? `HTTP ${log.statusCode}` : t("error")} — {log.response?.substring(0, 80) || "—"}
                 </p>
-                <p className="text-xs" style={{ color: "#aaa" }}>{new Date(log.createdAt).toLocaleString("fr-FR")}</p>
+                <p className="text-xs" style={{ color: "#aaa" }}>{new Date(log.createdAt).toLocaleString(localeForLanguage(lang))}</p>
               </div>
               <span className="text-xs px-2 py-0.5 rounded-full font-semibold shrink-0" style={{ background: log.success ? "#d4edda" : "#f8d7da", color: log.success ? "#155724" : "#721c24" }}>
                 {log.success ? t("delivered") : t("deliveryFailed")}
@@ -1282,6 +1233,7 @@ function WebhookPanel({ token }: { token: string | null }) {
 
 function TransfersPanel({ token }: { token: string | null }) {
   const { toast } = useToast();
+  const { t, lang } = useLanguage();
   const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
   const { data: transactions = [], isLoading: txLoading } = useMerchantFetch("/api/merchant/transactions", ["/api/merchant/transactions"], token);
 
@@ -1304,7 +1256,7 @@ function TransfersPanel({ token }: { token: string | null }) {
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify(data),
       });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      if (!res.ok) { const d = await res.json(); throw new Error(d.message || t("error")); }
       return res.json();
     },
     onSuccess: (data) => {
@@ -1312,8 +1264,8 @@ function TransfersPanel({ token }: { token: string | null }) {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/transactions"] });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/stats"] });
       toast({
-        title: "Transfert initie",
-        description: `${data.amount?.toLocaleString("fr-FR")} F CFA envoye. Ref: ${data.reference}`,
+        title: t("transferStarted"),
+        description: `${data.amount?.toLocaleString(localeForLanguage(lang))} F CFA ${t("sentReference")}: ${data.reference}`,
       });
       setRecipientPhone("");
       setAmount("");
@@ -1321,22 +1273,22 @@ function TransfersPanel({ token }: { token: string | null }) {
       setLastName("");
       setOperator("");
     },
-    onError: () => toast({ title: "Action non effectuée", description: "Une erreur est survenue. Veuillez réessayer.", variant: "destructive" }),
+    onError: () => toast({ title: t("actionFailed"), description: t("errorRetry"), variant: "destructive" }),
   });
 
   const handleTransfer = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCountry || !recipientPhone || !amount || !firstName || !lastName) {
-      toast({ title: "Champs incomplets", description: "Veuillez remplir tous les champs requis.", variant: "destructive" });
+      toast({ title: t("error"), description: t("incompleteFields"), variant: "destructive" });
       return;
     }
     const parsedAmount = parseInt(amount);
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      toast({ title: "Montant invalide", description: "Le montant doit être un nombre entier positif.", variant: "destructive" });
+      toast({ title: t("error"), description: t("invalidPositiveAmount"), variant: "destructive" });
       return;
     }
     if (selectedMC && parsedAmount > selectedMC.balance) {
-      toast({ title: "Solde insuffisant", description: "Votre solde disponible ne permet pas d'effectuer cette opération.", variant: "destructive" });
+      toast({ title: t("insufficientFunds"), description: t("insufficientLabel"), variant: "destructive" });
       return;
     }
     transferMutation.mutate({
@@ -1366,8 +1318,8 @@ function TransfersPanel({ token }: { token: string | null }) {
       {/* Header */}
       <div className="px-5 pt-5 pb-4 bg-white border-b border-gray-100 flex items-center justify-between gap-3 mb-0">
         <div>
-          <h2 className="text-lg font-bold" style={{ color: "#1a1a1a" }}>Transferts Mobile Money</h2>
-          <p className="text-xs mt-0.5" style={{ color: "#888" }}>Envoyez de l'argent vers un portefeuille Mobile Money</p>
+          <h2 className="text-lg font-bold" style={{ color: "#1a1a1a" }}>{t("transfers")} {t("mobileMoney")}</h2>
+          <p className="text-xs mt-0.5" style={{ color: "#888" }}>{t("sendMoney")} {t("via")} {t("mobileMoney")}</p>
         </div>
         <div className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0" style={{ background: "#3b82f6" }}>
           <Send className="w-5 h-5 text-white" />
@@ -1382,10 +1334,10 @@ function TransfersPanel({ token }: { token: string | null }) {
               <img src={icnStatVolume} alt="volume" className="w-6 h-6 object-contain"
                 style={{ filter: "brightness(0) saturate(100%) invert(39%) sepia(94%) saturate(729%) hue-rotate(199deg) brightness(105%) contrast(93%)" }} />
             </div>
-            <span className="text-xs font-semibold text-blue-500 uppercase tracking-wide">Volume</span>
+            <span className="text-xs font-semibold text-blue-500 uppercase tracking-wide">{t("volumeLabel")}</span>
           </div>
-          <p className="text-lg font-black text-gray-900 leading-tight">{transferTotal.toLocaleString("fr-FR")}</p>
-          <p className="text-xs text-gray-400 mt-0.5">FCFA envoyés</p>
+          <p className="text-lg font-black text-gray-900 leading-tight">{transferTotal.toLocaleString(localeForLanguage(lang))}</p>
+          <p className="text-xs text-gray-400 mt-0.5">{t("amount")} FCFA</p>
         </div>
         <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(22,163,74,0.08)" }}>
           <div className="flex items-center gap-2 mb-3">
@@ -1393,10 +1345,10 @@ function TransfersPanel({ token }: { token: string | null }) {
               <img src={icnStatConfirmed} alt="transferts" className="w-6 h-6 object-contain"
                 style={{ filter: "brightness(0) saturate(100%) invert(44%) sepia(72%) saturate(543%) hue-rotate(89deg) brightness(93%) contrast(88%)" }} />
             </div>
-            <span className="text-xs font-semibold text-green-600 uppercase tracking-wide">Total</span>
+            <span className="text-xs font-semibold text-green-600 uppercase tracking-wide">{t("total")}</span>
           </div>
           <p className="text-lg font-black text-gray-900">{transferCount}</p>
-          <p className="text-xs text-gray-400 mt-0.5">transferts</p>
+          <p className="text-xs text-gray-400 mt-0.5">{t("transfers")}</p>
         </div>
         <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(217,119,6,0.08)" }}>
           <div className="flex items-center gap-2 mb-3">
@@ -1404,10 +1356,10 @@ function TransfersPanel({ token }: { token: string | null }) {
               <img src={icnStatPending} alt="ce mois" className="w-6 h-6 object-contain"
                 style={{ filter: "brightness(0) saturate(100%) invert(54%) sepia(100%) saturate(432%) hue-rotate(12deg) brightness(96%) contrast(97%)" }} />
             </div>
-            <span className="text-xs font-semibold text-amber-600 uppercase tracking-wide">Ce mois</span>
+            <span className="text-xs font-semibold text-amber-600 uppercase tracking-wide">{t("thisMonth")}</span>
           </div>
           <p className="text-lg font-black text-gray-900">{thisMonthCount}</p>
-          <p className="text-xs text-gray-400 mt-0.5">transferts</p>
+          <p className="text-xs text-gray-400 mt-0.5">{t("transfers")}</p>
         </div>
         <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(59,130,246,0.08)" }}>
           <div className="flex items-center gap-2 mb-3">
@@ -1415,29 +1367,29 @@ function TransfersPanel({ token }: { token: string | null }) {
               <img src={icnStatFailed} alt="pays" className="w-6 h-6 object-contain"
                 style={{ filter: "brightness(0) saturate(100%) invert(22%) sepia(93%) saturate(1354%) hue-rotate(344deg) brightness(96%) contrast(98%)" }} />
             </div>
-            <span className="text-xs font-semibold text-red-500 uppercase tracking-wide">Pays actifs</span>
+            <span className="text-xs font-semibold text-red-500 uppercase tracking-wide">{t("activeCountriesLabel")}</span>
           </div>
           <p className="text-lg font-black text-gray-900">{activeCountriesCount}</p>
-          <p className="text-xs text-gray-400 mt-0.5">disponibles</p>
+          <p className="text-xs text-gray-400 mt-0.5">{t("availableLabel")}</p>
         </div>
       </div>
 
       <div className="px-4 pb-4 space-y-4">
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Nouveau transfert</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">{t("newTransferTitle")}</CardTitle></CardHeader>
         <CardContent>
           <form onSubmit={handleTransfer} className="space-y-4">
             <div className="space-y-2">
-              <Label>Pays</Label>
+              <Label>{t("country")}</Label>
               <Select value={selectedCountry} onValueChange={setSelectedCountry}>
                 <SelectTrigger data-testid="select-transfer-country">
-                  <SelectValue placeholder="Selectionner un pays" />
+                  <SelectValue placeholder={t("selectCountryPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
                   {omnipayCountries.map(c => (
                     <SelectItem key={c.id} value={c.country}>
-                      {c.country} - Solde: {c.balance.toLocaleString("fr-FR")} F CFA
+                      {c.country} - {t("balance")}: {c.balance.toLocaleString(localeForLanguage(lang))} F CFA
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1446,21 +1398,21 @@ function TransfersPanel({ token }: { token: string | null }) {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Prenom du destinataire</Label>
+                <Label>{t("recipientFirstName")}</Label>
                 <Input
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
-                  placeholder="Prenom"
+                  placeholder={t("firstNamePlaceholder")}
                   required
                   data-testid="input-transfer-firstname"
                 />
               </div>
               <div className="space-y-2">
-                <Label>Nom du destinataire</Label>
+                <Label>{t("recipientLastName")}</Label>
                 <Input
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
-                  placeholder="Nom"
+                  placeholder={t("lastNamePlaceholder")}
                   required
                   data-testid="input-transfer-lastname"
                 />
@@ -1468,7 +1420,7 @@ function TransfersPanel({ token }: { token: string | null }) {
             </div>
 
             <div className="space-y-2">
-              <Label>Numero de telephone</Label>
+              <Label>{t("phoneNumberLabel")}</Label>
               <Input
                 value={recipientPhone}
                 onChange={(e) => setRecipientPhone(e.target.value)}
@@ -1479,7 +1431,7 @@ function TransfersPanel({ token }: { token: string | null }) {
             </div>
 
             <div className="space-y-2">
-              <Label>Montant (F CFA)</Label>
+              <Label>{t("amountCfaLabel")}</Label>
               <Input
                 type="number"
                 value={amount}
@@ -1491,19 +1443,19 @@ function TransfersPanel({ token }: { token: string | null }) {
               />
               {selectedMC && (
                 <p className="text-xs text-muted-foreground">
-                  Solde disponible: {selectedMC.balance.toLocaleString("fr-FR")} F CFA
+                  {t("availableBalance")}: {selectedMC.balance.toLocaleString(localeForLanguage(lang))} F CFA
                 </p>
               )}
             </div>
 
             <div className="space-y-2">
-              <Label>Operateur (optionnel)</Label>
+              <Label>{t("operatorOptional")}</Label>
               <Select value={operator} onValueChange={setOperator}>
                 <SelectTrigger data-testid="select-transfer-operator">
-                  <SelectValue placeholder="Auto-detection" />
+                  <SelectValue placeholder={t("autoDetection")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="auto">Auto-detection</SelectItem>
+                  <SelectItem value="auto">{t("autoDetection")}</SelectItem>
                   <SelectItem value="moov">Moov Money</SelectItem>
                   <SelectItem value="tmoney">T-Money</SelectItem>
                   <SelectItem value="wave">Wave</SelectItem>
@@ -1519,7 +1471,7 @@ function TransfersPanel({ token }: { token: string | null }) {
               data-testid="button-submit-transfer"
             >
               {transferMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Send className="w-4 h-4 mr-2" />}
-              Envoyer le transfert
+              {t("sendTransfer")}
             </Button>
           </form>
         </CardContent>
@@ -1528,8 +1480,8 @@ function TransfersPanel({ token }: { token: string | null }) {
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <CardTitle className="text-base">Historique des transferts</CardTitle>
-            <Badge variant="secondary">{transferTxs.length} transfert(s)</Badge>
+            <CardTitle className="text-base">{t("transferHistoryTitle")}</CardTitle>
+            <Badge variant="secondary">{transferTxs.length} {t("transfers").toLowerCase()}</Badge>
           </div>
         </CardHeader>
         <CardContent>
@@ -1539,7 +1491,7 @@ function TransfersPanel({ token }: { token: string | null }) {
               <Skeleton className="h-10 w-full" />
             </div>
           ) : transferTxs.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">Aucun transfert pour le moment</p>
+            <p className="text-sm text-muted-foreground text-center py-4">{t("noTransfersYet")}</p>
           ) : (
             <ScrollArea className="max-h-[400px]">
               <div className="space-y-2">
@@ -1552,12 +1504,12 @@ function TransfersPanel({ token }: { token: string | null }) {
                         <Badge variant="secondary">{tx.country}</Badge>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">
-                        {tx.payerNumber ? `Vers ${tx.payerNumber}` : ""}
-                        {" "}{new Date(tx.createdAt).toLocaleString("fr-FR")}
+                        {tx.payerNumber ? `${t("transferTo")} ${tx.payerNumber}` : ""}
+                        {" "}{new Date(tx.createdAt).toLocaleString(localeForLanguage(lang))}
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-sm font-bold text-destructive">{tx.amount.toLocaleString("fr-FR")} F</p>
+                      <p className="text-sm font-bold text-destructive">{tx.amount.toLocaleString(localeForLanguage(lang))} F</p>
                     </div>
                   </div>
                 ))}
@@ -1597,7 +1549,7 @@ function StatusPill({ status }: { status: string }) {
 }
 
 function WithdrawalsPanel({ token }: { token: string | null }) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const { toast } = useToast();
   const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
   const { data: withdrawalList = [], isLoading: wdLoading } = useMerchantFetch("/api/merchant/withdrawals", ["/api/merchant/withdrawals"], token);
@@ -1655,7 +1607,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
       });
       const d = await res.json();
       if (!res.ok) {
-        const err: any = new Error(d.message || "Erreur");
+        const err: any = new Error(d.message || t("error"));
         err.data = d;
         throw err;
       }
@@ -1666,7 +1618,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/balance"] });
       setAmount(""); setPhone(""); setSelectedOperator(""); setRecipientName("");
       setRetryState(null);
-      toast({ title: "Demande soumise", description: "Votre demande de reversement est en cours de traitement." });
+      toast({ title: t("success"), description: t("processing") });
     },
     onError: (err: any) => {
       const d = err?.data || {};
@@ -1675,8 +1627,8 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
         refetchMe();
       }
       toast({
-        title: "Retrait non abouti",
-        description: sanitizePaymentMessage(err?.message, "Une erreur est survenue. Votre solde a été restitué."),
+        title: t("withdrawalUnavailable"),
+        description: sanitizePaymentMessage(err?.message, t("errorRetry")),
         variant: "destructive",
       });
     },
@@ -1688,11 +1640,11 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
     const amountNum = parseInt(amount);
     if (isNaN(amountNum) || amountNum <= 0) return;
     if (amountNum < withdrawalMinAmount) {
-      toast({ title: "Montant trop faible", description: `Le montant minimum de retrait est de ${withdrawalMinAmount.toLocaleString("fr-FR")} FCFA.`, variant: "destructive" });
+      toast({ title: t("error"), description: `${t("minLabel")} ${withdrawalMinAmount.toLocaleString(localeForLanguage(lang))} FCFA`, variant: "destructive" });
       return;
     }
     if (selectedWallet && amountNum > selectedWallet.balance) {
-      toast({ title: "Solde insuffisant", description: `Votre solde disponible est de ${selectedWallet.balance.toLocaleString("fr-FR")} ${countryToCurrency(selectedWallet.country)}.`, variant: "destructive" });
+      toast({ title: t("insufficientFunds"), description: `${t("availableBalance")}: ${selectedWallet.balance.toLocaleString(localeForLanguage(lang))} ${countryToCurrency(selectedWallet.country)}.`, variant: "destructive" });
       return;
     }
     createMutation.mutate({ merchantCountryId: Number(selectedWalletId), amount: amountNum, phone, operator: selectedOperator, recipientName: recipientName.trim() || undefined });
@@ -1709,7 +1661,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
       <div className="flex items-center justify-between mb-5">
         <div>
           <h2 className="text-xl font-bold" style={{ color: "#1a1a1a" }}>{t("withdrawalsTitle")}</h2>
-          <p className="text-xs mt-0.5" style={{ color: "#888" }}>Demandez un reversement vers votre compte mobile money</p>
+          <p className="text-xs mt-0.5" style={{ color: "#888" }}>{t("withdrawalsDesc")}</p>
         </div>
         <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: "#00b050" }}>
           <Download className="w-5 h-5 text-white" />
@@ -1724,10 +1676,10 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
               <img src={icnStatVolume} alt="volume" className="w-6 h-6 object-contain"
                 style={{ filter: "brightness(0) saturate(100%) invert(39%) sepia(94%) saturate(729%) hue-rotate(199deg) brightness(105%) contrast(93%)" }} />
             </div>
-            <span className="text-xs font-semibold text-blue-500 uppercase tracking-wide">Volume</span>
+            <span className="text-xs font-semibold text-blue-500 uppercase tracking-wide">{t("volumeLabel")}</span>
           </div>
-          <p className="text-lg font-black text-gray-900 leading-tight">{totalWithdrawn.toLocaleString("fr-FR")}</p>
-          <p className="text-xs text-gray-400 mt-0.5">FCFA reversés</p>
+          <p className="text-lg font-black text-gray-900 leading-tight">{totalWithdrawn.toLocaleString(localeForLanguage(lang))}</p>
+          <p className="text-xs text-gray-400 mt-0.5">{t("totalWithdrawn")}</p>
         </div>
         <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(22,163,74,0.08)" }}>
           <div className="flex items-center gap-2 mb-3">
@@ -1735,10 +1687,10 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
               <img src={icnStatConfirmed} alt="approuvés" className="w-6 h-6 object-contain"
                 style={{ filter: "brightness(0) saturate(100%) invert(44%) sepia(72%) saturate(543%) hue-rotate(89deg) brightness(93%) contrast(88%)" }} />
             </div>
-            <span className="text-xs font-semibold text-green-600 uppercase tracking-wide">Approuvés</span>
+            <span className="text-xs font-semibold text-green-600 uppercase tracking-wide">{t("approvedWithdrawals")}</span>
           </div>
           <p className="text-lg font-black text-gray-900">{approvedCount}</p>
-          <p className="text-xs text-gray-400 mt-0.5">reversements</p>
+          <p className="text-xs text-gray-400 mt-0.5">{t("withdrawals")}</p>
         </div>
         <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(217,119,6,0.08)" }}>
           <div className="flex items-center gap-2 mb-3">
@@ -1746,10 +1698,10 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
               <img src={icnStatPending} alt="en attente" className="w-6 h-6 object-contain"
                 style={{ filter: "brightness(0) saturate(100%) invert(54%) sepia(100%) saturate(432%) hue-rotate(12deg) brightness(96%) contrast(97%)" }} />
             </div>
-            <span className="text-xs font-semibold text-amber-600 uppercase tracking-wide">En attente</span>
+            <span className="text-xs font-semibold text-amber-600 uppercase tracking-wide">{t("pendingWithdrawals")}</span>
           </div>
           <p className="text-lg font-black text-gray-900">{pendingCount}</p>
-          <p className="text-xs text-gray-400 mt-0.5">reversements</p>
+          <p className="text-xs text-gray-400 mt-0.5">{t("withdrawals")}</p>
         </div>
         <div className="rounded-2xl p-4 bg-white border border-gray-100" style={{ boxShadow: "0 2px 8px rgba(220,38,38,0.08)" }}>
           <div className="flex items-center gap-2 mb-3">
@@ -1757,10 +1709,10 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
               <img src={icnStatFailed} alt="rejetés" className="w-6 h-6 object-contain"
                 style={{ filter: "brightness(0) saturate(100%) invert(22%) sepia(93%) saturate(1354%) hue-rotate(344deg) brightness(96%) contrast(98%)" }} />
             </div>
-            <span className="text-xs font-semibold text-red-600 uppercase tracking-wide">Rejetés</span>
+            <span className="text-xs font-semibold text-red-600 uppercase tracking-wide">{t("rejected")}</span>
           </div>
           <p className="text-lg font-black text-gray-900">{rejectedCount}</p>
-          <p className="text-xs text-gray-400 mt-0.5">reversements</p>
+          <p className="text-xs text-gray-400 mt-0.5">{t("withdrawals")}</p>
         </div>
       </div>
 
@@ -1797,7 +1749,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                   >
                     <p className="text-xs font-bold uppercase tracking-wide mb-1" style={{ color: String(w.id) === selectedWalletId ? "rgba(255,255,255,0.8)" : "#888" }}>{w.country}</p>
                     <p className="text-lg font-bold" style={{ color: String(w.id) === selectedWalletId ? "#fff" : "#1a1a1a" }}>
-                      {w.balance.toLocaleString("fr-FR")}<span className="text-xs ml-1" style={{ color: String(w.id) === selectedWalletId ? "rgba(255,255,255,0.7)" : "#aaa" }}>{countryToCurrency(w.country)}</span>
+                      {w.balance.toLocaleString(localeForLanguage(lang))}<span className="text-xs ml-1" style={{ color: String(w.id) === selectedWalletId ? "rgba(255,255,255,0.7)" : "#aaa" }}>{countryToCurrency(w.country)}</span>
                     </p>
                   </div>
                 ))}
@@ -1839,9 +1791,9 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                       </div>
                       <div className="min-w-0 text-left">
                         <p className="text-xs font-bold truncate" style={{ color: selectedOperator ? "#1e88e5" : "#888" }}>
-                          {selectedOperator || "Choisir un opérateur"}
+                          {selectedOperator || t("chooseOperator")}
                         </p>
-                        {selectedOperator && <p className="text-xs" style={{ color: "#64b5f6" }}>{operatorList.find(o => o.name === selectedOperator)?.type || "Bank"}</p>}
+                          {selectedOperator && <p className="text-xs" style={{ color: "#64b5f6" }}>{operatorList.find(o => o.name === selectedOperator)?.type || t("bank")}</p>}
                       </div>
                     </div>
                     <ChevronDown className="w-4 h-4 shrink-0" style={{ color: selectedOperator ? "#1e88e5" : "#aaa" }} />
@@ -1862,7 +1814,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                             type="text"
                             value={pkSearch}
                             onChange={e => setPkSearch(e.target.value)}
-                            placeholder="Rechercher une banque ou opérateur…"
+                            placeholder={t("searchBankOperator")}
                             className="flex-1 text-sm outline-none bg-transparent"
                             style={{ color: "#1a1a1a" }}
                             autoFocus
@@ -1904,7 +1856,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                               </button>
                             ))}
                           {operatorList.filter(op => op.name.toLowerCase().includes(pkSearch.toLowerCase())).length === 0 && (
-                            <p className="text-sm text-center py-6" style={{ color: "#aaa" }}>Aucun résultat pour « {pkSearch} »</p>
+                            <p className="text-sm text-center py-6" style={{ color: "#aaa" }}>{t("noSearchResults")} « {pkSearch} »</p>
                           )}
                         </div>
                       </ScrollArea>
@@ -1951,24 +1903,24 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                   <div className="min-w-0 flex-1">
                     {retryState?.blocked ? (
                       <>
-                        <p className="text-sm font-bold" style={{ color: "#c0392b" }}>Compte temporairement bloqué</p>
+                        <p className="text-sm font-bold" style={{ color: "#c0392b" }}>{t("temporarilyBlocked")}</p>
                         <p className="text-xs mt-0.5" style={{ color: "#922b21" }}>
-                          Trop de tentatives détectées. Les retraits sont suspendus sur votre compte pendant 3 heures.
-                          {retryState.blockedUntil && ` Réessayez après ${new Date(retryState.blockedUntil).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}.`}
+                          {t("tooManyAttempts")}
+                          {retryState.blockedUntil && ` ${t("tryAgainAt")} ${new Date(retryState.blockedUntil).toLocaleTimeString(localeForLanguage(lang), { hour: "2-digit", minute: "2-digit" })}.`}
                         </p>
                       </>
                     ) : retryState?.retriesLeft !== undefined ? (
                       <>
-                        <p className="text-sm font-bold" style={{ color: "#c0392b" }}>Retrait non disponible</p>
+                        <p className="text-sm font-bold" style={{ color: "#c0392b" }}>{t("withdrawalUnavailable")}</p>
                         <p className="text-xs mt-0.5" style={{ color: "#922b21" }}>
-                          Les retraits sont désactivés sur votre compte. Veuillez patienter et réessayer.
-                          Attention : encore {retryState.retriesLeft} tentative(s) avant blocage de 3 heures.
+                          {t("withdrawalDisabled")}
+                          {" "}{t("attemptsBeforeBlock").replace(lang === "fr" ? "tentative(s)" : "attempt(s)", String(retryState.retriesLeft))}
                         </p>
                       </>
                     ) : (
                       <>
-                        <p className="text-sm font-bold" style={{ color: "#c0392b" }}>Retrait non disponible</p>
-                        <p className="text-xs mt-0.5" style={{ color: "#922b21" }}>Les retraits sont temporairement suspendus. Veuillez réessayer ultérieurement ou contacter le support.</p>
+                        <p className="text-sm font-bold" style={{ color: "#c0392b" }}>{t("withdrawalUnavailable")}</p>
+                        <p className="text-xs mt-0.5" style={{ color: "#922b21" }}>{t("withdrawalsSuspended")}</p>
                       </>
                     )}
                   </div>
@@ -1984,19 +1936,19 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                 {t("withdrawalHistory")}
               </p>
               <div className="rounded-xl p-3 mb-4 text-xs" style={{ background: "#f0faf5", border: "1px solid #c3e6cb" }}>
-                <span style={{ color: "#155724" }}>{selectedWallet.country} · <strong>{selectedOperator}</strong> · {t("availableBalance")} : <strong>{selectedWallet.balance.toLocaleString("fr-FR")} {countryToCurrency(selectedWallet.country)}</strong></span>
+                <span style={{ color: "#155724" }}>{selectedWallet.country} · <strong>{selectedOperator}</strong> · {t("availableBalance")} : <strong>{selectedWallet.balance.toLocaleString(localeForLanguage(lang))} {countryToCurrency(selectedWallet.country)}</strong></span>
               </div>
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>
                     {t("amount")} ({countryToCurrency(selectedWallet.country)})
-                    <span className="ml-2 text-xs font-normal" style={{ color: "#888" }}>min. {withdrawalMinAmount.toLocaleString("fr-FR")}</span>
+                    <span className="ml-2 text-xs font-normal" style={{ color: "#888" }}>{t("minLabel")} {withdrawalMinAmount.toLocaleString(localeForLanguage(lang))}</span>
                   </label>
                   <input
                     type="number"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
-                    placeholder={`Min. ${withdrawalMinAmount.toLocaleString("fr-FR")}`}
+                    placeholder={`${t("minLabel")} ${withdrawalMinAmount.toLocaleString(localeForLanguage(lang))}`}
                     min={withdrawalMinAmount}
                     max={selectedWallet.balance}
                     className="w-full rounded-xl px-4 py-2.5 text-sm outline-none transition-all"
@@ -2011,24 +1963,24 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                       <div className="mt-2 rounded-lg p-2.5 text-xs space-y-1" style={{ background: "#f0faf5", border: "1px solid #c3e6cb" }}>
                         {feeExempt ? (
                           <div className="flex justify-between items-center">
-                            <span style={{ color: "#155724", fontWeight: 600 }}>✦ Mode sans frais</span>
+                            <span style={{ color: "#155724", fontWeight: 600 }}>✦ {t("noFeesMode")}</span>
                             <span style={{ color: "#155724", fontWeight: 600 }}>0 F</span>
                           </div>
                         ) : (
-                          <div className="flex justify-between"><span style={{ color: "#666" }}>Frais WestPay (4,5 %)</span><span style={{ color: "#e53e3e", fontWeight: 600 }}>−{fee.toLocaleString("fr-FR")} F</span></div>
+                          <div className="flex justify-between"><span style={{ color: "#666" }}>{t("fees")} WestPay (4,5 %)</span><span style={{ color: "#e53e3e", fontWeight: 600 }}>−{fee.toLocaleString(localeForLanguage(lang))} F</span></div>
                         )}
-                        <div className="flex justify-between border-t pt-1" style={{ borderColor: "#c3e6cb" }}><span style={{ color: "#155724", fontWeight: 700 }}>Vous recevrez</span><span style={{ color: "#155724", fontWeight: 700 }}>{net.toLocaleString("fr-FR")} F</span></div>
+                        <div className="flex justify-between border-t pt-1" style={{ borderColor: "#c3e6cb" }}><span style={{ color: "#155724", fontWeight: 700 }}>{t("youReceive")}</span><span style={{ color: "#155724", fontWeight: 700 }}>{net.toLocaleString(localeForLanguage(lang))} F</span></div>
                       </div>
                     );
                   })()}
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>Nom du bénéficiaire <span style={{ color: "#aaa", fontWeight: 400 }}>(optionnel)</span></label>
+                  <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>{t("beneficiaryName")} <span style={{ color: "#aaa", fontWeight: 400 }}>({t("optional")})</span></label>
                   <input
                     type="text"
                     value={recipientName}
                     onChange={(e) => setRecipientName(e.target.value)}
-                    placeholder="Prénom et nom du destinataire"
+                    placeholder={t("recipientNamePlaceholder")}
                     className="w-full rounded-xl px-4 py-2.5 text-sm outline-none transition-all"
                     style={{ border: "1.5px solid #e2e8f0", background: "#fff", color: "#1a1a1a" }}
                     data-testid="input-withdrawal-recipient-name"
@@ -2086,7 +2038,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
               <Download className="w-6 h-6" style={{ color: "#ccc" }} />
             </div>
             <p className="text-sm font-medium mb-1" style={{ color: "#888" }}>{t("noWithdrawals")}</p>
-            <p className="text-xs" style={{ color: "#bbb" }}>Vos demandes de reversement apparaîtront ici</p>
+          <p className="text-xs" style={{ color: "#bbb" }}>{t("noWithdrawalsDesc")}</p>
           </div>
         ) : (
           <div className="divide-y" style={{ borderColor: "#f5f5f5" }}>
@@ -2105,7 +2057,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2 mb-0.5">
                         <p className="font-bold text-sm" style={{ color: "#1a1a1a" }}>
-                          {w.amount.toLocaleString("fr-FR")} <span className="font-semibold text-xs" style={{ color: "#888" }}>{countryToCurrency(w.country)}</span>
+                          {w.amount.toLocaleString(localeForLanguage(lang))} <span className="font-semibold text-xs" style={{ color: "#888" }}>{countryToCurrency(w.country)}</span>
                         </p>
                         <span className="text-xs px-2 py-0.5 rounded-full font-semibold shrink-0" style={{ background: statusConfig.bg, color: statusConfig.color }}>{statusConfig.label}</span>
                       </div>
@@ -2114,7 +2066,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                         {(w as any).operator && <span style={{ color: "#1e88e5", fontWeight: 600 }}>{(w as any).operator}</span>}
                         {(w as any).recipientName && <span><User className="w-3 h-3 inline mr-0.5" />{(w as any).recipientName}</span>}
                         <span><Phone className="w-3 h-3 inline mr-0.5" />{w.phone}</span>
-                        <span>{new Date(w.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</span>
+                        <span>{new Date(w.createdAt).toLocaleDateString(localeForLanguage(lang), { day: "2-digit", month: "short" })}</span>
                       </div>
                       {w.adminNote && (
                         <p className="text-xs mt-1.5 px-2.5 py-1.5 rounded-lg italic" style={{ background: "#fffbea", color: "#78350f", border: "1px solid #fef3c7" }}>
@@ -2134,7 +2086,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
 }
 
 function WalletTransfersPanel({ token }: { token: string | null }) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const { toast } = useToast();
   const { data: balance = [], isLoading: balLoading } = useMerchantFetch("/api/merchant/balance", ["/api/merchant/balance"], token);
   const { data: walletTransfers = [], isLoading: wtLoading } = useMerchantFetch("/api/merchant/wallet-transfers", ["/api/merchant/wallet-transfers"], token);
@@ -2177,7 +2129,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
       });
       if (!res.ok) {
         const d = await res.json();
-        const error = new Error(d.message || "Erreur") as Error & { code?: string };
+        const error = new Error(d.message || t("error")) as Error & { code?: string };
         error.code = d.code;
         throw error;
       }
@@ -2187,31 +2139,31 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/wallet-transfers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/balance"] });
       toast({
-        title: "Virement soumis",
+        title: t("success"),
         description: data.fee === 0
-          ? `${data.amount.toLocaleString("fr-FR")} ${data.currency} de ${data.fromCountry} → ${data.toCountry}. ✦ Sans frais.`
-          : `${data.amount.toLocaleString("fr-FR")} ${data.currency} de ${data.fromCountry} → ${data.toCountry}. Frais : ${data.fee.toLocaleString("fr-FR")} ${data.currency}.`,
+          ? `${data.amount.toLocaleString(localeForLanguage(lang))} ${data.currency} ${t("from")} ${data.fromCountry} → ${data.toCountry}. ✦ ${t("noFeesLabel")}.`
+          : `${data.amount.toLocaleString(localeForLanguage(lang))} ${data.currency} ${t("from")} ${data.fromCountry} → ${data.toCountry}. ${t("fees")}: ${data.fee.toLocaleString(localeForLanguage(lang))} ${data.currency}.`,
       });
       setFromCountryId(""); setToCountryId(""); setAmount("");
     },
      onError: (err: any) => {
        if (err?.code === "WALLET_EXCHANGE_UNAVAILABLE" || err?.message === "Wallet exchange is unavailable") {
-         toast({ title: "Wallet exchange is unavailable", variant: "destructive" });
+         toast({ title: t("walletExchangeUnavailable"), variant: "destructive" });
          return;
        }
-       toast({ title: "Action non effectuée", description: sanitizePaymentMessage(err.message), variant: "destructive" });
+       toast({ title: t("actionFailed"), description: sanitizePaymentMessage(err.message), variant: "destructive" });
      },
   });
 
   const handleSubmit = (e: { preventDefault: () => void }) => {
     e.preventDefault();
     if (!fromCountryId || !toCountryId || !amount) {
-      toast({ title: "Champs incomplets", description: "Veuillez sélectionner les pays et saisir un montant.", variant: "destructive" });
+      toast({ title: t("error"), description: t("incompleteFields"), variant: "destructive" });
       return;
     }
     const parsed = parseInt(amount);
     if (isNaN(parsed) || parsed <= 0) {
-      toast({ title: "Montant invalide", description: "Le montant doit être un nombre entier positif.", variant: "destructive" });
+      toast({ title: t("error"), description: t("invalidPositiveAmount"), variant: "destructive" });
       return;
     }
     createMutation.mutate({ fromCountryId, toCountryId, amount });
@@ -2280,13 +2232,13 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
 
         {/* ── Montant ── */}
         <div>
-          <p className="text-sm font-semibold mb-2" style={{ color: "#1a1a1a" }}>Montant</p>
+          <p className="text-sm font-semibold mb-2" style={{ color: "#1a1a1a" }}>{t("amount")}</p>
           <div className="w-full rounded-xl overflow-hidden" style={{ border: "1.5px solid #d1d5db" }}>
             <input
               type="number"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              placeholder="Entrez le montant"
+              placeholder={t("enterAmount")}
               min="1"
               className="w-full px-4 py-5 text-lg outline-none bg-white"
               style={{ color: parsedAmt > 0 ? "#1a1a1a" : "#9ca3af", fontWeight: parsedAmt > 0 ? 600 : 400 }}
@@ -2295,15 +2247,15 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
           </div>
           {fromMCObj && parsedAmt > 0 && (
             <p className="text-xs mt-1.5 pl-1" style={{ color: insufficientBalance ? "#e53e3e" : "#888" }}>
-              Solde : <strong>{fromMCObj.balance.toLocaleString("fr-FR")} {fromZone}</strong>
-              {insufficientBalance && " — insuffisant"}
+              {t("balance")} : <strong>{fromMCObj.balance.toLocaleString(localeForLanguage(lang))} {fromZone}</strong>
+              {insufficientBalance && ` — ${t("insufficientLabel")}`}
             </p>
           )}
         </div>
 
         {/* ── De ── */}
         <div>
-          <p className="text-sm font-semibold mb-2" style={{ color: "#1a1a1a" }}>De</p>
+          <p className="text-sm font-semibold mb-2" style={{ color: "#1a1a1a" }}>{t("from")}</p>
           <div className="relative w-full rounded-xl overflow-hidden" style={{ border: "1.5px solid #d1d5db", background: "#fff" }}>
             <div className="absolute left-0 top-0 bottom-0 flex items-center px-3 pointer-events-none" style={{ background: "transparent" }}>
               <span className="text-xl">{fromMCDisplay ? (ZONE_FLAGS[fromMCDisplay.country] || "🌍") : ""}</span>
@@ -2315,7 +2267,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
               style={{ paddingLeft: fromMCDisplay ? "3rem" : "1rem", color: fromCountryId ? "#1a1a1a" : "#9ca3af" }}
               data-testid="select-from-country"
             >
-              <option value="">Sélectionner un pays</option>
+              <option value="">{t("selectCountryPlaceholder")}</option>
               {eligibleCountries.map(c => (
                 <option key={c.id} value={String(c.id)}>
                   {c.country}
@@ -2338,7 +2290,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
             className="w-14 h-14 rounded-full flex items-center justify-center shadow-md transition-transform active:scale-95"
             style={{ background: "#4caf7d", border: "none", flexShrink: 0 }}
             data-testid="button-swap-countries"
-            title="Inverser les pays"
+            title={t("swapCountries")}
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="3" x2="12" y2="21" />
@@ -2350,7 +2302,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
 
         {/* ── À ── */}
         <div>
-          <p className="text-sm font-semibold mb-2" style={{ color: "#1a1a1a" }}>À</p>
+          <p className="text-sm font-semibold mb-2" style={{ color: "#1a1a1a" }}>{t("toCountry")}</p>
           <div className="relative w-full rounded-xl overflow-hidden" style={{ border: "1.5px solid #d1d5db", background: "#f3f4f6" }}>
             <div className="absolute left-0 top-0 bottom-0 flex items-center px-3 pointer-events-none">
               <span className="text-xl">{toMCDisplay ? (ZONE_FLAGS[toMCDisplay.country] || "🌍") : ""}</span>
@@ -2363,7 +2315,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
               style={{ paddingLeft: toMCDisplay ? "3rem" : "1rem", color: toCountryId ? "#1a1a1a" : "#9ca3af" }}
               data-testid="select-to-country"
             >
-              <option value="">{!fromCountryId ? "Sélectionnez d'abord un pays source" : toCountries.length === 0 ? `Aucun pays dans la même zone` : "Sélectionner un pays"}</option>
+              <option value="">{!fromCountryId ? t("selectSourceFirst") : toCountries.length === 0 ? t("noSameCurrencyZone") : t("selectCountryPlaceholder")}</option>
               {toCountries.map(c => (
                 <option key={c.id} value={String(c.id)}>
                   {c.country}
@@ -2382,28 +2334,28 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
         {fromCountryId && toCountryId && parsedAmt > 0 && (
           <div className="rounded-xl px-4 py-3 space-y-1.5" style={{ background: insufficientBalance ? "#fff5f5" : "#f0faf5", border: `1px solid ${insufficientBalance ? "#fca5a5" : "#bbf7d0"}` }}>
             <div className="flex justify-between text-xs">
-              <span style={{ color: "#555" }}>Montant</span>
-              <span style={{ color: "#1a1a1a", fontWeight: 600 }}>{parsedAmt.toLocaleString("fr-FR")} {fromZone || "FCFA"}</span>
+              <span style={{ color: "#555" }}>{t("amount")}</span>
+              <span style={{ color: "#1a1a1a", fontWeight: 600 }}>{parsedAmt.toLocaleString(localeForLanguage(lang))} {fromZone || "FCFA"}</span>
             </div>
             <div className="flex justify-between text-xs">
-              <span style={{ color: "#555" }}>Frais</span>
+              <span style={{ color: "#555" }}>{t("feesLabel")}</span>
               {feeExempt
-                ? <span style={{ color: "#2e7d32", fontWeight: 600 }}>Sans frais</span>
+                ? <span style={{ color: "#2e7d32", fontWeight: 600 }}>{t("noFeesLabel")}</span>
                 : <span style={{ color: estimatedFee > 0 ? "#e53e3e" : "#555", fontWeight: 600 }}>
-                    {estimatedFee > 0 ? `−${estimatedFee.toLocaleString("fr-FR")} ${fromZone || "FCFA"}` : "0"}
+                    {estimatedFee > 0 ? `−${estimatedFee.toLocaleString(localeForLanguage(lang))} ${fromZone || "FCFA"}` : "0"}
                   </span>
               }
             </div>
             <div className="flex justify-between text-xs pt-1.5" style={{ borderTop: `1px solid ${insufficientBalance ? "#fca5a5" : "#bbf7d0"}` }}>
-              <span style={{ fontWeight: 700, color: insufficientBalance ? "#c53030" : "#155724" }}>Total débité</span>
-              <span style={{ fontWeight: 700, color: insufficientBalance ? "#c53030" : "#155724" }}>{totalNeeded.toLocaleString("fr-FR")} {fromZone || "FCFA"}</span>
+              <span style={{ fontWeight: 700, color: insufficientBalance ? "#c53030" : "#155724" }}>{t("debitedTotal")}</span>
+              <span style={{ fontWeight: 700, color: insufficientBalance ? "#c53030" : "#155724" }}>{totalNeeded.toLocaleString(localeForLanguage(lang))} {fromZone || "FCFA"}</span>
             </div>
           </div>
         )}
 
         {/* ── Note ── */}
         <p className="text-sm font-bold leading-relaxed" style={{ color: "#1a1a1a" }}>
-          笔记 : Les échanges entre wallet sont possibles entre les pays avec les même zones monétaire et les demandes sont traitées par 我们的支持团队
+          {t("walletExchangeNote")}
         </p>
 
         {/* ── Submit ── */}
@@ -2423,7 +2375,7 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
           {createMutation.isPending
             ? <Loader2 className="w-5 h-5 animate-spin" />
             : <Send className="w-5 h-5" />}
-          {createMutation.isPending ? t("processingLabel") : "Envoyer l'argent"}
+          {createMutation.isPending ? t("processingLabel") : t("sendMoney")}
         </button>
 
         {/* ── History ── */}
@@ -2471,11 +2423,11 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
                             </span>
                           </div>
                           <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs" style={{ color: "#888" }}>
-                            <span className="font-semibold" style={{ color: "#555" }}>{wt.amount.toLocaleString("fr-FR")} {wt.currency}</span>
+                            <span className="font-semibold" style={{ color: "#555" }}>{wt.amount.toLocaleString(localeForLanguage(lang))} {wt.currency}</span>
                             <span style={{ color: wt.fee === 0 ? "#00b050" : "#888" }}>
-                              {wt.fee === 0 ? t("noFeesLabel") : `${t("fees")} : ${wt.fee.toLocaleString("fr-FR")} ${wt.currency}`}
+                              {wt.fee === 0 ? t("noFeesLabel") : `${t("fees")} : ${wt.fee.toLocaleString(localeForLanguage(lang))} ${wt.currency}`}
                             </span>
-                            <span>{new Date(wt.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</span>
+                            <span>{new Date(wt.createdAt).toLocaleDateString(localeForLanguage(lang), { day: "2-digit", month: "short" })}</span>
                           </div>
                           {wt.adminNote && (
                             <p className="text-xs mt-1.5 px-2.5 py-1.5 rounded-lg italic"
@@ -2520,7 +2472,7 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPassword !== confirmPassword) {
-      toast({ title: "Les mots de passe ne correspondent pas", variant: "destructive" }); return;
+      toast({ title: t("passwordMismatch"), variant: "destructive" }); return;
     }
     setIsChanging(true);
     try {
@@ -2535,18 +2487,18 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
       toast({ title: t("passwordChanged") });
       setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
     } catch (err: any) {
-      toast({ title: "Action non effectuée", description: sanitizePaymentMessage(err.message), variant: "destructive" });
+      toast({ title: t("actionFailed"), description: sanitizePaymentMessage(err.message), variant: "destructive" });
     } finally { setIsChanging(false); }
   };
 
   const tabs = [
-    { key: "info" as const, label: "Informations personnelles", img: icnSettingsProfile,
+    { key: "info" as const, label: t("profileInfo"), img: icnSettingsProfile,
       filterActive: "brightness(0) saturate(100%) invert(44%) sepia(72%) saturate(543%) hue-rotate(89deg) brightness(93%) contrast(88%)",
       filterInactive: "saturate(0%) opacity(45%)" },
-    { key: "password" as const, label: "Mot de passe", img: icnSettingsPassword,
+    { key: "password" as const, label: t("currentPassword"), img: icnSettingsPassword,
       filterActive: "brightness(0) saturate(100%) invert(30%) sepia(60%) saturate(900%) hue-rotate(265deg) brightness(90%) contrast(105%)",
       filterInactive: "brightness(0) opacity(30%)" },
-    { key: "support" as const, label: "Contacts SAV", img: icnSettingsContact,
+    { key: "support" as const, label: t("supportContact"), img: icnSettingsContact,
       filterActive: "none",
       filterInactive: "saturate(0%) opacity(50%)" },
   ];
@@ -2583,8 +2535,8 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
             <p className="text-lg font-bold leading-tight truncate" style={{ color: "#1a1a1a" }}>{user?.name}</p>
             <p className="text-sm mt-0.5 truncate" style={{ color: "#888" }}>{user?.email}</p>
             <div className="flex gap-1.5 mt-2">
-              <span className="text-xs px-2.5 py-0.5 rounded-full font-semibold" style={{ background: "#e8f5e9", color: "#2e7d32" }}>Marchand</span>
-              <span className="text-xs px-2.5 py-0.5 rounded-full font-semibold" style={{ background: "#e3f2fd", color: "#1565c0" }}>Actif</span>
+              <span className="text-xs px-2.5 py-0.5 rounded-full font-semibold" style={{ background: "#e8f5e9", color: "#2e7d32" }}>{t("merchant")}</span>
+              <span className="text-xs px-2.5 py-0.5 rounded-full font-semibold" style={{ background: "#e3f2fd", color: "#1565c0" }}>{t("active")}</span>
             </div>
           </div>
         </div>
@@ -2628,13 +2580,13 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
                   <img src={icnSettingsProfile} alt="info" className="w-5 h-5 object-contain"
                     style={{ filter: "brightness(0) saturate(100%) invert(44%) sepia(72%) saturate(543%) hue-rotate(89deg) brightness(93%) contrast(88%)" }} />
                 </div>
-                <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Informations du compte</span>
+                <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>{t("profileInfo")}</span>
               </div>
               <div className="divide-y" style={{ borderColor: "#f8f9fa" }}>
                 {/* Nom commercial */}
                 <div className="flex items-center px-5 py-4 gap-3">
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold mb-0.5" style={{ color: "#888" }}>Nom commercial</p>
+                    <p className="text-xs font-semibold mb-0.5" style={{ color: "#888" }}>{t("businessName")}</p>
                     <p className="text-sm font-bold truncate" style={{ color: "#1a1a1a" }}>{user?.name || "—"}</p>
                   </div>
                   <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#f5f6f8" }}>
@@ -2644,7 +2596,7 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
                 {/* Email */}
                 <div className="flex items-center px-5 py-4 gap-3">
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold mb-0.5" style={{ color: "#888" }}>Adresse e-mail</p>
+                    <p className="text-xs font-semibold mb-0.5" style={{ color: "#888" }}>{t("email")}</p>
                     <p className="text-sm font-medium truncate" style={{ color: "#1a1a1a" }}>{user?.email || "—"}</p>
                   </div>
                   <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#fce4ec" }}>
@@ -2654,8 +2606,8 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
                 {/* Role */}
                 <div className="flex items-center px-5 py-4 gap-3">
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold mb-0.5" style={{ color: "#888" }}>Rôle</p>
-                    <p className="text-sm font-medium" style={{ color: "#1a1a1a" }}>Marchand WestPay</p>
+                    <p className="text-xs font-semibold mb-0.5" style={{ color: "#888" }}>{t("merchant")}</p>
+                    <p className="text-sm font-medium" style={{ color: "#1a1a1a" }}>WestPay</p>
                   </div>
                   <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0" style={{ background: "#e3f2fd" }}>
                     <Shield className="w-4 h-4" style={{ color: "#1976d2" }} />
@@ -2666,7 +2618,7 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
             <div className="rounded-2xl p-4 flex items-start gap-3" style={{ background: "#fffbea", border: "1.5px solid #fef3c7" }}>
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "#d97706" }} />
               <p className="text-xs leading-relaxed" style={{ color: "#92400e" }}>
-                Pour modifier votre nom commercial ou votre adresse e-mail, veuillez contacter votre administrateur WestPay.
+                {t("contactAdminProfile")}
               </p>
             </div>
           </>
@@ -2682,7 +2634,7 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
               </div>
               <div>
                 <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>{t("changePassword")}</span>
-                <p className="text-xs" style={{ color: "#aaa" }}>Choisissez un mot de passe fort et unique</p>
+                <p className="text-xs" style={{ color: "#aaa" }}>{t("strongPasswordHint")}</p>
               </div>
             </div>
             <form onSubmit={handleChangePassword} className="p-5 space-y-4">
@@ -2723,7 +2675,7 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-bold mb-2" style={{ color: "#555" }}>Confirmer le nouveau mot de passe</label>
+                <label className="block text-xs font-bold mb-2" style={{ color: "#555" }}>{t("confirmNewPasswordLabel")}</label>
                 <div className="flex items-center rounded-xl px-3.5 py-2.5 gap-2" style={{
                   border: `1.5px solid ${confirmPassword && confirmPassword !== newPassword ? "#f44336" : "#e2e8f0"}`,
                   background: "#f9fafb"
@@ -2772,17 +2724,17 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
                 <img src={icnSettingsContact} alt="support" className="w-5 h-5 object-contain" />
               </div>
               <div>
-                <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Contacts du support</span>
-                <p className="text-xs" style={{ color: "#aaa" }}>Nous sommes disponibles pour vous aider</p>
+                <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>{t("supportContact")}</span>
+                <p className="text-xs" style={{ color: "#aaa" }}>{t("help")}</p>
               </div>
             </div>
             {contacts ? (
               <div className="divide-y p-0" style={{ borderColor: "#f8f9fa" }}>
                 {[
-                  { key: "telegram1", label: "Telegram" },
-                  { key: "telegram2", label: "Telegram" },
-                  { key: "telegram3", label: "Telegram" },
-                  { key: "telegram4", label: "Telegram" },
+                  { key: "telegram1", label: t("telegram") },
+                  { key: "telegram2", label: t("telegram") },
+                  { key: "telegram3", label: t("telegram") },
+                  { key: "telegram4", label: t("telegram") },
                 ].map(({ key, label }, idx) => {
                   const handle = (contacts as any)[key];
                   if (!handle) return null;
@@ -2805,7 +2757,7 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
             ) : (
               <div className="p-8 text-center">
                 <SiTelegram style={{ color: "#ddd", width: 32, height: 32, margin: "0 auto 8px" }} />
-                <p className="text-sm" style={{ color: "#aaa" }}>Aucun contact configuré</p>
+                <p className="text-sm" style={{ color: "#aaa" }}>{t("noSupportContact")}</p>
               </div>
             )}
           </div>
@@ -2853,7 +2805,7 @@ const LINK_COUNTRY_FLAGS: Record<string, { flag: string; currency: string; label
 };
 
 function PaymentLinksPanel({ token }: { token: string | null }) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const { toast } = useToast();
   const baseUrl = "https://link.westpay.cfd";
   const bank2BaseUrl = "https://payment.bank2.westpay.cfd";
@@ -2919,7 +2871,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
       setView("list"); setForm(mkForm()); setShowAdvanced(false);
       toast({ title: t("linkCreated") });
     },
-    onError: (e: any) => toast({ title: "Erreur", description: sanitizePaymentMessage(e.message), variant: "destructive" }),
+    onError: (e: any) => toast({ title: t("error"), description: sanitizePaymentMessage(e.message), variant: "destructive" }),
   });
 
   const updateMutation = useMutation({
@@ -2937,7 +2889,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
       setView("list"); setEditLink(null); setForm(mkForm()); setShowAdvanced(false);
       toast({ title: t("linkUpdated") });
     },
-    onError: (e: any) => toast({ title: "Erreur", description: sanitizePaymentMessage(e.message), variant: "destructive" }),
+    onError: (e: any) => toast({ title: t("error"), description: sanitizePaymentMessage(e.message), variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
@@ -2981,8 +2933,8 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
   };
 
   const handleSubmit = () => {
-    if (!form.name.trim()) { toast({ title: "Le titre du lien est requis", variant: "destructive" }); return; }
-    if (form.amountType === "fixed" && !form.amount) { toast({ title: "Le montant est requis pour un lien à montant fixe", variant: "destructive" }); return; }
+    if (!form.name.trim()) { toast({ title: t("linkNameRequired"), variant: "destructive" }); return; }
+    if (form.amountType === "fixed" && !form.amount) { toast({ title: t("fixedAmountRequired"), variant: "destructive" }); return; }
     if (view === "edit" && editLink) updateMutation.mutate({ id: editLink.id, data: buildPayload(form) });
     else createMutation.mutate(form);
   };
@@ -3020,9 +2972,9 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
             </div>
             <div>
               <h2 className="text-base font-bold text-white leading-tight">
-                {isEdit ? "Modifier le lien" : "Créer un lien de paiement"}
+                {isEdit ? t("editLink") : `${t("createLink")} ${t("paymentLink").toLowerCase()}`}
               </h2>
-              <p className="text-xs text-white/70">{isEdit ? editLink?.name : "Nouveau lien de paiement"}</p>
+              <p className="text-xs text-white/70">{isEdit ? editLink?.name : `${t("newLink")} ${t("paymentLink").toLowerCase()}`}</p>
             </div>
           </div>
         </div>
@@ -3036,16 +2988,16 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
               <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#e8f5e9" }}>
                 <Link className="w-4 h-4" style={{ color: "#00b050" }} />
               </div>
-              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Informations du lien</span>
+              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>{t("linkInformation")}</span>
             </div>
             <div className="p-4 space-y-3">
               <div>
                 <label className="text-xs font-bold mb-1.5 block" style={{ color: "#555" }}>
-                  Titre du lien <span style={{ color: "#e53e3e" }}>*</span>
+                  {t("linkTitle")} <span style={{ color: "#e53e3e" }}>*</span>
                 </label>
                 <input
                   value={form.name} onChange={e => setField("name", e.target.value)}
-                  placeholder="ex : Billets Liverpool, Facture Mai, Inscription…"
+                  placeholder={`${t("linkTitle")}…`}
                   className="w-full px-3.5 py-3 text-sm rounded-xl outline-none transition-all"
                   style={{ border: `1.5px solid ${form.name ? "#00b050" : "#e0e0e0"}`, background: "#fafafa", color: "#1a1a1a" }}
                   data-testid="input-link-name"
@@ -3053,11 +3005,11 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
               </div>
               <div>
                 <label className="text-xs font-bold mb-1.5 block" style={{ color: "#555" }}>
-                  Description <span className="font-normal" style={{ color: "#bbb" }}>(optionnel)</span>
+                  {t("description")} <span className="font-normal" style={{ color: "#bbb" }}>({t("optional")})</span>
                 </label>
                 <textarea
                   value={form.description} onChange={e => setField("description", e.target.value)}
-                  placeholder="ex : Meilleures places, rangée VIP, entrée générale…"
+                  placeholder={`${t("description")}…`}
                   rows={2}
                   className="w-full px-3.5 py-3 text-sm rounded-xl outline-none resize-none transition-all"
                   style={{ border: "1.5px solid #e0e0e0", background: "#fafafa", color: "#1a1a1a" }}
@@ -3073,7 +3025,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
               <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#eef2ff" }}>
                 <Building2 className="w-4 h-4" style={{ color: "#4f46e5" }} />
               </div>
-              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Banque de paiement</span>
+              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>{t("paymentBank")}</span>
             </div>
             <div className="p-4 grid grid-cols-2 gap-3">
               {(["bank1", "bank2"] as const).map((bank) => {
@@ -3108,7 +3060,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
               <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#e3f2fd" }}>
                 <Globe className="w-4 h-4" style={{ color: "#1976d2" }} />
               </div>
-              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Pays de collecte</span>
+              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>{t("collectionCountries")}</span>
             </div>
             <div className="p-4">
               <div className="flex items-center justify-between mb-3">
@@ -3132,7 +3084,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
                 </button>
               </div>
               {activeCountries.length === 0 ? (
-                <p className="text-xs text-center py-4" style={{ color: "#aaa" }}>Aucun pays actif configuré sur votre compte</p>
+                <p className="text-xs text-center py-4" style={{ color: "#aaa" }}>{t("noActiveCountriesConfigured")}</p>
               ) : (
                 <>
                   <div className="grid grid-cols-3 gap-2">
@@ -3159,7 +3111,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
                   </div>
                   {form.countries.length === 0 && (
                     <p className="text-xs mt-2 text-center py-1 rounded-lg" style={{ color: "#aaa", background: "#f9fafb" }}>
-                      Aucune sélection = tous les pays actifs acceptés
+                      {t("allActiveCountriesAccepted")}
                     </p>
                   )}
                 </>
@@ -3173,14 +3125,14 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
               <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#fff8e1" }}>
                 <Zap className="w-4 h-4" style={{ color: "#f59e0b" }} />
               </div>
-              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Montant</span>
+                <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>{t("amount")}</span>
             </div>
             <div className="p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-semibold" style={{ color: "#1a1a1a" }}>Montant fixe</p>
+                  <p className="text-sm font-semibold" style={{ color: "#1a1a1a" }}>{t("fixedAmount")}</p>
                   <p className="text-xs mt-0.5" style={{ color: "#888" }}>
-                    {form.amountType === "fixed" ? "Activé — montant prédéfini par le marchand" : "Désactivé — le payeur saisit le montant librement"}
+                    {form.amountType === "fixed" ? `${t("active")} — ${t("fixedAmount")}` : `${t("disabled")} — ${t("flexibleAmount")}`}
                   </p>
                 </div>
                 <button
@@ -3195,10 +3147,10 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
               </div>
               {form.amountType === "fixed" && (
                 <div>
-                  <label className="text-xs font-bold mb-1.5 block" style={{ color: "#555" }}>Montant (F CFA)</label>
+                  <label className="text-xs font-bold mb-1.5 block" style={{ color: "#555" }}>{t("amount")} (F CFA)</label>
                   <input
                     type="number" value={form.amount} onChange={e => setField("amount", e.target.value)}
-                    placeholder="ex : 5000"
+                    placeholder="5000"
                     className="w-full px-3.5 py-3 text-sm rounded-xl outline-none"
                     style={{ border: `1.5px solid ${form.amount ? "#00b050" : "#e0e0e0"}`, background: "#fafafa", color: "#1a1a1a" }}
                     data-testid="input-link-amount"
@@ -3214,11 +3166,11 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
               <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#fce4ec" }}>
                 <Mail className="w-4 h-4" style={{ color: "#e91e63" }} />
               </div>
-              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Notification par email</span>
+              <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>{t("emailNotification")}</span>
             </div>
             <div className="p-4">
               <p className="text-xs mb-3" style={{ color: "#888" }}>
-                Recevez une notification à chaque paiement reçu via ce lien.
+                {t("emailNotificationDesc")}
               </p>
               <div className="flex items-center gap-2.5 rounded-xl px-3.5 py-2.5" style={{ border: "1.5px solid #e0e0e0", background: "#fafafa" }}>
                 <Mail className="w-4 h-4 shrink-0" style={{ color: "#ccc" }} />
@@ -3245,7 +3197,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
                 <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: "#f3e5f5" }}>
                   <Settings className="w-4 h-4" style={{ color: "#9c27b0" }} />
                 </div>
-                <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>Paramètres avancés</span>
+                <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>{t("advancedSettings")}</span>
               </div>
               <ChevronRight className="w-4 h-4 transition-transform" style={{ color: "#bbb", transform: showAdvanced ? "rotate(90deg)" : "none" }} />
             </button>
@@ -3255,11 +3207,11 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
 
                 {/* Message de confirmation */}
                 <div>
-                  <label className="text-xs font-bold mb-1 block" style={{ color: "#555" }}>Message de confirmation</label>
-                  <p className="text-xs mb-2" style={{ color: "#aaa" }}>Affiché au payeur après un paiement réussi.</p>
+                  <label className="text-xs font-bold mb-1 block" style={{ color: "#555" }}>{t("confirmationMessage")}</label>
+                  <p className="text-xs mb-2" style={{ color: "#aaa" }}>{t("displayedAfterPayment")}</p>
                   <input
                     value={form.confirmationMessage} onChange={e => setField("confirmationMessage", e.target.value)}
-                    placeholder="ex : Merci pour votre paiement ! Votre commande est confirmée."
+                    placeholder={t("confirmationMessagePlaceholder")}
                     className="w-full px-3.5 py-3 text-sm rounded-xl outline-none"
                     style={{ border: "1.5px solid #e0e0e0", background: "#fafafa", color: "#1a1a1a" }}
                     data-testid="input-link-confirmation-message"
@@ -3268,8 +3220,8 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
 
                 {/* Redirection après paiement */}
                 <div>
-                  <label className="text-xs font-bold mb-1 block" style={{ color: "#555" }}>Redirection après paiement</label>
-                  <p className="text-xs mb-2" style={{ color: "#aaa" }}>Redirigez le client vers votre site après le paiement.</p>
+                  <label className="text-xs font-bold mb-1 block" style={{ color: "#555" }}>{t("redirectAfterPayment")}</label>
+                  <p className="text-xs mb-2" style={{ color: "#aaa" }}>{t("redirectAfterPaymentDesc")}</p>
                   <input
                     value={form.redirectUrl} onChange={e => setField("redirectUrl", e.target.value)}
                     placeholder="https://votre-site.com/merci"
@@ -3282,8 +3234,8 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
                 {/* Collecter l'adresse de facturation */}
                 <div className="flex items-start justify-between gap-4 py-1">
                   <div className="flex-1">
-                    <p className="text-sm font-semibold" style={{ color: "#1a1a1a" }}>Collecter l'adresse de facturation</p>
-                    <p className="text-xs mt-0.5" style={{ color: "#888" }}>Demande l'adresse complète du payeur lors du paiement.</p>
+                    <p className="text-sm font-semibold" style={{ color: "#1a1a1a" }}>{t("billingAddress")}</p>
+                    <p className="text-xs mt-0.5" style={{ color: "#888" }}>{t("billingAddressDesc")}</p>
                   </div>
                   <button
                     onClick={() => setField("collectBillingAddress", !form.collectBillingAddress)}
@@ -3299,8 +3251,8 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
                 {/* Afficher le bouton de partage */}
                 <div className="flex items-start justify-between gap-4 py-1">
                   <div className="flex-1">
-                    <p className="text-sm font-semibold" style={{ color: "#1a1a1a" }}>Afficher le bouton de partage</p>
-                    <p className="text-xs mt-0.5" style={{ color: "#888" }}>Permet au payeur de partager le lien avec d'autres personnes.</p>
+                    <p className="text-sm font-semibold" style={{ color: "#1a1a1a" }}>{t("shareButton")}</p>
+                    <p className="text-xs mt-0.5" style={{ color: "#888" }}>{t("shareButtonDesc")}</p>
                   </div>
                   <button
                     onClick={() => setField("showShareButton", !form.showShareButton)}
@@ -3315,11 +3267,11 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
 
                 {/* Limite d'utilisations */}
                 <div>
-                  <label className="text-xs font-bold mb-1 block" style={{ color: "#555" }}>Limite d'utilisations</label>
-                  <p className="text-xs mb-2" style={{ color: "#aaa" }}>Nombre maximum de paiements autorisés via ce lien.</p>
+                  <label className="text-xs font-bold mb-1 block" style={{ color: "#555" }}>{t("usageLimit")}</label>
+                  <p className="text-xs mb-2" style={{ color: "#aaa" }}>{t("usageLimitDesc")}</p>
                   <input
                     type="number" value={form.paymentLimit} onChange={e => setField("paymentLimit", e.target.value)}
-                    placeholder="Illimité par défaut"
+                    placeholder={t("unlimitedDefault")}
                     className="w-full px-3.5 py-3 text-sm rounded-xl outline-none"
                     style={{ border: "1.5px solid #e0e0e0", background: "#fafafa", color: "#1a1a1a" }}
                     data-testid="input-link-limit"
@@ -3328,8 +3280,8 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
 
                 {/* Date d'expiration */}
                 <div>
-                  <label className="text-xs font-bold mb-1 block" style={{ color: "#555" }}>Date d'expiration</label>
-                  <p className="text-xs mb-2" style={{ color: "#aaa" }}>Le lien sera automatiquement désactivé après cette date.</p>
+                  <label className="text-xs font-bold mb-1 block" style={{ color: "#555" }}>{t("expirationDate")}</label>
+                  <p className="text-xs mb-2" style={{ color: "#aaa" }}>{t("expirationDesc")}</p>
                   <input
                     type="datetime-local" value={form.expiresAt} onChange={e => setField("expiresAt", e.target.value)}
                     className="w-full px-3.5 py-3 text-sm rounded-xl outline-none"
@@ -3354,7 +3306,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
               data-testid="button-cancel-link"
             >
               <ChevronLeft className="w-4 h-4" />
-              Retour
+              {t("back")}
             </button>
             <button
               onClick={handleSubmit} disabled={isPending}
@@ -3370,7 +3322,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
               data-testid="button-submit-link-form"
             >
               {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : isEdit ? <Edit3 className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
-              {isPending ? "En cours…" : isEdit ? "Enregistrer les modifications" : "Créer le lien de paiement"}
+              {isPending ? `${t("processing")}…` : isEdit ? t("saveChanges") : `${t("createLink")} ${t("paymentLink").toLowerCase()}`}
             </button>
           </div>
         </div>
@@ -3394,7 +3346,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
             style={{ background: "rgba(255,255,255,0.25)", border: "1.5px solid rgba(255,255,255,0.5)" }}>
             <Plus className="w-5 h-5 text-white" strokeWidth={3} />
           </span>
-          Ajouter
+          {t("add")}
         </button>
       </div>
 
@@ -3466,34 +3418,34 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
                   {/* ── Info rows ── */}
                   <div className="space-y-1.5 text-sm" style={{ color: "#333" }}>
                     <div className="flex items-center justify-between">
-                      <span style={{ color: "#555" }}>Env :</span>
+                      <span style={{ color: "#555" }}>{t("environment")} :</span>
                       <span className="font-bold" style={{ color: "#1db954" }}>PROD</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span style={{ color: "#555" }}>Banque :</span>
+                      <span style={{ color: "#555" }}>{t("bank")} :</span>
                       <span className="font-bold" style={{ color: link.bank === "bank2" ? "#2563eb" : "#00963f" }}>
                         {link.bank === "bank2" ? "Bank 2" : "Bank 1"}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span style={{ color: "#555" }}>Balance Prod :</span>
+                      <span style={{ color: "#555" }}>{t("balance")} :</span>
                       <span className="font-bold" style={{ color: "#1a1a1a" }}>
-                        {link.totalRevenue > 0 ? link.totalRevenue.toLocaleString("fr-FR", { minimumFractionDigits: 2 }) : "0,00"} XOF
+                        {link.totalRevenue > 0 ? link.totalRevenue.toLocaleString(localeForLanguage(lang), { minimumFractionDigits: 2 }) : "0,00"} XOF
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span style={{ color: "#555" }}>Transaction :</span>
+                      <span style={{ color: "#555" }}>{t("transaction")} :</span>
                       <span className="font-bold" style={{ color: "#1a1a1a" }}>{link.paymentCount}</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span style={{ color: "#555" }}>Statut :</span>
+                      <span style={{ color: "#555" }}>{t("status")} :</span>
                       <span className="text-xs font-bold px-3 py-1 rounded-md text-white"
                         style={{ background: inactive ? "#888" : "#1db954" }}>
                         {inactive ? (isExpired ? "Expiré" : isLimited ? "Limite atteinte" : "Inactif") : "Active"}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span style={{ color: "#555" }}>Date :</span>
+                      <span style={{ color: "#555" }}>{t("date")} :</span>
                       <span style={{ color: "#1a1a1a" }}>{dateStr}</span>
                     </div>
                   </div>
@@ -3506,7 +3458,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
                       style={{ background: "#6b7280" }}
                       data-testid={`button-actions-${link.id}`}
                     >
-                      Actions
+                      {t("actions")}
                       <ChevronDown className="w-3.5 h-3.5" />
                     </button>
 
@@ -3518,21 +3470,21 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
                           className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors"
                           style={{ color: "#333" }}
                           data-testid={`button-copy-link-${link.id}`}>
-                          <Copy className="w-4 h-4 text-blue-500" /> Copier le lien
+                          <Copy className="w-4 h-4 text-blue-500" /> {t("copyLink")}
                         </button>
                         <button
                           onClick={() => { setOpenActionsId(null); window.open(url, "_blank"); }}
                           className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors"
                           style={{ color: "#333" }}
                           data-testid={`button-open-link-${link.id}`}>
-                          <ExternalLink className="w-4 h-4 text-indigo-500" /> Ouvrir
+                          <ExternalLink className="w-4 h-4 text-indigo-500" /> {t("open")}
                         </button>
                         <button
                           onClick={() => { setOpenActionsId(null); shareLink(link); }}
                           className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors"
                           style={{ color: "#333" }}
                           data-testid={`button-share-link-${link.id}`}>
-                          <Share2 className="w-4 h-4 text-green-500" /> Partager
+                          <Share2 className="w-4 h-4 text-green-500" /> {t("share")}
                         </button>
                         <div style={{ height: "1px", background: "#f0f0f0" }} />
                         <button
@@ -3540,14 +3492,14 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
                           className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors"
                           style={{ color: "#3949ab" }}
                           data-testid={`button-edit-link-${link.id}`}>
-                          <Edit3 className="w-4 h-4" /> Modifier
+                          <Edit3 className="w-4 h-4" /> {t("edit")}
                         </button>
                         <button
                           onClick={() => { setOpenActionsId(null); updateMutation.mutate({ id: link.id, data: { active: !link.active } }); }}
                           className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors"
                           style={{ color: link.active ? "#d97706" : "#16a34a" }}
                           data-testid={`button-toggle-link-${link.id}`}>
-                          {link.active ? <><span className="w-4 h-4 flex items-center justify-center">⏸</span> Désactiver</> : <><span className="w-4 h-4 flex items-center justify-center">▶</span> Activer</>}
+                          {link.active ? <><span className="w-4 h-4 flex items-center justify-center">⏸</span> {t("disable")}</> : <><span className="w-4 h-4 flex items-center justify-center">▶</span> {t("enable")}</>}
                         </button>
                         <div style={{ height: "1px", background: "#f0f0f0" }} />
                         <button
@@ -3555,7 +3507,7 @@ function PaymentLinksPanel({ token }: { token: string | null }) {
                           className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-red-50 transition-colors"
                           style={{ color: "#e11d48" }}
                           data-testid={`button-delete-link-${link.id}`}>
-                          <Trash2 className="w-4 h-4" /> Supprimer
+                          <Trash2 className="w-4 h-4" /> {t("delete")}
                         </button>
                       </div>
                     )}
@@ -3582,6 +3534,7 @@ function MerchantLoadingSkeleton() {
 }
 
 function SupportBanner() {
+  const { t } = useLanguage();
   const { data: contacts } = useQuery<{
     telegram1: string; telegram2: string; telegram3: string; telegram4: string;
   }>({
@@ -3600,11 +3553,11 @@ function SupportBanner() {
           <SiTelegram style={{ color: "#2CA5E0", width: 14, height: 14 }} />
         </div>
         <div className="min-w-0">
-          <p className="font-semibold text-foreground text-xs mb-1.5">Support client disponible</p>
+          <p className="font-semibold text-foreground text-xs mb-1.5">{t("supportAvailable")}</p>
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span className="flex items-center gap-1 flex-wrap">
               <SiTelegram style={{ color: "#2CA5E0", width: 12, height: 12, flexShrink: 0 }} />
-              <span>Telegram :</span>
+              <span>{t("telegram")} :</span>
               {handles.map((h, i) => (
                 <span key={h} className="flex items-center gap-1">
                   {i > 0 && <span className="opacity-50">·</span>}
@@ -3674,22 +3627,22 @@ function LanguageDropdown() {
 }
 
 const CRYPTO_TX_STATUS: Record<string, { bg: string; color: string; label: string }> = {
-  new:        { bg: "#e3f2fd", color: "#1976d2", label: "Nouveau" },
-  pending:    { bg: "#e3f2fd", color: "#1976d2", label: "En attente" },
-  waiting:    { bg: "#e3f2fd", color: "#1976d2", label: "En attente" },
-  confirming: { bg: "#fff3e0", color: "#fb8c00", label: "Confirmation" },
-  paying:     { bg: "#e8f5e9", color: "#43a047", label: "Reçu" },
-  paid:       { bg: "#e8f5e9", color: "#2e7d32", label: "Confirmé" },
-  expired:    { bg: "#f5f5f5", color: "#757575", label: "Expiré" },
-  failed:     { bg: "#ffebee", color: "#c62828", label: "Échoué" },
-  refunded:   { bg: "#efebe9", color: "#6d4c41", label: "Remboursé" },
+  new:        { bg: "#e3f2fd", color: "#1976d2", label: "cryptoStatusNew" },
+  pending:    { bg: "#e3f2fd", color: "#1976d2", label: "cryptoStatusPending" },
+  waiting:    { bg: "#e3f2fd", color: "#1976d2", label: "cryptoStatusPending" },
+  confirming: { bg: "#fff3e0", color: "#fb8c00", label: "cryptoStatusConfirming" },
+  paying:     { bg: "#e8f5e9", color: "#43a047", label: "cryptoStatusPaying" },
+  paid:       { bg: "#e8f5e9", color: "#2e7d32", label: "cryptoStatusPaid" },
+  expired:    { bg: "#f5f5f5", color: "#757575", label: "cryptoStatusExpired" },
+  failed:     { bg: "#ffebee", color: "#c62828", label: "cryptoStatusFailed" },
+  refunded:   { bg: "#efebe9", color: "#6d4c41", label: "cryptoStatusRefunded" },
 };
 
 const WITHDRAWAL_STATUS: Record<string, { bg: string; color: string; label: string }> = {
-  pending:    { bg: "#e3f2fd", color: "#1976d2", label: "En attente" },
-  processing: { bg: "#fff3e0", color: "#fb8c00", label: "En cours" },
-  completed:  { bg: "#e8f5e9", color: "#2e7d32", label: "Complété" },
-  rejected:   { bg: "#ffebee", color: "#c62828", label: "Rejeté" },
+  pending:    { bg: "#e3f2fd", color: "#1976d2", label: "pending" },
+  processing: { bg: "#fff3e0", color: "#fb8c00", label: "withdrawalStatusProcessing" },
+  completed:  { bg: "#e8f5e9", color: "#2e7d32", label: "completed" },
+  rejected:   { bg: "#ffebee", color: "#c62828", label: "rejected" },
 };
 
 const CRYPTO_NETWORKS: Record<string, string[]> = {
@@ -3708,6 +3661,7 @@ const CRYPTO_NETWORKS: Record<string, string[]> = {
 const SUPPORTED_INVOICE_CURRENCIES = ["USDT", "BTC", "ETH", "LTC", "TRX", "BNB", "SOL", "DOGE"];
 
 function CryptoPanel({ token, user }: { token: string | null; user: any }) {
+  const { t, lang } = useLanguage();
   const queryClient = useQueryClient();
   const [cryptoTab, setCryptoTab] = useState<"balances" | "invoice" | "withdrawals" | "transactions" | "api">("balances");
 
@@ -3760,7 +3714,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
   };
 
   const handleRegenerateKey = async () => {
-    if (!(await showConfirm("Régénérer la clé API crypto ?", { variant: "destructive", confirmLabel: "Régénérer", message: "L'ancienne clé sera immédiatement invalidée." }))) return;
+    if (!(await showConfirm(t("cryptoRegenerateConfirm"), { variant: "destructive", confirmLabel: t("regenerate"), message: t("cryptoOldKeyInvalidated") }))) return;
     setIsRegenerating(true);
     try {
       const res = await fetch("/api/merchant/crypto/regenerate-api-key", {
@@ -3769,10 +3723,10 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
 
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
-      if (!res.ok) throw new Error("Échec de la régénération");
+      if (!res.ok) throw new Error(t("cryptoRegenerateFailed"));
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/crypto/api-key"] });
     } catch (e: any) {
-      cryptoToast({ title: "Erreur", description: sanitizePaymentMessage(e.message), variant: "destructive" });
+      cryptoToast({ title: t("error"), description: sanitizePaymentMessage(e.message), variant: "destructive" });
     } finally {
       setIsRegenerating(false);
     }
@@ -3793,11 +3747,11 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ webhookUrl: cryptoWebhookUrl.trim() }),
       });
-      if (!res.ok) throw new Error("Erreur lors de la sauvegarde");
+      if (!res.ok) throw new Error(t("cryptoSaveFailed"));
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/webhook"] });
-      cryptoToast({ title: "Webhook enregistré" });
+      cryptoToast({ title: t("webhookSaved") });
     } catch (e: any) {
-      cryptoToast({ title: "Erreur", description: sanitizePaymentMessage(e.message), variant: "destructive" });
+      cryptoToast({ title: t("error"), description: sanitizePaymentMessage(e.message), variant: "destructive" });
     } finally {
       setIsSavingWebhook(false);
     }
@@ -3820,11 +3774,11 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
 
   const handleWithdraw = async () => {
     setWdError("");
-    if (!wdAddress.trim()) { setWdError("Adresse requise"); return; }
+    if (!wdAddress.trim()) { setWdError(t("cryptoAddressRequired")); return; }
     const amt = parseFloat(wdAmount);
-    if (isNaN(amt) || amt <= 0) { setWdError("Montant invalide"); return; }
+    if (isNaN(amt) || amt <= 0) { setWdError(t("cryptoAmountInvalid")); return; }
     const avail = parseFloat(withdrawModal?.available || "0");
-    if (amt > avail) { setWdError(`Montant dépasse le solde disponible (${avail.toFixed(6)} ${withdrawModal?.currency})`); return; }
+    if (amt > avail) { setWdError(`${t("cryptoBalanceExceeded")} (${avail.toFixed(6)} ${withdrawModal?.currency})`); return; }
     setWdLoading(true);
     try {
       const res = await fetch("/api/merchant/crypto/withdraw", {
@@ -3834,7 +3788,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
         body: JSON.stringify({ currency: withdrawModal?.currency, amount: amt, walletAddress: wdAddress, network: wdNetwork }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Erreur");
+      if (!res.ok) throw new Error(data.message || t("cryptoWithdrawalFailed"));
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/crypto/balances"] });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/crypto/withdrawals"] });
       setWithdrawModal(null);
@@ -3874,10 +3828,10 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
 
   const handleCreateInvoice = async () => {
     setInvError(""); setInvResults([]);
-    if (!invDescription.trim()) { setInvError("Nom du produit requis"); return; }
-    if (invSelectedCurrencies.length === 0) { setInvError("Sélectionnez au moins une cryptomonnaie"); return; }
+    if (!invDescription.trim()) { setInvError(t("cryptoProductRequired")); return; }
+    if (invSelectedCurrencies.length === 0) { setInvError(t("cryptoCurrencyRequired")); return; }
     const amt = invFreePrice ? 0 : parseFloat(invAmount);
-    if (!invFreePrice && (isNaN(amt) || amt <= 0)) { setInvError("Montant invalide"); return; }
+    if (!invFreePrice && (isNaN(amt) || amt <= 0)) { setInvError(t("cryptoAmountInvalid")); return; }
     setInvLoading(true);
     try {
       const results: Array<{ paymentUrl: string; currency: string; name: string }> = [];
@@ -3896,12 +3850,12 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
           }),
         });
         const data = await res.json();
-        if (!res.ok) { setInvError(sanitizePaymentMessage(data.message, "Erreur de création")); setInvLoading(false); return; }
+        if (!res.ok) { setInvError(sanitizePaymentMessage(data.message, t("cryptoInvoiceFailed"))); setInvLoading(false); return; }
         results.push({ currency, paymentUrl: data.url, name: invDescription.trim() });
       }
       setInvResults(results);
     } catch (e: any) {
-      setInvError(sanitizePaymentMessage(e.message, "Erreur inattendue"));
+      setInvError(sanitizePaymentMessage(e.message, t("cryptoUnexpectedError")));
     } finally {
       setInvLoading(false);
     }
@@ -3910,17 +3864,17 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
   if (aggLoading) return <MerchantLoadingSkeleton />;
 
   const CRYPTO_TABS: { key: typeof cryptoTab; label: string }[] = [
-    { key: "balances",     label: "Soldes" },
-    { key: "invoice",      label: "Créer un lien" },
-    { key: "withdrawals",  label: "Retraits" },
-    { key: "transactions", label: "Transactions" },
-    { key: "api",          label: "API" },
+    { key: "balances",     label: t("balance") },
+    { key: "invoice",      label: t("createLink") },
+    { key: "withdrawals",  label: t("withdrawals") },
+    { key: "transactions", label: t("transactions") },
+    { key: "api",          label: t("apiKey") },
   ];
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-bold mb-1" style={{ color: "#1a237e" }}>Paiements Crypto</h2>
+        <h2 className="text-xl font-bold mb-1" style={{ color: "#1a237e" }}>{t("cryptoPaymentsTitle")}</h2>
         <p className="text-sm" style={{ color: "#546e7a" }}>
           Acceptez des cryptomonnaies via RobotPay — USDT, BTC, ETH, LTC, TRX et plus. Mondial, sans restriction de pays.
         </p>
@@ -3929,7 +3883,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
       {!isEnabled ? (
         <div className="rounded-xl p-6 text-center" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
           <Bitcoin className="w-10 h-10 mx-auto mb-3" style={{ color: "#e2e8f0" }} />
-          <p className="text-sm font-medium" style={{ color: "#546e7a" }}>Paiements crypto non activés</p>
+          <p className="text-sm font-medium" style={{ color: "#546e7a" }}>{t("cryptoPaymentsDisabled")}</p>
           <p className="text-xs mt-1" style={{ color: "#90a4ae" }}>
             Contactez l'administrateur pour activer les paiements crypto sur votre compte.
           </p>
@@ -3962,14 +3916,14 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
               <div className="rounded-lg px-3 py-2 text-xs flex items-start gap-2" style={{ background: "#fef9c3", border: "1px solid #fde047", color: "#713f12" }}>
                 <span className="text-base leading-none mt-0.5">💡</span>
                 <span>
-                  <strong>Frais RobotPay :</strong> 5% sur chaque dépôt reçu et 5% sur chaque retrait. Ces frais sont déduits automatiquement.
+                  <strong>{t("cryptoDocsFeesTitle")} :</strong> {t("cryptoDocsFeesDesc")}.
                 </span>
               </div>
               {balances.length === 0 ? (
                 <div className="rounded-xl p-6 text-center" style={{ background: "#f8fafc", border: "1px solid #e2e8f0" }}>
                   <Bitcoin className="w-8 h-8 mx-auto mb-2" style={{ color: "#e2e8f0" }} />
-                  <p className="text-sm" style={{ color: "#90a4ae" }}>Aucun solde crypto pour le moment.</p>
-                  <p className="text-xs mt-1" style={{ color: "#b0bec5" }}>Les soldes s'accumulent après chaque paiement reçu.</p>
+                  <p className="text-sm" style={{ color: "#90a4ae" }}>{t("noCryptoBalance")}</p>
+                  <p className="text-xs mt-1" style={{ color: "#b0bec5" }}>{t("cryptoBalanceHint")}</p>
                 </div>
               ) : (
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -3999,7 +3953,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                           style={{ background: "#e3f2fd", color: "#1565c0", border: "1px solid #bbdefb" }}
                           data-testid={`btn-withdraw-${b.currency}`}
                         >
-                          Retirer
+                          {t("requestWithdrawal")}
                         </button>
                       </div>
                     );
@@ -4016,12 +3970,12 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
 
                 {/* Nom du produit */}
                 <div>
-                  <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>Nom du produit *</label>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>{t("cryptoPurpose")} *</label>
                   <input
                     type="text"
                     value={invDescription}
                     onChange={e => setInvDescription(e.target.value)}
-                    placeholder="ex: Abonnement Premium, Commande #123..."
+                    placeholder={`${t("cryptoPurpose")}…`}
                     className="w-full text-sm px-3 py-2.5 rounded-lg"
                     style={{ border: "1px solid #e2e8f0", background: "#f8fafc", color: "#1a237e" }}
                     data-testid="input-invoice-description"
@@ -4030,7 +3984,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
 
                 {/* Prix */}
                 <div>
-                  <label className="block text-xs font-semibold mb-2" style={{ color: "#546e7a" }}>Prix</label>
+                  <label className="block text-xs font-semibold mb-2" style={{ color: "#546e7a" }}>{t("cryptoAmountToPay")}</label>
                   <div className="flex gap-2 mb-3">
                     <button
                       onClick={() => setInvFreePrice(false)}
@@ -4064,7 +4018,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                       step="any"
                       value={invAmount}
                       onChange={e => setInvAmount(e.target.value)}
-                      placeholder="Montant (ex: 10)"
+                      placeholder={`${t("cryptoAmountToPay")}…`}
                       className="w-full text-sm px-3 py-2.5 rounded-lg"
                       style={{ border: "1px solid #e2e8f0", background: "#f8fafc", color: "#1a237e" }}
                       data-testid="input-invoice-amount"
@@ -4079,7 +4033,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                 {/* Cryptomonnaies */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <label className="text-xs font-semibold" style={{ color: "#546e7a" }}>Cryptomonnaies à accepter *</label>
+                    <label className="text-xs font-semibold" style={{ color: "#546e7a" }}>{t("cryptoCurrency")} *</label>
                     <button
                       onClick={handleSelectAllCurrencies}
                       className="text-xs font-semibold px-2 py-1 rounded"
@@ -4119,7 +4073,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
 
                 {/* URL de retour */}
                 <div>
-                  <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>URL de retour (facultatif)</label>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>{t("redirectAfterPayment")} ({t("optional")})</label>
                   <input
                     type="url"
                     value={invReturnUrl}
@@ -4208,8 +4162,8 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                 <MerchantLoadingSkeleton />
               ) : withdrawals.length === 0 ? (
                 <div className="rounded-xl p-6 text-center" style={{ background: "#f8fafc", border: "1px solid #e2e8f0" }}>
-                  <p className="text-sm" style={{ color: "#90a4ae" }}>Aucune demande de retrait pour le moment.</p>
-                  <p className="text-xs mt-1" style={{ color: "#b0bec5" }}>Allez dans "Soldes" pour initier un retrait.</p>
+                  <p className="text-sm" style={{ color: "#90a4ae" }}>{t("noWithdrawals")}</p>
+                  <p className="text-xs mt-1" style={{ color: "#b0bec5" }}>{t("cryptoDocsCredentialsTitle")} → {t("balance")}</p>
                 </div>
               ) : (
                 <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #e2e8f0" }}>
@@ -4217,14 +4171,14 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                     <table className="w-full text-xs">
                       <thead>
                         <tr style={{ background: "#f8fafc" }}>
-                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Date</th>
-                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Crypto</th>
-                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Montant brut</th>
-                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#dc2626" }}>Frais (5%)</th>
-                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#166534" }}>Net reçu</th>
-                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Adresse</th>
-                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Réseau</th>
-                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Statut</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>{t("date")}</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>{t("cryptoCurrency")}</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>{t("amount")}</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#dc2626" }}>{t("fees")}</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#166534" }}>{t("netAmount")}</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>{t("cryptoWalletAddress")}</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>{t("cryptoNetwork")}</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>{t("status")}</th>
                         </tr>
                       </thead>
                       <tbody style={{ background: "#fff" }}>
@@ -4237,7 +4191,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                               data-testid={`row-withdrawal-${wr.id}`}
                             >
                               <td className="px-4 py-3" style={{ color: "#546e7a" }}>
-                                {new Date(wr.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                                {new Date(wr.createdAt).toLocaleDateString(localeForLanguage(lang), { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}
                               </td>
                               <td className="px-4 py-3 font-bold" style={{ color: "#f59e0b" }}>{wr.currency}</td>
                               <td className="px-4 py-3 font-semibold" style={{ color: "#1a237e" }}>{parseFloat(wr.amount).toFixed(6)}</td>
@@ -4253,7 +4207,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                               <td className="px-4 py-3" style={{ color: "#546e7a" }}>{wr.network || "—"}</td>
                               <td className="px-4 py-3">
                                 <span className="px-2 py-0.5 rounded-full font-bold" style={{ background: s.bg, color: s.color }}>
-                                  {s.label}
+                                  {t(s.label)}
                                 </span>
                                 {wr.adminNote && (
                                   <p className="text-xs mt-1" style={{ color: "#78909c" }}>{sanitizePaymentMessage(wr.adminNote, "Information de traitement indisponible.")}</p>
@@ -4277,7 +4231,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                 <MerchantLoadingSkeleton />
               ) : txs.length === 0 ? (
                 <div className="rounded-xl p-6 text-center" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
-                  <p className="text-sm font-medium" style={{ color: "#546e7a" }}>Aucune transaction crypto pour le moment.</p>
+                  <p className="text-sm font-medium" style={{ color: "#546e7a" }}>{t("noTransactionsFound")}</p>
                 </div>
               ) : (
                 <div className="rounded-xl overflow-hidden" style={{ border: "1px solid #e2e8f0" }}>
@@ -4285,12 +4239,12 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                     <table className="w-full text-xs">
                       <thead>
                         <tr style={{ background: "#f8fafc" }}>
-                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Track ID</th>
-                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Montant</th>
-                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Crypto reçu</th>
-                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Statut</th>
-                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Date</th>
-                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>Page</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>{t("cryptoTrackId")}</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>{t("amount")}</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>{t("cryptoCurrency")}</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>{t("status")}</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>{t("date")}</th>
+                          <th className="text-left px-4 py-3 font-semibold" style={{ color: "#546e7a" }}>{t("cryptoDocsPaymentPageLabel")}</th>
                         </tr>
                       </thead>
                       <tbody style={{ background: "#fff" }}>
@@ -4315,13 +4269,13 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                                   <span style={{ color: "#b0bec5" }}>—</span>
                                 )}
                               </td>
-                              <td className="px-4 py-3">
-                                <span className="px-2 py-0.5 rounded-full font-bold" style={{ background: s.bg, color: s.color }}>
-                                  {s.label}
+                          <td className="px-4 py-3">
+                            <span className="px-2 py-0.5 rounded-full font-bold" style={{ background: s.bg, color: s.color }}>
+                              {t(s.label)}
                                 </span>
                               </td>
                               <td className="px-4 py-3" style={{ color: "#546e7a" }}>
-                                {new Date(tx.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                                {new Date(tx.createdAt).toLocaleDateString(localeForLanguage(lang), { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}
                               </td>
                               <td className="px-4 py-3">
                                 <a
@@ -4333,7 +4287,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                                   data-testid={`link-crypto-payment-${tx.id}`}
                                 >
                                   <ExternalLink className="w-3 h-3" />
-                                  Voir
+                                  {t("viewPayment")}
                                 </a>
                               </td>
                             </tr>
@@ -4352,10 +4306,8 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
             <div className="space-y-4">
               {/* Clé API */}
               <div className="rounded-xl p-4 space-y-3" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
-                <h3 className="text-xs font-bold uppercase tracking-widest" style={{ color: "#90a4ae" }}>Clé API Crypto</h3>
-                <p className="text-xs" style={{ color: "#546e7a" }}>
-                  Clé dédiée aux paiements crypto. Globale (non liée à un pays), utilisable indépendamment du mobile money.
-                </p>
+                <h3 className="text-xs font-bold uppercase tracking-widest" style={{ color: "#90a4ae" }}>{t("cryptoDocsApiKeyLabel")}</h3>
+                <p className="text-xs" style={{ color: "#546e7a" }}>{t("cryptoApiKeyDesc")}</p>
                 {cryptoApiKey ? (
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
@@ -4372,7 +4324,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                         style={{ background: copiedKey === "crypto-key" ? "#e8f5e9" : "#e3f2fd", color: copiedKey === "crypto-key" ? "#2e7d32" : "#1565c0" }}
                         data-testid="btn-copy-crypto-key"
                       >
-                        {copiedKey === "crypto-key" ? "Copié !" : "Copier"}
+                        {copiedKey === "crypto-key" ? t("copied") : t("copy")}
                       </button>
                     </div>
                     <div className="flex justify-end">
@@ -4383,7 +4335,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                         style={{ background: "#fff8e1", color: "#f59e0b", border: "1px solid #fde68a" }}
                         data-testid="btn-regenerate-crypto-key"
                       >
-                        {isRegenerating ? "Régénération..." : "Régénérer la clé"}
+                        {isRegenerating ? t("regenerating") : t("regenerate")}
                       </button>
                     </div>
                     <p className="text-xs" style={{ color: "#b0bec5" }}>
@@ -4392,17 +4344,15 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                   </div>
                 ) : (
                   <div className="p-3 rounded-lg text-xs" style={{ background: "#f8fafc", color: "#90a4ae" }}>
-                    Aucune clé API crypto. Contactez l'administrateur.
+                    {t("cryptoDocsNoApiKey")}
                   </div>
                 )}
               </div>
 
               {/* Webhook URL crypto */}
               <div className="rounded-xl p-4 space-y-3" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
-                <h3 className="text-xs font-bold uppercase tracking-widest" style={{ color: "#90a4ae" }}>URL Webhook Crypto</h3>
-                <p className="text-xs" style={{ color: "#546e7a" }}>
-                  RobotPay envoie une notification <code className="font-mono bg-slate-100 px-1 rounded">POST</code> à cette URL dès qu'un paiement crypto est confirmé.
-                </p>
+                <h3 className="text-xs font-bold uppercase tracking-widest" style={{ color: "#90a4ae" }}>{t("cryptoWebhookPanelTitle")}</h3>
+                <p className="text-xs" style={{ color: "#546e7a" }}>{t("cryptoWebhookPanelDesc")}</p>
                 {(cryptoWebhookData as any)?.webhookUrl && (
                   <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono" style={{ background: "#e8f5e9", border: "1px solid #a5d6a7", color: "#2e7d32" }}>
                     <span className="text-green-600">✓</span>
@@ -4426,20 +4376,18 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                     style={{ background: "#1a237e", color: "#fff", opacity: isSavingWebhook || !cryptoWebhookUrl.trim() ? 0.6 : 1 }}
                     data-testid="btn-save-crypto-webhook"
                   >
-                    {isSavingWebhook ? "..." : "Enregistrer"}
+                    {isSavingWebhook ? "..." : t("save")}
                   </button>
                 </div>
                 <p className="text-xs" style={{ color: "#b0bec5" }}>
-                  Signature HMAC envoyée dans le header <code className="font-mono">X-RobotPay-Signature</code>
+                  {t("cryptoSignatureNote")} <code className="font-mono">X-RobotPay-Signature</code>
                 </p>
               </div>
 
               {/* Bouton documentation */}
               <div className="rounded-xl p-4 space-y-3" style={{ background: "#fff", border: "1px solid #e2e8f0" }}>
-                <h3 className="text-xs font-bold uppercase tracking-widest" style={{ color: "#90a4ae" }}>Documentation</h3>
-                <p className="text-xs" style={{ color: "#546e7a" }}>
-                  Consultez la documentation complète : lien de paiement, API invoice, vérification de statut, webhooks, exemples de code PHP / JavaScript / cURL.
-                </p>
+                <h3 className="text-xs font-bold uppercase tracking-widest" style={{ color: "#90a4ae" }}>{t("docsTitle")}</h3>
+                <p className="text-xs" style={{ color: "#546e7a" }}>{t("cryptoDocumentationDesc")}</p>
                 <button
                   onClick={() => window.open(SECURE_CRYPTO_DOCS_URL, "_blank", "noopener,noreferrer")}
                   className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90"
@@ -4447,7 +4395,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                   data-testid="btn-open-crypto-docs"
                 >
                   <span>📄</span>
-                  Ouvrir la documentation API Crypto
+                  {t("openCryptoDocumentation")}
                 </button>
               </div>
             </div>
@@ -4470,9 +4418,9 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
           >
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="font-bold" style={{ color: "#1a237e" }}>Retirer {withdrawModal.currency}</h3>
+                <h3 className="font-bold" style={{ color: "#1a237e" }}>{t("withdrawals")} {withdrawModal.currency}</h3>
                 <p className="text-xs" style={{ color: "#90a4ae" }}>
-                  Disponible : {parseFloat(withdrawModal.available).toFixed(6)} {withdrawModal.currency}
+                  {t("availableBalance")} : {parseFloat(withdrawModal.available).toFixed(6)} {withdrawModal.currency}
                 </p>
               </div>
               <button
@@ -4487,14 +4435,14 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
 
             <div className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>Montant ({withdrawModal.currency}) *</label>
+                <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>{t("amount")} ({withdrawModal.currency}) *</label>
                 <input
                   type="number"
                   min="0"
                   step="any"
                   value={wdAmount}
                   onChange={e => setWdAmount(e.target.value)}
-                  placeholder={`Max: ${parseFloat(withdrawModal.available).toFixed(6)}`}
+                  placeholder={`${t("max")}: ${parseFloat(withdrawModal.available).toFixed(6)}`}
                   className="w-full text-sm px-3 py-2 rounded-lg"
                   style={{ border: "1px solid #e2e8f0", background: "#f8fafc", color: "#1a237e" }}
                   data-testid="input-withdraw-amount"
@@ -4504,13 +4452,13 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                   className="text-xs mt-1 underline"
                   style={{ color: "#1565c0" }}
                 >
-                  Max
+                  {t("max")}
                 </button>
               </div>
 
               {(CRYPTO_NETWORKS[withdrawModal.currency.toUpperCase()] || []).length > 0 && (
                 <div>
-                  <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>Réseau *</label>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>{t("cryptoNetwork")} *</label>
                   <select
                     value={wdNetwork}
                     onChange={e => setWdNetwork(e.target.value)}
@@ -4526,12 +4474,12 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
               )}
 
               <div>
-                <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>Adresse de destination *</label>
+                <label className="block text-xs font-semibold mb-1" style={{ color: "#546e7a" }}>{t("cryptoWalletAddress")} *</label>
                 <input
                   type="text"
                   value={wdAddress}
                   onChange={e => setWdAddress(e.target.value)}
-                  placeholder="Votre adresse crypto"
+                  placeholder={t("cryptoWalletAddress")}
                   className="w-full text-sm px-3 py-2 rounded-lg font-mono"
                   style={{ border: "1px solid #e2e8f0", background: "#f8fafc", color: "#1a237e" }}
                   data-testid="input-withdraw-address"
@@ -4541,16 +4489,16 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
               {wdAmount && !isNaN(parseFloat(wdAmount)) && parseFloat(wdAmount) > 0 && (
                 <div className="p-3 rounded-lg text-xs space-y-1" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
                   <div className="flex justify-between" style={{ color: "#374151" }}>
-                    <span>Montant demandé</span>
+                    <span>{t("amount")}</span>
                     <span className="font-mono font-semibold">{parseFloat(wdAmount).toFixed(6)} {withdrawModal.currency}</span>
                   </div>
                   <div className="flex justify-between" style={{ color: "#dc2626" }}>
-                    <span>Frais RobotPay (5%)</span>
+                    <span>{t("fees")} RobotPay (5%)</span>
                     <span className="font-mono">−{(parseFloat(wdAmount) * 0.05).toFixed(6)} {withdrawModal.currency}</span>
                   </div>
                   <div className="h-px my-1" style={{ background: "#bbf7d0" }} />
                   <div className="flex justify-between font-bold" style={{ color: "#166534" }}>
-                    <span>Vous recevez</span>
+                    <span>{t("youReceive")}</span>
                     <span className="font-mono">{(parseFloat(wdAmount) * 0.95).toFixed(6)} {withdrawModal.currency}</span>
                   </div>
                 </div>
@@ -4561,7 +4509,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
               )}
 
               <div className="p-3 rounded-lg text-xs" style={{ background: "#fff8e1", border: "1px solid #fde68a", color: "#92400e" }}>
-                ⚠️ Vérifiez soigneusement l'adresse et le réseau. Les retraits crypto sont irréversibles.
+                {t("cryptoWarning")}
               </div>
             </div>
 
@@ -4572,7 +4520,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                 style={{ background: "#f1f5f9", color: "#546e7a" }}
                 data-testid="btn-cancel-withdraw"
               >
-                Annuler
+                {t("cancel")}
               </button>
               <button
                 onClick={handleWithdraw}
@@ -4581,7 +4529,7 @@ function CryptoPanel({ token, user }: { token: string | null; user: any }) {
                 style={{ background: wdLoading ? "#e2e8f0" : "#1a237e", color: wdLoading ? "#90a4ae" : "#fff" }}
                 data-testid="btn-confirm-withdraw"
               >
-                {wdLoading ? "Envoi..." : "Confirmer le retrait"}
+                {wdLoading ? t("sending") : t("confirm")}
               </button>
             </div>
           </div>
@@ -4708,7 +4656,7 @@ function MerchantSidebarContent({
               </div>
               <div className="min-w-0">
                 <p className="text-white font-black text-sm tracking-tight leading-tight drop-shadow-md truncate" style={{ maxWidth: 120 }}>{user?.name}</p>
-                <p className="text-xs font-medium truncate" style={{ color: "rgba(255,255,255,0.6)", maxWidth: 120 }}>Espace Marchand</p>
+                <p className="text-xs font-medium truncate" style={{ color: "rgba(255,255,255,0.6)", maxWidth: 120 }}>{t("merchantSpace")}</p>
               </div>
             </div>
           )}
@@ -4764,10 +4712,10 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
     <div className="relative group">
       <pre className="bg-gray-900 text-green-300 text-xs rounded-lg p-4 overflow-x-auto font-mono leading-relaxed whitespace-pre">{code}</pre>
       <button
-        onClick={() => copy(code, "Code copié")}
+        onClick={() => copy(code, t("copied"))}
         className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-700 hover:bg-gray-600 text-white rounded px-2 py-1 text-xs flex items-center gap-1"
       >
-        <Copy className="w-3 h-3" />Copier
+        <Copy className="w-3 h-3" />{t("copy")}
       </button>
     </div>
   );
@@ -4792,7 +4740,7 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
     <tr className="border-b border-gray-50 last:border-0">
       <td className="py-2 pr-3 align-top"><code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded font-mono text-gray-800">{name}</code></td>
       <td className="py-2 pr-3 align-top"><span className="text-xs text-gray-500 font-mono">{type}</span></td>
-      <td className="py-2 pr-3 align-top">{req ? <span className="text-xs text-red-500 font-medium">Requis</span> : <span className="text-xs text-gray-400">Optionnel</span>}</td>
+      <td className="py-2 pr-3 align-top">{req ? <span className="text-xs text-red-500 font-medium">{t("docsRequired")}</span> : <span className="text-xs text-gray-400">{t("optional")}</span>}</td>
       <td className="py-2 align-top text-xs text-gray-600">{desc}</td>
     </tr>
   );
@@ -4807,72 +4755,72 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
           </div>
           <div>
             <h2 className="text-xl font-bold">WestPay SDK API</h2>
-            <p className="text-xs text-white/60">Documentation — Payin & Payout Mobile Money</p>
+            <p className="text-xs text-white/60">{t("docsSubtitle")} — {t("mobileMoney")}</p>
           </div>
         </div>
         <div className="mt-4 bg-white/10 rounded-xl p-4 flex items-center gap-3">
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-white/50 mb-1 font-medium uppercase tracking-widest">Votre Clé SDK</p>
+            <p className="text-xs text-white/50 mb-1 font-medium uppercase tracking-widest">{t("cryptoDocsApiKeyLabel")}</p>
             <code className="text-sm font-mono text-green-300 break-all">{KEY_DISPLAY}</code>
           </div>
           <button onClick={() => setShowKey(v => !v)} className="shrink-0 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition" data-testid="button-toggle-sdk-key">
             {showKey ? <EyeOff className="w-4 h-4 text-white" /> : <Eye className="w-4 h-4 text-white" />}
           </button>
           {sdkApiKey && (
-            <button onClick={() => copy(sdkApiKey, "Clé SDK copiée")} className="shrink-0 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition" data-testid="button-copy-sdk-key-merchant">
+            <button onClick={() => copy(sdkApiKey, t("copied"))} className="shrink-0 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition" data-testid="button-copy-sdk-key-merchant">
               <Copy className="w-4 h-4 text-white" />
             </button>
           )}
         </div>
         <div className="mt-3 flex flex-wrap gap-3 text-xs text-white/60">
-          <span>URL de base: <code className="text-white font-mono">{BASE_URL}</code></span>
+          <span>{t("docsBaseUrl")}: <code className="text-white font-mono">{BASE_URL}</code></span>
           <span>•</span>
-          <span>Fournisseur: <span className="text-green-300 font-medium">RobotPay</span></span>
+          <span>{t("provider")}: <span className="text-green-300 font-medium">RobotPay</span></span>
           <span>•</span>
-          <span>Version: <span className="text-white font-medium">v1</span></span>
+          <span>{t("version")}: <span className="text-white font-medium">v1</span></span>
         </div>
       </div>
 
       {/* Authentication */}
-      <Section id="auth" title="Authentification" icon={Key}>
-        <p className="text-sm text-gray-600">Toutes les requêtes doivent inclure votre clé SDK dans le header HTTP <code className="bg-gray-100 px-1 rounded font-mono text-xs">X-SDK-Key</code>.</p>
+      <Section id="auth" title={t("authentication")} icon={Key}>
+        <p className="text-sm text-gray-600">{t("docsAuthDesc")} <code className="bg-gray-100 px-1 rounded font-mono text-xs">X-SDK-Key</code>.</p>
         <CodeBlock code={`curl -X POST ${BASE_URL}/api/sdk/v1/payin \\
   -H "Content-Type: application/json" \\
   -H "X-SDK-Key: ${sdkApiKey || "WP-SDK-VOTRE_CLE"}" \\
   -d '{...}'`} />
         <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
           <span className="text-amber-500 text-sm mt-0.5">⚠️</span>
-          <p className="text-xs text-amber-700">Ne partagez jamais votre clé SDK publiquement. Stockez-la dans vos variables d'environnement serveur.</p>
+          <p className="text-xs text-amber-700">{t("docsImportantWarning")}</p>
         </div>
       </Section>
 
       {/* Payin */}
-      <Section id="payin" title="Payin — Initier un Paiement Entrant" icon={ArrowRightLeft}>
+      <Section id="payin" title={`${t("docsPaymentDeposit")} — ${t("payStep1")}`} icon={ArrowRightLeft}>
         <div className="flex items-center gap-2">
           <EndpointBadge method="POST" />
           <code className="text-sm font-mono text-gray-700 bg-gray-100 px-2 py-1 rounded">/api/sdk/v1/payin</code>
         </div>
-        <p className="text-sm text-gray-600">Déclenche une demande de paiement Mobile Money vers le client. Le client reçoit une notification USSD ou push sur son téléphone.</p>
+        <p className="text-sm text-gray-600">{t("docsPaymentDesc")}</p>
         <div>
-          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Paramètres du corps (JSON)</p>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">{t("docsRequestBody")} (JSON)</p>
           <div className="overflow-x-auto rounded-lg border border-gray-100">
             <table className="w-full text-sm min-w-[500px]">
-              <thead><tr className="bg-gray-50"><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Champ</th><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Type</th><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Requis</th><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Description</th></tr></thead>
+              <thead><tr className="bg-gray-50"><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">{t("docsColParam")}</th><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">{t("docsType")}</th><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">{t("docsRequired")}</th><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">{t("description")}</th></tr></thead>
               <tbody className="divide-y divide-gray-50">
-                <ParamRow name="amount" type="number" req={true} desc="Montant en unité de la monnaie locale (ex: 5000 pour 5000 XOF)" />
-                <ParamRow name="currency" type="string" req={true} desc="Code devise ISO: XOF, XAF, GNF, CDF, GMD" />
-                <ParamRow name="order_id" type="string" req={true} desc="Identifiant unique de votre commande (stocké côté serveur)" />
-                <ParamRow name="callback_url" type="string" req={true} desc="URL de votre webhook pour recevoir la notification de statut" />
-                <ParamRow name="metadata.phone_number" type="string" req={true} desc="Numéro de téléphone du payeur avec indicatif (ex: +22890123456)" />
-                <ParamRow name="metadata.network" type="string" req={true} desc="Réseau mobile: mtn, orange, moov, wave, togocom, flooz, airtel, mpesa" />
-                <ParamRow name="metadata.country_code" type="string" req={true} desc="Code pays ISO 2 lettres: TG, BJ, CI, SN, ML, BF, CM, CG, CD, GN, GM" />
-                <ParamRow name="metadata.customer_name" type="string" req={false} desc="Nom du client (optionnel, pour votre référence)" />
+                <ParamRow name="amount" type="number" req={true} desc={t("sdkAmountDesc")} />
+                <ParamRow name="currency" type="string" req={true} desc={t("sdkCurrencyDesc")} />
+                <ParamRow name="order_id" type="string" req={true} desc={t("sdkOrderIdDesc")} />
+                <ParamRow name="callback_url" type="string" req={true} desc={t("sdkCallbackDesc")} />
+                <ParamRow name="metadata.phone_number" type="string" req={true} desc={t("sdkPhoneDesc")} />
+                <ParamRow name="metadata.network" type="string" req={true} desc={t("sdkNetworkDesc")} />
+                <ParamRow name="metadata.country_code" type="string" req={true} desc={t("sdkCountryCodeDesc")} />
+                <ParamRow name="metadata.customer_name" type="string" req={false} desc={t("sdkCustomerNameDesc")} />
               </tbody>
             </table>
           </div>
         </div>
         <div>
-          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Exemple de requête</p>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">{t("docsEx1").replace(/^1\.\s*/, "")}</p>
           <CodeBlock code={`curl -X POST ${BASE_URL}/api/sdk/v1/payin \\
   -H "Content-Type: application/json" \\
   -H "X-SDK-Key: ${sdkApiKey || "WP-SDK-VOTRE_CLE"}" \\
@@ -4890,7 +4838,7 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
   }'`} />
         </div>
         <div>
-          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Réponse succès (200)</p>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">{t("docsResponseOk")}</p>
           <CodeBlock code={`{
   "status": "success",
   "message": "Paiement initié avec succès",
@@ -4913,35 +4861,35 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
       </Section>
 
       {/* Payout */}
-      <Section id="payout" title="Payout — Retrait Automatique (Envoi d'argent)" icon={Send}>
+      <Section id="payout" title={`${t("payout")} — ${t("docsTransferFlowTitle")}`} icon={Send}>
         <div className="flex items-center gap-2">
           <EndpointBadge method="POST" />
           <code className="text-sm font-mono text-gray-700 bg-gray-100 px-2 py-1 rounded">/api/sdk/v1/payout</code>
         </div>
-        <p className="text-sm text-gray-600">Envoie un paiement Mobile Money vers un bénéficiaire depuis votre solde WestPay. Le solde est débité immédiatement. Les frais sont calculés automatiquement.</p>
+        <p className="text-sm text-gray-600">{t("docsTransferEndpointDesc")}</p>
         <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700">
-          💡 <strong>Frais appliqués:</strong> 4,5% du montant (5,5% pour Congo Brazzaville et Congo RDC). Votre solde disponible doit couvrir le montant + frais.
+          💡 <strong>{t("fees")} :</strong> {t("docsTransferFeeNote")}
         </div>
         <div>
-          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Paramètres du corps (JSON)</p>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">{t("docsRequestBody")} (JSON)</p>
           <div className="overflow-x-auto rounded-lg border border-gray-100">
             <table className="w-full text-sm min-w-[500px]">
-              <thead><tr className="bg-gray-50"><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Champ</th><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Type</th><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Requis</th><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Description</th></tr></thead>
+              <thead><tr className="bg-gray-50"><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">{t("docsColParam")}</th><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">{t("docsType")}</th><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">{t("docsRequired")}</th><th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">{t("description")}</th></tr></thead>
               <tbody>
-                <ParamRow name="amount" type="number" req={true} desc="Montant à envoyer (sans les frais, qui sont ajoutés automatiquement)" />
-                <ParamRow name="currency" type="string" req={true} desc="Code devise ISO: XOF, XAF, GNF, CDF, GMD" />
-                <ParamRow name="order_id" type="string" req={true} desc="Identifiant unique de votre opération de payout" />
-                <ParamRow name="callback_url" type="string" req={true} desc="URL de votre webhook pour la notification de statut" />
-                <ParamRow name="metadata.phone_number" type="string" req={true} desc="Numéro de téléphone du bénéficiaire avec indicatif" />
-                <ParamRow name="metadata.network" type="string" req={true} desc="Réseau mobile du bénéficiaire: mtn, orange, moov, wave..." />
-                <ParamRow name="metadata.country_code" type="string" req={true} desc="Code pays du bénéficiaire: TG, BJ, CI, SN, ML, BF, CM, CG, CD, GN, GM" />
-                <ParamRow name="metadata.beneficiary" type="string" req={false} desc="Nom du bénéficiaire (optionnel)" />
+                <ParamRow name="amount" type="number" req={true} desc={t("sdkAmountDesc")} />
+                <ParamRow name="currency" type="string" req={true} desc={t("sdkCurrencyDesc")} />
+                <ParamRow name="order_id" type="string" req={true} desc={t("sdkOrderIdDesc")} />
+                <ParamRow name="callback_url" type="string" req={true} desc={t("sdkCallbackDesc")} />
+                <ParamRow name="metadata.phone_number" type="string" req={true} desc={t("sdkPhoneDesc")} />
+                <ParamRow name="metadata.network" type="string" req={true} desc={t("sdkNetworkDesc")} />
+                <ParamRow name="metadata.country_code" type="string" req={true} desc={t("sdkCountryCodeDesc")} />
+                <ParamRow name="metadata.beneficiary" type="string" req={false} desc={t("sdkBeneficiaryDesc")} />
               </tbody>
             </table>
           </div>
         </div>
         <div>
-          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Exemple de requête</p>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">{t("docsEx3").replace(/^3\.\s*/, "")}</p>
           <CodeBlock code={`curl -X POST ${BASE_URL}/api/sdk/v1/payout \\
   -H "Content-Type: application/json" \\
   -H "X-SDK-Key: ${sdkApiKey || "WP-SDK-VOTRE_CLE"}" \\
@@ -4959,7 +4907,7 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
   }'`} />
         </div>
         <div>
-          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Réponse succès (200)</p>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">{t("docsResponseOk")}</p>
           <CodeBlock code={`{
   "status": "success",
   "message": "Payout initié avec succès",
@@ -4984,7 +4932,7 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
 }`} />
         </div>
         <div>
-          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Erreur solde insuffisant (422)</p>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">{t("insufficientFunds")} (422)</p>
           <CodeBlock code={`{
   "status": "error",
   "message": "Solde insuffisant pour ce retrait.",
@@ -4998,16 +4946,16 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
       </Section>
 
       {/* Transaction Status */}
-      <Section id="status" title="Statut Transaction" icon={Search}>
+      <Section id="status" title={t("status")} icon={Search}>
         <div className="flex items-center gap-2">
           <EndpointBadge method="GET" />
           <code className="text-sm font-mono text-gray-700 bg-gray-100 px-2 py-1 rounded">/api/sdk/v1/transaction/:reference</code>
         </div>
-        <p className="text-sm text-gray-600">Récupère le statut actuel d'une transaction payin ou payout à partir de sa référence WestPay (champ <code className="bg-gray-100 px-1 rounded text-xs font-mono">reference</code> de la réponse initiale).</p>
+        <p className="text-sm text-gray-600">{t("docsStatusDesc")}</p>
         <CodeBlock code={`curl -X GET ${BASE_URL}/api/sdk/v1/transaction/MB1A2B3C4D5E6F7G \\
   -H "X-SDK-Key: ${sdkApiKey || "WP-SDK-VOTRE_CLE"}"`} />
         <div>
-          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Réponse (200)</p>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">{t("docsResponseOk")}</p>
           <CodeBlock code={`{
   "status": "success",
   "data": {
@@ -5023,14 +4971,14 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
 }`} />
         </div>
         <div>
-          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Valeurs de statut possibles</p>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">{t("docsStatusValues")}</p>
           <div className="grid grid-cols-2 gap-2">
             {[
-              { s: "pending", c: "bg-yellow-100 text-yellow-700", d: "En attente de confirmation" },
-              { s: "confirmed", c: "bg-green-100 text-green-700", d: "Paiement confirmé" },
-              { s: "failed", c: "bg-red-100 text-red-700", d: "Echec de la transaction" },
+              { s: "pending", c: "bg-yellow-100 text-yellow-700", d: t("sdkPendingDesc") },
+              { s: "confirmed", c: "bg-green-100 text-green-700", d: t("sdkConfirmedDesc") },
+              { s: "failed", c: "bg-red-100 text-red-700", d: t("sdkFailedDesc") },
               { s: "processing", c: "bg-blue-100 text-blue-700", d: "En cours de traitement (payout)" },
-              { s: "completed", c: "bg-green-100 text-green-700", d: "Payout effectué avec succès" },
+              { s: "completed", c: "bg-green-100 text-green-700", d: t("sdkCompletedDesc") },
             ].map(({ s, c, d }) => (
               <div key={s} className="flex items-center gap-2 p-2 rounded-lg border border-gray-100">
                 <span className={`text-xs px-2 py-0.5 rounded font-mono font-medium ${c}`}>{s}</span>
@@ -5042,12 +4990,12 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
       </Section>
 
       {/* Balance */}
-      <Section id="balance" title="Solde par Pays" icon={Wallet}>
+      <Section id="balance" title={t("walletTitle")} icon={Wallet}>
         <div className="flex items-center gap-2">
           <EndpointBadge method="GET" />
           <code className="text-sm font-mono text-gray-700 bg-gray-100 px-2 py-1 rounded">/api/sdk/v1/balance</code>
         </div>
-        <p className="text-sm text-gray-600">Retourne vos soldes disponibles pour tous vos pays actifs.</p>
+        <p className="text-sm text-gray-600">{t("docsBalanceAllDesc")}</p>
         <CodeBlock code={`curl -X GET ${BASE_URL}/api/sdk/v1/balance \\
   -H "X-SDK-Key: ${sdkApiKey || "WP-SDK-VOTRE_CLE"}"`} />
         <CodeBlock code={`{
@@ -5063,10 +5011,10 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
       </Section>
 
       {/* Webhooks */}
-      <Section id="webhook" title="Notifications Webhook" icon={Webhook}>
-        <p className="text-sm text-gray-600">WestPay envoie une requête <code className="bg-gray-100 px-1 rounded text-xs font-mono">POST</code> vers votre <code className="bg-gray-100 px-1 rounded text-xs font-mono">callback_url</code> dès que le statut d'une transaction change.</p>
+      <Section id="webhook" title={t("webhook")} icon={Webhook}>
+        <p className="text-sm text-gray-600">{t("docsWebhookDesc2")}</p>
         <div>
-          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Payload webhook payin (paiement confirmé)</p>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">{t("docsWebhookPayloadTitle")}</p>
           <CodeBlock code={`{
   "event": "payment.confirmed",
   "reference": "MB1A2B3C4D5E6F7G",
@@ -5084,7 +5032,7 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
 }`} />
         </div>
         <div>
-          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Payload webhook payout</p>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">{t("docsWebhookPayloadTitle")} {t("payout")}</p>
           <CodeBlock code={`{
   "event": "payout.completed",
   "reference": "MB7H8I9J0K1L2M3N",
@@ -5102,15 +5050,15 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
 }`} />
         </div>
         <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700">
-          💡 Votre endpoint webhook doit répondre avec un code HTTP 200 pour confirmer la réception. WestPay réessaie automatiquement en cas d'échec.
+          💡 {t("docsWebhookResponseNote")}
         </div>
       </Section>
 
       {/* Networks */}
-      <Section id="networks" title="Réseaux & Pays Supportés" icon={Globe}>
+      <Section id="networks" title={t("docsNetworksTitle")} icon={Globe}>
         <div className="overflow-x-auto rounded-lg border border-gray-100">
           <table className="w-full text-xs">
-            <thead><tr className="bg-gray-50"><th className="text-left py-2 px-3 text-gray-500 font-medium">Pays</th><th className="text-left py-2 px-3 text-gray-500 font-medium">Code</th><th className="text-left py-2 px-3 text-gray-500 font-medium">Devise</th><th className="text-left py-2 px-3 text-gray-500 font-medium">Réseaux disponibles</th></tr></thead>
+            <thead><tr className="bg-gray-50"><th className="text-left py-2 px-3 text-gray-500 font-medium">{t("docsColCountry")}</th><th className="text-left py-2 px-3 text-gray-500 font-medium">{t("docsColCode")}</th><th className="text-left py-2 px-3 text-gray-500 font-medium">{t("docsColCurrency")}</th><th className="text-left py-2 px-3 text-gray-500 font-medium">{t("docsNetworksAvailable")}</th></tr></thead>
             <tbody className="divide-y divide-gray-50">
               {[
                 { pays: "Togo", code: "TG", devise: "XOF", reseaux: "togocom, moov, flooz" },
@@ -5138,19 +5086,19 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
       </Section>
 
       {/* Errors */}
-      <Section id="errors" title="Codes d'Erreur" icon={XCircle}>
+      <Section id="errors" title={t("docsErrorsTitle")} icon={XCircle}>
         <div className="overflow-x-auto rounded-lg border border-gray-100">
           <table className="w-full text-xs">
-            <thead><tr className="bg-gray-50"><th className="text-left py-2 px-3 text-gray-500 font-medium">HTTP</th><th className="text-left py-2 px-3 text-gray-500 font-medium">status</th><th className="text-left py-2 px-3 text-gray-500 font-medium">Cause</th></tr></thead>
+            <thead><tr className="bg-gray-50"><th className="text-left py-2 px-3 text-gray-500 font-medium">{t("sdkHttpStatus")}</th><th className="text-left py-2 px-3 text-gray-500 font-medium">{t("sdkStatusColumn")}</th><th className="text-left py-2 px-3 text-gray-500 font-medium">{t("docsErrorColCause")}</th></tr></thead>
             <tbody className="divide-y divide-gray-50">
               {[
-                { code: "400", s: "error", cause: "Paramètres manquants ou invalides dans le corps de la requête" },
-                { code: "401", s: "error", cause: "Clé SDK manquante, invalide ou SDK désactivé sur ce compte" },
-                { code: "403", s: "error", cause: "Compte marchand suspendu" },
-                { code: "404", s: "error", cause: "Transaction introuvable pour cette référence" },
-                { code: "422", s: "error", cause: "Solde insuffisant (payout) ou paiement refusé" },
-                { code: "503", s: "error", cause: "Passerelle de paiement non disponible (contacter le support)" },
-                { code: "500", s: "error", cause: "Erreur interne du serveur" },
+                { code: "400", s: "error", cause: t("sdkErrorMissing") },
+                { code: "401", s: "error", cause: t("sdkErrorKey") },
+                { code: "403", s: "error", cause: t("sdkErrorSuspended") },
+                { code: "404", s: "error", cause: t("sdkErrorTransaction") },
+                { code: "422", s: "error", cause: t("sdkErrorBalance") },
+                { code: "503", s: "error", cause: t("sdkErrorGateway") },
+                { code: "500", s: "error", cause: t("sdkErrorInternal") },
               ].map(r => (
                 <tr key={r.code} className="hover:bg-gray-50/50">
                   <td className="py-2 px-3"><span className={`px-1.5 py-0.5 rounded font-mono font-bold ${r.code.startsWith("2") ? "bg-green-100 text-green-700" : r.code.startsWith("4") ? "bg-red-100 text-red-700" : "bg-orange-100 text-orange-700"}`}>{r.code}</span></td>
@@ -5162,7 +5110,7 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
           </table>
         </div>
         <div>
-          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">Format de réponse d'erreur</p>
+          <p className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-widest">{t("docsErrorFormat")}</p>
           <CodeBlock code={`{
   "status": "error",
   "message": "Description lisible de l'erreur",
@@ -5172,7 +5120,7 @@ function SdkDocPanel({ sdkApiKey }: { sdkApiKey: string | null }) {
       </Section>
 
       {/* PHP Example */}
-      <Section id="examples" title="Exemple d'Intégration PHP" icon={Hash}>
+      <Section id="examples" title={t("sdkPhpExample")} icon={Hash}>
         <CodeBlock code={`<?php
 // Configuration
 $SDK_KEY = '${sdkApiKey || "WP-SDK-VOTRE_CLE"}';
@@ -5223,7 +5171,7 @@ http_response_code(200);
       </Section>
 
       {/* JavaScript Example */}
-      <Section id="js-example" title="Exemple d'Intégration Node.js" icon={Zap}>
+      <Section id="js-example" title={t("sdkNodeExample")} icon={Zap}>
         <CodeBlock code={`const SDK_KEY  = process.env.WESTPAY_SDK_KEY; // "${sdkApiKey ? sdkApiKey.slice(0, 12) + "..." : "WP-SDK-..."}"
 const BASE_URL = '${BASE_URL}';
 
@@ -5274,7 +5222,7 @@ console.log(result);`} />
       </Section>
 
       <div className="text-center py-4 text-xs text-gray-400">
-        WestPay SDK v1 — Support: <a href="mailto:support@westpay.cfd" className="text-blue-500 hover:underline">support@westpay.cfd</a>
+        WestPay SDK v1 — {t("docsFooterContact")}: <a href="mailto:support@westpay.cfd" className="text-blue-500 hover:underline">support@westpay.cfd</a>
       </div>
     </div>
   );
