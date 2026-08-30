@@ -2350,7 +2350,7 @@ export async function registerRoutes(
     try {
       const { registerWebhookUrl, setupWebhook, getBot } = await import("./telegram-bot");
       if (!getBot()) return res.status(400).json({ message: "Bot non initialisé — vérifiez TELEGRAM_BOT_TOKEN" });
-      const appUrl = process.env.APP_URL || "http://Westpay.cfd";
+      const appUrl = (process.env.APP_URL || "https://westpay.cfd").trim().replace(/\/+$/, "");
       let webhookSecret = await storage.getSetting("telegram_webhook_secret");
       if (!webhookSecret) {
         const { randomBytes } = await import("crypto");
@@ -2372,16 +2372,21 @@ export async function registerRoutes(
   // ── Test message to admin group ────────────────────────────────────────────
   app.post("/api/admin/telegram/test-bot", authMiddleware("admin"), async (req, res) => {
     try {
-      const { notifyAdminGroup, getBot } = await import("./telegram-bot");
+      const { sendTelegramMessage, getBot } = await import("./telegram-bot");
       if (!getBot()) return res.status(400).json({ message: "Bot non initialisé — vérifiez TELEGRAM_BOT_TOKEN" });
       const groupId = await storage.getSetting("telegram_group_id");
       if (!groupId) return res.status(400).json({ message: "Groupe admin non configuré — définissez d'abord le Chat ID" });
-      await notifyAdminGroup(
+      const delivered = await sendTelegramMessage({
+        chatId: groupId,
+        message:
         `🤖 *Test bot WestPay*\n\n` +
         `✅ Le bot fonctionne correctement.\n` +
         `🕐 ${new Date().toLocaleString("fr-FR", { timeZone: "Africa/Lagos" })}\n` +
-        `🌐 Environnement : ${process.env.NODE_ENV || "development"}`
-      );
+        `🌐 Environnement : ${process.env.NODE_ENV || "development"}`,
+      });
+      if (!delivered) {
+        return res.status(502).json({ message: "Telegram a refusé ou n'a pas reçu le message test. Consultez les logs du serveur." });
+      }
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });

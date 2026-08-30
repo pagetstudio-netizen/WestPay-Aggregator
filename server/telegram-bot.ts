@@ -2330,7 +2330,7 @@ export async function notifyMerchantPayment(merchantId: number, data: {
 }
 
 async function safeSend(chatId: string, message: string): Promise<void> {
-  if (!bot) return;
+  if (!bot) throw new Error("Bot Telegram non initialisé");
   try {
     await bot.telegram.sendMessage(chatId, message, { parse_mode: "Markdown" });
   } catch {
@@ -2339,6 +2339,7 @@ async function safeSend(chatId: string, message: string): Promise<void> {
       await bot.telegram.sendMessage(chatId, message);
     } catch (err2: any) {
       console.error("[TELEGRAM] Echec envoi:", err2.message);
+      throw err2;
     }
   }
 }
@@ -2357,7 +2358,7 @@ async function safeSendWithMedia(
   imageSource?: string,
   buttons?: InlineButton[][]
 ): Promise<void> {
-  if (!bot) return;
+  if (!bot) throw new Error("Bot Telegram non initialisé");
   const replyMarkup = buttons && buttons.length > 0 ? buildInlineKeyboard(buttons) : undefined;
 
   if (imageSource) {
@@ -2397,6 +2398,7 @@ async function safeSendWithMedia(
       });
     } catch (err2: any) {
       console.error("[TELEGRAM] Echec envoi:", err2.message);
+      throw err2;
     }
   }
 }
