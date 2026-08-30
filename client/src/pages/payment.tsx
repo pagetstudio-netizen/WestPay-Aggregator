@@ -170,6 +170,7 @@ export default function PaymentPage() {
   const countryParam    = urlParams.get("country") || "";
   const redirectUrlParam= urlParams.get("redirect") || "";
   const omnipayStatus   = urlParams.get("omnipay_status") || "";
+  const clapayReturn    = urlParams.get("clapay_return") === "1";
   const refParam        = urlParams.get("ref") || "";
   const phoneParam      = urlParams.get("phone") || urlParams.get("payerPhone") || "";
   const nameParam       = urlParams.get("name")  || urlParams.get("payerName")  || "";
