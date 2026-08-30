@@ -4371,7 +4371,7 @@ export async function registerRoutes(
         const currency = mbiyoCurrency(country);
         const network = operatorRecord?.mbiyoCode || mbiyoNetwork(operator || paymentMethod);
         const callbackUrl = `${callbackBaseUrl}/api/mbiyo/callback`;
-        const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&clapay_return=1`;
+        const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
 
         try {
           const mbiyoResult = await mbiyoInitiatePayin({
@@ -4530,7 +4530,7 @@ export async function registerRoutes(
         const countryCode = clapayCountryCode(country);
         const currency = clapayCurrency(country);
         const callbackUrl = `${callbackBaseUrl}/api/clapay/callback`;
-        const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
+        const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&clapay_return=1`;
 
         try {
           const clapayOpCode = (operatorRecord as any)?.clapayCode || paymentMethod || "";
