@@ -186,6 +186,7 @@ export interface IStorage {
   getPendingWithdrawals(): Promise<(Withdrawal & { merchantName: string })[]>;
   getWithdrawalById(id: number): Promise<Withdrawal | undefined>;
   getWithdrawalByOmnipayRef(ref: string): Promise<Withdrawal | undefined>;
+  getWithdrawalByProviderTxId(providerTxId: string): Promise<Withdrawal | undefined>;
   updateWithdrawalStatus(id: number, status: string, adminNote?: string, omnipayRef?: string, fees?: number, providerPayoutFee?: number): Promise<void>;
   updateWithdrawalGateway(id: number, gateway: string): Promise<void>;
   updateWithdrawalProviderTxId(id: number, providerTxId: string | null): Promise<void>;
@@ -952,6 +953,10 @@ export class DatabaseStorage implements IStorage {
   }
   async getWithdrawalByOmnipayRef(ref: string): Promise<Withdrawal | undefined> {
     const [w] = await financialDb.select().from(withdrawals).where(eq(withdrawals.omnipayRef, ref));
+    return w;
+  }
+  async getWithdrawalByProviderTxId(providerTxId: string): Promise<Withdrawal | undefined> {
+    const [w] = await financialDb.select().from(withdrawals).where(eq(withdrawals.providerTxId, providerTxId));
     return w;
   }
   async updateWithdrawalStatus(id: number, status: string, adminNote?: string, omnipayRef?: string, fees?: number, providerPayoutFee?: number): Promise<void> {

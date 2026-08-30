@@ -81,6 +81,7 @@ export interface ClapayWebhookPayload {
   // Champs de compatibilité (ancienne API) — conservés pour robustesse
   reference?: string;
   external_reference?: string;
+  order_id?: string;
 }
 
 // ── Country / currency helpers ────────────────────────────────────────────────

@@ -6234,10 +6234,13 @@ export async function registerRoutes(
       }
 
       // v3 : transaction_id = notre référence marchande du retrait
-      const orderId = payload.transaction_id || payload.reference || payload.external_reference || "";
-      if (!orderId) return res.status(200).json({ received: true });
-
-      const withdrawal = await storage.getWithdrawalByOmnipayRef(orderId);
+      const orderId = payload.transaction_id || payload.reference || payload.external_reference || payload.order_id || "";
+      let withdrawal = orderId ? await storage.getWithdrawalByOmnipayRef(orderId) : undefined;
+      // Certains callbacks ClaPay renvoient la signature comme identifiant
+      // principal au lieu de notre transaction_id.
+      if (!withdrawal && payload.signature) {
+        withdrawal = await storage.getWithdrawalByProviderTxId(payload.signature);
+      }
       if (!withdrawal) return res.json({ received: true });
       if (payload.signature) {
         await storage.updateWithdrawalProviderTxId(withdrawal.id, payload.signature);
@@ -6245,18 +6248,24 @@ export async function registerRoutes(
 
       const statusUpper = (payload.status || "").toUpperCase();
       const isSuccess = ["SUCCESSFUL", "SUCCESS", "COMPLETED", "PAID", "APPROVED"].includes(statusUpper);
+      const isFailure = ["FAILED", "FAILURE", "CANCELLED", "CANCELED", "REJECTED", "EXPIRED"].includes(statusUpper);
       if (isSuccess) {
         if (withdrawal.status !== "approved") {
           await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Approuvé par ClaPay — ref=${orderId}`, orderId);
         }
         console.log(`[CLAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} approuvé`);
-      } else {
+      } else if (isFailure) {
         if (withdrawal.status === "pending") {
           await storage.updateWithdrawalStatus(withdrawal.id, "failed", `Rejeté par ClaPay — statut ${statusUpper}`, orderId);
           const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
           if (mc) await storage.incrementMerchantCountryBalance(mc.id, withdrawal.amount);
         }
         console.log(`[CLAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} échoué`);
+      } else {
+        // Un callback intermédiaire (PENDING/PROCESSING) ne doit jamais
+        // transformer un retrait encore en cours en échec local.
+        console.log(`[CLAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} encore en cours — statut ${statusUpper}`);
+        return res.json({ received: true, status: "pending" });
       }
       res.json({ received: true });
     } catch (err: any) {
@@ -8273,7 +8282,7 @@ export async function registerRoutes(
             method: "CASHIN",
             tunnel: "API",
             callback_url: cpCallbackUrl,
-            return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
+           return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
             additional_infos: {
               customer_phone: cpLocalPhone,
               customer_firstname: merchant.name,
@@ -9344,7 +9353,7 @@ export async function registerRoutes(
           method: "MERCHANT",
           tunnel: adminTunnel,
           callback_url: `${callbackBaseUrl}/api/clapay/callback`,
-          return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
+          return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&clapay_return=1`,
           additional_infos: adminAdditionalInfos,
         });
         if (!result.success) {
