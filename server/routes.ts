@@ -8923,16 +8923,19 @@ export async function registerRoutes(
 
       let ref: string | null | undefined;
       let txCountry: string | null | undefined;
+      let pendingRecord: any = null;
+      let txRecord: any = null;
       if (source === "pending") {
-        const pp = await storage.getPendingPaymentById(id);
-        if (!pp) return res.status(404).json({ message: "Paiement en cours introuvable" });
-        ref = pp.omnipayReference;
-        txCountry = pp.country;
+        pendingRecord = await storage.getPendingPaymentById(id);
+        if (!pendingRecord) return res.status(404).json({ message: "Paiement en cours introuvable" });
+        ref = pendingRecord.omnipayReference;
+        txCountry = pendingRecord.country;
       } else {
         const [tx] = await financialDb.select().from(transactions).where(eq(transactions.id, id));
         if (!tx) return res.status(404).json({ message: "Transaction introuvable" });
-        ref = tx.omnipayReference;
-        txCountry = tx.country;
+        txRecord = tx;
+        ref = txRecord.omnipayReference;
+        txCountry = txRecord.country;
       }
       if (!ref) return res.status(400).json({ message: "Aucune référence fournisseur pour ce paiement" });
       if (!["sendavapay", "mbiyo", "omnipay", "seapay", "clapay"].includes(provider)) {
@@ -8942,7 +8945,10 @@ export async function registerRoutes(
       if (provider === "clapay") {
         const cpToken = await getClapayApiKey();
         if (!cpToken) return res.status(500).json({ message: "Clé API ClaPay non configurée" });
-        const result = await clapayGetTransactionStatus(cpToken, ref);
+        // ClaPay v3 vérifie la signature retournée à l'initiation, pas notre
+        // référence marchande. Les anciennes lignes utilisent le fallback.
+        const clapayRef = pendingRecord?.omnipayTxId || txRecord?.omnipayTxId || ref;
+        const result = await clapayGetTransactionStatus(cpToken, clapayRef);
         return res.json({ provider: "clapay", success: result.success, status: result.status, data: result.data, error: result.message });
       }
       if (provider === "sendavapay") {
@@ -9008,7 +9014,8 @@ export async function registerRoutes(
       if (provider === "clapay") {
         const cpToken = await getClapayApiKey();
         if (!cpToken) return res.status(500).json({ message: "Clé API ClaPay non configurée" });
-        const result = await clapayGetTransactionStatus(cpToken, ref);
+        const clapayRef = pendingRecord?.omnipayTxId || txRecord?.omnipayTxId || ref;
+        const result = await clapayGetTransactionStatus(cpToken, clapayRef);
         providerStatus = (result.status || "").toLowerCase();
       } else if (provider === "sendavapay") {
         const sendavaApiKey = await getSendavaApiKey();

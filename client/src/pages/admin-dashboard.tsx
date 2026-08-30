@@ -1760,11 +1760,17 @@ function TransactionsPanel() {
   const getProviderName = (provider: string | null | undefined, ref: string | null | undefined): string => {
     const p = (provider || "").toLowerCase();
     const r = ref || "";
-    if (p === "sendavapay" || r.startsWith("sdk_") || r.startsWith("SP-")) return "SendavaPay";
-    if (p === "mbiyo" || r.startsWith("MBY") || r.startsWith("MB-")) return "Mbiyo";
-    if (p === "omnipay" || r.startsWith("OP-") || r.startsWith("TR-")) return "OmniPay";
-    if (p === "clapay" || r.startsWith("CP-")) return "ClaPay";
-    if (p === "seapay" || r.startsWith("SP-")) return "SeaPay";
+    // Le champ provider est la source de vérité. Le préfixe SP- est partagé
+    // par SendavaPay et SeaPay et ne doit donc être utilisé qu'en dernier recours.
+    if (p === "sendavapay") return "SendavaPay";
+    if (p === "mbiyo") return "Mbiyo";
+    if (p === "omnipay") return "OmniPay";
+    if (p === "clapay") return "ClaPay";
+    if (p === "seapay") return "SeaPay";
+    if (r.startsWith("sdk_") || r.startsWith("SP-")) return "SendavaPay";
+    if (r.startsWith("MBY") || r.startsWith("MB-")) return "Mbiyo";
+    if (r.startsWith("OP-") || r.startsWith("TR-")) return "OmniPay";
+    if (r.startsWith("CP-")) return "ClaPay";
     if (p === "westpay") return "Mbiyo";
     if (p === "sms") return "SMS";
     return "WestPay";
