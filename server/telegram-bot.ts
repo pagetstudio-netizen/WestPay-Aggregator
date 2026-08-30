@@ -3505,17 +3505,48 @@ export async function initTelegramBotFromDb(): Promise<Telegraf | null> {
 
 export async function reloadMainBot(newToken: string): Promise<{ ok: boolean; error?: string; username?: string }> {
   try {
+    // Valider le nouveau token avant d'arrêter le bot actuel ou de l'enregistrer.
+    // Sinon une faute de frappe peut à la fois couper le bot actif et persister
+    // un token invalide qui cassera le prochain redémarrage.
+    const candidateBot = new Telegraf(newToken);
+    const me = await candidateBot.telegram.getMe();
+
     if (bot) {
       try { bot.stop("reload"); } catch {}
       bot = null;
     }
+    _pollingActive = false;
     await storage.setSetting("telegram_bot_token", newToken);
     const newBot = initTelegramBot(newToken);
     if (!newBot) return { ok: false, error: "Impossible d'initialiser le bot" };
-    const me = await newBot.telegram.getMe();
+
     const isProductionEnv = process.env.NODE_ENV === "production" ||
       (!process.env.REPLIT_DEV_DOMAIN && !!process.env.APP_URL);
-    if (!isProductionEnv) {
+
+    if (isProductionEnv) {
+      // Le webhook est lié au token du bot Telegram. Après un changement de
+      // token, le webhook de l'ancien bot ne peut pas servir au nouveau bot.
+      // La route Express est déjà enregistrée lorsque cette action admin est
+      // disponible, il suffit donc de publier le webhook pour le nouveau token.
+      let webhookSecret = await storage.getSetting("telegram_webhook_secret");
+      if (!webhookSecret) {
+        const { randomBytes } = await import("crypto");
+        webhookSecret = randomBytes(24).toString("hex");
+        await storage.setSetting("telegram_webhook_secret", webhookSecret);
+      }
+      const appUrl = (process.env.APP_URL || "https://westpay.cfd").trim().replace(/\/+$/, "");
+      const webhookUrl = `${appUrl}/api/telegram/webhook/${webhookSecret}`;
+      await registerWebhookUrl(webhookUrl);
+
+      const webhookInfo = await newBot.telegram.getWebhookInfo();
+      if (webhookInfo.url !== webhookUrl) {
+        return {
+          ok: false,
+          username: me.username,
+          error: "Bot validé, mais le webhook Telegram n'a pas pu être configuré",
+        };
+      }
+    } else {
       startPolling();
     }
     return { ok: true, username: me.username };
