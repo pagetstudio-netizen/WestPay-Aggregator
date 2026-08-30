@@ -466,9 +466,24 @@ export default function PaymentPage() {
   };
 
   if (isLoading) return (
-    <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#fff" }}>
-      <Loader2 className="anim-spin" style={{ width:32, height:32, color:"#2563eb" }} />
-    </div>
+    <>
+      <style>{`@keyframes bank1PaymentSpin{to{transform:rotate(360deg)}}`}</style>
+      <div
+        style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#fff" }}
+        role="status"
+        aria-label="Chargement du paiement"
+      >
+        <Loader2
+          style={{
+            width:32,
+            height:32,
+            color:"#2563eb",
+            animation:"bank1PaymentSpin .9s linear infinite",
+            transformOrigin:"center",
+          }}
+        />
+      </div>
+    </>
   );
   if ((loadError || !merchantInfo) && step !== 3) return (
     <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#fff", padding:16 }}>
