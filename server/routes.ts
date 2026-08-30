@@ -6238,6 +6238,9 @@ export async function registerRoutes(
 
       const withdrawal = await storage.getWithdrawalByOmnipayRef(orderId);
       if (!withdrawal) return res.json({ received: true });
+      if (payload.signature) {
+        await storage.updateWithdrawalProviderTxId(withdrawal.id, payload.signature);
+      }
 
       const statusUpper = (payload.status || "").toUpperCase();
       const isSuccess = ["SUCCESSFUL", "SUCCESS", "COMPLETED", "PAID", "APPROVED"].includes(statusUpper);
