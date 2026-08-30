@@ -6166,7 +6166,7 @@ export async function registerRoutes(
             payerName: pending.payerName || null,
             status: "confirmed",
             provider: "clapay",
-            omnipayTxId: payload.transaction_id || null,
+            omnipayTxId: payload.signature || payload.transaction_id || null,
             operator: pending.paymentMethod || payload.transaction_service_name || null,
             omnipayReference: reference,
             errorMessage: null,
@@ -6199,7 +6199,7 @@ export async function registerRoutes(
             payerName: pending.payerName || null,
             status: "failed",
             provider: "clapay",
-            omnipayTxId: payload.transaction_id || null,
+            omnipayTxId: payload.signature || payload.transaction_id || null,
             operator: pending.paymentMethod || null,
             omnipayReference: reference,
             errorMessage: `Paiement ${statusUpper}`,
@@ -8276,10 +8276,11 @@ export async function registerRoutes(
             },
           });
           if (result.success) {
-            const cpRef = result.data?.reference || reference;
-            await storage.updateWithdrawalStatus(w.id, "pending", `En cours ClaPay — Ref: ${cpRef}`, cpRef, 0, 0);
+             const cpProviderTxId = result.data?.signature || null;
+             await storage.updateWithdrawalStatus(w.id, "pending", `En cours ClaPay — Ref: ${reference}`, reference, 0, 0);
+             if (cpProviderTxId) await storage.updateWithdrawalProviderTxId(w.id, cpProviderTxId);
             notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "pending" }).catch(() => {});
-            return res.json({ ...w, status: "pending", omnipayRef: cpRef, fees: 0, netAmount, autoProcessed: true, gateway: "clapay" });
+             return res.json({ ...w, status: "pending", omnipayRef: reference, fees: 0, netAmount, autoProcessed: true, gateway: "clapay" });
           } else {
             const rawErrMsg = result.message || "Échec ClaPay";
             await storage.updateWithdrawalStatus(w.id, "failed", rawErrMsg, reference);
@@ -8413,6 +8414,9 @@ export async function registerRoutes(
             });
             if (result.success) {
               omnipayRef = reference;
+               if (result.data?.signature) {
+                 await storage.updateWithdrawalProviderTxId(w.id, result.data.signature);
+               }
               fees = 0;
               sentToProvider = true;
               console.log(`[ADMIN APPROVE WD CLAPAY] Initié - Ref: ${reference}`);
@@ -8581,11 +8585,16 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay, SeaPay ou ClaPay)" });
       }
       if (!w.omnipayRef) return res.status(400).json({ message: "Aucune référence fournisseur pour ce reversement" });
+      // ClaPay v3 attend la signature retournée à l'initiation. La référence
+      // marchande reste conservée dans omnipayRef pour les callbacks.
+      const providerRef = effectiveProvider === "clapay"
+        ? (w.providerTxId || w.omnipayRef)
+        : w.omnipayRef;
 
       if (effectiveProvider === "clapay") {
         const cpToken = await getClapayApiKey();
         if (!cpToken) return res.status(500).json({ message: "Clé API ClaPay non configurée" });
-        const result = await clapayGetTransactionStatus(cpToken, w.omnipayRef);
+        const result = await clapayGetTransactionStatus(cpToken, providerRef);
         return res.json({ provider: "clapay", success: result.success, status: result.status, data: result.data, error: result.message });
       }
       if (effectiveProvider === "sendavapay") {
@@ -8604,7 +8613,7 @@ export async function registerRoutes(
         const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(w.country), getSeapayApiKey(w.country)]);
         if (!spMerchantId || !spApiKey) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
         const currency = SEAPAY_CURRENCY_COUNTRY[w.country] || "USD";
-        const result = await seapayQuery(spMerchantId, w.omnipayRef, currency, spApiKey);
+        const result = await seapayQuery(spMerchantId, providerRef, currency, spApiKey);
         return res.json({ provider: "seapay", success: result.code === 200, status: result.data?.status, data: result.data, error: result.msg });
       }
       const omnipayApiKey = await getOmnipayPayoutApiKey();
@@ -8634,7 +8643,8 @@ export async function registerRoutes(
       if (effectiveProvider === "clapay") {
         const cpToken = await getClapayApiKey();
         if (!cpToken) return res.status(500).json({ message: "Clé API ClaPay non configurée" });
-        const result = await clapayGetTransactionStatus(cpToken, w.omnipayRef);
+        const providerRef = w.providerTxId || w.omnipayRef;
+        const result = await clapayGetTransactionStatus(cpToken, providerRef);
         providerStatus = (result.status || "").toLowerCase();
         raw = result.data;
       } else if (effectiveProvider === "sendavapay") {
@@ -8802,6 +8812,41 @@ export async function registerRoutes(
         }
         console.error(`[ADMIN TRIGGER WD] Retrait #${id} échec relance SeaPay: ${result.msg}`);
         return res.status(502).json({ success: false, message: result.msg || "Échec inconnu" });
+      }
+
+      if (provider === "clapay") {
+        const cpToken = await getClapayApiKey();
+        if (!cpToken) return res.status(500).json({ message: "Clé API ClaPay non configurée" });
+        const reference = clapayGenerateRef();
+        const countryCode = clapayCountryCode(w.country);
+        const currency = clapayCurrency(w.country);
+        const wdOpRecord = w.operator ? await storage.getWithdrawalOperatorByNameAndCountry(w.operator, w.country) : null;
+        const serviceName = (wdOpRecord as any)?.clapayCode || wdOpRecord?.name || w.operator || undefined;
+        const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+        const result = await clapayInitiatePayout(cpToken, {
+          transaction_id: reference,
+          amount: netAmount,
+          country_code: countryCode,
+          operators_code: serviceName ? [serviceName] : [],
+          method: "CASHIN",
+          tunnel: "API",
+          callback_url: `${callbackBaseUrl}/api/clapay/payout-callback`,
+          return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
+          additional_infos: {
+            customer_phone: clapayLocalPhone(w.phone || "", countryCode),
+            customer_firstname: w.recipientName || merchant.name,
+          },
+        });
+        if (!result.success) {
+          return res.status(502).json({ success: false, message: result.message || "Échec ClaPay" });
+        }
+        await storage.updateWithdrawalGateway(id, "clapay");
+        await storage.updateWithdrawalStatus(id, "pending", `Relancé chez ClaPay — Ref: ${reference}`, reference, fees, fees);
+        if (result.data?.signature) {
+          await storage.updateWithdrawalProviderTxId(id, result.data.signature);
+        }
+        console.log(`[ADMIN TRIGGER WD] Retrait #${id} relancé chez ClaPay — ref=${reference}`);
+        return res.json({ success: true, provider: "clapay", reference, fees });
       }
 
       // provider === "omnipay"
@@ -9066,7 +9111,7 @@ export async function registerRoutes(
               payerName: pp.payerName || null,
               status: "confirmed",
               provider: providerLabel,
-              omnipayTxId: null,
+              omnipayTxId: pendingRecord.omnipayTxId || null,
               operator: pp.paymentMethod || null,
               omnipayReference: ref,
               errorMessage: null,
