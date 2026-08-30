@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -27,16 +27,18 @@ import { useState, useEffect } from "react";
 
 function Router() {
   const [adminPath, setAdminPath] = useState<string>(ADMIN_PATH);
+  const [location] = useLocation();
   const hostname = window.location.hostname.toLowerCase();
+  const currentPath = location.replace(/\/+$/, "") || "/";
   const isBank2Host = hostname === "payment.bank2.westpay.cfd";
   const isSecureDocsHost = hostname === "secure.docs.westpay.cfd";
   const isDashboardHost = hostname === "dashboard.westpay.cfd";
   const isLegacyDocsPath = !isSecureDocsHost &&
-    window.location.pathname.replace(/\/+$/, "") === "/api-docs";
-  const isMerchantLoginPath = window.location.pathname.replace(/\/+$/, "") === "/merchant/index/login";
+    currentPath === "/api-docs";
+  const isMerchantLoginPath = currentPath === "/merchant/index/login";
   const isLegacyMerchantLoginPath =
-    window.location.pathname.replace(/\/+$/, "") === "/merchant/login";
-  const isBank2Root = window.location.pathname === "/" && window.location.search === "";
+    currentPath === "/merchant/login";
+  const isBank2Root = currentPath === "/" && window.location.search === "";
 
   useEffect(() => {
     // Injection HTML par Node.js a fonctionné → rien à faire.
