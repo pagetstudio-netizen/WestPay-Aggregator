@@ -9,6 +9,7 @@ import { db, pool, financialDb, financialPool } from "./db";
 import { generateSecret as totpGenerateSecret, generateURI as totpGenerateURI, verifySync as totpVerifySync } from "otplib";
 import QRCode from "qrcode";
 import { admins, merchantCountries, transactions, pendingPayments } from "@shared/schema";
+import { normalizeEmailInput } from "@shared/email-validation";
 import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -1154,16 +1155,6 @@ export async function registerRoutes(
     return raw || "unknown";
   }
 
-  // ── Validation email — rejette les payloads d'injection ───────────────────────
-  function isValidEmailInput(email: unknown): email is string {
-    if (typeof email !== "string") return false;
-    if (email.length > 254) return false;
-    // Rejette tout ce qui ressemble à du JSON, NoSQL injection, ou script
-    if (/[{}<>$]/.test(email)) return false;
-    // Validation basique format email
-    return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
-  }
-
   // ── Helpers sécurité ─────────────────────────────────────────────────────────
   function parseUa(ua: string): { browser: string; os: string } {
     const browser = ua.includes("Firefox") ? "Firefox" : ua.includes("Edg") ? "Edge" : ua.includes("Chrome") ? "Chrome" : ua.includes("Safari") ? "Safari" : "Autre";
@@ -1191,9 +1182,12 @@ export async function registerRoutes(
   // ==================== AUTH ====================
   app.post("/api/auth/admin/login", async (req, res) => {
     try {
-      const { email, password } = req.body;
-      // Validation stricte du format email — rejette injections JSON/NoSQL/script
-      if (!isValidEmailInput(email) || !password) return res.status(400).json({ message: "Email et mot de passe requis" });
+      const { email: rawEmail, password } = req.body ?? {};
+      const email = normalizeEmailInput(rawEmail);
+      // Validation stricte avant toute recherche — la requête DB reste paramétrée.
+      if (!email || typeof password !== "string" || password.length === 0) {
+        return res.status(400).json({ message: "Email et mot de passe requis" });
+      }
 
       const clientIp = getClientIp(req);
       const ua = req.headers["user-agent"] || "?";
@@ -1747,9 +1741,12 @@ export async function registerRoutes(
 
   app.post("/api/auth/merchant/login", async (req, res) => {
     try {
-      const { email, password } = req.body;
-      // Validation stricte du format email — rejette injections JSON/NoSQL/script
-      if (!isValidEmailInput(email) || !password) return res.status(400).json({ message: "Email et mot de passe requis" });
+      const { email: rawEmail, password } = req.body ?? {};
+      const email = normalizeEmailInput(rawEmail);
+      // Validation stricte avant toute recherche — la requête DB reste paramétrée.
+      if (!email || typeof password !== "string" || password.length === 0) {
+        return res.status(400).json({ message: "Email et mot de passe requis" });
+      }
 
       const clientIp = getClientIp(req);
       const ua = req.headers["user-agent"] || "?";
@@ -3675,11 +3672,14 @@ export async function registerRoutes(
   // ==================== API DOCS ACCESS (PIN protected) ====================
   app.post("/api/docs/access", docsAccessRateLimit, async (req, res) => {
     try {
-      const { email, pin } = req.body;
-      if (!email || !pin) return res.status(400).json({ message: "Email et code PIN requis" });
+      const { email: rawEmail, pin } = req.body ?? {};
+      const email = normalizeEmailInput(rawEmail);
+      if (!email || typeof pin !== "string" || !/^\d{6}$/.test(pin)) {
+        return res.status(400).json({ message: "Email valide et code PIN à 6 chiffres requis" });
+      }
 
       // Per-account lockout (defeats IP rotation): check global failed-attempt count for this email
-      const emailKey = (email as string).toLowerCase().trim();
+      const emailKey = email;
       const now = Date.now();
       const acctEntry = docsAccountLockStore.get(emailKey) || { count: 0, firstAttempt: now };
       if (now - acctEntry.firstAttempt > DOCS_ACCOUNT_WINDOW) { acctEntry.count = 0; acctEntry.firstAttempt = now; }

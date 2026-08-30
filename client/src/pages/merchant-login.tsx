@@ -6,6 +6,7 @@ import { Eye, EyeOff, Loader2, Shield, Lock, Mail, CheckCircle2, Zap, Globe, Arr
 import { SiTelegram } from "react-icons/si";
 import Captcha, { generateCaptchaCode } from "@/components/Captcha";
 import { useLanguage } from "@/lib/language";
+import { normalizeEmailInput } from "@shared/email-validation";
 
 const FEATURES = [
   { icon: Zap, label: "Encaissements Mobile Money en temps réel" },
@@ -151,6 +152,15 @@ export default function MerchantLogin() {
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
+    const normalizedEmail = normalizeEmailInput(email);
+    if (!normalizedEmail) {
+      toast({
+        title: "E-mail invalide",
+        description: "Saisissez une adresse e-mail valide.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     // Validate CAPTCHA
     if (captchaInput.toUpperCase().trim() !== captchaCode.toUpperCase()) {
@@ -166,7 +176,7 @@ export default function MerchantLogin() {
       const res = await fetch("/api/auth/merchant/login", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(fp ? { "X-Device-FP": fp } : {}) },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: normalizedEmail, password }),
       });
       const data = await readApiJson(
         res,
@@ -176,7 +186,7 @@ export default function MerchantLogin() {
 
       if (data.requiresOtp) {
         setOtpToken(data.tempToken);
-        setOtpEmail(email);
+        setOtpEmail(normalizedEmail);
         setOtpMerchantName(data.merchantName || "");
         setOtpStep(true);
         setOtpCountdown(60);
@@ -185,7 +195,7 @@ export default function MerchantLogin() {
           title: t("authCodeSent"),
           description: data.otpVia === "telegram"
             ? "Your verification code was sent to your Telegram group."
-            : `A verification code was sent to ${email}`,
+            : `A verification code was sent to ${normalizedEmail}`,
         });
         return;
       }
@@ -588,6 +598,7 @@ export default function MerchantLogin() {
                   placeholder="Email"
                   aria-label="Email"
                   required
+                  maxLength={254}
                   autoComplete="username"
                   data-testid="input-merchant-email"
                 />

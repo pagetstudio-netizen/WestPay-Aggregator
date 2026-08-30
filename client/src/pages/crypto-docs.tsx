@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { useLanguage } from "@/lib/language";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { copyTextToClipboard } from "@/lib/clipboard";
+import { normalizeEmailInput } from "@shared/email-validation";
 import {
   Shield, Lock, Loader2, BookOpen, Code, Server, Key,
   ArrowRight, CheckCircle, AlertTriangle, Globe, Bell, Menu, X,
@@ -105,12 +106,22 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
 
   const handleSubmit = async (e: { preventDefault: () => void }) => {
     e.preventDefault();
+    const normalizedEmail = normalizeEmailInput(email);
+    if (!normalizedEmail) {
+      toast({
+        title: "E-mail invalide",
+        description: "Saisissez une adresse e-mail valide.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsLoading(true);
     try {
       const res = await fetch("/api/docs/access", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, pin }),
+        body: JSON.stringify({ email: normalizedEmail, pin }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || t("docsInvalidPin"));
@@ -144,7 +155,8 @@ function PinGate({ onAccess }: { onAccess: (data: { token: string; merchant: { n
             <div className="space-y-1.5">
               <Label htmlFor="doc-email">{t("merchant")} Email</Label>
               <Input id="doc-email" type="email" value={email} onChange={e => setEmail(e.target.value)}
-                placeholder="contact@votreboite.com" required data-testid="input-crypto-docs-email" />
+                placeholder="contact@votreboite.com" required maxLength={254} autoComplete="email"
+                data-testid="input-crypto-docs-email" />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="doc-pin">{t("docsPinLabel")}</Label>
