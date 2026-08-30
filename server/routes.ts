@@ -7614,7 +7614,10 @@ export async function registerRoutes(
       // Vérifier si les virements inter-wallets sont globalement désactivés
       const walletTransfersDisabledFlag = await storage.getSetting("wallet_transfers_disabled");
       if (walletTransfersDisabledFlag === "true") {
-        return res.status(403).json({ message: "Les virements inter-wallets sont temporairement désactivés par l'administrateur." });
+        return res.status(403).json({
+          code: "WALLET_EXCHANGE_UNAVAILABLE",
+          message: "Wallet exchange is unavailable",
+        });
       }
 
       const wtMerchantForFee = await storage.getMerchantById(merchantId);

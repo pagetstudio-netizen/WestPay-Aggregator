@@ -2175,7 +2175,12 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify(data),
       });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
+      if (!res.ok) {
+        const d = await res.json();
+        const error = new Error(d.message || "Erreur") as Error & { code?: string };
+        error.code = d.code;
+        throw error;
+      }
       return res.json();
     },
     onSuccess: (data: WalletTransfer) => {
@@ -2189,7 +2194,13 @@ function WalletTransfersPanel({ token }: { token: string | null }) {
       });
       setFromCountryId(""); setToCountryId(""); setAmount("");
     },
-    onError: (err: any) => toast({ title: "Action non effectuée", description: sanitizePaymentMessage(err.message), variant: "destructive" }),
+     onError: (err: any) => {
+       if (err?.code === "WALLET_EXCHANGE_UNAVAILABLE" || err?.message === "Wallet exchange is unavailable") {
+         toast({ title: "Wallet exchange is unavailable", variant: "destructive" });
+         return;
+       }
+       toast({ title: "Action non effectuée", description: sanitizePaymentMessage(err.message), variant: "destructive" });
+     },
   });
 
   const handleSubmit = (e: { preventDefault: () => void }) => {
