@@ -4,3 +4,4 @@
 - [NoWallet (ClaPay) API v3](nowallet-v3-integration.md) — payloads, phone format, tunnel modes, and status check endpoint differ significantly from older API.
 - [Dual-database architecture](dual-db-architecture.md) — Auth tables on Supabase (AUTH_DATABASE_URL), financial tables on Neon (FINANCIAL_DATABASE_URL). Cross-DB FKs impossible: enforced at app layer.
 - [Plesk deploy.sh root cause](plesk-deploy-root-cause.md) — deploy.sh ran npm run build which deletes dist/ first; if build fails on server, dist/ is gone → Passenger crash. Fix: remove build step, use pre-built dist/ from git.
+- [GitHub shell authentication](github-shell-auth.md) — attaching Replit’s GitHub connection does not necessarily authenticate local `git push`; use the workspace Git flow or secure API path.
