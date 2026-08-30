@@ -382,7 +382,7 @@ if (process.env.NODE_ENV === "production") {
 
   // Telegram main bot
   try {
-    const { initTelegramBotFromDb: initTelegramBot, setupWebhook, registerWebhookUrl, startPolling } = await import("./telegram-bot");
+    const { initTelegramBotFromDb: initTelegramBot, setupWebhook, registerWebhookUrl, startWebhookWatchdog, startPolling } = await import("./telegram-bot");
     const { storage } = await import("./storage");
 
     const telegramBot = await initTelegramBot();
@@ -409,6 +409,7 @@ if (process.env.NODE_ENV === "production") {
       if (isProductionEnv) {
         console.log(`[TELEGRAM] Mode production (webhook) — URL : ${webhookUrl}`);
         await registerWebhookUrl(webhookUrl);
+        startWebhookWatchdog(webhookUrl);
       } else {
         // En dev Replit : NE PAS supprimer le webhook — cela couperait la production.
         // On tente le polling ; si un webhook de prod est actif, la 409 est ignorée silencieusement.

@@ -2076,12 +2076,12 @@ export function handleWebhookUpdate(secret: string, body: any): boolean {
   return true;
 }
 
-async function tryRegisterWebhook(webhookUrl: string): Promise<boolean> {
+async function tryRegisterWebhook(webhookUrl: string, force = false): Promise<boolean> {
   if (!bot) return false;
   try {
     const current = await bot.telegram.getWebhookInfo();
     console.log(`[TELEGRAM] Webhook actuel : "${current.url || "(vide)"}"`);
-    if (current.url === webhookUrl) {
+    if (!force && current.url === webhookUrl) {
       console.log(`[TELEGRAM] Webhook deja actif — aucune action requise`);
       return true;
     }
@@ -2119,6 +2119,56 @@ export async function registerWebhookUrl(webhookUrl: string): Promise<void> {
 }
 
 let _pollingActive = false;
+let _webhookWatchdog: ReturnType<typeof setInterval> | null = null;
+let _webhookWatchdogUrl: string | null = null;
+
+/**
+ * Surveille le webhook en production.
+ *
+ * Telegram conserve parfois une URL configurée mais cesse de livrer les
+ * updates après une erreur TLS, un redémarrage Passenger ou une interruption
+ * réseau. Dans ce cas le bot paraît "endormi" alors que le processus Node est
+ * toujours vivant. Cette vérification légère répare automatiquement le
+ * webhook, sans supprimer les updates en attente.
+ */
+export function startWebhookWatchdog(webhookUrl: string): void {
+  if (_webhookWatchdog && _webhookWatchdogUrl === webhookUrl) return;
+  if (_webhookWatchdog) clearInterval(_webhookWatchdog);
+  _webhookWatchdogUrl = webhookUrl;
+
+  const check = async () => {
+    if (!bot || _webhookWatchdogUrl !== webhookUrl) return;
+    try {
+      const info = await bot.telegram.getWebhookInfo();
+      const hasError = !!(info as any).last_error_message;
+      const wrongUrl = info.url !== webhookUrl;
+      if (!wrongUrl && !hasError) {
+        console.log(`[TELEGRAM] Webhook watchdog : OK (en attente: ${info.pending_update_count || 0})`);
+        return;
+      }
+
+      console.warn(
+        `[TELEGRAM] Webhook watchdog : réparation nécessaire` +
+        `${wrongUrl ? ` — URL inattendue "${info.url || "(vide)"}"` : ""}` +
+        `${hasError ? ` — ${String((info as any).last_error_message).slice(0, 180)}` : ""}`,
+      );
+      await tryRegisterWebhook(webhookUrl, true);
+    } catch (err: any) {
+      console.error("[TELEGRAM] Webhook watchdog indisponible:", err?.message || err);
+    }
+  };
+
+  // Première vérification après le démarrage, puis toutes les 5 minutes.
+  void check();
+  _webhookWatchdog = setInterval(() => { void check(); }, 5 * 60 * 1000);
+  console.log("[TELEGRAM] Webhook watchdog activé (vérification toutes les 5 min)");
+}
+
+export function stopWebhookWatchdog(): void {
+  if (_webhookWatchdog) clearInterval(_webhookWatchdog);
+  _webhookWatchdog = null;
+  _webhookWatchdogUrl = null;
+}
 
 export async function startPolling(): Promise<void> {
   if (!bot) return;
@@ -3516,6 +3566,7 @@ export async function reloadMainBot(newToken: string): Promise<{ ok: boolean; er
       bot = null;
     }
     _pollingActive = false;
+    stopWebhookWatchdog();
     await storage.setSetting("telegram_bot_token", newToken);
     const newBot = initTelegramBot(newToken);
     if (!newBot) return { ok: false, error: "Impossible d'initialiser le bot" };
@@ -3537,6 +3588,7 @@ export async function reloadMainBot(newToken: string): Promise<{ ok: boolean; er
       const appUrl = (process.env.APP_URL || "https://westpay.cfd").trim().replace(/\/+$/, "");
       const webhookUrl = `${appUrl}/api/telegram/webhook/${webhookSecret}`;
       await registerWebhookUrl(webhookUrl);
+      startWebhookWatchdog(webhookUrl);
 
       const webhookInfo = await newBot.telegram.getWebhookInfo();
       if (webhookInfo.url !== webhookUrl) {
