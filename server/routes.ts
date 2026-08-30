@@ -8844,7 +8844,7 @@ export async function registerRoutes(
           method: "CASHIN",
           tunnel: "API",
           callback_url: `${callbackBaseUrl}/api/clapay/payout-callback`,
-          return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&clapay_return=1`,
+          return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
           additional_infos: {
             customer_phone: clapayLocalPhone(w.phone || "", countryCode),
             customer_firstname: w.recipientName || merchant.name,
