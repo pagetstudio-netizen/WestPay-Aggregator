@@ -180,7 +180,7 @@ export default function PaymentPage() {
   const [redirectUrl, setRedirectUrl] = useState(redirectUrlParam);
   const redirectRef   = useRef(redirectUrlParam);
 
-  const [step,         setStep]        = useState(omnipayStatus === "complete" ? 3 : 1);
+  const [step,         setStep]        = useState(omnipayStatus === "complete" && !clapayReturn ? 3 : 1);
   const [merchantInfo, setMerchantInfo]= useState<MerchantInfo | null>(null);
   const [isLoading,    setIsLoading]   = useState(true);
   const [loadError,    setLoadError]   = useState<string | null>(null);
@@ -266,6 +266,38 @@ export default function PaymentPage() {
 
   /* ── fetch merchant ─────────────────────────────────────────────────── */
   useEffect(() => {
+    if (clapayReturn && refParam) {
+      setIsLoading(true);
+      fetch(`/api/payment/by-ref/${encodeURIComponent(refParam)}`)
+        .then(async r => {
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.message || t("payLinkNotFound"));
+          return d;
+        })
+        .then(d => {
+          if (d.amount) setAmount(d.amount);
+          if (d.redirectUrl) { setRedirectUrl(d.redirectUrl); redirectRef.current = d.redirectUrl; }
+          if (d.omnipayReference) setOmniRef(d.omnipayReference);
+          if (d.paymentId) setPaymentId(d.paymentId);
+          if (d.merchantName || d.merchantSlug) {
+            setMerchantInfo({ name: d.merchantName || d.merchantSlug, slug: d.merchantSlug || "", countries: d.country ? [d.country] : [] });
+          }
+          if (["omnipay_confirmed", "confirmed"].includes(d.status)) {
+            setConfirmedAt(new Date());
+            setStep(3);
+          } else if (["omnipay_failed", "omnipay_error", "failed", "expired"].includes(d.status)) {
+            setFailed(true);
+            setFailReason(t("payFailedDesc"));
+            setStep(2);
+          } else {
+            setStep(2);
+            if (d.paymentId) startPolling(d.paymentId);
+          }
+        })
+        .catch(e => setLoadError(e.message || t("payLinkNotFound")))
+        .finally(() => setIsLoading(false));
+      return;
+    }
     if (omnipayStatus === "complete" && refParam) {
       setIsLoading(false);
       fetch(`/api/payment/by-ref/${encodeURIComponent(refParam)}`)
