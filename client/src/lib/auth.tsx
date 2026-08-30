@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
 
 interface AuthUser {
   id: number;
@@ -12,6 +12,7 @@ interface AuthContextType {
   user: AuthUser | null;
   token: string | null;        // en mémoire uniquement — jamais dans localStorage
   login: (token: string, user: AuthUser) => void;
+  restoreUser: (user: AuthUser) => void;
   logout: () => void;
   isLoading: boolean;
 }
@@ -41,25 +42,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
   }, []);
 
-  const login = (newToken: string, newUser: AuthUser) => {
+  const login = useCallback((newToken: string, newUser: AuthUser) => {
     // Stocker le token en mémoire React seulement (perdu au refresh — le cookie prend le relai)
     setToken(newToken);
     setUser(newUser);
     // Stocker uniquement les infos d'affichage non sensibles
     localStorage.setItem("westpay_user", JSON.stringify(newUser));
     // NE PLUS stocker le token JWT dans localStorage (protection XSS)
-  };
+  }, []);
 
-  const logout = () => {
+  const restoreUser = useCallback((restoredUser: AuthUser) => {
+    // Après un rechargement, le JWT reste uniquement dans le cookie httpOnly.
+    // Cette méthode restaure les seules informations d'affichage renvoyées
+    // par le serveur, sans créer ni stocker de token côté navigateur.
+    setUser(restoredUser);
+    localStorage.setItem("westpay_user", JSON.stringify(restoredUser));
+  }, []);
+
+  const logout = useCallback(() => {
     setToken(null);
     setUser(null);
     localStorage.removeItem("westpay_user");
     // Effacer le cookie httpOnly côté serveur
     fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
-  };
+  }, []);
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, token, login, restoreUser, logout, isLoading }}>
       {children}
     </AuthContext.Provider>
   );

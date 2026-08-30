@@ -67,8 +67,9 @@ export default function MerchantLogin() {
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpResendLoading, setOtpResendLoading] = useState(false);
   const [otpCountdown, setOtpCountdown] = useState(0);
+  const [sessionChecking, setSessionChecking] = useState(true);
 
-  const { login } = useAuth();
+  const { login, restoreUser, logout, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { t } = useLanguage();
@@ -82,6 +83,58 @@ export default function MerchantLogin() {
       })
       .catch(() => setIpStatus("allowed"));
   }, [setLocation]);
+
+  // Si le visiteur possède encore un cookie de session valide, il n'a pas
+  // besoin de remplir à nouveau le formulaire de connexion.
+  useEffect(() => {
+    if (authLoading || ipStatus !== "allowed") return;
+
+    let cancelled = false;
+    const restoreMerchantSession = async () => {
+      try {
+        const res = await fetch("/api/merchant/me", {
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        if (!res.ok) {
+          // Un cookie expiré, révoqué ou associé à un compte supprimé ne doit
+          // pas conserver un ancien marchand affiché dans localStorage.
+          if (res.status === 401 || res.status === 403) logout();
+          if (!cancelled) setSessionChecking(false);
+          return;
+        }
+
+        const merchant = await res.json();
+        if (!merchant?.id || !merchant?.slug || !merchant?.email) {
+          if (!cancelled) setSessionChecking(false);
+          return;
+        }
+
+        restoreUser({
+          id: merchant.id,
+          email: merchant.email,
+          role: "merchant",
+          name: merchant.name,
+          slug: merchant.slug,
+        });
+
+        if (!cancelled) {
+          setSessionChecking(false);
+          setLocation(`/merchant/${encodeURIComponent(merchant.slug)}`);
+        }
+      } catch {
+        // Une erreur réseau ne doit pas supprimer une session locale ni
+        // empêcher l'utilisateur de se connecter manuellement.
+        if (!cancelled) setSessionChecking(false);
+      }
+    };
+
+    restoreMerchantSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, ipStatus, logout, restoreUser, setLocation]);
 
   // Countdown timer for OTP resend
   useEffect(() => {
@@ -220,7 +273,7 @@ export default function MerchantLogin() {
     }
   }, [email, password, otpEmail, otpCountdown, toast]);
 
-  if (ipStatus === "checking") {
+  if (ipStatus === "checking" || authLoading || sessionChecking) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
         <div className="flex flex-col items-center gap-4">
