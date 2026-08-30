@@ -4371,7 +4371,7 @@ export async function registerRoutes(
         const currency = mbiyoCurrency(country);
         const network = operatorRecord?.mbiyoCode || mbiyoNetwork(operator || paymentMethod);
         const callbackUrl = `${callbackBaseUrl}/api/mbiyo/callback`;
-        const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
+        const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&clapay_return=1`;
 
         try {
           const mbiyoResult = await mbiyoInitiatePayin({
@@ -4784,6 +4784,7 @@ export async function registerRoutes(
         country: pending.country,
         redirectUrl: pending.redirectUrl || null,
         status: pending.status,
+        gateway: pending.gateway,
         omnipayReference: pending.omnipayReference,
       });
     } catch (err: any) {
@@ -8834,7 +8835,7 @@ export async function registerRoutes(
           method: "CASHIN",
           tunnel: "API",
           callback_url: `${callbackBaseUrl}/api/clapay/payout-callback`,
-          return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
+          return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&clapay_return=1`,
           additional_infos: {
             customer_phone: clapayLocalPhone(w.phone || "", countryCode),
             customer_firstname: w.recipientName || merchant.name,
