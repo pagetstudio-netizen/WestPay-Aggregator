@@ -2140,9 +2140,11 @@ export function startWebhookWatchdog(webhookUrl: string): void {
     if (!bot || _webhookWatchdogUrl !== webhookUrl) return;
     try {
       const info = await bot.telegram.getWebhookInfo();
-      const hasError = !!(info as any).last_error_message;
+      const lastErrorDate = Number((info as any).last_error_date || 0) * 1000;
+      const hasRecentError = !!(info as any).last_error_message &&
+        (!lastErrorDate || Date.now() - lastErrorDate <= 10 * 60 * 1000);
       const wrongUrl = info.url !== webhookUrl;
-      if (!wrongUrl && !hasError) {
+      if (!wrongUrl && !hasRecentError) {
         console.log(`[TELEGRAM] Webhook watchdog : OK (en attente: ${info.pending_update_count || 0})`);
         return;
       }
@@ -2150,7 +2152,7 @@ export function startWebhookWatchdog(webhookUrl: string): void {
       console.warn(
         `[TELEGRAM] Webhook watchdog : réparation nécessaire` +
         `${wrongUrl ? ` — URL inattendue "${info.url || "(vide)"}"` : ""}` +
-        `${hasError ? ` — ${String((info as any).last_error_message).slice(0, 180)}` : ""}`,
+        `${hasRecentError ? ` — ${String((info as any).last_error_message).slice(0, 180)}` : ""}`,
       );
       await tryRegisterWebhook(webhookUrl, true);
     } catch (err: any) {
