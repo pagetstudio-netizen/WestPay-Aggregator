@@ -121,6 +121,7 @@ export async function runAuthMigrations() {
         crypto_api_key text,
         sdk_enabled boolean NOT NULL DEFAULT false,
         sdk_api_key text,
+        payin_disabled boolean NOT NULL DEFAULT false,
         withdrawals_disabled boolean NOT NULL DEFAULT false,
         custom_fee_rate real,
         token_invalidated_at timestamp,
@@ -311,6 +312,7 @@ export async function runAuthMigrations() {
     // ── Colonnes ajoutées après déploiement initial ──────────────────────────
     await client.query(`
       ALTER TABLE merchants ADD COLUMN IF NOT EXISTS custom_fee_rate REAL;
+      ALTER TABLE merchants ADD COLUMN IF NOT EXISTS payin_disabled BOOLEAN NOT NULL DEFAULT false;
     `);
 
     await client.query(`

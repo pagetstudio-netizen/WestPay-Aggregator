@@ -31,6 +31,7 @@ export const merchants = pgTable("merchants", {
   cryptoApiKey: text("crypto_api_key"),
   sdkEnabled: boolean("sdk_enabled").default(false).notNull(),
   sdkApiKey: text("sdk_api_key"),
+  payinDisabled: boolean("payin_disabled").default(false).notNull(),
   withdrawalsDisabled: boolean("withdrawals_disabled").default(false).notNull(),
   customFeeRate: real("custom_fee_rate"),   // % personnalisé (ex: 3.5 = 3.5%) — null = taux standard
   tokenInvalidatedAt: timestamp("token_invalidated_at"),

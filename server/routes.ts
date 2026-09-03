@@ -393,6 +393,8 @@ function toMerchantSafeMessage(msg: string | null | undefined): string {
     .trim();
 }
 
+const MERCHANT_PAYMENT_DISABLED_MESSAGE = "404 未经授权的付款";
+
 /* Pays fermés aux transferts inter-pays (wallet transfer interdit — devise isolée) */
 const NO_WALLET_TRANSFER_COUNTRIES = new Set(["Niger", "Kenya", "Ghana"]);
 
@@ -4303,6 +4305,9 @@ export async function registerRoutes(
       if (!merchant || merchant.suspended) {
         return res.status(404).json({ message: "Marchand introuvable ou suspendu" });
       }
+      if (merchant.payinDisabled) {
+        return res.status(404).json({ message: MERCHANT_PAYMENT_DISABLED_MESSAGE });
+      }
 
       const countries = await storage.getMerchantCountries(merchant.id);
       const merchantCountry = countries.find(c => c.country === country && c.active);
@@ -8137,43 +8142,10 @@ export async function registerRoutes(
         return res.status(503).json({ message: "Les retraits sont temporairement indisponibles. Veuillez réessayer plus tard.", withdrawalsDisabled: true });
       }
 
-      // ── Vérification désactivation par marchand + suivi tentatives ────────────
+      // ── Vérification désactivation payout par marchand ───────────────────────
       const merchantRecord = await storage.getMerchantById(merchantId);
       if (merchantRecord?.withdrawalsDisabled) {
-        const now = Date.now();
-        const retryKey = `wd_retry_${merchantId}`;
-        let retryData: { count: number; blockedUntil?: number } = { count: 0 };
-        const existing = await storage.getSetting(retryKey);
-        if (existing) {
-          try { retryData = JSON.parse(existing); } catch { retryData = { count: 0 }; }
-        }
-        if (retryData.blockedUntil && now < retryData.blockedUntil) {
-          const remaining = Math.ceil((retryData.blockedUntil - now) / 60000);
-          return res.status(503).json({
-            message: `Trop de tentatives. Les retraits sont bloqués sur votre compte. Réessayez dans ${remaining} minute(s).`,
-            withdrawalsDisabled: true,
-            blocked: true,
-            blockedUntil: retryData.blockedUntil,
-          });
-        }
-        const newCount = (retryData.count || 0) + 1;
-        if (newCount >= 3) {
-          const blockedUntil = now + 3 * 60 * 60 * 1000;
-          await storage.setSetting(retryKey, JSON.stringify({ count: newCount, blockedUntil }));
-          return res.status(503).json({
-            message: "Trop de tentatives. Les retraits sont bloqués sur votre compte. Réessayez dans 3 heures.",
-            withdrawalsDisabled: true,
-            blocked: true,
-            blockedUntil,
-          });
-        }
-        await storage.setSetting(retryKey, JSON.stringify({ count: newCount }));
-        return res.status(503).json({
-          message: "Les retraits sont désactivés sur votre compte. Veuillez patienter et réessayer dans quelques minutes.",
-          withdrawalsDisabled: true,
-          retryCount: newCount,
-          retriesLeft: 3 - newCount,
-        });
+        return res.status(404).json({ message: MERCHANT_PAYMENT_DISABLED_MESSAGE });
       }
 
       const mc = await storage.getMerchantCountryById(Number(merchantCountryId));
@@ -9875,6 +9847,9 @@ export async function registerRoutes(
       if (!merchant || merchant.suspended) {
         return res.status(404).json({ message: "Marchand introuvable ou suspendu" });
       }
+      if (merchant.payinDisabled) {
+        return res.status(404).json({ message: MERCHANT_PAYMENT_DISABLED_MESSAGE });
+      }
       const aggs = await storage.getCryptoAggregatorsByMerchant(merchant.id);
       if (aggs.length === 0) {
         return res.status(403).json({ message: "Le paiement crypto n'est pas activé pour ce marchand" });
@@ -10053,6 +10028,10 @@ export async function registerRoutes(
   app.post("/api/merchant/crypto/invoice", cryptoApiKeyAuthMiddleware, async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
+      const merchant = await storage.getMerchantById(merchantId);
+      if (merchant?.payinDisabled) {
+        return res.status(404).json({ message: MERCHANT_PAYMENT_DISABLED_MESSAGE });
+      }
       const { amount, currency, description, orderId, callbackUrl, returnUrl } = req.body;
       if (amount === undefined || amount === null || !currency) {
         return res.status(400).json({ message: "amount et currency sont requis" });
@@ -10188,6 +10167,10 @@ export async function registerRoutes(
   app.post("/api/merchant/crypto/withdraw", cryptoApiKeyAuthMiddleware, async (req, res) => {
     try {
       const merchantId = (req as any).user.id;
+      const merchant = await storage.getMerchantById(merchantId);
+      if (merchant?.withdrawalsDisabled) {
+        return res.status(404).json({ message: MERCHANT_PAYMENT_DISABLED_MESSAGE });
+      }
       const { currency, amount, walletAddress, network } = req.body;
       if (!currency?.trim() || !amount || !walletAddress?.trim()) {
         return res.status(400).json({ message: "currency, amount et walletAddress sont requis" });
@@ -10202,7 +10185,6 @@ export async function registerRoutes(
       if (amountNum > available) {
         return res.status(400).json({ message: `Solde insuffisant. Disponible : ${available.toFixed(8)} ${currency}` });
       }
-      const merchant = await storage.getMerchantById(merchantId);
       const withdrawFeeRate = merchant?.feeExempt ? 0 : CRYPTO_FEE_RATE;
       const feeAmount = amountNum * withdrawFeeRate;
       const netAmount = amountNum - feeAmount;
@@ -10446,6 +10428,9 @@ export async function registerRoutes(
   app.post("/api/sdk/v1/payin", sdkAuthMiddleware, async (req, res) => {
     try {
       const merchant = (req as any).sdkMerchant;
+      if (merchant.payinDisabled) {
+        return res.status(404).json({ status: "error", message: MERCHANT_PAYMENT_DISABLED_MESSAGE });
+      }
       const { amount, currency, order_id, callback_url, metadata } = req.body;
       if (!amount || !currency || !order_id || !callback_url || !metadata?.phone_number || !metadata?.network || !metadata?.country_code) {
         return res.status(400).json({ status: "error", message: "Paramètres manquants: amount, currency, order_id, callback_url, metadata.phone_number, metadata.network, metadata.country_code requis." });
@@ -10530,6 +10515,9 @@ export async function registerRoutes(
   app.post("/api/sdk/v1/payout", sdkAuthMiddleware, async (req, res) => {
     try {
       const merchant = (req as any).sdkMerchant;
+      if (merchant.withdrawalsDisabled) {
+        return res.status(404).json({ status: "error", message: MERCHANT_PAYMENT_DISABLED_MESSAGE });
+      }
       const { amount, currency, order_id, callback_url, metadata } = req.body;
       if (!amount || !currency || !order_id || !callback_url || !metadata?.phone_number || !metadata?.network || !metadata?.country_code) {
         return res.status(400).json({ status: "error", message: "Paramètres manquants: amount, currency, order_id, callback_url, metadata.phone_number, metadata.network, metadata.country_code requis." });
