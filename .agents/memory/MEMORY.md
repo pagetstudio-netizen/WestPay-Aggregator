@@ -6,3 +6,4 @@
 - [Plesk deploy.sh root cause](plesk-deploy-root-cause.md) — deploy.sh ran npm run build which deletes dist/ first; if build fails on server, dist/ is gone → Passenger crash. Fix: remove build step, use pre-built dist/ from git.
 - [GitHub shell authentication](github-shell-auth.md) — attaching Replit’s GitHub connection does not necessarily authenticate local `git push`; use the workspace Git flow or secure API path.
 - [Bank 1 loading state](bank1-loading-state.md) — the checkout spinner must define its animation before the page’s early loading return; validated working on mobile after deployment.
+- [Merchant payment disable flags](merchant-payment-disable.md) — keep payout on withdrawals_disabled; use payin_disabled separately and enforce both before transaction side effects.
