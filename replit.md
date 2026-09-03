@@ -135,7 +135,7 @@ admins, merchants, merchant_countries, transactions, sms_logs, numbers, settings
 - Install dependencies with `npm install`, then start the preview with `npm run dev` on port 5000.
 - The server requires the existing PostgreSQL databases before it can initialize routes and the frontend: `AUTH_DATABASE_URL` (auth/config database), `FINANCIAL_DATABASE_URL` (financial database), and `SESSION_SECRET`.
 - Optional provider credentials (OmniPay, Mbiyo, SendavaPay, SeaPay, OxaPay, Telegram, and AI services) can be added later through Replit Secrets or the admin settings where supported.
-- If the database variables are missing, the server remains listening on port 5000 and exposes `/api/healthz-boot`, but intentionally does not register application routes.
+- If the database variables are missing, the server remains listening on port 5000, serves the development frontend for preview, exposes `/api/healthz-boot`, and keeps application API routes blocked until configuration is complete.
 
 ## Déploiement Plesk
 - **Build** : `npm run build` → génère `dist/index.cjs` (serveur) + `dist/public/` (frontend)
