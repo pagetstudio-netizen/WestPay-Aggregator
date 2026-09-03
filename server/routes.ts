@@ -783,6 +783,28 @@ function sanitizePublicPaymentMessage(
   return message;
 }
 
+const WITHDRAWAL_FAILURE_NOTE_PATTERN =
+  /\b(?:échec|echec|échoué|echoue|refusé|refuse|non abouti|failed|failure|rejected|declined|cancelled|canceled|insufficient|error|timeout)\b/i;
+
+function normalizeMerchantWithdrawalStatus(status: unknown, internalNote?: unknown): string {
+  const normalized = String(status || "").trim().toLowerCase();
+  // Some older records kept "pending" after the provider had already failed.
+  // Their internal note is enough to correct the display without touching the
+  // merchant balance again (the balance was already restored by the failure path).
+  if (normalized === "pending" && typeof internalNote === "string" && WITHDRAWAL_FAILURE_NOTE_PATTERN.test(internalNote)) {
+    return "failed";
+  }
+  return normalized || "pending";
+}
+
+function merchantWithdrawalNote(status: string): string {
+  return status === "approved"
+    ? "Successfully treated"
+    : status === "failed" || status === "rejected"
+    ? "Failed, please try again later"
+    : "Information de traitement indisponible.";
+}
+
 /**
  * Renvoie un message d'erreur sûr pour le client.
  * - En production  : message générique pour les 5xx (évite de fuiter des détails internes
@@ -7889,7 +7911,18 @@ export async function registerRoutes(
     try {
       const merchantId = (req as any).user.id;
       const list = await storage.getWithdrawals(merchantId);
-      res.json(list);
+      // Never expose the internal provider error stored in adminNote.
+      // Also repair the public status of legacy records whose note already
+      // proves that the provider rejected the withdrawal.
+      const sanitized = list.map((withdrawal: any) => {
+        const status = normalizeMerchantWithdrawalStatus(withdrawal.status, withdrawal.adminNote);
+        return {
+          ...withdrawal,
+          status,
+          adminNote: merchantWithdrawalNote(status),
+        };
+      });
+      res.json(sanitized);
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }

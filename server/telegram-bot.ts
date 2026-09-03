@@ -2853,6 +2853,7 @@ export async function notifyAdminWithdrawal(data: {
   mode: "auto" | "manual";
   ip?: string;
   geo?: GeoInfo;
+  reason?: string | null;
 }): Promise<void> {
   const dateStr = new Date().toLocaleString("fr-FR", {
     day: "2-digit", month: "long", year: "numeric",
@@ -2861,6 +2862,10 @@ export async function notifyAdminWithdrawal(data: {
   const icon = data.status === "approved" ? "💸" : data.status === "pending" ? "⏳" : "❌";
   const statusLabel = data.status === "approved" ? "Effectué" : data.status === "rejected" ? "Rejeté" : data.status === "pending" ? "En attente" : "Échoué";
   const net = data.amount - data.fees;
+  let adminReason = data.reason || null;
+  if (!adminReason && (data.status === "failed" || data.status === "rejected")) {
+    adminReason = (await storage.getWithdrawalById(data.id).catch(() => undefined))?.adminNote || null;
+  }
 
   const geoLine = data.geo && data.status === "pending"
     ? `📍 *Localisation :* ${[data.geo.city, data.geo.region, data.geo.country].filter(Boolean).join(", ")}`
@@ -2887,6 +2892,7 @@ export async function notifyAdminWithdrawal(data: {
     data.operator ? `📱 *Opérateur :* ${data.operator}` : null,
     `⚙️ *Mode :* ${data.mode === "auto" ? "Automatique" : "Manuel"}`,
     `📊 *Statut :* ${statusLabel}`,
+    adminReason ? `🛠️ *Cause interne :* ${adminReason}` : null,
     `📅 *Date :* ${dateStr} UTC`,
   ].filter(Boolean) as string[];
 

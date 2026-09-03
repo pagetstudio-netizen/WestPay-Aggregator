@@ -2043,11 +2043,19 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
         ) : (
           <div className="divide-y" style={{ borderColor: "#f5f5f5" }}>
             {(withdrawalList as Withdrawal[]).map((w) => {
-              const statusConfig = w.status === "approved"
+              const status = String(w.status || "").toLowerCase();
+              const statusConfig = status === "approved"
                 ? { bg: "#e8f5e9", color: "#2e7d32", label: "Approuvé" }
-                : w.status === "rejected"
+                : status === "rejected"
                 ? { bg: "#fce4ec", color: "#ad1457", label: "Refusé" }
+                : status === "failed" || status === "failure" || status === "error" || status === "cancelled" || status === "canceled" || status === "declined"
+                ? { bg: "#ffebee", color: "#c62828", label: "Échoué" }
                 : { bg: "#fff8e1", color: "#e65100", label: "En attente" };
+              const merchantNote = status === "approved"
+                ? "Successfully treated"
+                : status === "failed" || status === "rejected" || status === "failure" || status === "error" || status === "cancelled" || status === "canceled" || status === "declined"
+                ? "Failed, please try again later"
+                : "Information de traitement indisponible.";
               return (
                 <div key={w.id} className="px-5 py-4" data-testid={`withdrawal-row-${w.id}`}>
                   <div className="flex items-center gap-3">
@@ -2068,9 +2076,9 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                         <span><Phone className="w-3 h-3 inline mr-0.5" />{w.phone}</span>
                         <span>{new Date(w.createdAt).toLocaleDateString(localeForLanguage(lang), { day: "2-digit", month: "short" })}</span>
                       </div>
-                      {w.adminNote && (
+                      {merchantNote && (
                         <p className="text-xs mt-1.5 px-2.5 py-1.5 rounded-lg italic" style={{ background: "#fffbea", color: "#78350f", border: "1px solid #fef3c7" }}>
-                           💬 {sanitizePaymentMessage(w.adminNote, "Information de traitement indisponible.")}
+                           💬 {merchantNote}
                         </p>
                       )}
                     </div>
