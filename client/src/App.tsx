@@ -11,6 +11,7 @@ import AdminLogin from "@/pages/admin-login";
 import { ADMIN_PATH, updateAdminBase } from "@/lib/admin-config";
 import AdminDashboard from "@/pages/admin-dashboard";
 import MerchantLogin from "@/pages/merchant-login";
+import MerchantActivation from "@/pages/merchant-activation";
 import MerchantDashboard from "@/pages/merchant-dashboard";
 import ApiDocsPage from "@/pages/api-docs";
 import PaymentPage from "@/pages/payment";
@@ -99,6 +100,7 @@ function Router() {
       <Route path={`${adminPath}/dashboard`} component={AdminDashboard} />
       <Route path={`${adminPath}/create-merchant`} component={AdminCreateMerchant} />
       <Route path="/merchant-login" component={MerchantLogin} />
+      <Route path="/merchant/activate" component={MerchantActivation} />
       <Route path="/merchant/:slug" component={MerchantDashboard} />
       <Route path="/crypto-docs" component={CryptoDocsPage} />
       <Route path="/pay" component={PaymentPage} />

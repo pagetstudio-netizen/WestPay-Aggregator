@@ -17,7 +17,8 @@ const POOL_CFG = { max: 10, connectionTimeoutMillis: 8000, idleTimeoutMillis: 30
 // ║  BASE 1 — AUTH / CONFIG  →  Supabase  (AUTH_DATABASE_URL)                  ║
 // ║  Tables : admins, merchants, merchant_pins, settings, numbers,              ║
 // ║           allowed_ips, blocked_ips, blocked_devices, devices,              ║
-// ║           admin_otp_codes, merchant_login_otps, telegram_activation_codes, ║
+// ║           admin_otp_codes, merchant_login_otps, merchant_login_activations,║
+// ║           merchant_sessions, telegram_activation_codes,                   ║
 // ║           withdrawal_operators, wallet_transfer_countries,                 ║
 // ║           crypto_aggregators, crypto_aggregator_countries,                 ║
 // ║           crypto_aggregator_merchants                                       ║
@@ -214,6 +215,32 @@ export async function runAuthMigrations() {
         attempts integer DEFAULT 0 NOT NULL,
         created_at timestamp DEFAULT now() NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS merchant_login_activations (
+        id serial PRIMARY KEY,
+        merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+        token_hash text NOT NULL UNIQUE,
+        ip_address text NOT NULL,
+        device_hash text NOT NULL,
+        expires_at timestamp NOT NULL,
+        used_at timestamp,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS merchant_login_activations_merchant_idx
+        ON merchant_login_activations (merchant_id);
+
+      CREATE TABLE IF NOT EXISTS merchant_sessions (
+        id serial PRIMARY KEY,
+        merchant_id integer NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+        session_hash text NOT NULL UNIQUE,
+        device_hash text NOT NULL,
+        expires_at timestamp NOT NULL,
+        revoked_at timestamp,
+        created_at timestamp DEFAULT now() NOT NULL,
+        last_seen_at timestamp DEFAULT now() NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS merchant_sessions_merchant_idx
+        ON merchant_sessions (merchant_id);
 
       CREATE TABLE IF NOT EXISTS telegram_activation_codes (
         id serial PRIMARY KEY,

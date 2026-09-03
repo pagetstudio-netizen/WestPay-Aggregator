@@ -284,6 +284,12 @@ export interface IStorage {
   getMerchantLoginOtp(email: string): Promise<{ otpHash: string; tempToken: string; expiresAt: Date; used: boolean; attempts: number } | undefined>;
   deleteMerchantLoginOtp(email: string): Promise<void>;
   incrementMerchantLoginOtpAttempts(email: string): Promise<void>;
+  createMerchantLoginActivation(merchantId: number, tokenHash: string, ipAddress: string, deviceHash: string, expiresAt: Date): Promise<void>;
+  deleteMerchantLoginActivation(tokenHash: string): Promise<void>;
+  consumeMerchantLoginActivation(tokenHash: string, ipAddress: string, deviceHash: string): Promise<{ merchantId: number } | undefined>;
+  replaceMerchantSession(merchantId: number, sessionHash: string, deviceHash: string, expiresAt: Date): Promise<void>;
+  getMerchantSession(merchantId: number, sessionHash: string): Promise<{ expiresAt: Date; revokedAt: Date | null } | undefined>;
+  revokeMerchantSession(sessionHash: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1388,6 +1394,89 @@ export class DatabaseStorage implements IStorage {
   async deleteMerchantLoginOtp(email: string): Promise<void> { await authDb.delete(merchantLoginOtps).where(eq(merchantLoginOtps.email, email)); }
   async incrementMerchantLoginOtpAttempts(email: string): Promise<void> {
     await authDb.update(merchantLoginOtps).set({ attempts: sql`${merchantLoginOtps.attempts} + 1` }).where(eq(merchantLoginOtps.email, email));
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BASE AUTH — merchant login activation/session binding
+  // ══════════════════════════════════════════════════════════════════════════
+  async createMerchantLoginActivation(
+    merchantId: number,
+    tokenHash: string,
+    ipAddress: string,
+    deviceHash: string,
+    expiresAt: Date,
+  ): Promise<void> {
+    await authDb.execute(sql`
+      INSERT INTO merchant_login_activations
+        (merchant_id, token_hash, ip_address, device_hash, expires_at)
+      VALUES
+        (${merchantId}, ${tokenHash}, ${ipAddress}, ${deviceHash}, ${expiresAt})
+    `);
+  }
+
+  async deleteMerchantLoginActivation(tokenHash: string): Promise<void> {
+    await authDb.execute(sql`
+      DELETE FROM merchant_login_activations WHERE token_hash = ${tokenHash}
+    `);
+  }
+
+  async consumeMerchantLoginActivation(
+    tokenHash: string,
+    ipAddress: string,
+    deviceHash: string,
+  ): Promise<{ merchantId: number } | undefined> {
+    const result = await authDb.execute(sql`
+      UPDATE merchant_login_activations
+      SET used_at = NOW()
+      WHERE token_hash = ${tokenHash}
+        AND ip_address = ${ipAddress}
+        AND device_hash = ${deviceHash}
+        AND used_at IS NULL
+        AND expires_at > NOW()
+      RETURNING merchant_id AS "merchantId"
+    `);
+    const row = result.rows[0] as { merchantId: number } | undefined;
+    return row;
+  }
+
+  async replaceMerchantSession(
+    merchantId: number,
+    sessionHash: string,
+    deviceHash: string,
+    expiresAt: Date,
+  ): Promise<void> {
+    await authDb.execute(sql`
+      UPDATE merchant_sessions
+      SET revoked_at = NOW()
+      WHERE merchant_id = ${merchantId} AND revoked_at IS NULL
+    `);
+    await authDb.execute(sql`
+      INSERT INTO merchant_sessions
+        (merchant_id, session_hash, device_hash, expires_at)
+      VALUES
+        (${merchantId}, ${sessionHash}, ${deviceHash}, ${expiresAt})
+    `);
+  }
+
+  async getMerchantSession(
+    merchantId: number,
+    sessionHash: string,
+  ): Promise<{ expiresAt: Date; revokedAt: Date | null } | undefined> {
+    const result = await authDb.execute(sql`
+      SELECT expires_at AS "expiresAt", revoked_at AS "revokedAt"
+      FROM merchant_sessions
+      WHERE merchant_id = ${merchantId} AND session_hash = ${sessionHash}
+      LIMIT 1
+    `);
+    return result.rows[0] as { expiresAt: Date; revokedAt: Date | null } | undefined;
+  }
+
+  async revokeMerchantSession(sessionHash: string): Promise<void> {
+    await authDb.execute(sql`
+      UPDATE merchant_sessions
+      SET revoked_at = NOW()
+      WHERE session_hash = ${sessionHash} AND revoked_at IS NULL
+    `);
   }
 }
 

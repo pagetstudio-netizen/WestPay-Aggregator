@@ -140,6 +140,30 @@ export async function sendOtpViaDedicatedBot(
   }
 }
 
+/**
+ * Send the one-time merchant dashboard activation link to the merchant group.
+ * The IP and device binding are kept server-side and are never included here.
+ */
+export async function sendActivationLinkViaDedicatedBot(
+  chatId: string,
+  activationUrl: string,
+): Promise<boolean> {
+  if (!otpBot) return false;
+
+  const message = "Hi, please click on the link to log in to your account.";
+  const replyMarkup = {
+    inline_keyboard: [[{ text: "Open login link", url: activationUrl }]],
+  };
+
+  try {
+    await otpBot.telegram.sendMessage(chatId, message, { reply_markup: replyMarkup });
+    return true;
+  } catch (err: any) {
+    console.error("[OTP BOT] Activation link delivery failed:", err.message);
+    return false;
+  }
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function escapeMarkdown(text: string): string {
