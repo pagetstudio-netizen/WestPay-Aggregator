@@ -272,6 +272,23 @@ if (process.env.NODE_ENV === "production") {
   })();
 }
 
+async function setupDevelopmentFrontend(): Promise<boolean> {
+  if (process.env.NODE_ENV === "production") return true;
+
+  try {
+    const { setupVite } = await import("./vite");
+    await setupVite(httpServer, app);
+    bootState.steps.static = "ok";
+    return true;
+  } catch (err: any) {
+    bootState.steps.static = "error";
+    bootState.errors.push(`Vite: ${err.message}`);
+    bootState.status = "error";
+    console.error("[FATAL] Vite setup failed:", err.message);
+    return false;
+  }
+}
+
 (async () => {
   // Vérification env
   const missingEnv = ["AUTH_DATABASE_URL", "FINANCIAL_DATABASE_URL", "SESSION_SECRET"]
@@ -281,6 +298,7 @@ if (process.env.NODE_ENV === "production") {
     bootState.errors.push(`Missing env vars: ${missingEnv.join(", ")}`);
     bootState.status = "error";
     console.error("[FATAL] Variables manquantes:", missingEnv.join(", "));
+    await setupDevelopmentFrontend();
     resolveRoutesReady();
     return; // Ne pas appeler process.exit — le serveur reste up pour /api/healthz-boot
   }
@@ -296,6 +314,7 @@ if (process.env.NODE_ENV === "production") {
     bootState.errors.push(`DB module load: ${err.message}`);
     bootState.status = "error";
     console.error("[FATAL] DB module load failed:", err.message);
+    await setupDevelopmentFrontend();
     resolveRoutesReady();
     return;
   }
@@ -308,6 +327,7 @@ if (process.env.NODE_ENV === "production") {
     bootState.errors.push(`Migrations: ${err.message}`);
     bootState.status = "error";
     console.error("[FATAL] Migration failed:", err.message);
+    await setupDevelopmentFrontend();
     resolveRoutesReady();
     return;
   }
@@ -340,6 +360,7 @@ if (process.env.NODE_ENV === "production") {
     bootState.errors.push(`Routes: ${err.message}`);
     bootState.status = "error";
     console.error("[FATAL] Routes registration failed:", err.message);
+    await setupDevelopmentFrontend();
     resolveRoutesReady();
     return;
   }
@@ -357,17 +378,7 @@ if (process.env.NODE_ENV === "production") {
   // En production le frontend est déjà servi (immédiatement après listen()).
   // Ici uniquement le mode dev (Vite middleware).
   if (process.env.NODE_ENV !== "production") {
-    try {
-      const { setupVite } = await import("./vite");
-      await setupVite(httpServer, app);
-      bootState.steps.static = "ok";
-    } catch (err: any) {
-      bootState.steps.static = "error";
-      bootState.errors.push(`Vite: ${err.message}`);
-      bootState.status = "error";
-      console.error("[FATAL] Vite setup failed:", err.message);
-      return;
-    }
+    if (!(await setupDevelopmentFrontend())) return;
   }
 
   if (!process.env.ADMIN_SLUG) {
