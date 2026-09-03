@@ -15,7 +15,6 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { sendMerchantOtpEmail } from "./email";
-import { sendActivationLinkViaDedicatedBot } from "./telegram-otp-bot";
 import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, notifyAdminMerchantCreated, notifyAdminAdminCreated, getGeoInfo, notifyAdminMerchantLogin, notifyAdminIpBlocked, notifyAdminBruteForce, notifyAdminDeviceBlocked, notifyAdminNewDevice, notifyAdminOtp, notifyAdminVpn, notifyAdminCountryBlocked, notifyAdminLocationJump, notifyAdminNewMerchantIp, broadcastToMerchants, sendTelegramMessage } from "./telegram-bot";
 import {
   initiatePayment as omnipayInitiatePayment,
@@ -525,50 +524,6 @@ function signToken(payload: { id: number; role: string; email: string; sessionId
 
 function hashMerchantSecurityValue(value: string): string {
   return crypto.createHash("sha256").update(`${JWT_SECRET}:merchant:${value}`).digest("hex");
-}
-
-function getMerchantDeviceFingerprint(req: Request): string {
-  const value = req.headers["x-device-fp"];
-  return typeof value === "string" ? value.trim() : "";
-}
-
-async function createMerchantActivation(
-  merchant: { id: number; name: string; telegramChatId?: string | null },
-  req: Request,
-): Promise<void> {
-  if (!merchant.telegramChatId) {
-    throw new Error("Votre groupe Telegram marchand n'est pas encore associé.");
-  }
-
-  const deviceFingerprint = getMerchantDeviceFingerprint(req);
-  if (deviceFingerprint.length < 8) {
-    throw new Error("Appareil non reconnu. Veuillez recommencer depuis votre navigateur.");
-  }
-
-  const rawToken = crypto.randomBytes(32).toString("hex");
-  const tokenHash = hashMerchantSecurityValue(rawToken);
-  const ipAddress = getClientIp(req);
-  const deviceHash = hashMerchantSecurityValue(deviceFingerprint);
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-  await storage.createMerchantLoginActivation(merchant.id, tokenHash, ipAddress, deviceHash, expiresAt);
-
-  const appUrl = (process.env.APP_URL || "https://dashboard.westpay.cfd").trim().replace(/\/+$/, "");
-  const activationUrl = `${appUrl}/merchant/activate?token=${encodeURIComponent(rawToken)}`;
-  const message = "Hi, please click on the link to log in to your account.";
-  const buttons = [[{ text: "Open login link", url: activationUrl }]];
-
-  let sent = await sendActivationLinkViaDedicatedBot(merchant.telegramChatId, activationUrl);
-  if (!sent) {
-    sent = await sendTelegramMessage({
-      chatId: merchant.telegramChatId,
-      message,
-      buttons,
-    });
-  }
-  if (!sent) {
-    await storage.deleteMerchantLoginActivation(tokenHash);
-    throw new Error("Impossible d'envoyer le lien d'activation Telegram.");
-  }
 }
 
 /** Pose le JWT dans un cookie httpOnly (inaccessible au JS) — protection XSS */
@@ -2042,10 +1997,6 @@ export async function registerRoutes(
       void storage.createLoginLog({ userId: merchant.id, role: "merchant", ip: clientIp, device: ua, success: true })
         .catch((err) => console.error("[AUTH] Failed to write merchant login log:", err.message));
 
-      if (!merchant.telegramChatId) {
-        return res.status(403).json({ message: "Connexion indisponible : votre groupe Telegram marchand doit d'abord être associé." });
-      }
-
       // ── Bypass OTP pour les comptes de test internes ─────────────────────────
       // Liste gérée via le paramètre DB "otp_bypass_emails" (virgule-séparés) — aucun email hardcodé
       const otpBypassRaw = await storage.getSetting("otp_bypass_emails").catch(() => "");
@@ -2059,12 +2010,12 @@ export async function registerRoutes(
             notifyAdminMerchantLogin({ email: merchant.email, merchantName: merchant.name, ip: clientIp, device: ua, success: true }).catch(() => {});
           }
         }).catch(() => {});
-        try {
-          await createMerchantActivation(merchant, req);
-          return res.json({ requiresActivation: true, activationVia: "telegram", merchantName: merchant.name });
-        } catch (activationError: any) {
-          return res.status(503).json({ message: activationError?.message || "Le lien d'activation est indisponible." });
-        }
+        const token = signToken({ id: merchant.id, role: "merchant", email: merchant.email });
+        setAuthCookie(res, token);
+        return res.json({
+          token,
+          user: { id: merchant.id, email: merchant.email, name: merchant.name, slug: merchant.slug },
+        });
       }
 
       // ── Email OTP 2FA ─────────────────────────────────────────────────────────
@@ -2171,20 +2122,15 @@ export async function registerRoutes(
       await storage.deleteMerchantLoginOtp(email);
 
       const merchant = await storage.getMerchantById(merchantId);
-      if (!merchant || merchant.suspended || !merchant.telegramChatId) {
-        return res.status(403).json({ message: "Connexion indisponible : votre groupe Telegram marchand doit d'abord être associé." });
+      if (!merchant || merchant.suspended) {
+        return res.status(403).json({ message: "Compte marchand suspendu ou introuvable." });
       }
 
-      try {
-        await createMerchantActivation(merchant, req);
-      } catch (activationError: any) {
-        return res.status(503).json({ message: activationError?.message || "Le lien d'activation est indisponible." });
-      }
-
+      const token = signToken({ id: merchant.id, role: "merchant", email: merchant.email });
+      setAuthCookie(res, token);
       return res.json({
-        requiresActivation: true,
-        activationVia: "telegram",
-        merchantName: merchant.name,
+        token,
+        user: { id: merchant.id, email: merchant.email, name: merchant.name, slug: merchant.slug },
       });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
@@ -2192,44 +2138,12 @@ export async function registerRoutes(
   });
 
   // ── Merchant dashboard activation link ─────────────────────────────────────
-  app.post("/api/auth/merchant/activate", async (req, res) => {
-    try {
-      const rawToken = typeof req.body?.token === "string" ? req.body.token.trim() : "";
-      const deviceFingerprint = getMerchantDeviceFingerprint(req);
-      if (!rawToken || deviceFingerprint.length < 8) {
-        return res.status(403).json({ message: "Connexion non autorisée", code: "activation_denied" });
-      }
-
-      const activation = await storage.consumeMerchantLoginActivation(
-        hashMerchantSecurityValue(rawToken),
-        getClientIp(req),
-        hashMerchantSecurityValue(deviceFingerprint),
-      );
-      if (!activation) {
-        return res.status(403).json({ message: "Connexion non autorisée", code: "activation_denied" });
-      }
-
-      const merchant = await storage.getMerchantById(activation.merchantId);
-      if (!merchant || merchant.suspended || !merchant.telegramChatId) {
-        return res.status(403).json({ message: "Connexion non autorisée", code: "activation_denied" });
-      }
-
-      const sessionId = crypto.randomBytes(32).toString("hex");
-      const sessionHash = hashMerchantSecurityValue(sessionId);
-      const deviceHash = hashMerchantSecurityValue(deviceFingerprint);
-      const expiresAt = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
-      await storage.replaceMerchantSession(merchant.id, sessionHash, deviceHash, expiresAt);
-
-      const token = signToken({ id: merchant.id, role: "merchant", email: merchant.email, sessionId });
-      setAuthCookie(res, token);
-      return res.json({
-        token,
-        user: { id: merchant.id, email: merchant.email, name: merchant.name, slug: merchant.slug },
-      });
-    } catch (err: any) {
-      console.error("[MERCHANT ACTIVATION] Error:", err?.message || err);
-      return res.status(403).json({ message: "Connexion non autorisée", code: "activation_denied" });
-    }
+  // L'activation Telegram est conservée en pause. L'ancien OTP reste le flux actif.
+  app.post("/api/auth/merchant/activate", async (_req, res) => {
+    return res.status(410).json({
+      message: "Activation Telegram temporairement désactivée. Utilisez le code OTP.",
+      code: "activation_disabled",
+    });
   });
 
   // ── Logout — efface le cookie httpOnly côté serveur ──────────────────────

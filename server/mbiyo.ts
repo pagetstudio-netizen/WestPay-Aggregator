@@ -67,6 +67,18 @@ export interface MbiyoStatusResponse {
   };
 }
 
+export interface MbiyoBalanceResponse {
+  status: string;
+  message?: string;
+  data?: Array<{
+    currency: string;
+    currency_symbol?: string;
+    amount: string | number;
+    hold?: string | number;
+    country?: string;
+  }>;
+}
+
 const COUNTRY_CODES: Record<string, string> = {
   "Togo": "TG",
   "Benin": "BJ",
@@ -196,6 +208,35 @@ export async function getTransactionStatus(apiKey: string, transactionId: string
   } catch (err: any) {
     clearTimeout(timeout);
     throw new Error(`Mbiyo statut: ${err.message}`);
+  }
+}
+
+export async function getBalance(apiKey: string): Promise<MbiyoBalanceResponse> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const response = await fetch(`${MBIYO_BASE_URL}/balances`, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    const data = await response.json() as MbiyoBalanceResponse;
+    if (!response.ok) {
+      throw new Error(data.message || `Réponse HTTP ${response.status}`);
+    }
+    return data;
+  } catch (err: any) {
+    clearTimeout(timeout);
+    if (err.name === "AbortError") {
+      throw new Error("Mbiyo solde : délai de connexion dépassé (15s)");
+    }
+    throw new Error(`Mbiyo solde : ${err.message}`);
   }
 }
 

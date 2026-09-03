@@ -7,3 +7,6 @@
 - [GitHub shell authentication](github-shell-auth.md) — attaching Replit’s GitHub connection does not necessarily authenticate local `git push`; use the workspace Git flow or secure API path.
 - [Bank 1 loading state](bank1-loading-state.md) — the checkout spinner must define its animation before the page’s early loading return; validated working on mobile after deployment.
 - [Merchant payment disable flags](merchant-payment-disable.md) — keep payout on withdrawals_disabled; use payin_disabled separately and enforce both before transaction side effects.
+- [Merchant login OTP mode](merchant-login-otp.md) — legacy OTP issues the JWT directly while Telegram activation remains intentionally paused.
+- [MbiyoPay balance endpoint](mbiyo-balance.md) — merchant wallet balances use the official `/api/v1/balances` endpoint.
+- [Screenshot asset and Git safety](screenshot-gitsafe.md) — preview screenshots can reintroduce uploaded captures through an automatic local safety commit.

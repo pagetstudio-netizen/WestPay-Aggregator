@@ -3,7 +3,6 @@ import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { Eye, EyeOff, Loader2, Shield, Lock, Mail, CheckCircle2, Zap, Globe, ArrowRight } from "lucide-react";
-import { SiTelegram } from "react-icons/si";
 import Captcha, { generateCaptchaCode } from "@/components/Captcha";
 import { useLanguage } from "@/lib/language";
 import { normalizeEmailInput } from "@shared/email-validation";
@@ -63,12 +62,10 @@ export default function MerchantLogin() {
   const [otpCode, setOtpCode] = useState("");
   const [otpToken, setOtpToken] = useState("");
   const [otpEmail, setOtpEmail] = useState("");
-  const [otpMerchantName, setOtpMerchantName] = useState("");
   const [otpVia, setOtpVia] = useState<"email" | "telegram">("email");
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpResendLoading, setOtpResendLoading] = useState(false);
   const [otpCountdown, setOtpCountdown] = useState(0);
-  const [activationStep, setActivationStep] = useState(false);
   const [sessionChecking, setSessionChecking] = useState(true);
 
   const { login, restoreUser, logout, isLoading: authLoading } = useAuth();
@@ -186,10 +183,8 @@ export default function MerchantLogin() {
       if (!res.ok) throw new Error(data.message || "Unable to connect.");
 
       if (data.requiresOtp) {
-        setActivationStep(false);
         setOtpToken(data.tempToken);
         setOtpEmail(normalizedEmail);
-        setOtpMerchantName(data.merchantName || "");
         setOtpStep(true);
         setOtpCountdown(60);
         setOtpVia(data.otpVia || "email");
@@ -198,16 +193,6 @@ export default function MerchantLogin() {
           description: data.otpVia === "telegram"
             ? "Your verification code was sent to your Telegram group."
             : `A verification code was sent to ${normalizedEmail}`,
-        });
-        return;
-      }
-
-      if (data.requiresActivation) {
-        setOtpStep(true);
-        setActivationStep(true);
-        toast({
-          title: "Activation requise",
-          description: "Un lien d’activation a été envoyé dans votre groupe Telegram.",
         });
         return;
       }
@@ -244,15 +229,6 @@ export default function MerchantLogin() {
         "Le serveur de vérification est momentanément indisponible. Veuillez réessayer dans quelques secondes.",
       );
        if (!res.ok) throw new Error(data.message || "Invalid code.");
-      if (data.requiresActivation) {
-        setActivationStep(true);
-        toast({
-          title: "Activation requise",
-          description: "Un lien d’activation a été envoyé dans votre groupe Telegram.",
-        });
-        return;
-      }
-
       login(data.token, {
         id: data.user.id,
         email: data.user.email,
@@ -675,27 +651,6 @@ export default function MerchantLogin() {
                 </button>
               </form>
             </>
-          ) : activationStep ? (
-            <>
-              <h1 className="wp-merchant-reference-title">Activation required</h1>
-              <p className="wp-merchant-reference-description">
-                Please click the activation link sent to your Telegram group.
-              </p>
-              <div className="flex flex-col items-center gap-4 mt-12 text-center">
-                <Shield className="w-12 h-12 text-blue-600" />
-                <p className="text-sm text-slate-600">
-                  The link is valid for 5 minutes and can only be used once.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => { setOtpStep(false); setActivationStep(false); setOtpCode(""); setOtpToken(""); refreshCaptcha(); }}
-                  className="text-sm text-slate-500 hover:text-slate-700 transition-colors font-medium"
-                  data-testid="button-back-activation-login"
-                >
-                  ← Back to login
-                </button>
-              </div>
-            </>
           ) : (
             <>
               <h1 className="wp-merchant-reference-title">Verification code</h1>
@@ -737,7 +692,7 @@ export default function MerchantLogin() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setOtpStep(false); setActivationStep(false); setOtpCode(""); setOtpToken(""); refreshCaptcha(); }}
+                    onClick={() => { setOtpStep(false); setOtpCode(""); setOtpToken(""); refreshCaptcha(); }}
                     className="text-sm text-slate-500 hover:text-slate-700 transition-colors font-medium"
                     data-testid="button-back-merchant-login"
                   >

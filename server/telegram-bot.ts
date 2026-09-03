@@ -10,6 +10,7 @@ import {
 import {
   initiatePayout as mbiyoInitiatePayout,
   getTransactionStatus as mbiyoGetStatus,
+  getBalance as mbiyoGetBalance,
   mbiyoCountryCode,
   mbiyoCurrency,
   mbiyoNetwork,
@@ -417,6 +418,7 @@ type GatewayBalanceResult = {
 const GATEWAY_BALANCE_OPTIONS = [
   { id: "omnipay", label: "OmniPay" },
   { id: "sendavapay", label: "SendavaPay" },
+  { id: "mbiyo", label: "MbiyoPay" },
   { id: "seapay", label: "SeaPay" },
   { id: "clapay", label: "ClaPay" },
 ] as const;
@@ -451,6 +453,9 @@ function gatewayBalanceMenuMarkup() {
       [
         { text: "💰 SeaPay", callback_data: "gateway_balance:seapay" },
         { text: "💰 ClaPay", callback_data: "gateway_balance:clapay" },
+      ],
+      [
+        { text: "💰 MbiyoPay", callback_data: "gateway_balance:mbiyo" },
       ],
     ],
   };
@@ -547,6 +552,24 @@ async function fetchGatewayBalances(gateway: GatewayBalanceId): Promise<GatewayB
         country: wallet.countryName || wallet.country || "Pays inconnu",
         currency: wallet.currency || "—",
         amount: normalizeGatewayAmount(wallet.balance),
+      })),
+    };
+  }
+
+  if (gateway === "mbiyo") {
+    const apiKey = process.env.MBIYO_API_KEY || await storage.getSetting("mbiyo_api_key");
+    if (!apiKey) throw new Error("MbiyoPay n'est pas configuré.");
+
+    const result = await mbiyoGetBalance(apiKey);
+    if (result.status !== "success") {
+      throw new Error(result.message || "MbiyoPay n'a pas retourné le solde.");
+    }
+    return {
+      wallets: (result.data || []).map((wallet) => ({
+        country: wallet.country || wallet.currency || "Pays inconnu",
+        currency: wallet.currency || "—",
+        amount: normalizeGatewayAmount(wallet.amount),
+        frozen: wallet.hold !== undefined ? normalizeGatewayAmount(wallet.hold) : undefined,
       })),
     };
   }
@@ -970,30 +993,48 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     );
   });
 
-  bot.action(/^gateway_balance:(omnipay|sendavapay|seapay|clapay)$/, async (ctx) => {
+  bot.action(/^gateway_balance:(omnipay|sendavapay|mbiyo|seapay|clapay)$/, async (ctx) => {
     const chatId = String(ctx.chat?.id || "");
     if (!chatId || !await isAdminGroup(chatId)) {
-      await ctx.answerCbQuery("⛔ Non autorisé");
+      await ctx.answerCbQuery("⛔ Non autorisé").catch(() => {});
       return;
     }
 
     const gateway = ctx.match[1] as GatewayBalanceId;
     const gatewayLabel = GATEWAY_BALANCE_OPTIONS.find((option) => option.id === gateway)?.label || gateway;
-    await ctx.answerCbQuery("⏳ Récupération du solde...");
-    await ctx.editMessageText(`⏳ Récupération des soldes ${gatewayLabel}...`);
+    await ctx.answerCbQuery("⏳ Récupération du solde...").catch(() => {});
 
     try {
-      const result = await fetchGatewayBalances(gateway);
+      await ctx.editMessageText(
+        `⏳ Récupération des soldes ${gatewayLabel}...`,
+        { reply_markup: gatewayBalanceResultMarkup(gateway) },
+      );
+    } catch {
+      // Le message peut déjà avoir été modifié par un autre clic ; la requête
+      // de solde doit tout de même continuer et produire une réponse finale.
+    }
+
+    try {
+      const result = await Promise.race([
+        fetchGatewayBalances(gateway),
+        new Promise<GatewayBalanceResult>((_, reject) =>
+          setTimeout(() => reject(new Error("Délai dépassé (35s).")), 35000)
+        ),
+      ]);
       await ctx.editMessageText(
         formatGatewayBalanceMessage(gatewayLabel, result),
         { parse_mode: "Markdown", reply_markup: gatewayBalanceResultMarkup(gateway) },
       );
-    } catch {
-      await ctx.editMessageText(
+    } catch (err: any) {
+      const errorText =
         `❌ Impossible de récupérer les soldes ${gatewayLabel}.\n\n` +
-        "Vérifiez que le gateway est configuré et que son service est accessible.",
-        { reply_markup: gatewayBalanceResultMarkup(gateway) },
-      );
+        `${err?.message || "Le service n'a pas répondu."}\n\n` +
+        "Vérifiez que le gateway est configuré et que son service est accessible.";
+      try {
+        await ctx.editMessageText(errorText, { reply_markup: gatewayBalanceResultMarkup(gateway) });
+      } catch {
+        await ctx.reply(errorText, { reply_markup: gatewayBalanceResultMarkup(gateway) }).catch(() => {});
+      }
     }
   });
 
@@ -1538,7 +1579,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `📊 *Statistiques & Soldes*\n` +
           `/stats — Statistiques globales\n` +
           `/solde — Soldes détaillés de tous les marchands\n\n` +
-          `/soldegateway — Solde global et wallets pays d'un gateway\n\n` +
+          `/commander@Westpaybot — Rechercher un retrait par numéro\n` +
+          `/soldegateway@Westpaybot — Consulter le solde d'un gateway et ses wallets pays\n\n` +
           `📢 *Diffusion*\n` +
           `/broadcast — Envoyer un message dans les groupes\n` +
           `/groupes — Lister tous les groupes où le bot est présent\n` +
