@@ -235,9 +235,7 @@ app.use("/api", async (req, res, next) => {
   ]);
   if (timedOut && !routesReady) {
     return res.status(503).json({
-      message: bootState.status === "error"
-        ? "Serveur indisponible : sa configuration n'est pas terminée. Contactez l'administrateur."
-        : "Serveur en cours de démarrage, réessayez dans quelques secondes.",
+      message: "Serveur en cours de démarrage, réessayez dans quelques secondes.",
     });
   }
   next();
