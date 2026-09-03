@@ -8137,15 +8137,15 @@ export async function registerRoutes(
         return res.status(400).json({ message: "merchantCountryId invalide" });
       }
 
-      const withdrawalsDisabledFlag = await storage.getSetting("withdrawals_disabled");
-      if (withdrawalsDisabledFlag === "true") {
-        return res.status(503).json({ message: "Les retraits sont temporairement indisponibles. Veuillez réessayer plus tard.", withdrawalsDisabled: true });
-      }
-
       // ── Vérification désactivation payout par marchand ───────────────────────
       const merchantRecord = await storage.getMerchantById(merchantId);
       if (merchantRecord?.withdrawalsDisabled) {
         return res.status(404).json({ message: MERCHANT_PAYMENT_DISABLED_MESSAGE });
+      }
+
+      const withdrawalsDisabledFlag = await storage.getSetting("withdrawals_disabled");
+      if (withdrawalsDisabledFlag === "true") {
+        return res.status(503).json({ message: "Les retraits sont temporairement indisponibles. Veuillez réessayer plus tard.", withdrawalsDisabled: true });
       }
 
       const mc = await storage.getMerchantCountryById(Number(merchantCountryId));
