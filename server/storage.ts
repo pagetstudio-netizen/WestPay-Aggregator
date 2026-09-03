@@ -999,7 +999,10 @@ export class DatabaseStorage implements IStorage {
     return o;
   }
   async getWithdrawalOperatorByNameAndCountry(name: string, country: string): Promise<WithdrawalOperator | undefined> {
-    const [o] = await authDb.select().from(withdrawalOperators).where(and(eq(withdrawalOperators.name, name), eq(withdrawalOperators.country, country)));
+    const [o] = await authDb.select().from(withdrawalOperators).where(and(
+      sql`LOWER(BTRIM(${withdrawalOperators.name})) = LOWER(BTRIM(${name}))`,
+      sql`LOWER(BTRIM(${withdrawalOperators.country})) = LOWER(BTRIM(${country}))`,
+    ));
     return o;
   }
   async createWithdrawalOperator(data: InsertWithdrawalOperator): Promise<WithdrawalOperator> {

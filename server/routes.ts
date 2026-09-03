@@ -276,44 +276,65 @@ function decryptTotpSecret(stored: string): string {
   return decipher.update(Buffer.from(encHex, "hex")).toString("utf8") + decipher.final("utf8");
 }
 
+function cleanConfiguredSecret(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const cleaned = value.trim();
+  return cleaned || undefined;
+}
+
+async function getConfiguredSecret(
+  envNames: string[],
+  dbKeys: string[],
+): Promise<string | undefined> {
+  for (const envName of envNames) {
+    const envValue = cleanConfiguredSecret(process.env[envName]);
+    if (envValue) return envValue;
+  }
+  for (const dbKey of dbKeys) {
+    const dbValue = cleanConfiguredSecret(await storage.getSetting(dbKey));
+    if (dbValue) return dbValue;
+  }
+  return undefined;
+}
+
 async function getOmnipayApiKey(): Promise<string | undefined> {
-  return process.env.OMNIPAY_API_KEY || await storage.getSetting("omnipay_api_key");
+  return getConfiguredSecret(["OMNIPAY_API_KEY"], ["omnipay_api_key"]);
 }
 
 async function getOmnipayPayoutApiKey(): Promise<string | undefined> {
-  return process.env.OMNIPAY_PAYOUT_API_KEY || await storage.getSetting("omnipay_payout_api_key") || await getOmnipayApiKey();
+  return await getConfiguredSecret(["OMNIPAY_PAYOUT_API_KEY"], ["omnipay_payout_api_key"]) || await getOmnipayApiKey();
 }
 
 async function getOmnipayCallbackKey(): Promise<string | undefined> {
-  return process.env.OMNIPAY_CALLBACK_KEY || await storage.getSetting("omnipay_callback_key");
+  return getConfiguredSecret(["OMNIPAY_CALLBACK_KEY"], ["omnipay_callback_key"]);
 }
 
 async function getMbiyoApiKey(): Promise<string | undefined> {
-  return process.env.MBIYO_API_KEY || await storage.getSetting("mbiyo_api_key");
+  return getConfiguredSecret(["MBIYO_API_KEY"], ["mbiyo_api_key"]);
 }
 
 async function getMbiyoWebhookSecret(): Promise<string | undefined> {
-  return process.env.MBIYO_WEBHOOK_SECRET || await storage.getSetting("mbiyo_webhook_secret");
+  return getConfiguredSecret(["MBIYO_WEBHOOK_SECRET"], ["mbiyo_webhook_secret"]);
 }
 
 async function getSendavaApiKey(): Promise<string | undefined> {
-  return process.env.SENDAVA_API_KEY || process.env.SENDAVAPAY_API_KEY || await storage.getSetting("sendavapay_api_key");
+  return getConfiguredSecret(["SENDAVA_API_KEY", "SENDAVAPAY_API_KEY"], ["sendavapay_api_key"]);
 }
 
 async function getSendavaWebhookSecret(): Promise<string | undefined> {
-  return process.env.SENDAVA_WEBHOOK_SECRET || process.env.SENDAVAPAY_WEBHOOK_SECRET || await storage.getSetting("sendavapay_webhook_secret");
+  return getConfiguredSecret(["SENDAVA_WEBHOOK_SECRET", "SENDAVAPAY_WEBHOOK_SECRET"], ["sendavapay_webhook_secret"]);
 }
 
 async function getClapayApiKey(): Promise<string | undefined> {
-  return process.env.CLAPAY_API_KEY || await storage.getSetting("clapay_api_key");
+  return getConfiguredSecret(["CLAPAY_API_KEY"], ["clapay_api_key"]);
 }
 
 async function getClapayWebhookSecret(): Promise<string | undefined> {
-  return process.env.CLAPAY_WEBHOOK_SECRET || await storage.getSetting("clapay_webhook_secret");
+  return getConfiguredSecret(["CLAPAY_WEBHOOK_SECRET"], ["clapay_webhook_secret"]);
 }
 
 async function getClapayWebhookUniqueKey(): Promise<string | undefined> {
-  return process.env.CLAPAY_WEBHOOK_UNIQUE_KEY || await storage.getSetting("clapay_webhook_unique_key");
+  return getConfiguredSecret(["CLAPAY_WEBHOOK_UNIQUE_KEY"], ["clapay_webhook_unique_key"]);
 }
 
 /* SeaPay : chaque pays possede son propre compte marchand (merchant_id/api_key/api_secret distincts) */
@@ -338,18 +359,24 @@ async function getSeapayMerchantId(country: string): Promise<string | undefined>
   // Uniquement la variable pays-spécifique (ex: SEAPAY_PAKISTAN_MERCHANT_ID)
   // Les variables génériques sans pays (SEAPAY_MERCHANT_ID) ne sont plus acceptées
   // pour éviter qu'un mauvais compte s'applique à un autre pays.
-  return process.env[`${envPrefix}_MERCHANT_ID`]
-    || await storage.getSetting(`seapay_merchant_id_${seapayCountrySlug(country)}`);
+  return getConfiguredSecret(
+    [`${envPrefix}_MERCHANT_ID`],
+    [`seapay_merchant_id_${seapayCountrySlug(country)}`],
+  );
 }
 async function getSeapayApiKey(country: string): Promise<string | undefined> {
   const envPrefix = seapayCountryEnvPrefix(country);
-  return process.env[`${envPrefix}_API_KEY`]
-    || await storage.getSetting(`seapay_api_key_${seapayCountrySlug(country)}`);
+  return getConfiguredSecret(
+    [`${envPrefix}_API_KEY`],
+    [`seapay_api_key_${seapayCountrySlug(country)}`],
+  );
 }
 async function getSeapayApiSecret(country: string): Promise<string | undefined> {
   const envPrefix = seapayCountryEnvPrefix(country);
-  return process.env[`${envPrefix}_API_SECRET`]
-    || await storage.getSetting(`seapay_api_secret_${seapayCountrySlug(country)}`);
+  return getConfiguredSecret(
+    [`${envPrefix}_API_SECRET`],
+    [`seapay_api_secret_${seapayCountrySlug(country)}`],
+  );
 }
 
 // Nettoie tout message avant qu'il soit visible par un marchand/client (adminNote,
@@ -4328,11 +4355,18 @@ export async function registerRoutes(
       const msisdn = localPhone.startsWith(dialCode) ? localPhone : `${dialCode}${localPhone}`;
 
       const operatorRecord = await storage.getWithdrawalOperatorByNameAndCountry(paymentMethod, country);
-      const gatewayLower = operatorRecord?.gateway?.toLowerCase();
+      const gatewayLower = (operatorRecord?.gateway || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_-]+/g, "");
       const useMbiyo = gatewayLower === "mbiyo";
-      const useSendava = gatewayLower === "sendavapay";
+      const useSendava = gatewayLower === "sendavapay" || gatewayLower === "sendava";
       const useSeapay = gatewayLower === "seapay";
       const useClapay = gatewayLower === "clapay";
+
+      if (!operatorRecord) {
+        console.warn(`[PAYMENT CONFIG] Opérateur introuvable: country="${country}" method="${paymentMethod}" — OmniPay utilisé par défaut`);
+      }
 
       if (useSendava) {
         const sendavaApiKey = await getSendavaApiKey();
@@ -9654,16 +9688,17 @@ export async function registerRoutes(
 
   app.post("/api/admin/withdrawal-operators", authMiddleware("admin"), async (req, res) => {
     try {
-      const { name, type, country, dailyLimit, gateway, omnipayCode, mbiyoCode, active } = req.body;
+      const { name, type, country, dailyLimit, gateway, omnipayCode, mbiyoCode, seapayCode, active } = req.body;
       if (!name || !country) return res.status(400).json({ message: "Nom et pays requis" });
       const op = await storage.createWithdrawalOperator({
         name,
         type: type || "Mobile Money",
         country,
         dailyLimit: dailyLimit ? Number(dailyLimit) : 1000000,
-        gateway: "westpay",
+        gateway: typeof gateway === "string" && gateway.trim() ? gateway.trim() : "OmniPay",
         omnipayCode: omnipayCode?.trim() || null,
         mbiyoCode: mbiyoCode?.trim() || null,
+        seapayCode: seapayCode?.trim() || null,
         clapayCode: (req.body.clapayCode || "")?.trim() || null,
         active: active !== false,
         maintenanceAll: false,
@@ -9681,15 +9716,16 @@ export async function registerRoutes(
   app.put("/api/admin/withdrawal-operators/:id", authMiddleware("admin"), async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const { name, type, country, dailyLimit, gateway, omnipayCode, mbiyoCode, logo, sortOrder, active, maintenanceAll, maintenanceDeposits, maintenanceWithdrawals, maintenancePaymentLinks, maintenanceApiPayment } = req.body;
+      const { name, type, country, dailyLimit, gateway, omnipayCode, mbiyoCode, seapayCode, logo, sortOrder, active, maintenanceAll, maintenanceDeposits, maintenanceWithdrawals, maintenancePaymentLinks, maintenanceApiPayment } = req.body;
       const updated = await storage.updateWithdrawalOperator(id, {
         ...(name !== undefined && { name }),
         ...(type !== undefined && { type }),
         ...(country !== undefined && { country }),
         ...(dailyLimit !== undefined && { dailyLimit: Number(dailyLimit) }),
-        ...(gateway !== undefined && { gateway }),
+        ...(gateway !== undefined && { gateway: typeof gateway === "string" && gateway.trim() ? gateway.trim() : "OmniPay" }),
         ...(omnipayCode !== undefined && { omnipayCode: omnipayCode?.trim() || null }),
         ...(mbiyoCode !== undefined && { mbiyoCode: mbiyoCode?.trim() || null }),
+        ...(seapayCode !== undefined && { seapayCode: seapayCode?.trim() || null }),
         ...(req.body.clapayCode !== undefined && { clapayCode: (req.body.clapayCode || "")?.trim() || null }),
         ...(logo !== undefined && { logo: logo || null }),
         ...(sortOrder !== undefined && { sortOrder: Number(sortOrder) }),
