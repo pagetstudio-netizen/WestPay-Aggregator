@@ -172,7 +172,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── État d'initialisation exposé par /api/healthz-boot ───────────────────────
+// ── État d'initialisation interne ───────────────────────────────────────────
 const bootState: {
   status: "starting" | "ready" | "error";
   errors: string[];
@@ -190,7 +190,6 @@ const bootState: {
 };
 
 // Démarrer le serveur HTTP EN PREMIER — avant toute initialisation.
-// /api/healthz-boot répond toujours, même si la suite crashe.
 const port = parseInt(process.env.PORT || "5000", 10);
 
 // Handler d'erreur — évite que EADDRINUSE ou autre erreur réseau crashe le process
@@ -223,16 +222,7 @@ let routesReady = false;
 let resolveRoutesReady: () => void = () => {};
 const routesReadyPromise = new Promise<void>((r) => { resolveRoutesReady = r; });
 
-app.get("/api/healthz-boot", (_req, res) => {
-  const statusCode = bootState.status === "error" ? 503 : 200;
-  return res.status(statusCode).json({
-    status: bootState.status,
-    steps: bootState.steps,
-  });
-});
-
 app.use("/api", async (req, res, next) => {
-  if (req.path === "/healthz-boot") return next();
   if (routesReady) return next();
   if (bootState.status === "error") {
     return res.status(503).json({
@@ -245,9 +235,7 @@ app.use("/api", async (req, res, next) => {
   ]);
   if (timedOut && !routesReady) {
     return res.status(503).json({
-      message: bootState.status === "error"
-        ? "Serveur indisponible : sa configuration n'est pas terminée. Contactez l'administrateur."
-        : "Serveur en cours de démarrage, réessayez dans quelques secondes.",
+      message: "Serveur en cours de démarrage, réessayez dans quelques secondes.",
     });
   }
   next();
@@ -300,7 +288,7 @@ async function setupDevelopmentFrontend(): Promise<boolean> {
     console.error("[FATAL] Variables manquantes:", missingEnv.join(", "));
     await setupDevelopmentFrontend();
     resolveRoutesReady();
-    return; // Ne pas appeler process.exit — le serveur reste up pour /api/healthz-boot
+    return; // Ne pas appeler process.exit : le serveur reste disponible pour le frontend
   }
   bootState.steps.env = "ok";
 

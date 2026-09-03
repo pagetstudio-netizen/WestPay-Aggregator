@@ -4365,7 +4365,7 @@ export async function registerRoutes(
       const useClapay = gatewayLower === "clapay";
 
       if (!operatorRecord) {
-        console.warn(`[PAYMENT CONFIG] Opérateur introuvable: country="${country}" method="${paymentMethod}" — OmniPay utilisé par défaut`);
+        console.warn("[PAYMENT CONFIG] Opérateur introuvable — OmniPay utilisé par défaut");
       }
 
       if (useSendava) {
@@ -8283,7 +8283,7 @@ export async function registerRoutes(
           const network = payoutOpRecord?.mbiyoCode || mbiyoNetwork(operator || "");
           const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
           const callbackUrl = `${callbackBaseUrl}/api/mbiyo/payout-callback`;
-          console.log(`[WITHDRAWAL MBIYO] Requête préparée: network=${network} country=${countryCode} currency=${currency}`);
+          console.log("[WITHDRAWAL MBIYO] Requête préparée");
 
           const result = await mbiyoInitiatePayout({
             apiKey: mbiyoApiKey,
@@ -8397,7 +8397,7 @@ export async function registerRoutes(
           const countryCode = SENDAVAPAY_COUNTRY_CODES[mc.country] || "";
           const currency = SENDAVAPAY_CURRENCY_MAP[countryCode] || "XOF";
           const sendavaOperator = toSendavaOperator(operator || "", countryCode);
-          console.log(`[WITHDRAWAL SENDAVAPAY] Requête préparée: op=${sendavaOperator} country=${countryCode}`);
+          console.log("[WITHDRAWAL SENDAVAPAY] Requête préparée");
 
           const result = await sendavaInitiateWithdraw(sendavaApiKey, {
             amount: netAmount,
