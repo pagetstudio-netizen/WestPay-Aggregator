@@ -5,6 +5,7 @@ import { pool, financialPool } from "./db";
 import {
   initiateTransfer as omnipayInitiateTransfer,
   getTransactionStatus as omnipayGetStatus,
+  getBalance as omnipayGetBalance,
 } from "./omnipay";
 import {
   initiatePayout as mbiyoInitiatePayout,
@@ -20,7 +21,12 @@ import {
   toSendavaOperator,
   SENDAVAPAY_COUNTRY_CODES,
   SENDAVAPAY_CURRENCY_MAP,
+  getBalance as sendavaGetBalance,
 } from "./sendavapay";
+import {
+  seapayBalance,
+} from "./seapay";
+import { clapayGetBalance } from "./clapay";
 
 export interface GeoInfo {
   ip: string;
@@ -389,6 +395,217 @@ async function buildMerchantSoldeMessage(merchantId: number, merchantName: strin
   return parts.join("\n\n─────────────────\n\n");
 }
 
+type GatewayWalletBalance = {
+  country: string;
+  currency: string;
+  amount: number;
+  pending?: number;
+  frozen?: number;
+};
+
+type GatewayBalanceResult = {
+  wallets: GatewayWalletBalance[];
+  skippedCountries?: string[];
+};
+
+const GATEWAY_BALANCE_OPTIONS = [
+  { id: "omnipay", label: "OmniPay" },
+  { id: "sendavapay", label: "SendavaPay" },
+  { id: "seapay", label: "SeaPay" },
+  { id: "clapay", label: "ClaPay" },
+] as const;
+
+type GatewayBalanceId = typeof GATEWAY_BALANCE_OPTIONS[number]["id"];
+
+const SEAPAY_BALANCE_COUNTRIES: Record<string, string> = {
+  Pakistan: "PKR",
+  Philippines: "PHP",
+  India: "INR",
+  Nigeria: "NGN",
+};
+
+function gatewayMoney(amount: number, currency: string): string {
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount)) return "Indisponible";
+  return `${numericAmount.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} ${currency || ""}`.trim();
+}
+
+function normalizeGatewayAmount(value: unknown): number {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function gatewayBalanceMenuMarkup() {
+  return {
+    inline_keyboard: [
+      [
+        { text: "💰 OmniPay", callback_data: "gateway_balance:omnipay" },
+        { text: "💰 SendavaPay", callback_data: "gateway_balance:sendavapay" },
+      ],
+      [
+        { text: "💰 SeaPay", callback_data: "gateway_balance:seapay" },
+        { text: "💰 ClaPay", callback_data: "gateway_balance:clapay" },
+      ],
+    ],
+  };
+}
+
+function gatewayBalanceResultMarkup(gateway: GatewayBalanceId) {
+  return {
+    inline_keyboard: [
+      [{ text: "🔄 Actualiser", callback_data: `gateway_balance:${gateway}` }],
+      [{ text: "↩️ Choisir un autre gateway", callback_data: "gateway_balance:menu" }],
+    ],
+  };
+}
+
+function formatGatewayBalanceMessage(
+  gatewayLabel: string,
+  result: GatewayBalanceResult,
+): string {
+  const totals = new Map<string, number>();
+  for (const wallet of result.wallets) {
+    totals.set(wallet.currency, (totals.get(wallet.currency) || 0) + wallet.amount);
+  }
+
+  const totalLines = totals.size > 0
+    ? Array.from(totals.entries()).map(([currency, amount]) =>
+        `💰 *${currency} :* ${gatewayMoney(amount, currency)}`
+      ).join("\n")
+    : "⚠️ Aucun solde retourné par le gateway.";
+
+  const walletLines = result.wallets.length > 0
+    ? result.wallets.map((wallet) => {
+        const details = [
+          `🌍 *${wallet.country}*`,
+          `💳 ${gatewayMoney(wallet.amount, wallet.currency)}`,
+        ];
+        if (wallet.pending !== undefined) {
+          details.push(`⏳ En attente : ${gatewayMoney(wallet.pending, wallet.currency)}`);
+        }
+        if (wallet.frozen !== undefined) {
+          details.push(`🔒 Bloqué : ${gatewayMoney(wallet.frozen, wallet.currency)}`);
+        }
+        return details.join(" — ");
+      }).join("\n")
+    : "Aucun wallet pays retourné.";
+
+  const skipped = result.skippedCountries?.length
+    ? `\n\nℹ️ *Pays non configurés :* ${result.skippedCountries.join(", ")}`
+    : "";
+
+  return (
+    `🏦 *Soldes — ${gatewayLabel}*\n\n` +
+    `🌐 *Solde global du compte*\n${totalLines}\n\n` +
+    `💳 *Soldes des wallets par pays*\n${walletLines}` +
+    skipped +
+    `\n\n🕒 Mis à jour : ${new Date().toLocaleString("fr-FR", { timeZone: "Africa/Abidjan" })}`
+  );
+}
+
+async function getSeapayCredential(country: string, type: "merchant_id" | "api_secret"): Promise<string | undefined> {
+  const slug = country.trim().toLowerCase().replace(/[^a-z]/g, "");
+  const envCountry = country.trim().toUpperCase().replace(/[^A-Z]/g, "");
+  const envName = `SEAPAY_${envCountry}_${type === "merchant_id" ? "MERCHANT_ID" : "API_SECRET"}`;
+  return process.env[envName] || await storage.getSetting(`seapay_${type}_${slug}`);
+}
+
+async function fetchGatewayBalances(gateway: GatewayBalanceId): Promise<GatewayBalanceResult> {
+  if (gateway === "omnipay") {
+    const apiKey = process.env.OMNIPAY_API_KEY || await storage.getSetting("omnipay_api_key");
+    if (!apiKey) throw new Error("OmniPay n'est pas configuré.");
+
+    const result = await omnipayGetBalance(apiKey);
+    if (result.success !== 1) throw new Error("OmniPay n'a pas retourné le solde.");
+    const rawBalances = Array.isArray(result.balance) ? result.balance : [];
+    return {
+      wallets: rawBalances.map((wallet: any) => ({
+        country: wallet.countryName || wallet.countryCode || "Pays inconnu",
+        currency: wallet.currency || "—",
+        amount: normalizeGatewayAmount(wallet.amount),
+        pending: wallet.pending !== undefined ? normalizeGatewayAmount(wallet.pending) : undefined,
+      })),
+    };
+  }
+
+  if (gateway === "sendavapay") {
+    const apiKey = process.env.SENDAVA_API_KEY
+      || process.env.SENDAVAPAY_API_KEY
+      || await storage.getSetting("sendavapay_api_key");
+    if (!apiKey) throw new Error("SendavaPay n'est pas configuré.");
+
+    const result = await sendavaGetBalance(apiKey);
+    if (!result.success) throw new Error(result.message || "SendavaPay n'a pas retourné le solde.");
+    return {
+      wallets: (result.data?.wallets || []).map((wallet) => ({
+        country: wallet.countryName || wallet.country || "Pays inconnu",
+        currency: wallet.currency || "—",
+        amount: normalizeGatewayAmount(wallet.balance),
+      })),
+    };
+  }
+
+  if (gateway === "clapay") {
+    const token = process.env.CLAPAY_API_KEY || await storage.getSetting("clapay_api_key");
+    if (!token) throw new Error("ClaPay n'est pas configuré.");
+
+    const result = await clapayGetBalance(token);
+    if (!result.success) throw new Error(result.message || "ClaPay n'a pas retourné le solde.");
+    if (Array.isArray(result.balances)) {
+      return {
+        wallets: result.balances.map((wallet: any) => ({
+          country: wallet.countryName || wallet.country || wallet.country_code || "Pays inconnu",
+          currency: wallet.currency || "XOF",
+          amount: normalizeGatewayAmount(wallet.balance),
+        })),
+      };
+    }
+    return {
+      wallets: result.balance !== undefined
+        ? [{ country: "Global", currency: result.currency || "XOF", amount: normalizeGatewayAmount(result.balance) }]
+        : [],
+    };
+  }
+
+  const seapayCountries = Object.entries(SEAPAY_BALANCE_COUNTRIES);
+  const settled = await Promise.all(seapayCountries.map(async ([country, currency]) => {
+    const [merchantId, apiSecret] = await Promise.all([
+      getSeapayCredential(country, "merchant_id"),
+      getSeapayCredential(country, "api_secret"),
+    ]);
+    if (!merchantId || !apiSecret) return { country, wallet: null };
+
+    try {
+      const result = await seapayBalance(merchantId, currency, apiSecret);
+      if (result.code !== 200 || !result.data) return { country, wallet: null };
+      return {
+        country,
+        wallet: {
+          country,
+          currency: result.data.currency || currency,
+          amount: normalizeGatewayAmount(result.data.balance),
+          frozen: result.data.frozen !== undefined ? normalizeGatewayAmount(result.data.frozen) : undefined,
+        },
+      };
+    } catch {
+      return { country, wallet: null };
+    }
+  }));
+
+  const wallets = settled.flatMap((item) => item.wallet ? [item.wallet] : []);
+  const skippedCountries = settled.filter((item) => !item.wallet).map((item) => item.country);
+  if (wallets.length === 0) throw new Error("Aucun compte SeaPay configuré ou joignable.");
+  return { wallets, skippedCountries };
+}
+
+async function replyGatewayBalanceMenu(ctx: any): Promise<void> {
+  await ctx.reply(
+    "🏦 *Soldes des gateways*\n\nSélectionnez le gateway à consulter :\n\n" +
+    "Le résultat affichera le solde global du compte et le détail des wallets par pays.",
+    { parse_mode: "Markdown", reply_markup: gatewayBalanceMenuMarkup() },
+  );
+}
+
 export function initTelegramBot(overrideToken?: string): Telegraf | null {
   const token = overrideToken || process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
@@ -722,6 +939,56 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         { parse_mode: "Markdown" }
       );
     } catch { await ctx.reply("❌ Erreur."); }
+  });
+
+  // ─── /soldegateway (groupe admin uniquement) ─────────────────────────────
+  bot.command("soldegateway", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
+    if (!isGroup || !await isAdminGroup(chatId)) return;
+    await replyGatewayBalanceMenu(ctx);
+  });
+
+  // ─── Callback : sélection et actualisation du solde gateway ──────────────
+  bot.action("gateway_balance:menu", async (ctx) => {
+    const chatId = String(ctx.chat?.id || "");
+    if (!chatId || !await isAdminGroup(chatId)) {
+      await ctx.answerCbQuery("⛔ Non autorisé");
+      return;
+    }
+    await ctx.answerCbQuery();
+    await ctx.editMessageText(
+      "🏦 *Soldes des gateways*\n\nSélectionnez le gateway à consulter :\n\n" +
+      "Le résultat affichera le solde global du compte et le détail des wallets par pays.",
+      { parse_mode: "Markdown", reply_markup: gatewayBalanceMenuMarkup() },
+    );
+  });
+
+  bot.action(/^gateway_balance:(omnipay|sendavapay|seapay|clapay)$/, async (ctx) => {
+    const chatId = String(ctx.chat?.id || "");
+    if (!chatId || !await isAdminGroup(chatId)) {
+      await ctx.answerCbQuery("⛔ Non autorisé");
+      return;
+    }
+
+    const gateway = ctx.match[1] as GatewayBalanceId;
+    const gatewayLabel = GATEWAY_BALANCE_OPTIONS.find((option) => option.id === gateway)?.label || gateway;
+    await ctx.answerCbQuery("⏳ Récupération du solde...");
+    await ctx.editMessageText(`⏳ Récupération des soldes ${gatewayLabel}...`);
+
+    try {
+      const result = await fetchGatewayBalances(gateway);
+      await ctx.editMessageText(
+        formatGatewayBalanceMessage(gatewayLabel, result),
+        { parse_mode: "Markdown", reply_markup: gatewayBalanceResultMarkup(gateway) },
+      );
+    } catch {
+      await ctx.editMessageText(
+        `❌ Impossible de récupérer les soldes ${gatewayLabel}.\n\n` +
+        "Vérifiez que le gateway est configuré et que son service est accessible.",
+        { reply_markup: gatewayBalanceResultMarkup(gateway) },
+      );
+    }
   });
 
   // ─── /solde ────────────────────────────────────────────────────────────────
@@ -1196,6 +1463,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `📊 *Statistiques & Soldes*\n` +
           `/stats — Statistiques globales\n` +
           `/solde — Soldes détaillés de tous les marchands\n\n` +
+          `/soldegateway — Solde global et wallets pays d'un gateway\n\n` +
           `📢 *Diffusion*\n` +
           `/broadcast — Envoyer un message dans les groupes\n` +
           `/groupes — Lister tous les groupes où le bot est présent\n` +
