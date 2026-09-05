@@ -2956,6 +2956,52 @@ export async function notifyAdminPayment(data: {
   await notifyAdminGroup(msg);
 }
 
+function formatAdminRawError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error ?? "");
+  const normalized = raw.trim() || "Erreur inconnue";
+  return normalized.length > 2800
+    ? `${normalized.slice(0, 2800)}\n...[erreur tronquée pour Telegram]`
+    : normalized;
+}
+
+export async function notifyAdminPaymentError(data: {
+  merchantName: string;
+  merchantId?: number;
+  country: string;
+  amount: number;
+  payerNumber?: string | null;
+  operator?: string | null;
+  gateway?: string | null;
+  stage?: string | null;
+  error: unknown;
+}): Promise<void> {
+  const dateStr = new Date().toLocaleString("fr-FR", {
+    day: "2-digit", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC",
+  });
+  const rawError = formatAdminRawError(data.error);
+  const lines = [
+    `🚨 *Erreur paiement WestPay*`,
+    ``,
+    `🏪 *Marchand :* ${data.merchantName}`,
+    data.merchantId ? `🆔 *ID marchand :* ${data.merchantId}` : null,
+    `🌍 *Pays :* ${countryLabel(data.country)}`,
+    `💰 *Montant :* ${formatAmountC(data.amount, data.country)}`,
+    data.payerNumber ? `📞 *Numéro client :* ${data.payerNumber}` : null,
+    data.operator ? `📱 *Opérateur :* ${data.operator}` : null,
+    data.gateway ? `⚙️ *Gateway :* ${data.gateway}` : null,
+    data.stage ? `📍 *Étape :* ${data.stage}` : null,
+    `📅 *Date :* ${dateStr} UTC`,
+    ``,
+    `⚠️ *Erreur exacte :*`,
+    "```",
+    rawError,
+    "```",
+  ].filter(Boolean).join("\n");
+
+  await notifyAdminGroup(lines);
+}
+
 export async function notifyAdminWithdrawal(data: {
   id: number;
   merchantName: string;
@@ -3014,6 +3060,48 @@ export async function notifyAdminWithdrawal(data: {
   ].filter(Boolean) as string[];
 
   await notifyAdminGroup(lines.join("\n"));
+}
+
+export async function notifyAdminWithdrawalError(data: {
+  id?: number;
+  merchantName: string;
+  merchantEmail?: string;
+  merchantId?: number;
+  country: string;
+  amount: number;
+  phone?: string | null;
+  operator?: string | null;
+  gateway?: string | null;
+  stage?: string | null;
+  error: unknown;
+}): Promise<void> {
+  const dateStr = new Date().toLocaleString("fr-FR", {
+    day: "2-digit", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC",
+  });
+  const rawError = formatAdminRawError(data.error);
+  const lines = [
+    `🚨 *Erreur retrait WestPay*`,
+    ``,
+    data.id ? `🔖 *Retrait :* \`WD-${data.id}\`` : null,
+    `🏪 *Marchand :* ${data.merchantName}`,
+    data.merchantEmail ? `📧 *Email :* \`${data.merchantEmail}\`` : null,
+    data.merchantId ? `🆔 *ID marchand :* ${data.merchantId}` : null,
+    `🌍 *Pays :* ${countryLabel(data.country)}`,
+    `💰 *Montant :* ${formatAmountC(data.amount, data.country)}`,
+    data.phone ? `📞 *Numéro destinataire :* ${data.phone}` : null,
+    data.operator ? `📱 *Opérateur :* ${data.operator}` : null,
+    data.gateway ? `⚙️ *Gateway :* ${data.gateway}` : null,
+    data.stage ? `📍 *Étape :* ${data.stage}` : null,
+    `📅 *Date :* ${dateStr} UTC`,
+    ``,
+    `⚠️ *Erreur exacte :*`,
+    "```",
+    rawError,
+    "```",
+  ].filter(Boolean).join("\n");
+
+  await notifyAdminGroup(lines);
 }
 
 export async function notifyAdminWalletTransfer(data: {

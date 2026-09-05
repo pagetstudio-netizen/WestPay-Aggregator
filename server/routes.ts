@@ -15,7 +15,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { sendMerchantOtpEmail } from "./email";
-import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminWithdrawal, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, notifyAdminMerchantCreated, notifyAdminAdminCreated, getGeoInfo, notifyAdminMerchantLogin, notifyAdminIpBlocked, notifyAdminBruteForce, notifyAdminDeviceBlocked, notifyAdminNewDevice, notifyAdminOtp, notifyAdminVpn, notifyAdminCountryBlocked, notifyAdminLocationJump, notifyAdminNewMerchantIp, broadcastToMerchants, sendTelegramMessage } from "./telegram-bot";
+import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminPaymentError, notifyAdminWithdrawal, notifyAdminWithdrawalError, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, notifyAdminMerchantCreated, notifyAdminAdminCreated, getGeoInfo, notifyAdminMerchantLogin, notifyAdminIpBlocked, notifyAdminBruteForce, notifyAdminDeviceBlocked, notifyAdminNewDevice, notifyAdminOtp, notifyAdminVpn, notifyAdminCountryBlocked, notifyAdminLocationJump, notifyAdminNewMerchantIp, broadcastToMerchants, sendTelegramMessage } from "./telegram-bot";
 import {
   initiatePayment as omnipayInitiatePayment,
   initiateTransfer as omnipayInitiateTransfer,
@@ -4364,6 +4364,17 @@ export async function registerRoutes(
           console.error(
             `[PAYMENT CONFIG] Clé absente pour gateway=sendavapay pays=${country} opérateur=${paymentMethod}`,
           );
+          notifyAdminPaymentError({
+            merchantName: merchant.name,
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerNumber: msisdn,
+            operator: paymentMethod,
+            gateway: "sendavapay",
+            stage: "lecture de la clé API",
+            error: "SENDAVA_API_KEY/sendavapay_api_key absent ou vide",
+          }).catch(() => {});
           return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
         }
 
@@ -4394,6 +4405,17 @@ export async function registerRoutes(
             const rawError = sendavaResult.message || (sendavaResult as any).error || "Erreur de paiement. Veuillez reessayer.";
             const userMsg = "Service de paiement temporairement indisponible. Veuillez reessayer dans quelques instants.";
             console.error(`[SENDAVAPAY] Erreur interne API: ${rawError}`);
+            notifyAdminPaymentError({
+              merchantName: merchant.name,
+              merchantId: merchant.id,
+              country,
+              amount: parsedAmount,
+              payerNumber: msisdn,
+              operator: paymentMethod,
+              gateway: "sendavapay",
+              stage: "réponse API de création du paiement",
+              error: rawError,
+            }).catch(() => {});
             storage.createTransaction({
               merchantId: merchant.id,
               country,
@@ -4542,6 +4564,17 @@ export async function registerRoutes(
           }
         } catch (sendavaErr: any) {
           console.error("[SENDAVAPAY] Erreur création paiement:", sendavaErr.message);
+          notifyAdminPaymentError({
+            merchantName: merchant.name,
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerNumber: msisdn,
+            operator: paymentMethod,
+            gateway: "sendavapay",
+            stage: "appel API de création du paiement",
+            error: sendavaErr,
+          }).catch(() => {});
           return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
         }
       } else if (useMbiyo) {
@@ -4550,6 +4583,17 @@ export async function registerRoutes(
           console.error(
             `[PAYMENT CONFIG] Clé absente pour gateway=mbiyo pays=${country} opérateur=${paymentMethod}`,
           );
+          notifyAdminPaymentError({
+            merchantName: merchant.name,
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerNumber: msisdn,
+            operator: paymentMethod,
+            gateway: "mbiyo",
+            stage: "lecture de la clé API",
+            error: "MBIYO_API_KEY/mbiyo_api_key absent ou vide",
+          }).catch(() => {});
           return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
         }
 
@@ -4575,6 +4619,17 @@ export async function registerRoutes(
 
           if (mbiyoResult.status !== "success" || !mbiyoResult.data) {
             const errorMsg = mbiyoResult.message || "Erreur de paiement. Veuillez reessayer.";
+            notifyAdminPaymentError({
+              merchantName: merchant.name,
+              merchantId: merchant.id,
+              country,
+              amount: parsedAmount,
+              payerNumber: msisdn,
+              operator: paymentMethod,
+              gateway: "mbiyo",
+              stage: "réponse API d'initiation du paiement",
+              error: errorMsg,
+            }).catch(() => {});
             storage.createTransaction({
               merchantId: merchant.id,
               country,
@@ -4627,6 +4682,17 @@ export async function registerRoutes(
           });
         } catch (mbiyoErr: any) {
           console.error("[MBIYO] Erreur initiation:", mbiyoErr.message);
+          notifyAdminPaymentError({
+            merchantName: merchant.name,
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerNumber: msisdn,
+            operator: paymentMethod,
+            gateway: "mbiyo",
+            stage: "appel API d'initiation du paiement",
+            error: mbiyoErr,
+          }).catch(() => {});
           return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
         }
       } else if (useSeapay) {
@@ -4637,6 +4703,17 @@ export async function registerRoutes(
             `[PAYMENT CONFIG] Identifiants incomplets pour gateway=seapay pays=${country} opérateur=${paymentMethod} ` +
             `(merchantId=${!!spMerchantId}, apiKey=${!!spApiKey})`,
           );
+          notifyAdminPaymentError({
+            merchantName: merchant.name,
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerNumber: msisdn,
+            operator: paymentMethod,
+            gateway: "seapay",
+            stage: "lecture des identifiants pays",
+            error: `Identifiants SeaPay incomplets (merchantId=${!!spMerchantId}, apiKey=${!!spApiKey})`,
+          }).catch(() => {});
           return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
         }
 
@@ -4663,6 +4740,17 @@ export async function registerRoutes(
 
           if (spResult.code !== 200 || !spResult.data) {
             const errorMsg = spResult.msg || "Erreur de paiement. Veuillez reessayer.";
+            notifyAdminPaymentError({
+              merchantName: merchant.name,
+              merchantId: merchant.id,
+              country,
+              amount: parsedAmount,
+              payerNumber: msisdn,
+              operator: paymentMethod,
+              gateway: "seapay",
+              stage: "réponse API d'initiation du paiement",
+              error: errorMsg,
+            }).catch(() => {});
             storage.createTransaction({
               merchantId: merchant.id, country,
               txId: reference, amount: parsedAmount,
@@ -4708,6 +4796,17 @@ export async function registerRoutes(
           });
         } catch (spErr: any) {
           console.error("[SEAPAY] Erreur initiation:", spErr.message);
+          notifyAdminPaymentError({
+            merchantName: merchant.name,
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerNumber: msisdn,
+            operator: paymentMethod,
+            gateway: "seapay",
+            stage: "appel API d'initiation du paiement",
+            error: spErr,
+          }).catch(() => {});
           return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
         }
       } else if (useClapay) {
@@ -4717,6 +4816,17 @@ export async function registerRoutes(
           console.error(
             `[PAYMENT CONFIG] Clé absente pour gateway=clapay pays=${country} opérateur=${paymentMethod}`,
           );
+          notifyAdminPaymentError({
+            merchantName: merchant.name,
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerNumber: msisdn,
+            operator: paymentMethod,
+            gateway: "clapay",
+            stage: "lecture de la clé API",
+            error: "CLAPAY_API_KEY/clapay_api_key absent ou vide",
+          }).catch(() => {});
           return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
         }
 
@@ -4767,6 +4877,17 @@ export async function registerRoutes(
           if (!cpResult.success) {
             const errorMsg = cpResult.message || "Erreur de paiement. Veuillez reessayer.";
             console.error(`[CLAPAY] Erreur initiation: ${errorMsg}`);
+            notifyAdminPaymentError({
+              merchantName: merchant.name,
+              merchantId: merchant.id,
+              country,
+              amount: parsedAmount,
+              payerNumber: msisdn,
+              operator: paymentMethod,
+              gateway: "clapay",
+              stage: "réponse API d'initiation du paiement",
+              error: errorMsg,
+            }).catch(() => {});
             storage.createTransaction({
               merchantId: merchant.id, country,
               txId: reference, amount: parsedAmount,
@@ -4814,6 +4935,17 @@ export async function registerRoutes(
           });
         } catch (cpErr: any) {
           console.error("[CLAPAY] Erreur initiation:", cpErr.message);
+          notifyAdminPaymentError({
+            merchantName: merchant.name,
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerNumber: msisdn,
+            operator: paymentMethod,
+            gateway: "clapay",
+            stage: "appel API d'initiation du paiement",
+            error: cpErr,
+          }).catch(() => {});
           return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
         }
       } else {
@@ -4822,6 +4954,17 @@ export async function registerRoutes(
           console.error(
             `[PAYMENT CONFIG] Clé absente pour gateway=omnipay pays=${country} opérateur=${paymentMethod}`,
           );
+          notifyAdminPaymentError({
+            merchantName: merchant.name,
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerNumber: msisdn,
+            operator: paymentMethod,
+            gateway: "omnipay",
+            stage: "lecture de la clé API",
+            error: "OMNIPAY_API_KEY/omnipay_api_key absent ou vide",
+          }).catch(() => {});
           return res.status(500).json({ message: "Systeme de paiement non configure. Contactez l'administrateur." });
         }
 
@@ -4848,6 +4991,17 @@ export async function registerRoutes(
 
           if (omnipayResult.success !== 1) {
             const errorMsg = OMNIPAY_ERRORS[omnipayResult.code || 0] || omnipayResult.message || "Erreur de paiement";
+            notifyAdminPaymentError({
+              merchantName: merchant.name,
+              merchantId: merchant.id,
+              country,
+              amount: parsedAmount,
+              payerNumber: msisdn,
+              operator: paymentMethod,
+              gateway: "omnipay",
+              stage: "réponse API d'initiation du paiement",
+              error: `Code ${omnipayResult.code ?? "inconnu"} — ${errorMsg}`,
+            }).catch(() => {});
             storage.createTransaction({
               merchantId: merchant.id,
               country,
@@ -4899,6 +5053,17 @@ export async function registerRoutes(
           });
         } catch (omnipayErr: any) {
           console.error("[OMNIPAY] Erreur initiation:", omnipayErr.message);
+          notifyAdminPaymentError({
+            merchantName: merchant.name,
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerNumber: msisdn,
+            operator: paymentMethod,
+            gateway: "omnipay",
+            stage: "appel API d'initiation du paiement",
+            error: omnipayErr,
+          }).catch(() => {});
           return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
         }
       }
