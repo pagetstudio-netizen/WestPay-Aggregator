@@ -8413,6 +8413,19 @@ export async function registerRoutes(
           console.error(
             `[WITHDRAWAL CONFIG] Clé absente pour gateway=mbiyo pays=${mc.country} opérateur=${operator || "(vide)"}`,
           );
+          notifyAdminWithdrawalError({
+            id: w.id,
+            merchantName: merchant.name,
+            merchantEmail: merchant.email,
+            merchantId,
+            country: mc.country,
+            amount: parsedAmount,
+            phone: phoneClean,
+            operator,
+            gateway: "mbiyo",
+            stage: "lecture de la clé API",
+            error: "MBIYO_API_KEY/mbiyo_api_key absent ou vide",
+          }).catch(() => {});
           await storage.updateWithdrawalStatus(w.id, "failed", "Cle API Mbiyo non configuree", reference);
           await storage.incrementMerchantCountryBalance(mc.id, amount);
           return res.status(500).json({ message: "Service de retrait non configure. Contactez l'administrateur." });
@@ -8448,6 +8461,19 @@ export async function registerRoutes(
           } else {
             const errMsg = result.message || "Echec du transfert";
             console.warn(`[WITHDRAWAL MBIYO] Echec: ${errMsg} — tentative fallback OmniPay...`);
+            notifyAdminWithdrawalError({
+              id: w.id,
+              merchantName: merchant.name,
+              merchantEmail: merchant.email,
+              merchantId,
+              country: mc.country,
+              amount: parsedAmount,
+              phone: phoneClean,
+              operator,
+              gateway: "mbiyo",
+              stage: "réponse API d'initiation du retrait (fallback OmniPay tenté)",
+              error: errMsg,
+            }).catch(() => {});
             // Fallback OmniPay
             const fallbackApiKey = await getOmnipayPayoutApiKey();
             if (fallbackApiKey) {
@@ -8490,6 +8516,19 @@ export async function registerRoutes(
           const isTimeout = errDetail.includes("abort") || errDetail.includes("timeout") || errDetail.includes("UND_ERR");
           const techMsg = isTimeout ? "Timeout connexion passerelle" : `Erreur technique: ${errDetail}`;
           console.error(`[WITHDRAWAL MBIYO] Erreur catch — retrait #${w.id} | ${techMsg} — tentative fallback OmniPay...`);
+          notifyAdminWithdrawalError({
+            id: w.id,
+            merchantName: merchant.name,
+            merchantEmail: merchant.email,
+            merchantId,
+            country: mc.country,
+            amount: parsedAmount,
+            phone: phoneClean,
+            operator,
+            gateway: "mbiyo",
+            stage: "appel API d'initiation du retrait (fallback OmniPay tenté)",
+            error: errDetail,
+          }).catch(() => {});
           // Fallback OmniPay sur exception
           const fallbackApiKey = await getOmnipayPayoutApiKey();
           if (fallbackApiKey) {
@@ -8532,6 +8571,19 @@ export async function registerRoutes(
           console.error(
             `[WITHDRAWAL CONFIG] Clé absente pour gateway=sendavapay pays=${mc.country} opérateur=${operator || "(vide)"}`,
           );
+          notifyAdminWithdrawalError({
+            id: w.id,
+            merchantName: merchant.name,
+            merchantEmail: merchant.email,
+            merchantId,
+            country: mc.country,
+            amount: parsedAmount,
+            phone: phoneClean,
+            operator,
+            gateway: "sendavapay",
+            stage: "lecture de la clé API",
+            error: "SENDAVA_API_KEY/sendavapay_api_key absent ou vide",
+          }).catch(() => {});
           await storage.updateWithdrawalStatus(w.id, "failed", "Service de retrait non configuré", reference);
           await storage.incrementMerchantCountryBalance(mc.id, amount);
           return res.status(500).json({ message: "Service de retrait non configure. Contactez l'administrateur." });
@@ -8580,6 +8632,19 @@ export async function registerRoutes(
           } else {
             const rawErrMsg = result.message || result.data?.message || (result as any).error || "Échec du virement";
             console.warn(`[WITHDRAWAL SENDAVAPAY] Echec: ${rawErrMsg}`);
+            notifyAdminWithdrawalError({
+              id: w.id,
+              merchantName: merchant.name,
+              merchantEmail: merchant.email,
+              merchantId,
+              country: mc.country,
+              amount: parsedAmount,
+              phone: phoneClean,
+              operator,
+              gateway: "sendavapay",
+              stage: "réponse API d'initiation du retrait",
+              error: rawErrMsg,
+            }).catch(() => {});
             const safeErrMsg = toMerchantSafeMessage(rawErrMsg) || "Échec du virement";
             await storage.updateWithdrawalStatus(w.id, "failed", `Retrait non abouti: ${safeErrMsg}`, reference);
             notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
@@ -8597,6 +8662,19 @@ export async function registerRoutes(
             ? "Délai d'attente dépassé (service inaccessible)"
             : `Erreur technique : ${toMerchantSafeMessage(errDetail)}`;
           console.error(`[WITHDRAWAL SENDAVAPAY] Erreur catch — retrait #${w.id} | ${techMsg}`);
+          notifyAdminWithdrawalError({
+            id: w.id,
+            merchantName: merchant.name,
+            merchantEmail: merchant.email,
+            merchantId,
+            country: mc.country,
+            amount: parsedAmount,
+            phone: phoneClean,
+            operator,
+            gateway: "sendavapay",
+            stage: "appel API d'initiation du retrait",
+            error: errDetail,
+          }).catch(() => {});
           await storage.updateWithdrawalStatus(w.id, "failed", techMsg, reference);
           notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
           notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
@@ -8612,6 +8690,19 @@ export async function registerRoutes(
           console.error(
             `[WITHDRAWAL CONFIG] Clé absente pour gateway=clapay pays=${mc.country} opérateur=${operator || "(vide)"}`,
           );
+          notifyAdminWithdrawalError({
+            id: w.id,
+            merchantName: merchant.name,
+            merchantEmail: merchant.email,
+            merchantId,
+            country: mc.country,
+            amount: parsedAmount,
+            phone: phoneClean,
+            operator,
+            gateway: "clapay",
+            stage: "lecture de la clé API",
+            error: "CLAPAY_API_KEY/clapay_api_key absent ou vide",
+          }).catch(() => {});
           await storage.updateWithdrawalStatus(w.id, "failed", "Clé API ClaPay non configurée", reference);
           await storage.incrementMerchantCountryBalance(mc.id, amount);
           return res.status(500).json({ message: "Service de retrait non configure. Contactez l'administrateur." });
@@ -8648,11 +8739,37 @@ export async function registerRoutes(
              return res.json({ ...w, status: "pending", omnipayRef: reference, fees: 0, netAmount, autoProcessed: true, gateway: "clapay" });
           } else {
             const rawErrMsg = result.message || "Échec ClaPay";
+            notifyAdminWithdrawalError({
+              id: w.id,
+              merchantName: merchant.name,
+              merchantEmail: merchant.email,
+              merchantId,
+              country: mc.country,
+              amount: parsedAmount,
+              phone: phoneClean,
+              operator,
+              gateway: "clapay",
+              stage: "réponse API d'initiation du retrait",
+              error: rawErrMsg,
+            }).catch(() => {});
             await storage.updateWithdrawalStatus(w.id, "failed", rawErrMsg, reference);
             await storage.incrementMerchantCountryBalance(mc.id, amount);
             return res.status(400).json({ message: `Retrait refusé : ${rawErrMsg}. Votre solde a été restitué.` });
           }
         } catch (cpErr: any) {
+          notifyAdminWithdrawalError({
+            id: w.id,
+            merchantName: merchant.name,
+            merchantEmail: merchant.email,
+            merchantId,
+            country: mc.country,
+            amount: parsedAmount,
+            phone: phoneClean,
+            operator,
+            gateway: "clapay",
+            stage: "appel API d'initiation du retrait",
+            error: cpErr,
+          }).catch(() => {});
           await storage.updateWithdrawalStatus(w.id, "failed", `Erreur technique ClaPay`, reference);
           await storage.incrementMerchantCountryBalance(mc.id, amount);
           return res.status(500).json({ message: "Erreur technique lors du traitement. Votre solde a été restitué." });
@@ -8663,6 +8780,19 @@ export async function registerRoutes(
           console.error(
             `[WITHDRAWAL CONFIG] Clé absente pour gateway=omnipay pays=${mc.country} opérateur=${operator || "(vide)"}`,
           );
+          notifyAdminWithdrawalError({
+            id: w.id,
+            merchantName: merchant.name,
+            merchantEmail: merchant.email,
+            merchantId,
+            country: mc.country,
+            amount: parsedAmount,
+            phone: phoneClean,
+            operator,
+            gateway: "omnipay",
+            stage: "lecture de la clé API",
+            error: "OMNIPAY_API_KEY/omnipay_payout_api_key/omnipay_api_key absent ou vide",
+          }).catch(() => {});
           await storage.updateWithdrawalStatus(w.id, "failed", "Cle API retrait non configuree", reference);
           await storage.incrementMerchantCountryBalance(mc.id, amount);
           return res.status(500).json({ message: "Cle API retrait non configuree. Contactez l'administrateur." });
@@ -8690,6 +8820,19 @@ export async function registerRoutes(
             return res.json({ ...w, status: "pending", omnipayRef, fees: withdrawalFee, netAmount, autoProcessed: true });
           } else {
             const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Echec de traitement";
+            notifyAdminWithdrawalError({
+              id: w.id,
+              merchantName: merchant.name,
+              merchantEmail: merchant.email,
+              merchantId,
+              country: mc.country,
+              amount: parsedAmount,
+              phone: phoneClean,
+              operator,
+              gateway: "omnipay",
+              stage: "réponse API d'initiation du retrait",
+              error: `Code ${result.code ?? "inconnu"} — ${errMsg}`,
+            }).catch(() => {});
             await storage.updateWithdrawalStatus(w.id, "failed", `Retrait non abouti: ${errMsg}`, reference);
             notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
             notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
@@ -8698,6 +8841,19 @@ export async function registerRoutes(
           }
         } catch (omnipayErr: any) {
           console.error("[WITHDRAWAL AUTO] Erreur OmniPay:", omnipayErr.message);
+          notifyAdminWithdrawalError({
+            id: w.id,
+            merchantName: merchant.name,
+            merchantEmail: merchant.email,
+            merchantId,
+            country: mc.country,
+            amount: parsedAmount,
+            phone: phoneClean,
+            operator,
+            gateway: "omnipay",
+            stage: "appel API d'initiation du retrait",
+            error: omnipayErr,
+          }).catch(() => {});
           await storage.updateWithdrawalStatus(w.id, "failed", `Erreur technique lors du traitement`, reference);
           notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
           notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
@@ -10617,7 +10773,20 @@ export async function registerRoutes(
         return res.status(400).json({ status: "error", message: "amount doit être un nombre positif." });
       }
       const mbiyoApiKey = await getMbiyoApiKey();
-      if (!mbiyoApiKey) return res.status(503).json({ status: "error", message: "Passerelle de paiement non configurée." });
+      if (!mbiyoApiKey) {
+        notifyAdminPaymentError({
+          merchantName: merchant.name,
+          merchantId: merchant.id,
+          country: metadata?.country_code || "N/A",
+          amount: Number(amount) || 0,
+          payerNumber: metadata?.phone_number || null,
+          operator: metadata?.network || null,
+          gateway: "mbiyopay",
+          stage: "SDK payin — clé API absente",
+          error: "Clé API MbiyoPay absente : passerelle de paiement non configurée.",
+        }).catch(() => {});
+        return res.status(503).json({ status: "error", message: "Passerelle de paiement non configurée." });
+      }
 
       const countryMap: Record<string, string> = {
         "TG": "Togo", "BJ": "Benin", "CI": "Cote d'Ivoire", "SN": "Senegal",
@@ -10659,6 +10828,17 @@ export async function registerRoutes(
       });
 
       if (mbiyoResult.status !== "success" && mbiyoResult.status !== "pending") {
+        notifyAdminPaymentError({
+          merchantName: merchant.name,
+          merchantId: merchant.id,
+          country: countryName,
+          amount,
+          payerNumber: metadata.phone_number,
+          operator: metadata.network,
+          gateway: "mbiyopay",
+          stage: "SDK payin — réponse API",
+          error: mbiyoResult.message || "Echec initiation paiement",
+        }).catch(() => {});
         return res.status(422).json({ status: "error", message: mbiyoResult.message || "Echec initiation paiement", data: null });
       }
 
@@ -10684,6 +10864,19 @@ export async function registerRoutes(
       });
     } catch (err: any) {
       console.error("[SDK PAYIN ERROR]", err.message);
+      const sdkBody = req.body || {};
+      const sdkMetadata = sdkBody.metadata || {};
+      notifyAdminPaymentError({
+        merchantName: (req as any).sdkMerchant?.name || "Marchand SDK inconnu",
+        merchantId: (req as any).sdkMerchant?.id,
+        country: sdkMetadata.country_code || "N/A",
+        amount: Number(sdkBody.amount) || 0,
+        payerNumber: sdkMetadata.phone_number || null,
+        operator: sdkMetadata.network || null,
+        gateway: "mbiyopay",
+        stage: "SDK payin — exception",
+        error: err,
+      }).catch(() => {});
       res.status(500).json({ status: "error", message: "Erreur interne du serveur", data: null });
     }
   });
@@ -10717,8 +10910,34 @@ export async function registerRoutes(
       const totalDeducted = Math.ceil(amount * (1 + feeRate));
 
       const mc = await storage.findMerchantCountryBySimAndCountry(merchant.id, countryName);
-      if (!mc) return res.status(422).json({ status: "error", message: `Compte ${countryName} non trouvé pour ce marchand.` });
+      if (!mc) {
+        const errorMessage = `Compte ${countryName} non trouvé pour ce marchand.`;
+        notifyAdminWithdrawalError({
+          merchantName: merchant.name,
+          merchantId: merchant.id,
+          country: countryName,
+          amount,
+          phone: metadata.phone_number,
+          operator: metadata.network,
+          gateway: "mbiyopay",
+          stage: "SDK payout — compte marchand/pays",
+          error: errorMessage,
+        }).catch(() => {});
+        return res.status(422).json({ status: "error", message: errorMessage });
+      }
       if (mc.balance < totalDeducted) {
+        const errorMessage = `Solde insuffisant pour ce retrait. Solde disponible: ${mc.balance}; montant débité requis: ${totalDeducted}.`;
+        notifyAdminWithdrawalError({
+          merchantName: merchant.name,
+          merchantId: merchant.id,
+          country: countryName,
+          amount,
+          phone: metadata.phone_number,
+          operator: metadata.network,
+          gateway: "mbiyopay",
+          stage: "SDK payout — contrôle du solde",
+          error: errorMessage,
+        }).catch(() => {});
         return res.status(422).json({
           status: "error",
           message: "Solde insuffisant pour ce retrait.",
@@ -10727,7 +10946,20 @@ export async function registerRoutes(
       }
 
       const mbiyoApiKey = await getMbiyoApiKey();
-      if (!mbiyoApiKey) return res.status(503).json({ status: "error", message: "Passerelle de paiement non configurée." });
+      if (!mbiyoApiKey) {
+        notifyAdminWithdrawalError({
+          merchantName: merchant.name,
+          merchantId: merchant.id,
+          country: countryName,
+          amount,
+          phone: metadata.phone_number,
+          operator: metadata.network,
+          gateway: "mbiyopay",
+          stage: "SDK payout — clé API absente",
+          error: "Clé API MbiyoPay absente : passerelle de paiement non configurée.",
+        }).catch(() => {});
+        return res.status(503).json({ status: "error", message: "Passerelle de paiement non configurée." });
+      }
 
       const internalRef = mbiyoGenerateRef();
 
@@ -10748,6 +10980,17 @@ export async function registerRoutes(
 
       if (mbiyoResult.status !== "success" && mbiyoResult.status !== "pending") {
         await storage.updateMerchantCountryBalance(mc.id, mc.balance);
+        notifyAdminWithdrawalError({
+          merchantName: merchant.name,
+          merchantId: merchant.id,
+          country: countryName,
+          amount,
+          phone: metadata.phone_number,
+          operator: metadata.network,
+          gateway: "mbiyopay",
+          stage: "SDK payout — réponse API",
+          error: mbiyoResult.message || "Echec initiation du payout",
+        }).catch(() => {});
         return res.status(422).json({ status: "error", message: mbiyoResult.message || "Echec initiation du payout", data: null });
       }
 
@@ -10793,6 +11036,19 @@ export async function registerRoutes(
       });
     } catch (err: any) {
       console.error("[SDK PAYOUT ERROR]", err.message);
+      const sdkBody = req.body || {};
+      const sdkMetadata = sdkBody.metadata || {};
+      notifyAdminWithdrawalError({
+        merchantName: (req as any).sdkMerchant?.name || "Marchand SDK inconnu",
+        merchantId: (req as any).sdkMerchant?.id,
+        country: sdkMetadata.country_code || "N/A",
+        amount: Number(sdkBody.amount) || 0,
+        phone: sdkMetadata.phone_number || "N/A",
+        operator: sdkMetadata.network || null,
+        gateway: "mbiyopay",
+        stage: "SDK payout — exception",
+        error: err,
+      }).catch(() => {});
       res.status(500).json({ status: "error", message: "Erreur interne du serveur", data: null });
     }
   });
