@@ -10,3 +10,4 @@
 - [Merchant login OTP mode](merchant-login-otp.md) — legacy OTP issues the JWT directly while Telegram activation remains intentionally paused.
 - [MbiyoPay balance endpoint](mbiyo-balance.md) — merchant wallet balances use the official `/api/v1/balances` endpoint.
 - [Screenshot asset and Git safety](screenshot-gitsafe.md) — preview screenshots can reintroduce uploaded captures through an automatic local safety commit.
+- [Telegram delivery recovery](telegram-delivery-recovery.md) — Telegraf polling launch deletes webhooks; check webhook ownership first and repair stuck webhook queues quickly.

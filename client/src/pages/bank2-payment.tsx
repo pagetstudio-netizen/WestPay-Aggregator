@@ -133,6 +133,12 @@ const PHONE_PLACEHOLDERS: Record<string, string> = {
   Kenya: "712 345 678",
 };
 
+const ORANGE_OTP_USSD: Record<string, string> = {
+  "Burkina Faso": "*144*4*6*montant#",
+  "Cote d'Ivoire": "#144*82#",
+  Mali: "*144#",
+};
+
 function currencyForCountry(country: string) {
   if (["Cameroun", "Congo Brazzaville", "Gabon"].includes(country)) return "XAF";
   if (country === "Congo RDC") return "CDF";
@@ -207,9 +213,8 @@ export default function Bank2PaymentPage() {
 
   const currency = currencyForCountry(country);
   const dialCode = DIAL_CODES[country] || "+";
-  const needsPreOtp =
-    method === "Orange Money" &&
-    (country === "Burkina Faso" || country === "Cote d'Ivoire");
+  const orangeOtpUssd = method === "Orange Money" ? ORANGE_OTP_USSD[country] : null;
+  const needsPreOtp = Boolean(orangeOtpUssd);
 
   const formatAmount = (value: number) => value.toLocaleString("fr-FR");
   const visibleCountries = (merchant?.countries || []).filter((item) => {
@@ -612,6 +617,13 @@ export default function Bank2PaymentPage() {
 
                 {needsPreOtp && (
                   <div className="bank2-otp-block">
+                    <div className="bank2-otp-help">
+                      <strong>Pour obtenir votre code OTP :</strong>
+                      <span>
+                        Composez <code>{orangeOtpUssd}</code> sur votre téléphone Orange Money,
+                        puis saisissez le code reçu ci-dessous.
+                      </span>
+                    </div>
                     <label className="bank2-label" htmlFor="bank2-pre-otp">Code OTP</label>
                     <input
                       id="bank2-pre-otp"
@@ -788,6 +800,9 @@ function Bank2Styles() {
       .bank2-selected-method{display:flex;align-items:center;gap:12px;font-size:19px;color:#565d66;margin-bottom:24px}
       .bank2-radio{width:22px;height:22px;border-radius:50%;border:7px solid #2d9fe4;background:#fff}
       .bank2-otp-block{margin-bottom:20px}.bank2-otp-block input,.bank2-otp-input{width:100%;border:1px solid #d6d8dc;border-radius:12px;padding:14px;font-size:18px;outline:0}
+      .bank2-otp-help{background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px 14px;margin-bottom:16px;color:#92400e;font-size:14px;line-height:1.45}
+      .bank2-otp-help strong{display:block;color:#c2410c;margin-bottom:5px}.bank2-otp-help span{display:block}
+      .bank2-otp-help code{display:inline-block;background:#fff;border:1px solid #fdba74;border-radius:6px;padding:2px 7px;margin:0 2px;color:#c2410c;font-weight:800;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
       .bank2-otp-input{text-align:center;font-size:25px;letter-spacing:.28em;max-width:320px}
       .bank2-inline-error{background:#fef2f2;border:1px solid #fecaca;color:#b42318;padding:10px 12px;border-radius:9px;margin:0 0 18px;font-size:14px}
       .bank2-actions{display:grid;grid-template-columns:1fr 1fr;gap:22px}

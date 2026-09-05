@@ -2504,8 +2504,10 @@ export async function registerWebhookUrl(webhookUrl: string): Promise<void> {
 }
 
 let _pollingActive = false;
+let _pollingRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 let _webhookWatchdog: ReturnType<typeof setInterval> | null = null;
 let _webhookWatchdogUrl: string | null = null;
+let _webhookPendingChecks = 0;
 
 /**
  * Surveille le webhook en production.
@@ -2520,6 +2522,7 @@ export function startWebhookWatchdog(webhookUrl: string): void {
   if (_webhookWatchdog && _webhookWatchdogUrl === webhookUrl) return;
   if (_webhookWatchdog) clearInterval(_webhookWatchdog);
   _webhookWatchdogUrl = webhookUrl;
+  _webhookPendingChecks = 0;
 
   const check = async () => {
     if (!bot || _webhookWatchdogUrl !== webhookUrl) return;
@@ -2529,7 +2532,11 @@ export function startWebhookWatchdog(webhookUrl: string): void {
       const hasRecentError = !!(info as any).last_error_message &&
         (!lastErrorDate || Date.now() - lastErrorDate <= 10 * 60 * 1000);
       const wrongUrl = info.url !== webhookUrl;
-      if (!wrongUrl && !hasRecentError) {
+      const pendingCount = Number(info.pending_update_count || 0);
+      if (pendingCount > 0) _webhookPendingChecks++;
+      else _webhookPendingChecks = 0;
+      const pendingStuck = pendingCount > 0 && _webhookPendingChecks >= 2;
+      if (!wrongUrl && !hasRecentError && !pendingStuck) {
         console.log(`[TELEGRAM] Webhook watchdog : OK (en attente: ${info.pending_update_count || 0})`);
         return;
       }
@@ -2537,55 +2544,78 @@ export function startWebhookWatchdog(webhookUrl: string): void {
       console.warn(
         `[TELEGRAM] Webhook watchdog : réparation nécessaire` +
         `${wrongUrl ? ` — URL inattendue "${info.url || "(vide)"}"` : ""}` +
-        `${hasRecentError ? ` — ${String((info as any).last_error_message).slice(0, 180)}` : ""}`,
+        `${hasRecentError ? ` — ${String((info as any).last_error_message).slice(0, 180)}` : ""}` +
+        `${pendingStuck ? ` — ${pendingCount} update(s) en attente depuis plusieurs contrôles` : ""}`,
       );
-      await tryRegisterWebhook(webhookUrl, true);
+      if (await tryRegisterWebhook(webhookUrl, true)) _webhookPendingChecks = 0;
     } catch (err: any) {
       console.error("[TELEGRAM] Webhook watchdog indisponible:", err?.message || err);
     }
   };
 
-  // Première vérification après le démarrage, puis toutes les 5 minutes.
+  // Première vérification après le démarrage, puis toutes les 60 secondes.
   void check();
-  _webhookWatchdog = setInterval(() => { void check(); }, 5 * 60 * 1000);
-  console.log("[TELEGRAM] Webhook watchdog activé (vérification toutes les 5 min)");
+  _webhookWatchdog = setInterval(() => { void check(); }, 60 * 1000);
+  console.log("[TELEGRAM] Webhook watchdog activé (vérification toutes les 60 s)");
 }
 
 export function stopWebhookWatchdog(): void {
   if (_webhookWatchdog) clearInterval(_webhookWatchdog);
   _webhookWatchdog = null;
   _webhookWatchdogUrl = null;
+  _webhookPendingChecks = 0;
 }
 
 export async function startPolling(): Promise<void> {
   if (!bot) return;
   if (_pollingActive) return; // Éviter les doublons
   _pollingActive = true;
+  const pollingBot = bot;
 
-  const launchWithRecovery = (attempt = 1) => {
-    if (!bot) { _pollingActive = false; return; }
-    // Ne PAS appeler deleteWebhook() ici — si un webhook de production (Plesk) est actif,
-    // le supprimer couperait la réception des commandes en production.
-    // bot.launch() échouera avec une 409 si un webhook est actif, ce qui est ignoré ci-dessous.
-    bot.launch({ dropPendingUpdates: false }).catch((err: any) => {
-      if (err?.message?.includes("409") || err?.message?.includes("Conflict")) {
-        // Conflit prod/dev — webhook actif en production, polling ignoré silencieusement
-        console.warn("[TELEGRAM] Polling ignoré (webhook prod actif — conflit 409)");
+  const launchWithRecovery = async (attempt = 1): Promise<void> => {
+    if (!bot || bot !== pollingBot || !_pollingActive) return;
+    try {
+      // Telegraf.deleteWebhook() est appelé implicitement par bot.launch().
+      // Vérifier d'abord évite qu'une instance Replit ne supprime le webhook
+      // utilisé par l'instance de production Plesk.
+      const webhookInfo = await pollingBot.telegram.getWebhookInfo();
+      if (webhookInfo.url) {
+        console.warn(`[TELEGRAM] Polling suspendu : webhook déjà actif (${webhookInfo.url})`);
         _pollingActive = false;
         return;
       }
-      // Erreur réseau ou autre — redémarrage automatique avec backoff exponentiel
-      const delay = Math.min(5000 * attempt, 60000); // max 60s
-      console.warn(`[TELEGRAM] Polling interrompu (tentative ${attempt}) — reprise dans ${delay / 1000}s:`, err.message);
-      setTimeout(() => launchWithRecovery(attempt + 1), delay);
-    });
+
+      await pollingBot.launch({ dropPendingUpdates: false });
+      if (bot === pollingBot && _pollingActive) {
+        throw new Error("Le polling Telegram s'est arrêté sans signal d'arrêt.");
+      }
+    } catch (err: any) {
+      if (bot !== pollingBot || !_pollingActive) return;
+      const delay = Math.min(3000 * Math.max(attempt, 1), 30000);
+      console.warn(`[TELEGRAM] Polling interrompu (tentative ${attempt}) — reprise dans ${delay / 1000}s:`, err?.message || err);
+      if (_pollingRecoveryTimer) clearTimeout(_pollingRecoveryTimer);
+      _pollingRecoveryTimer = setTimeout(() => {
+        _pollingRecoveryTimer = null;
+        void launchWithRecovery(attempt + 1);
+      }, delay);
+    }
   };
 
   try {
     console.log("[TELEGRAM] Bot demarre en mode polling (developpement)");
-    launchWithRecovery();
-    process.once("SIGINT", () => { bot?.stop("SIGINT"); _pollingActive = false; });
-    process.once("SIGTERM", () => { bot?.stop("SIGTERM"); _pollingActive = false; });
+    void launchWithRecovery();
+    process.once("SIGINT", () => {
+      if (_pollingRecoveryTimer) clearTimeout(_pollingRecoveryTimer);
+      _pollingRecoveryTimer = null;
+      pollingBot.stop("SIGINT");
+      _pollingActive = false;
+    });
+    process.once("SIGTERM", () => {
+      if (_pollingRecoveryTimer) clearTimeout(_pollingRecoveryTimer);
+      _pollingRecoveryTimer = null;
+      pollingBot.stop("SIGTERM");
+      _pollingActive = false;
+    });
   } catch (err: any) {
     console.error("[TELEGRAM] Erreur demarrage polling:", err.message);
     _pollingActive = false;
@@ -4046,6 +4076,8 @@ export async function reloadMainBot(newToken: string): Promise<{ ok: boolean; er
       try { bot.stop("reload"); } catch {}
       bot = null;
     }
+    if (_pollingRecoveryTimer) clearTimeout(_pollingRecoveryTimer);
+    _pollingRecoveryTimer = null;
     _pollingActive = false;
     stopWebhookWatchdog();
     await storage.setSetting("telegram_bot_token", newToken);

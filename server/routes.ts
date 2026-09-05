@@ -3738,6 +3738,78 @@ export async function registerRoutes(
     }
   }
 
+  // Payment confirmations can be received from a callback, polling, or the
+  // admin status-sync API. Keep delivery idempotent across those paths while
+  // retrying transient merchant endpoint failures.
+  const paymentWebhookInFlight = new Map<string, Promise<void>>();
+  async function notifyConfirmedPaymentWebhook(merchantId: number, payload: Record<string, any>): Promise<void> {
+    const txId = String(payload.txId || payload.reference || "");
+    const key = `${merchantId}:payment.confirmed:${txId}`;
+    if (!txId) {
+      await sendWebhookNotification(merchantId, payload);
+      return;
+    }
+
+    const running = paymentWebhookInFlight.get(key);
+    if (running) {
+      await running;
+      return;
+    }
+
+    const delivery = (async () => {
+      const merchant = await storage.getMerchantById(merchantId);
+      if (!merchant?.webhookUrl) return;
+
+      // A successful delivery is the durable idempotency marker. Failed
+      // attempts remain retryable when the provider reports success again.
+      try {
+        const logs = await storage.getWebhookLogs(merchantId);
+        const alreadyDelivered = logs.some((log) => {
+          if (!log.success || log.url !== merchant.webhookUrl) return false;
+          try {
+            const loggedPayload = JSON.parse(log.payload);
+            return loggedPayload.event === (payload.event || "payment.confirmed")
+              && String(loggedPayload.txId || loggedPayload.reference || "") === txId;
+          } catch {
+            return false;
+          }
+        });
+        if (alreadyDelivered) {
+          console.log(`[WEBHOOK] Confirmation déjà livrée pour marchand #${merchantId}, TX=${txId}`);
+          return;
+        }
+      } catch (err: any) {
+        // Delivery is still attempted if the audit lookup is temporarily
+        // unavailable; the send itself will create a new audit record.
+        console.warn(`[WEBHOOK] Lecture idempotence impossible pour TX=${txId}: ${err.message}`);
+      }
+
+      const retryDelays = [0, 500, 1500];
+      for (let attempt = 0; attempt < retryDelays.length; attempt++) {
+        if (retryDelays[attempt] > 0) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+        }
+        const result = await sendWebhookNotification(merchantId, payload);
+        if (result.success) {
+          console.log(`[WEBHOOK] Confirmation livrée pour TX=${txId} (tentative ${attempt + 1})`);
+          return;
+        }
+        if (attempt < retryDelays.length - 1) {
+          console.warn(`[WEBHOOK] Échec livraison TX=${txId}, nouvelle tentative ${attempt + 2}/3`);
+        }
+      }
+    })();
+
+    paymentWebhookInFlight.set(key, delivery);
+    try {
+      await delivery;
+    } finally {
+      if (paymentWebhookInFlight.get(key) === delivery) {
+        paymentWebhookInFlight.delete(key);
+      }
+    }
+  }
+
   app.get("/api/merchant/webhook", authMiddleware("merchant"), async (req, res) => {
     try {
       const merchant = await storage.getMerchantById((req as any).user.id);
@@ -5368,7 +5440,7 @@ export async function registerRoutes(
             });
 
             if (merchant?.webhookUrl) {
-              sendWebhookNotification(pending.merchantId, {
+              notifyConfirmedPaymentWebhook(pending.merchantId, {
                 event: "payment.confirmed",
                 txId,
                 amount: pending.amount,
@@ -5492,14 +5564,19 @@ export async function registerRoutes(
                       });
                     }
                     console.log(`[POLL MBIYO] Paiement credite via polling — ref=${pending.omnipayReference} montant=${pending.amount} credit=${credit} marchand=#${pending.merchantId}`);
-                    if (merchant?.webhookUrl) {
-                      try {
-                        const fetch2 = (await import("node-fetch")).default;
-                        const wp = { event: "payment.confirmed", txId: txRef, amount: pending.amount, country: pending.country, payerNumber: pending.payerPhone, payerName: pending.payerName, status: "confirmed", reference: pending.omnipayReference, provider: "westpay" };
-                        const hmac = crypto.createHmac("sha256", merchant.webhookSecret || "").update(JSON.stringify(wp)).digest("hex");
-                        await fetch2(merchant.webhookUrl, { method: "POST", headers: { "Content-Type": "application/json", "X-Signature": hmac }, body: JSON.stringify(wp) });
-                      } catch {}
-                    }
+                    notifyConfirmedPaymentWebhook(pending.merchantId, {
+                      event: "payment.confirmed",
+                      txId: txRef,
+                      amount: pending.amount,
+                      currency: pending.country,
+                      payer: pending.payerPhone || "",
+                      payerNumber: pending.payerPhone,
+                      payerName: pending.payerName,
+                      country: pending.country,
+                      status: "confirmed",
+                      reference: pending.omnipayReference,
+                      provider: "westpay",
+                    }).catch((err) => console.error("[WEBHOOK] Erreur async:", err));
                     notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "westpay" }).catch(() => {});
                     notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "westpay", status: "confirmed" }).catch(() => {});
                   } else {
@@ -6371,22 +6448,17 @@ export async function registerRoutes(
         }
 
         // Webhook marchand (hors transaction — effets secondaires non critiques)
-        const webhookUrl = merchant?.webhookUrl;
-        if (webhookUrl && merchant) {
-          const webhookSecret = merchant.webhookSecret || "";
-          const wPayload = {
-            event: "payment.confirmed",
-            txId, amount: pending.amount, currency: pending.country,
-            payer: pending.payerPhone || "", country: pending.country,
-            merchantSlug: merchant.slug, provider: "seapay", timestamp: new Date().toISOString(),
-          };
-          const sig = crypto.createHmac("sha256", webhookSecret).update(JSON.stringify(wPayload)).digest("hex");
-          fetch(webhookUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-WestPay-Signature": sig, "X-WestPay-Event": "payment.confirmed" },
-            body: JSON.stringify(wPayload),
-          }).catch(() => {});
-        }
+        notifyConfirmedPaymentWebhook(pending.merchantId, {
+          event: "payment.confirmed",
+          txId,
+          amount: pending.amount,
+          currency: pending.country,
+          payer: pending.payerPhone || "",
+          country: pending.country,
+          merchantSlug: merchant?.slug || "",
+          provider: "seapay",
+          timestamp: new Date().toISOString(),
+        }).catch((err) => console.error("[WEBHOOK] Erreur async:", err));
 
         console.log(`[SEAPAY CALLBACK] Paiement confirmé: ${orderId} — ${pending.amount} (${pending.country})`);
       } else if (status === "failed" || status === "expired" || status === "cancelled") {
@@ -6820,7 +6892,7 @@ export async function registerRoutes(
           await storage.incrementMerchantCountryBalance(mc.id, credit);
           console.log(`[SENDAVAPAY CALLBACK] Paiement confirme: ${txId} - Brut: ${pending.amount} - Frais WestPay: ${westpayFee} - Net marchand: ${credit}`);
 
-          sendWebhookNotification(pending.merchantId, {
+          notifyConfirmedPaymentWebhook(pending.merchantId, {
             event: "payment.confirmed",
             txId,
             amount: pending.amount,
@@ -7045,6 +7117,20 @@ export async function registerRoutes(
       });
 
       if (merchant) {
+        notifyConfirmedPaymentWebhook(pending.merchantId, {
+          event: "payment.confirmed",
+          txId: tx.txId || "",
+          amount: pending.amount,
+          currency: pending.country,
+          payer: pending.payerPhone || "",
+          payerNumber: pending.payerPhone || null,
+          country: pending.country,
+          merchantSlug: merchant.slug,
+          provider: "mbiyo",
+          reference,
+          status: "confirmed",
+          timestamp: new Date().toISOString(),
+        }).catch((err) => console.error("[WEBHOOK] Erreur async:", err));
         notifyMerchantPayment(pending.merchantId, { txId: tx.txId || "", amount: pending.amount, payerNumber: pending.payerPhone || null, country: pending.country, provider: "mbiyo" }).catch(() => {});
         notifyAdminPayment(merchant, pending.amount, pending.payerPhone || "", tx.txId || "", "Mbiyo (Manuel)").catch(() => {});
       }
@@ -7464,18 +7550,17 @@ export async function registerRoutes(
         await reconcilePendingPayments(txId, found.merchantId, amount);
 
         const foundMerchant = await storage.getMerchantById(found.merchantId);
-        if (foundMerchant?.webhookUrl) {
-          sendWebhookNotification(found.merchantId, {
-            event: "payment.confirmed",
-            txId,
-            amount,
-            currency: "XOF",
-            payer: payerNumber || "",
-            country: found.country,
-            merchantSlug: foundMerchant.slug,
-            timestamp: new Date().toISOString(),
-          }).catch(err => console.error("[WEBHOOK] Erreur async:", err));
-        }
+        notifyConfirmedPaymentWebhook(found.merchantId, {
+          event: "payment.confirmed",
+          txId,
+          amount,
+          currency: "XOF",
+          payer: payerNumber || "",
+          country: found.country,
+          merchantSlug: foundMerchant?.slug || "",
+          provider: "sms",
+          timestamp: new Date().toISOString(),
+        }).catch(err => console.error("[WEBHOOK] Erreur async:", err));
 
         notifyMerchantPayment(found.merchantId, {
           txId,
@@ -7564,18 +7649,17 @@ export async function registerRoutes(
       await reconcilePendingPayments(txId, simNumber.merchantId, amount);
 
       const simMerchant = await storage.getMerchantById(simNumber.merchantId);
-      if (simMerchant?.webhookUrl) {
-        sendWebhookNotification(simNumber.merchantId, {
-          event: "payment.confirmed",
-          txId,
-          amount,
-          currency: "XOF",
-          payer: payerNumber || "",
-          country: simNumber.country,
-          merchantSlug: simMerchant.slug,
-          timestamp: new Date().toISOString(),
-        }).catch(err => console.error("[WEBHOOK] Erreur async:", err));
-      }
+      notifyConfirmedPaymentWebhook(simNumber.merchantId, {
+        event: "payment.confirmed",
+        txId,
+        amount,
+        currency: "XOF",
+        payer: payerNumber || "",
+        country: simNumber.country,
+        merchantSlug: simMerchant?.slug || "",
+        provider: "sms",
+        timestamp: new Date().toISOString(),
+      }).catch(err => console.error("[WEBHOOK] Erreur async:", err));
 
       notifyMerchantPayment(simNumber.merchantId, {
         txId,
@@ -9641,10 +9725,24 @@ export async function registerRoutes(
               errorMessage: null,
               providerFee: fee,
             });
-            // Webhook marchand
-            sendWebhookNotification(pp.merchantId, { event: "payment.confirmed", txId: txRef, amount: pp.amount, country: pp.country, payerNumber: pp.payerPhone, payerName: pp.payerName, status: "confirmed", reference: ref, provider: providerLabel }).catch(() => {});
             notifyMerchantPayment(pp.merchantId, { txId: txRef, amount: pp.amount, payerNumber: pp.payerPhone, country: pp.country, provider: providerLabel }).catch(() => {});
             notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pp.merchantId}`, payerNumber: pp.payerPhone, country: pp.country, amount: pp.amount, provider: providerLabel, status: "confirmed" }).catch(() => {});
+          }
+          if (mc) {
+            notifyConfirmedPaymentWebhook(pp.merchantId, {
+              event: "payment.confirmed",
+              txId: txRef,
+              amount: pp.amount,
+              currency: pp.country,
+              country: pp.country,
+              payer: pp.payerPhone || "",
+              payerNumber: pp.payerPhone,
+              payerName: pp.payerName,
+              status: "confirmed",
+              reference: ref,
+              provider: providerLabel,
+              timestamp: new Date().toISOString(),
+            }).catch((err) => console.error("[WEBHOOK] Erreur async:", err));
           }
           await storage.updatePendingPaymentStatus(id, "confirmed");
           console.log(`[ADMIN SYNC-STATUS TX] pending #${id} confirmé (${provider}/${providerStatus}) — crédit: ${existingTx ? "doublon ignoré" : mc ? "ok" : "pays non trouvé"}`);
@@ -9658,9 +9756,23 @@ export async function registerRoutes(
               await storage.incrementMerchantCountryBalance(mc.id, credit);
             }
             await financialDb.update(transactions).set({ status: "confirmed" }).where(eq(transactions.id, id));
-            notifyAdminPayment({ txId: txRecord.txId || `TX-${id}`, merchantName: (await storage.getMerchantById(txRecord.merchantId))?.name || `#${txRecord.merchantId}`, payerNumber: txRecord.payerNumber, country: txRecord.country || "", amount: txRecord.amount, provider: txRecord.provider || provider, status: "confirmed" }).catch(() => {});
-            notifyMerchantPayment(txRecord.merchantId, { txId: txRecord.txId || `TX-${id}`, amount: txRecord.amount, payerNumber: txRecord.payerNumber, country: txRecord.country || "", provider: txRecord.provider || provider }).catch(() => {});
           }
+          const txMerchant = await storage.getMerchantById(txRecord.merchantId);
+          notifyConfirmedPaymentWebhook(txRecord.merchantId, {
+            event: "payment.confirmed",
+            txId: txRecord.txId || `TX-${id}`,
+            amount: txRecord.amount,
+            currency: txRecord.country || "",
+            country: txRecord.country || "",
+            payer: txRecord.payerNumber || "",
+            payerNumber: txRecord.payerNumber,
+            merchantSlug: txMerchant?.slug || "",
+            provider: txRecord.provider || provider,
+            status: "confirmed",
+            timestamp: new Date().toISOString(),
+          }).catch((err) => console.error("[WEBHOOK] Erreur async:", err));
+          notifyAdminPayment({ txId: txRecord.txId || `TX-${id}`, merchantName: txMerchant?.name || `#${txRecord.merchantId}`, payerNumber: txRecord.payerNumber, country: txRecord.country || "", amount: txRecord.amount, provider: txRecord.provider || provider, status: "confirmed" }).catch(() => {});
+          notifyMerchantPayment(txRecord.merchantId, { txId: txRecord.txId || `TX-${id}`, amount: txRecord.amount, payerNumber: txRecord.payerNumber, country: txRecord.country || "", provider: txRecord.provider || provider }).catch(() => {});
           console.log(`[ADMIN SYNC-STATUS TX] transaction #${id} confirmée (${provider}/${providerStatus})`);
         }
         return res.json({ success: true, applied: "confirmed", providerStatus });

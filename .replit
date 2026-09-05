@@ -52,8 +52,6 @@ PORT = "5000"
 NODE_ENV = "development"
 XOF_PER_USD = "600"
 APP_URL = "https://westpay.cfd"
-TELEGRAM_API_ID = "36887606"
-TELEGRAM_ADMIN_GROUP_ID = "-1003802528942"
 
 [postMerge]
 path = "scripts/post-merge.sh"
