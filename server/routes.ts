@@ -290,8 +290,13 @@ async function getConfiguredSecret(
     if (envValue) return envValue;
   }
   for (const dbKey of dbKeys) {
-    const dbValue = cleanConfiguredSecret(await storage.getSetting(dbKey));
-    if (dbValue) return dbValue;
+    try {
+      const dbValue = cleanConfiguredSecret(await storage.getSetting(dbKey));
+      if (dbValue) return dbValue;
+    } catch (err: any) {
+      console.error(`[CONFIG] Lecture impossible du paramètre ${dbKey}: ${err?.message || "erreur base de données"}`);
+      throw err;
+    }
   }
   return undefined;
 }
@@ -425,6 +430,52 @@ function toOmnipayOperatorCode(operatorName: string | null | undefined): string 
 }
 
 const OMNIPAY_MANDATORY_OPERATORS = ["wave", "mixx"];
+
+const SUPPORTED_PAYMENT_GATEWAYS = new Set([
+  "omnipay",
+  "mbiyo",
+  "sendavapay",
+  "seapay",
+  "clapay",
+  "oxapay",
+]);
+
+function normalizeGatewayName(value: unknown): string {
+  return typeof value === "string"
+    ? value.trim().toLowerCase().replace(/[\s_-]+/g, "")
+    : "";
+}
+
+/**
+ * Résout le gateway du payin.
+ *
+ * `merchant_countries.payin_gateway` est la configuration actuelle du pays.
+ * Les anciennes lignes ont toutefois toutes la valeur par défaut `omnipay` et
+ * le paiement historique utilisait `withdrawal_operators.gateway`. Dans ce
+ * cas précis, on conserve la compatibilité avec l'opérateur afin de ne pas
+ * basculer silencieusement les paiements existants vers OmniPay.
+ */
+function resolvePayinGateway(
+  countryGateway: unknown,
+  operatorGateway: unknown,
+): { gateway: string; countryGateway: string; operatorGateway: string } {
+  const normalizedCountryGateway = normalizeGatewayName(countryGateway);
+  const normalizedOperatorGateway = normalizeGatewayName(operatorGateway);
+
+  if (normalizedCountryGateway && normalizedCountryGateway !== "omnipay") {
+    return {
+      gateway: normalizedCountryGateway,
+      countryGateway: normalizedCountryGateway,
+      operatorGateway: normalizedOperatorGateway,
+    };
+  }
+
+  return {
+    gateway: normalizedOperatorGateway || normalizedCountryGateway || "omnipay",
+    countryGateway: normalizedCountryGateway || "omnipay",
+    operatorGateway: normalizedOperatorGateway,
+  };
+}
 
 const COUNTRY_DIAL_CODES: Record<string, string> = {
   "Togo": "228", "Benin": "229", "Cote d'Ivoire": "225",
@@ -4274,22 +4325,45 @@ export async function registerRoutes(
       const msisdn = localPhone.startsWith(dialCode) ? localPhone : `${dialCode}${localPhone}`;
 
       const operatorRecord = await storage.getWithdrawalOperatorByNameAndCountry(paymentMethod, country);
-      const gatewayLower = (operatorRecord?.gateway || "")
-        .trim()
-        .toLowerCase()
-        .replace(/[\s_-]+/g, "");
+      const payinGateway = resolvePayinGateway(
+        merchantCountry.payinGateway,
+        operatorRecord?.gateway,
+      );
+      const gatewayLower = payinGateway.gateway;
       const useMbiyo = gatewayLower === "mbiyo";
       const useSendava = gatewayLower === "sendavapay" || gatewayLower === "sendava";
       const useSeapay = gatewayLower === "seapay";
       const useClapay = gatewayLower === "clapay";
 
       if (!operatorRecord) {
-        console.warn("[PAYMENT CONFIG] Opérateur introuvable — OmniPay utilisé par défaut");
+        console.warn(
+          `[PAYMENT CONFIG] Opérateur introuvable — gateway=${gatewayLower} ` +
+          `countryGateway=${payinGateway.countryGateway}`,
+        );
+      } else {
+        console.log(
+          `[PAYMENT ROUTING] pays=${country} opérateur=${paymentMethod} ` +
+          `countryGateway=${payinGateway.countryGateway} ` +
+          `operatorGateway=${payinGateway.operatorGateway || "(vide)"} ` +
+          `selected=${gatewayLower}`,
+        );
+      }
+
+      if (!SUPPORTED_PAYMENT_GATEWAYS.has(gatewayLower)) {
+        console.error(
+          `[PAYMENT CONFIG] Gateway inconnu "${gatewayLower}" pour pays=${country} opérateur=${paymentMethod}`,
+        );
+        return res.status(500).json({
+          message: "Configuration du service de paiement invalide. Contactez l'administrateur.",
+        });
       }
 
       if (useSendava) {
         const sendavaApiKey = await getSendavaApiKey();
         if (!sendavaApiKey) {
+          console.error(
+            `[PAYMENT CONFIG] Clé absente pour gateway=sendavapay pays=${country} opérateur=${paymentMethod}`,
+          );
           return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
         }
 
@@ -4473,6 +4547,9 @@ export async function registerRoutes(
       } else if (useMbiyo) {
         const mbiyoApiKey = await getMbiyoApiKey();
         if (!mbiyoApiKey) {
+          console.error(
+            `[PAYMENT CONFIG] Clé absente pour gateway=mbiyo pays=${country} opérateur=${paymentMethod}`,
+          );
           return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
         }
 
@@ -4556,6 +4633,10 @@ export async function registerRoutes(
         /* ── SeaPay : GCash / Maya / UPI / EasyPaisa / JazzCash ─────────── */
         const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(country), getSeapayApiKey(country)]);
         if (!spMerchantId || !spApiKey) {
+          console.error(
+            `[PAYMENT CONFIG] Identifiants incomplets pour gateway=seapay pays=${country} opérateur=${paymentMethod} ` +
+            `(merchantId=${!!spMerchantId}, apiKey=${!!spApiKey})`,
+          );
           return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
         }
 
@@ -4633,6 +4714,9 @@ export async function registerRoutes(
         /* ── ClaPay : paiement mobile money multi-pays ────────────────── */
         const clapayToken = await getClapayApiKey();
         if (!clapayToken) {
+          console.error(
+            `[PAYMENT CONFIG] Clé absente pour gateway=clapay pays=${country} opérateur=${paymentMethod}`,
+          );
           return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
         }
 
@@ -4735,6 +4819,9 @@ export async function registerRoutes(
       } else {
         const omnipayApiKey = await getOmnipayApiKey();
         if (!omnipayApiKey) {
+          console.error(
+            `[PAYMENT CONFIG] Clé absente pour gateway=omnipay pays=${country} opérateur=${paymentMethod}`,
+          );
           return res.status(500).json({ message: "Systeme de paiement non configure. Contactez l'administrateur." });
         }
 
@@ -8070,7 +8157,7 @@ export async function registerRoutes(
       if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
 
       const payoutOpRecord = operator ? await storage.getWithdrawalOperatorByNameAndCountry(operator, mc.country) : null;
-      const payoutGatewayLower = payoutOpRecord?.gateway?.toLowerCase();
+      const payoutGatewayLower = normalizeGatewayName(payoutOpRecord?.gateway);
       const useMbiyoPayout = payoutGatewayLower === "mbiyo";
       const useSendavaPayout = payoutGatewayLower === "sendavapay";
       const useClapayPayout = payoutGatewayLower === "clapay";
@@ -8158,6 +8245,9 @@ export async function registerRoutes(
       if (useMbiyoPayout) {
         const mbiyoApiKey = await getMbiyoApiKey();
         if (!mbiyoApiKey) {
+          console.error(
+            `[WITHDRAWAL CONFIG] Clé absente pour gateway=mbiyo pays=${mc.country} opérateur=${operator || "(vide)"}`,
+          );
           await storage.updateWithdrawalStatus(w.id, "failed", "Cle API Mbiyo non configuree", reference);
           await storage.incrementMerchantCountryBalance(mc.id, amount);
           return res.status(500).json({ message: "Service de retrait non configure. Contactez l'administrateur." });
@@ -8274,6 +8364,9 @@ export async function registerRoutes(
       } else if (useSendavaPayout) {
         const sendavaApiKey = await getSendavaApiKey();
         if (!sendavaApiKey) {
+          console.error(
+            `[WITHDRAWAL CONFIG] Clé absente pour gateway=sendavapay pays=${mc.country} opérateur=${operator || "(vide)"}`,
+          );
           await storage.updateWithdrawalStatus(w.id, "failed", "Service de retrait non configuré", reference);
           await storage.incrementMerchantCountryBalance(mc.id, amount);
           return res.status(500).json({ message: "Service de retrait non configure. Contactez l'administrateur." });
@@ -8351,6 +8444,9 @@ export async function registerRoutes(
       } else if (useClapayPayout) {
         const cpToken = await getClapayApiKey();
         if (!cpToken) {
+          console.error(
+            `[WITHDRAWAL CONFIG] Clé absente pour gateway=clapay pays=${mc.country} opérateur=${operator || "(vide)"}`,
+          );
           await storage.updateWithdrawalStatus(w.id, "failed", "Clé API ClaPay non configurée", reference);
           await storage.incrementMerchantCountryBalance(mc.id, amount);
           return res.status(500).json({ message: "Service de retrait non configure. Contactez l'administrateur." });
@@ -8399,6 +8495,9 @@ export async function registerRoutes(
       } else {
         const apiKeyToUse = await getOmnipayPayoutApiKey();
         if (!apiKeyToUse) {
+          console.error(
+            `[WITHDRAWAL CONFIG] Clé absente pour gateway=omnipay pays=${mc.country} opérateur=${operator || "(vide)"}`,
+          );
           await storage.updateWithdrawalStatus(w.id, "failed", "Cle API retrait non configuree", reference);
           await storage.incrementMerchantCountryBalance(mc.id, amount);
           return res.status(500).json({ message: "Cle API retrait non configuree. Contactez l'administrateur." });
