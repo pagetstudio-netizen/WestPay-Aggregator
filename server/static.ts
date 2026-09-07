@@ -39,20 +39,33 @@ export function serveStatic(app: Express) {
     const slug = process.env.ADMIN_SLUG || "";
     const reqPath = req.path.replace(/\/+$/, "") || "/"; // normalise le trailing slash
 
-    // Le checkout API Bank 1 a été déplacé vers checkout1.westpay.cfd.
-    // Bank 2 utilise un autre domaine et n'est pas concernée par ce blocage.
+    // Les sous-domaines publics ne doivent pas exposer l'application lorsqu'ils
+    // sont ouverts seuls. Les URL fonctionnelles gardent leurs paramètres ou
+    // leur identifiant dans le chemin (ex: /pay?merchant=... ou /link/abc).
     const requestHost = (req.hostname || "").toLowerCase();
+    const hasQueryParameters = Object.keys(req.query || {}).length > 0;
 
-    // Les sous-domaines sont réservés à leurs routes fonctionnelles.
-    // Leur racine seule ne doit pas exposer la page d'accueil générale.
+    // Les racines seules sont volontairement neutres. Le DNS ne pouvant pas
+    // distinguer une URL avec/sans query string, on bloque au niveau HTTP.
     const isReservedSubdomainRoot =
       reqPath === "/" &&
       (
         requestHost === "checkout1.westpay.cfd" ||
         requestHost === "dashboard.westpay.cfd" ||
-        requestHost === "link.westpay.cfd"
+        requestHost === "link.westpay.cfd" ||
+        requestHost === "payment.bank2.westpay.cfd"
       );
-    if (isReservedSubdomainRoot) {
+    if (isReservedSubdomainRoot && !hasQueryParameters) {
+      return res.status(404).type("text").send("Not Found");
+    }
+
+    // Bank 1 ne doit pas charger le shell SPA sur /pay sans paramètres.
+    // Les liens réels portent merchant/amount/country, ou ref/omnipay_status
+    // lors du retour d'un paiement Wave.
+    const isBareBank1Payment =
+      requestHost === "checkout1.westpay.cfd" &&
+      (reqPath === "/pay" || /^\/pay\/[^/]+$/.test(reqPath));
+    if (isBareBank1Payment && !hasQueryParameters) {
       return res.status(404).type("text").send("Not Found");
     }
 

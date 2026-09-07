@@ -38,7 +38,16 @@ function Router() {
   const isMerchantLoginPath = currentPath === "/merchant/index/login";
   const isLegacyMerchantLoginPath =
     currentPath === "/merchant/login";
-  const isBank2Root = currentPath === "/" && window.location.search === "";
+  const hasQueryParameters = new URLSearchParams(window.location.search).toString() !== "";
+  const isBank2Root = currentPath === "/" && !hasQueryParameters;
+  const isHiddenPublicRoot =
+    !hasQueryParameters &&
+    (
+      (hostname === "checkout1.westpay.cfd" && (currentPath === "/" || currentPath === "/pay")) ||
+      (hostname === "payment.bank2.westpay.cfd" && currentPath === "/") ||
+      (hostname === "link.westpay.cfd" && currentPath === "/") ||
+      (hostname === "dashboard.westpay.cfd" && currentPath === "/")
+    );
 
   useEffect(() => {
     // Injection HTML par Node.js a fonctionné → rien à faire.
@@ -73,6 +82,7 @@ function Router() {
   // middleware Express : l'ancienne URL reste une page introuvable.
   if (isLegacyDocsPath) return <NotFound />;
   if (isLegacyMerchantLoginPath) return <NotFound />;
+  if (isHiddenPublicRoot) return <NotFound />;
 
   // Nouvelle URL officielle de connexion marchand. Le domaine reste
   // utilisable ensuite pour afficher /merchant/:slug après authentification.
