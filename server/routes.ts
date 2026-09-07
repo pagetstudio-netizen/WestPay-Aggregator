@@ -94,6 +94,12 @@ import {
 } from "./clapay";
 import { maskPhone as maskPhoneForLog, maskAddress as maskAddressForLog } from "./logMask";
 import {
+  WESTPAY_PAYOUT_BENEFICIARY,
+  WESTPAY_PAYOUT_FIRST_NAME,
+  WESTPAY_PAYOUT_LAST_NAME,
+  WESTPAY_PAYOUT_DESCRIPTION,
+} from "./payout-constants";
+import {
   getCollectionFeeRate, getWithdrawalFeeRate, calcMerchantCredit,
   FLAT_PAYIN_FEE, loadFeeConfig, saveFeeConfig, getFeeSnapshot,
 } from "./feeConfig";
@@ -8532,7 +8538,7 @@ export async function registerRoutes(
             network,
             phoneNumber: msisdnFull,
             countryCode,
-            beneficiary: merchant.name,
+            beneficiary: WESTPAY_PAYOUT_BENEFICIARY,
           });
 
           const payoutInitOk = (result.status === "success" || result.status === "pending") && result.data;
@@ -8562,9 +8568,6 @@ export async function registerRoutes(
             const fallbackApiKey = await getOmnipayPayoutApiKey();
             if (fallbackApiKey) {
               try {
-                const nameParts = merchant.name.trim().split(/\s+/);
-                const wdFirstName = nameParts[0] || merchant.name;
-                const wdLastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : nameParts[0] || merchant.name;
                 const omnipayOperatorCode = await resolveOmnipayOperatorCode(operator, mc.country);
                 const msisdnFullFb = prependDialCode(phone, mc.country);
                 const fallbackRef = reference + "F";
@@ -8573,8 +8576,8 @@ export async function registerRoutes(
                   msisdn: msisdnFullFb,
                   amount: netAmount,
                   reference: fallbackRef,
-                  first_name: wdFirstName,
-                  last_name: wdLastName,
+                  first_name: WESTPAY_PAYOUT_FIRST_NAME,
+                  last_name: WESTPAY_PAYOUT_LAST_NAME,
                   operator: omnipayOperatorCode,
                 });
                 if (fallbackResult.success === 1) {
@@ -8617,9 +8620,6 @@ export async function registerRoutes(
           const fallbackApiKey = await getOmnipayPayoutApiKey();
           if (fallbackApiKey) {
             try {
-              const nameParts = merchant.name.trim().split(/\s+/);
-              const wdFirstName = nameParts[0] || merchant.name;
-              const wdLastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : nameParts[0] || merchant.name;
               const omnipayOperatorCode = await resolveOmnipayOperatorCode(operator, mc.country);
               const msisdnFullFb = prependDialCode(phone, mc.country);
               const fallbackRef = reference + "F";
@@ -8628,8 +8628,8 @@ export async function registerRoutes(
                 msisdn: msisdnFullFb,
                 amount: netAmount,
                 reference: fallbackRef,
-                first_name: wdFirstName,
-                last_name: wdLastName,
+                first_name: WESTPAY_PAYOUT_FIRST_NAME,
+                last_name: WESTPAY_PAYOUT_LAST_NAME,
                 operator: omnipayOperatorCode,
               });
               if (fallbackResult.success === 1) {
@@ -8685,7 +8685,7 @@ export async function registerRoutes(
             operator: sendavaOperator,
             country: countryCode,
             currency,
-            description: `Retrait WestPay - ${merchant.name}`,
+            description: WESTPAY_PAYOUT_DESCRIPTION,
             externalReference: reference,
           });
 
@@ -8812,7 +8812,8 @@ export async function registerRoutes(
            return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
             additional_infos: {
               customer_phone: cpLocalPhone,
-              customer_firstname: merchant.name,
+              customer_firstname: WESTPAY_PAYOUT_FIRST_NAME,
+              customer_lastname: WESTPAY_PAYOUT_LAST_NAME,
             },
           });
           if (result.success) {
@@ -8882,9 +8883,6 @@ export async function registerRoutes(
           return res.status(500).json({ message: "Cle API retrait non configuree. Contactez l'administrateur." });
         }
         try {
-          const nameParts = merchant.name.trim().split(/\s+/);
-          const wdFirstName = nameParts[0] || merchant.name;
-          const wdLastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : nameParts[0] || merchant.name;
           const omnipayOperatorCode = await resolveOmnipayOperatorCode(operator, mc.country);
           const msisdnFull = prependDialCode(phone, mc.country);
           const result = await omnipayInitiateTransfer({
@@ -8892,8 +8890,8 @@ export async function registerRoutes(
             msisdn: msisdnFull,
             amount: netAmount,
             reference,
-            first_name: wdFirstName,
-            last_name: wdLastName,
+            first_name: WESTPAY_PAYOUT_FIRST_NAME,
+            last_name: WESTPAY_PAYOUT_LAST_NAME,
             operator: omnipayOperatorCode,
           });
           if (result.success === 1) {
@@ -9017,7 +9015,8 @@ export async function registerRoutes(
               return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
               additional_infos: {
                 customer_phone: cpAdminLocalPhone,
-                customer_firstname: w.recipientName || merchant.name,
+                customer_firstname: WESTPAY_PAYOUT_FIRST_NAME,
+                customer_lastname: WESTPAY_PAYOUT_LAST_NAME,
               },
             });
             if (result.success) {
@@ -9059,7 +9058,7 @@ export async function registerRoutes(
               walletCode: !isBankTransfer ? channelCode : undefined,
               channelCode,
               account: w.phone,
-              accountName: w.recipientName || merchant.name,
+              accountName: WESTPAY_PAYOUT_BENEFICIARY,
             }, spApiSecret);
             if (result.code === 200 && result.data) {
               omnipayRef = reference;
@@ -9097,7 +9096,7 @@ export async function registerRoutes(
               network,
               phoneNumber: msisdnFull,
               countryCode,
-              beneficiary: merchant.name,
+              beneficiary: WESTPAY_PAYOUT_BENEFICIARY,
             });
             if ((result.status === "success" || result.status === "pending") && result.data) {
               omnipayRef = reference;
@@ -9118,9 +9117,6 @@ export async function registerRoutes(
         if (mc && mc.omnipayEnabled && omnipayApiKey && merchant) {
           try {
             const reference = `WD-${w.id}-${Date.now()}`;
-            const mNameParts = merchant.name.trim().split(/\s+/);
-            const mFirstName = mNameParts[0] || merchant.name;
-            const mLastName = mNameParts.length > 1 ? mNameParts.slice(1).join(" ") : mNameParts[0] || merchant.name;
             const adminOmnipayCode = await resolveOmnipayOperatorCode(w.operator, w.country);
             const wdMsisdn = prependDialCode(w.phone, w.country);
             console.log(`[ADMIN APPROVE WD] Transfert: ${w.amount} vers ${maskPhoneForLog(wdMsisdn)}, operateur: ${adminOmnipayCode || "(auto)"}, ref: ${reference}`);
@@ -9129,8 +9125,8 @@ export async function registerRoutes(
               msisdn: wdMsisdn,
               amount: w.amount,
               reference,
-              first_name: mFirstName,
-              last_name: mLastName,
+                first_name: WESTPAY_PAYOUT_FIRST_NAME,
+                last_name: WESTPAY_PAYOUT_LAST_NAME,
               operator: adminOmnipayCode,
             });
             if (result.success === 1) {
@@ -9338,7 +9334,7 @@ export async function registerRoutes(
           operator: sendavaOperator,
           country: countryCode,
           currency,
-          description: `Retrait WestPay (relance) - ${merchant.name}`,
+          description: WESTPAY_PAYOUT_DESCRIPTION,
           externalReference: reference,
         });
         const spStatusLower = (result.data?.status || "").toLowerCase();
@@ -9377,7 +9373,7 @@ export async function registerRoutes(
           network,
           phoneNumber: msisdnFull,
           countryCode,
-          beneficiary: merchant.name,
+          beneficiary: WESTPAY_PAYOUT_BENEFICIARY,
         });
         if ((result.status === "success" || result.status === "pending") && result.data) {
           const mbFee = Math.round(parseFloat(String(result.data.fee || fees)) || fees);
@@ -9410,7 +9406,7 @@ export async function registerRoutes(
           walletCode: !isBankTransfer ? channelCode : undefined,
           channelCode,
           account: w.phone,
-          accountName: w.recipientName || merchant.name,
+          accountName: WESTPAY_PAYOUT_BENEFICIARY,
         }, spApiSecret);
         if (result.code === 200 && result.data) {
           await storage.updateWithdrawalGateway(id, "seapay");
@@ -9442,7 +9438,8 @@ export async function registerRoutes(
           return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
           additional_infos: {
             customer_phone: clapayLocalPhone(w.phone || "", countryCode),
-            customer_firstname: w.recipientName || merchant.name,
+            customer_firstname: WESTPAY_PAYOUT_FIRST_NAME,
+            customer_lastname: WESTPAY_PAYOUT_LAST_NAME,
           },
         });
         if (!result.success) {
@@ -9461,9 +9458,6 @@ export async function registerRoutes(
       const omnipayApiKey = await getOmnipayPayoutApiKey();
       if (!omnipayApiKey) return res.status(500).json({ message: "Clé API OmniPay non configurée" });
       const reference = `WD-${id}-${Date.now()}`;
-      const mNameParts = merchant.name.trim().split(/\s+/);
-      const mFirstName = mNameParts[0] || merchant.name;
-      const mLastName = mNameParts.length > 1 ? mNameParts.slice(1).join(" ") : mNameParts[0] || merchant.name;
       const adminOmnipayCode = await resolveOmnipayOperatorCode(w.operator, w.country);
       const wdMsisdn = prependDialCode(w.phone, w.country);
       const result = await omnipayInitiateTransfer({
@@ -9471,8 +9465,8 @@ export async function registerRoutes(
         msisdn: wdMsisdn,
         amount: netAmount,
         reference,
-        first_name: mFirstName,
-        last_name: mLastName,
+        first_name: WESTPAY_PAYOUT_FIRST_NAME,
+        last_name: WESTPAY_PAYOUT_LAST_NAME,
         operator: adminOmnipayCode,
       });
       if (result.success === 1) {
@@ -11087,7 +11081,7 @@ export async function registerRoutes(
         network: metadata.network,
         phoneNumber: metadata.phone_number,
         countryCode: metadata.country_code.toUpperCase(),
-        beneficiary: metadata.beneficiary || "Marchand WestPay",
+        beneficiary: WESTPAY_PAYOUT_BENEFICIARY,
       });
 
       if (mbiyoResult.status !== "success" && mbiyoResult.status !== "pending") {
@@ -11141,7 +11135,7 @@ export async function registerRoutes(
             phone_number: metadata.phone_number,
             network: metadata.network,
             country_code: metadata.country_code,
-            beneficiary: metadata.beneficiary || null,
+            beneficiary: WESTPAY_PAYOUT_BENEFICIARY,
           },
           created_at: new Date().toISOString(),
         },

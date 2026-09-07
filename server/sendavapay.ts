@@ -1,3 +1,5 @@
+import { WESTPAY_PAYOUT_DESCRIPTION } from "./payout-constants";
+
 import crypto from "crypto";
 
 const SENDAVAPAY_BASE_URL = "https://sendavapay.com/api/sdk/v1";
@@ -303,7 +305,8 @@ export async function initiateWithdraw(apiKey: string, params: SendavaWithdrawRe
     country: params.country,
     currency: params.currency,
   };
-  if (params.description) payload.description = params.description;
+  // Ne jamais exposer le nom du marchand dans la description d'un retrait.
+  payload.description = WESTPAY_PAYOUT_DESCRIPTION;
   if (params.externalReference) payload.externalReference = params.externalReference;
 
   const masked = params.phoneNumber.replace(/(\d{3})\d+(\d{2})/, "$1****$2");

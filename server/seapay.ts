@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { WESTPAY_PAYOUT_BENEFICIARY } from "./payout-constants";
 
 const SEAPAY_BASE_URL = "https://api.seaglb.xyz";
 
@@ -169,7 +170,7 @@ export async function seapayPayout(
     order_id:     req.orderId,
     notify_url:   req.notifyUrl,
     account:      req.account,
-    account_name: req.accountName,
+    account_name: WESTPAY_PAYOUT_BENEFICIARY,
   };
   if (req.bankCode)    params.bank_code    = req.bankCode;
   if (req.walletCode)  params.wallet_code  = req.walletCode;

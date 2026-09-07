@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { maskPhone as maskPhoneForLog } from "./logMask";
+import { WESTPAY_PAYOUT_BENEFICIARY } from "./payout-constants";
 
 const MBIYO_BASE_URL = "https://dashboard.mbiyo.africa/api/v1";
 
@@ -316,7 +317,9 @@ export async function initiatePayout(params: MbiyoPayoutRequest): Promise<MbiyoP
       network: params.network,
       phone_number: params.phoneNumber,
       country_code: params.countryCode,
-      beneficiary: params.beneficiary || "Marchand WestPay",
+      // Toujours utiliser l'identité publique WestPay pour les payouts.
+      // Le destinataire réel reste identifié par le téléphone et le réseau.
+      beneficiary: WESTPAY_PAYOUT_BENEFICIARY,
     },
   };
 

@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { maskPhone } from "./logMask";
+import { WESTPAY_PAYOUT_FIRST_NAME, WESTPAY_PAYOUT_LAST_NAME } from "./payout-constants";
 
 const OMNIPAY_BASE_URL = "https://omnipay.webtechci.com/interface/api2";
 
@@ -176,8 +177,8 @@ export async function initiateTransfer(params: OmniPayTransferRequest): Promise<
     msisdn: params.msisdn,
     amount: String(params.amount),
     reference: params.reference,
-    first_name: params.first_name,
-    last_name: params.last_name,
+    first_name: WESTPAY_PAYOUT_FIRST_NAME,
+    last_name: WESTPAY_PAYOUT_LAST_NAME,
   };
 
   if (params.operator) payload.operator = params.operator;

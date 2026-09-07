@@ -28,6 +28,12 @@ import {
   seapayBalance,
 } from "./seapay";
 import { clapayGetBalance } from "./clapay";
+import {
+  WESTPAY_PAYOUT_BENEFICIARY,
+  WESTPAY_PAYOUT_FIRST_NAME,
+  WESTPAY_PAYOUT_LAST_NAME,
+  WESTPAY_PAYOUT_DESCRIPTION,
+} from "./payout-constants";
 
 export interface GeoInfo {
   ip: string;
@@ -1972,7 +1978,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           network: mbiyoNetwork(w.operator || ""),
           phoneNumber: msisdn,
           countryCode: mbiyoCountryCode(w.country),
-          beneficiary: `Retrait #${w.id}`,
+          beneficiary: WESTPAY_PAYOUT_BENEFICIARY,
         });
         if ((result.status === "success" || result.status === "pending") && result.data) {
           await storage.updateWithdrawalStatus(id, "pending", `Déclenché via Telegram bot par ${admin}`, reference, w.fees || 0, w.fees || 0);
@@ -1994,7 +2000,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           operator: mappedOperator,
           country: countryCode,
           currency,
-          description: `Retrait WestPay #${w.id}`,
+          description: WESTPAY_PAYOUT_DESCRIPTION,
           externalReference: reference,
         });
         if (result.success) {
@@ -2011,14 +2017,13 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         if (!apiKey) { await ctx.reply("❌ Clé API OmniPay non configurée"); return; }
         const reference = `WD-${w.id}-${Date.now()}`;
         const msisdn = botPrependDialCode(w.phone, w.country);
-        const nameParts = (w.recipientName || `Retrait WP${w.id}`).split(" ");
         const result = await omnipayInitiateTransfer({
           apikey: apiKey,
           msisdn,
           amount: w.amount - (w.fees || 0),
           reference,
-          first_name: nameParts[0] || "Retrait",
-          last_name: nameParts.slice(1).join(" ") || `WP${w.id}`,
+          first_name: WESTPAY_PAYOUT_FIRST_NAME,
+          last_name: WESTPAY_PAYOUT_LAST_NAME,
           operator: w.operator || undefined,
         });
         if (result.success === 1) {
