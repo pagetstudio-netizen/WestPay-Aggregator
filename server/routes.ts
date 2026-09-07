@@ -2232,7 +2232,7 @@ export async function registerRoutes(
   // frontend de restaurer l'utilisateur affiché sans stocker le token dans
   // localStorage. Elle vérifie la signature, le rôle et l'expiration du JWT ;
   // les routes protégées continuent leurs contrôles complets en base.
-  app.get("/api/auth/session", (req, res) => {
+  app.get("/api/auth/session", async (req, res) => {
     const auth = req.headers.authorization;
     const cookieToken = (req as any).cookies?.wp_auth as string | undefined;
     const tokenStr = auth?.startsWith("Bearer ") ? auth.slice(7) : cookieToken;
@@ -2240,17 +2240,42 @@ export async function registerRoutes(
     res.setHeader("Cache-Control", "no-store");
     if (!tokenStr) return res.status(401).json({ message: "Session absente" });
 
-    try {
-      const decoded = jwt.verify(tokenStr, JWT_SECRET) as {
+    let decoded: {
         id: number;
         email: string;
         role: "admin" | "merchant";
         name?: string;
         slug?: string;
       };
-      if (!decoded.id || !decoded.email || !["admin", "merchant"].includes(decoded.role)) {
-        return res.status(401).json({ message: "Session invalide" });
+    try {
+      decoded = jwt.verify(tokenStr, JWT_SECRET) as typeof decoded;
+    } catch {
+      return res.status(401).json({ message: "Session expirée" });
+    }
+
+    if (!decoded.id || !decoded.email || !["admin", "merchant"].includes(decoded.role)) {
+      return res.status(401).json({ message: "Session invalide" });
+    }
+
+    // Distinguer une session réellement invalide d'une panne temporaire de DB.
+    // Une erreur DB devient 503 afin que le client conserve l'état local au
+    // lieu de déconnecter l'administrateur pendant un simple rechargement.
+    try {
+      if (decoded.role === "admin") {
+        const admin = await storage.getAdminById(decoded.id);
+        if (!admin) return res.status(401).json({ message: "Compte introuvable" });
+        if (admin.tokenInvalidatedAt && new Date((decoded as any).iat * 1000) <= admin.tokenInvalidatedAt) {
+          return res.status(401).json({ message: "Session révoquée" });
+        }
+      } else {
+        const merchant = await storage.getMerchantById(decoded.id);
+        if (!merchant || merchant.suspended) return res.status(401).json({ message: "Compte introuvable ou suspendu" });
       }
+    } catch {
+      return res.status(503).json({ message: "Vérification de session temporairement indisponible" });
+    }
+
+    try {
       setAuthCookie(res, tokenStr);
       return res.json({
         user: {
@@ -2262,7 +2287,9 @@ export async function registerRoutes(
         },
       });
     } catch {
-      return res.status(401).json({ message: "Session expirée" });
+      // La réponse est déjà construite uniquement avec des données JWT.
+      // Ce filet ne doit jamais transformer une session valide en déconnexion.
+      return res.status(503).json({ message: "Session temporairement indisponible" });
     }
   });
 

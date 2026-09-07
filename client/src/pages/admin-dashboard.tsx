@@ -43,7 +43,7 @@ import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, Payme
 type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "sendavapay" | "seapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge" | "actionlogs";
 
 function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: { staleTime?: number; refetchOnWindowFocus?: boolean }) {
-  const { token, logout } = useAuth();
+  const { token, logout, restoreUser } = useAuth();
   const [, setLocation] = useLocation();
   return useQuery({
     queryKey: key,
@@ -53,10 +53,28 @@ function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: {
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (res.status === 401) {
-        // 401 = session vraiment expirée → déconnexion
-        logout();
-        setLocation(adminConfig.base);
-        throw new Error("Session expiree");
+        // Vérifier le cookie séparément avant de déconnecter. Une route
+        // protégée peut répondre 401 pendant une panne DB alors que le JWT
+        // est encore valide ; dans ce cas, conserver la session affichée.
+        let sessionRes: Response;
+        try {
+          sessionRes = await fetch("/api/auth/session", {
+            credentials: "include",
+            cache: "no-store",
+          });
+        } catch {
+          throw new Error("Vérification temporairement indisponible");
+        }
+        if (sessionRes.status === 401) {
+          logout();
+          setLocation(adminConfig.base);
+          throw new Error("Session expiree");
+        }
+        if (sessionRes.ok) {
+          const sessionData = await sessionRes.json();
+          if (sessionData.user) restoreUser(sessionData.user);
+        }
+        throw new Error("Vérification temporairement indisponible");
       }
       if (res.status === 403) {
         // 403 = accès refusé temporaire (geo, IP, maintenance) — session toujours valide.

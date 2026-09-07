@@ -153,6 +153,7 @@ export default function AdminLogin() {
       const fp = await buildDeviceFingerprint();
       const res = await fetch("/api/auth/admin/login", {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
           ...(fp ? { "X-Device-FP": fp } : {}),
@@ -210,6 +211,7 @@ export default function AdminLogin() {
     try {
       const res = await fetch("/api/auth/admin/verify-2fa", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tempToken: otpToken, code: otpCode.trim() }),
       });
@@ -232,6 +234,7 @@ export default function AdminLogin() {
     try {
       const res = await fetch("/api/auth/admin/verify-totp", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tempToken: totpToken, code: totpCode.trim() }),
       });
@@ -255,6 +258,7 @@ export default function AdminLogin() {
     try {
       const res = await fetch("/api/auth/admin/complete-totp-setup", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tempToken: setupToken, code: setupCode.trim() }),
       });
