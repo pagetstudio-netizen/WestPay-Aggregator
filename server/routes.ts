@@ -682,6 +682,11 @@ function authMiddleware(role: "admin" | "merchant") {
         }
       }
       (req as any).user = decoded;
+      // Renouveler la durée de vie du cookie pendant une session active.
+      // Le JWT garde son expiration fixe de 2 jours : cela ne prolonge pas un
+      // token expiré, mais évite qu'un cookie valide disparaisse pendant
+      // l'utilisation normale du tableau de bord.
+      setAuthCookie(res, tokenStr);
       next();
     } catch {
       return res.status(401).json({ message: "Token invalide" });
@@ -2218,8 +2223,47 @@ export async function registerRoutes(
         /* Cookie already expired or invalid — clearing it is sufficient. */
       }
     }
-    res.clearCookie("wp_auth", { path: "/", httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production" });
+    res.clearCookie("wp_auth", { path: "/", httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production" });
     res.json({ success: true });
+  });
+
+  // ── Session courante — restauration après rechargement ───────────────────
+  // Le JWT reste uniquement dans le cookie httpOnly. Cette route permet au
+  // frontend de restaurer l'utilisateur affiché sans stocker le token dans
+  // localStorage. Elle vérifie la signature, le rôle et l'expiration du JWT ;
+  // les routes protégées continuent leurs contrôles complets en base.
+  app.get("/api/auth/session", (req, res) => {
+    const auth = req.headers.authorization;
+    const cookieToken = (req as any).cookies?.wp_auth as string | undefined;
+    const tokenStr = auth?.startsWith("Bearer ") ? auth.slice(7) : cookieToken;
+
+    res.setHeader("Cache-Control", "no-store");
+    if (!tokenStr) return res.status(401).json({ message: "Session absente" });
+
+    try {
+      const decoded = jwt.verify(tokenStr, JWT_SECRET) as {
+        id: number;
+        email: string;
+        role: "admin" | "merchant";
+        name?: string;
+        slug?: string;
+      };
+      if (!decoded.id || !decoded.email || !["admin", "merchant"].includes(decoded.role)) {
+        return res.status(401).json({ message: "Session invalide" });
+      }
+      setAuthCookie(res, tokenStr);
+      return res.json({
+        user: {
+          id: decoded.id,
+          email: decoded.email,
+          role: decoded.role,
+          ...(decoded.name ? { name: decoded.name } : {}),
+          ...(decoded.slug ? { slug: decoded.slug } : {}),
+        },
+      });
+    } catch {
+      return res.status(401).json({ message: "Session expirée" });
+    }
   });
 
   // ==================== ADMIN ROUTES ====================

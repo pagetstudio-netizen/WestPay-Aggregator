@@ -30,7 +30,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Ils sont désormais stockés dans un cookie httpOnly côté serveur.
     localStorage.removeItem("westpay_token");
 
-    // Récupérer uniquement les infos affichage (pas sensibles)
+    // Utiliser temporairement les infos d'affichage pour éviter un flash.
+    // Elles seront confirmées par /api/auth/session dès que le cookie
+    // httpOnly aura été vérifié par le serveur.
     const savedUser = localStorage.getItem("westpay_user");
     if (savedUser) {
       try {
@@ -39,7 +41,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem("westpay_user");
       }
     }
-    setIsLoading(false);
+
+    let cancelled = false;
+    fetch("/api/auth/session", {
+      credentials: "include",
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        if (cancelled) return;
+        if (response.ok) {
+          const data = await response.json();
+          if (data.user) {
+            setUser(data.user);
+            localStorage.setItem("westpay_user", JSON.stringify(data.user));
+          }
+          return;
+        }
+        // Seul un 401 prouve que la session n'est plus valide. Une erreur
+        // réseau, 403 ou 5xx ne doit pas déconnecter l'utilisateur au refresh.
+        if (response.status === 401) {
+          setUser(null);
+          localStorage.removeItem("westpay_user");
+        }
+      })
+      .catch(() => {
+        // Le cache d'affichage reste disponible pendant une panne temporaire.
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const login = useCallback((newToken: string, newUser: AuthUser) => {
