@@ -152,6 +152,36 @@ const CLAPAY_OPERATORS: Array<{ country: string; name: string; clapayCode: strin
   { country: "Ghana",             name: "Vodafone Cash",     clapayCode: "VODAFONE" },
 ];
 
+// Coris Money is a Burkina Faso payment method exposed by the public
+// operator list. Keep this idempotent so existing administrator gateway
+// choices are never overwritten on restart.
+async function ensureBurkinaOperatorsExist() {
+  try {
+    const existing = await storage.getWithdrawalOperatorByNameAndCountry("Coris Money", "Burkina Faso");
+    if (!existing) {
+      await storage.createWithdrawalOperator({
+        name: "Coris Money",
+        type: "Mobile Money",
+        country: "Burkina Faso",
+        dailyLimit: 1000000,
+        gateway: "Mbiyo",
+        mbiyoCode: "coris",
+        active: true,
+      } as any);
+      console.log("[SEED] Opérateur Coris Money Burkina Faso créé (Mbiyo)");
+    } else if (!(existing as any).mbiyoCode) {
+      const { db } = await import("./db");
+      const { withdrawalOperators } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      await db.update(withdrawalOperators)
+        .set({ mbiyoCode: "coris" } as any)
+        .where(eq(withdrawalOperators.id, existing.id));
+    }
+  } catch (err: any) {
+    console.error("[SEED] Erreur opérateur Coris Money:", err.message);
+  }
+}
+
 async function ensureClapayOperatorsExist() {
   try {
     let created = 0;
@@ -254,6 +284,10 @@ export async function seedDatabase() {
 
   // SeaPay : créer les opérateurs de retrait Pakistan/Philippines/India s'ils n'existent pas encore
   await ensureSeaPayOperatorsExist();
+
+  // Burkina Faso : garantir la présence de Coris Money sans modifier le
+  // gateway choisi par l'administrateur sur une ligne déjà existante.
+  await ensureBurkinaOperatorsExist();
 
   // ClaPay : créer les opérateurs mobile money pour tous les pays supportés
   await ensureClapayOperatorsExist();

@@ -4489,6 +4489,20 @@ export async function registerRoutes(
           `[PAYMENT CONFIG] Opérateur introuvable — gateway=${gatewayLower} ` +
           `countryGateway=${payinGateway.countryGateway}`,
         );
+        notifyAdminPaymentError({
+          merchantName: merchant.name,
+          merchantId: merchant.id,
+          country,
+          amount: parsedAmount,
+          payerNumber: msisdn,
+          operator: paymentMethod,
+          gateway: gatewayLower || "inconnu",
+          stage: "résolution de la configuration opérateur",
+          error: "Opérateur de paiement introuvable pour ce pays",
+        }).catch(() => {});
+        return res.status(500).json({
+          message: "Configuration du moyen de paiement indisponible. Contactez l'administrateur.",
+        });
       } else {
         console.log(
           `[PAYMENT ROUTING] pays=${country} opérateur=${paymentMethod} ` +

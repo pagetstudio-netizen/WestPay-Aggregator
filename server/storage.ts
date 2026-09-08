@@ -999,11 +999,26 @@ export class DatabaseStorage implements IStorage {
     return o;
   }
   async getWithdrawalOperatorByNameAndCountry(name: string, country: string): Promise<WithdrawalOperator | undefined> {
-    const [o] = await authDb.select().from(withdrawalOperators).where(and(
-      sql`LOWER(BTRIM(${withdrawalOperators.name})) = LOWER(BTRIM(${name}))`,
-      sql`LOWER(BTRIM(${withdrawalOperators.country})) = LOWER(BTRIM(${country}))`,
+    const countryCondition = sql`LOWER(BTRIM(${withdrawalOperators.country})) = LOWER(BTRIM(${country}))`;
+    const normalizedName = sql`LOWER(REGEXP_REPLACE(BTRIM(${withdrawalOperators.name}), '[^a-zA-Z0-9]+', '', 'g'))`;
+    const normalizedRequestedName = sql`LOWER(REGEXP_REPLACE(BTRIM(${name}), '[^a-zA-Z0-9]+', '', 'g'))`;
+
+    // Prefer the exact normalized label, then accept harmless display-name
+    // variants such as "Coris" vs "Coris Money". Payment links send the
+    // public label, while older operator rows may use the shorter label.
+    const [exact] = await authDb.select().from(withdrawalOperators).where(and(
+      countryCondition,
+      sql`${normalizedName} = ${normalizedRequestedName}`,
     ));
-    return o;
+    if (exact) return exact;
+
+    const candidates = await authDb.select().from(withdrawalOperators).where(countryCondition);
+    const requested = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+    if (!requested) return undefined;
+    return candidates.find((operator) => {
+      const candidate = operator.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+      return candidate.length >= 3 && (candidate.includes(requested) || requested.includes(candidate));
+    });
   }
   async createWithdrawalOperator(data: InsertWithdrawalOperator): Promise<WithdrawalOperator> {
     const [o] = await authDb.insert(withdrawalOperators).values(data).returning();

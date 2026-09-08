@@ -347,6 +347,7 @@ export async function runAuthMigrations() {
         ('Moov Money','Mobile Money','Benin',1000000,'OmniPay'),
         ('Moov Money','Mobile Money','Burkina Faso',1000000,'OmniPay'),
         ('Orange Money','Mobile Money','Burkina Faso',1000000,'OmniPay'),
+        ('Coris Money','Mobile Money','Burkina Faso',1000000,'Mbiyo'),
         ('MTN Mobile Money','Mobile Money','Cote d''Ivoire',1000000,'OmniPay'),
         ('Moov Money','Mobile Money','Cote d''Ivoire',1000000,'OmniPay'),
         ('Orange Money','Mobile Money','Cote d''Ivoire',1000000,'OmniPay'),
@@ -379,6 +380,7 @@ export async function runAuthMigrations() {
         WHEN LOWER(name) LIKE '%airtel%' THEN 'airtel'
         WHEN LOWER(name) LIKE '%flooz%' THEN 'flooz'
         WHEN LOWER(name) LIKE '%mpesa%' OR LOWER(name) LIKE '%m-pesa%' OR LOWER(name) LIKE '%m pesa%' THEN 'mpesa'
+        WHEN LOWER(name) LIKE '%coris%' THEN 'coris'
         ELSE omnipay_code
       END WHERE omnipay_code IS NULL;
       UPDATE withdrawal_operators SET gateway = 'Mbiyo'
