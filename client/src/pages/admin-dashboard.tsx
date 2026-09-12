@@ -3778,17 +3778,19 @@ function LipaPapPanel() {
   const [clientKey, setClientKey] = useState("");
   const [secretKey, setSecretKey] = useState("");
   const [paymentUrl, setPaymentUrl] = useState("");
+  const [payerEmail, setPayerEmail] = useState("");
   const [environment, setEnvironment] = useState("sandbox");
-  const [action, setAction] = useState("MOMOAPM");
+  const [action, setAction] = useState("MOMO");
   const [networkIdsJson, setNetworkIdsJson] = useState("{}");
 
   useEffect(() => {
     if (!settings) return;
     setClientKey(settings.clientKey?.includes("[DB]") ? "" : settings.clientKey || "");
     setSecretKey(settings.secretKey?.includes("[DB]") ? "" : settings.secretKey || "");
-    setPaymentUrl(settings.paymentUrl || "");
+    setPaymentUrl(settings.paymentUrl || "https://gateway.lipapap.net/post");
+    setPayerEmail(settings.payerEmail || "");
     setEnvironment(settings.environment || "sandbox");
-    setAction(settings.action || "MOMOAPM");
+    setAction(settings.action || "MOMO");
     setNetworkIdsJson(settings.networkIdsJson || "{}");
   }, [settings]);
 
@@ -3798,7 +3800,7 @@ function LipaPapPanel() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ clientKey, secretKey, paymentUrl, environment, action, networkIdsJson }),
+        body: JSON.stringify({ clientKey, secretKey, paymentUrl, payerEmail, environment, action, networkIdsJson }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.message || "Erreur de sauvegarde");
@@ -3816,22 +3818,23 @@ function LipaPapPanel() {
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold text-foreground">Configuration LipaPap</h2>
-        <p className="text-sm text-muted-foreground">Pay-in mobile money documenté, en Sandbox au départ. Aucun payout LipaPap n’est activé.</p>
+        <p className="text-sm text-muted-foreground">Pay-in et payout mobile money LipaPap. Commencez en Sandbox et passez en Production après validation.</p>
       </div>
       <Card>
         <CardHeader><CardTitle className="text-base flex items-center gap-2"><Globe className="w-4 h-4" />Paramètres API</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
-            L’action MOMOAPM et la signature HMAC-SHA256 suivent la documentation officielle. La clé Sandbox peut être ajoutée ultérieurement.
+            L’action MOMO et la signature HMAC-SHA256 suivent la documentation officielle. Le payout utilise MOMOPAYOUT et nécessite l’email enregistré chez LipaPap.
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="space-y-2"><Label>CLIENT_KEY</Label><Input type="password" value={clientKey} onChange={e => setClientKey(e.target.value)} placeholder={settings?.clientKey || "Clé client LipaPap"} data-testid="input-lipapap-client-key" /></div>
             <div className="space-y-2"><Label>SECRET_KEY</Label><Input type="password" value={secretKey} onChange={e => setSecretKey(e.target.value)} placeholder={settings?.secretKey || "Clé secrète LipaPap"} data-testid="input-lipapap-secret-key" /></div>
+            <div className="space-y-2"><Label>Email enregistré LipaPap</Label><Input type="email" value={payerEmail} onChange={e => setPayerEmail(e.target.value)} placeholder="merchant@votre-domaine.com" data-testid="input-lipapap-payer-email" /><p className="text-xs text-muted-foreground">Utilisé pour la signature des payouts et comme payer_email.</p></div>
           </div>
-          <div className="space-y-2"><Label>PAYMENT_URL</Label><Input value={paymentUrl} onChange={e => setPaymentUrl(e.target.value)} placeholder="https://..." data-testid="input-lipapap-payment-url" /><p className="text-xs text-muted-foreground">URL HTTPS exacte fournie pour le compte Sandbox ou Production.</p></div>
+          <div className="space-y-2"><Label>PAYMENT_URL</Label><Input value={paymentUrl} onChange={e => setPaymentUrl(e.target.value)} placeholder="https://gateway.lipapap.net/post" data-testid="input-lipapap-payment-url" /><p className="text-xs text-muted-foreground">Valeur officielle : https://gateway.lipapap.net/post</p></div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2"><Label>Environnement</Label><select value={environment} onChange={e => setEnvironment(e.target.value)} className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" data-testid="select-lipapap-environment"><option value="sandbox">Sandbox</option><option value="production">Production</option></select></div>
-            <div className="space-y-2"><Label>Action</Label><select value={action} onChange={e => setAction(e.target.value)} className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" data-testid="select-lipapap-action"><option value="MOMOAPM">MOMOAPM</option><option value="C2B_SIMULATE">C2B_SIMULATE (Sandbox)</option></select></div>
+            <div className="space-y-2"><Label>Action pay-in</Label><select value={action} onChange={e => setAction(e.target.value)} className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" data-testid="select-lipapap-action"><option value="MOMO">MOMO</option><option value="C2B_SIMULATE">C2B_SIMULATE (Sandbox)</option></select></div>
           </div>
           <div className="space-y-2">
             <Label>IDs numériques des réseaux (optionnel)</Label>
@@ -3841,7 +3844,7 @@ function LipaPapPanel() {
           <div className="space-y-2"><Label>Callback</Label><code className="block rounded-md bg-muted px-3 py-2 text-xs break-all">{settings?.callbackUrl}</code></div>
           <div className="flex items-center gap-3 flex-wrap">
             <Badge variant={settings?.configured ? "default" : "destructive"}>{settings?.configured ? "Configuré" : "Non configuré"}</Badge>
-            <span className="text-xs text-muted-foreground">Payout : désactivé explicitement</span>
+            <span className="text-xs text-muted-foreground">{settings?.payoutMessage || "Payout disponible selon les provider_code documentés."}</span>
           </div>
           <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} data-testid="button-save-lipapap-settings">
             {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}

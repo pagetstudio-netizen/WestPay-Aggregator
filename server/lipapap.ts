@@ -24,6 +24,8 @@ export const LIPAPAP_CURRENCY_MAP: Record<string, string> = {
   Togo: "XOF",
 };
 
+export const LIPAPAP_PAYMENT_URL = "https://gateway.lipapap.net/post";
+
 /**
  * Operator identifiers from the supplied LipaPap network list.
  * The public documentation does not publish numeric momo_network_id values,
@@ -52,13 +54,25 @@ export const LIPAPAP_NETWORKS = [
   { code: "TMONEY_TG", name: "T-Money", country: "Togo" },
 ] as const;
 
+export function lipapapPayoutProviderCode(country: string, operator: string): string | undefined {
+  const normalized = operator.toLowerCase().replace(/[\s\-_]+/g, "");
+  const mappings: Record<string, Record<string, string>> = {
+    Kenya: { mpesa: "MPESA" },
+    Ghana: { mtn: "MTN", mtnmobilemoney: "MTN", vodafone: "VOD", telecelcash: "VOD", airteltigo: "ATM", airteligomoney: "ATM" },
+    Benin: { mtn: "MTN_BJ", mtnmobilemoney: "MTN_BJ", moov: "MOOV_BJ", moovmoney: "MOOV_BJ" },
+    Togo: { tmoney: "TMONEY_TOGO" },
+  };
+  return mappings[country]?.[normalized];
+}
+
 export interface LipaPapConfig {
   clientKey: string;
   secretKey: string;
   paymentUrl: string;
   environment: "sandbox" | "production";
-  action: "MOMOAPM" | "C2B_SIMULATE";
-  networkIds: Record<string, string>;
+  action: "MOMO" | "MOMOAPM" | "C2B_SIMULATE";
+  networkIds: Record<string, string | number>;
+  payerEmail?: string;
 }
 
 export interface LipaPapPaymentResponse {
@@ -73,6 +87,8 @@ export interface LipaPapPaymentResponse {
   redirect_method?: string;
   txMsg?: string;
   decline_reason?: string;
+  message?: string;
+  TransactionID?: string;
   [key: string]: unknown;
 }
 
@@ -126,6 +142,43 @@ export function buildLipaPapRequestHash(fields: {
     secretKey,
   ].join("");
   return hmacSha256(value, secretKey);
+}
+
+function reverse(value: string): string {
+  return Array.from(value).reverse().join("");
+}
+
+function md5UpperInput(value: string): string {
+  return crypto.createHash("md5").update(value.toUpperCase(), "utf8").digest("hex");
+}
+
+/**
+ * LipaPap Formula 3:
+ * MD5(UPPERCASE(reverse(payer_email) + secret_key +
+ * reverse(first six + last four account_number))).
+ */
+export function buildLipaPapPayoutHash(
+  payerEmail: string,
+  secretKey: string,
+  accountNumber: string,
+): string {
+  const normalizedAccount = accountNumber.replace(/\D/g, "");
+  const accountFragment = normalizedAccount.length >= 10
+    ? normalizedAccount.slice(0, 6) + normalizedAccount.slice(-4)
+    : normalizedAccount;
+  return md5UpperInput(reverse(payerEmail) + secretKey + reverse(accountFragment));
+}
+
+/**
+ * LipaPap Formula 4:
+ * MD5(UPPERCASE(reverse(payer_email) + secret_key + reverse(order_id))).
+ */
+export function buildLipaPapPayoutStatusHash(
+  payerEmail: string,
+  secretKey: string,
+  orderId: string,
+): string {
+  return md5UpperInput(reverse(payerEmail) + secretKey + reverse(orderId));
 }
 
 export function buildLipaPapResponseHash(payload: {
@@ -212,7 +265,7 @@ export async function initiateLipaPapPayment(config: LipaPapConfig, params: {
   const payerEmail = params.customerEmail || "customer@westpay.cfd";
   const timestamp = String(Date.now());
   const body: Record<string, unknown> = {
-    action: config.action,
+    action: config.action === "MOMOAPM" ? "MOMO" : config.action,
     client_key: config.clientKey,
     order_id: params.orderId,
     order_amount: orderAmount,
@@ -220,11 +273,20 @@ export async function initiateLipaPapPayment(config: LipaPapConfig, params: {
     order_description: orderDescription,
     payer_phone: params.phone,
     payer_email: payerEmail,
+    customer_name: params.customerName || "Client WestPay",
     payer_country: lipapapCountryCode(params.country),
+    mode: config.environment,
+    environment: config.environment,
     term_url_3ds: params.returnUrl || params.callbackUrl,
     timestamp,
   };
-  if (params.networkId) body.momo_network_id = params.networkId;
+  if (params.networkId) {
+    const numericNetworkId = Number(params.networkId);
+    if (!Number.isInteger(numericNetworkId) || numericNetworkId <= 0) {
+      throw new Error("LipaPap: momo_network_id doit être un entier positif confirmé par LipaPap");
+    }
+    body.momo_network_id = numericNetworkId;
+  }
   body.hash = buildLipaPapRequestHash({
     clientKey: config.clientKey,
     orderId: params.orderId,
@@ -250,6 +312,55 @@ export async function getLipaPapTransactionStatus(
       status: "",
       trans_id: transactionId,
     }, config.secretKey),
+  };
+  return lipapapRequest(config, body);
+}
+
+export async function initiateLipaPapPayout(config: LipaPapConfig, params: {
+  orderId: string;
+  amount: number;
+  currency: string;
+  beneficiaryName: string;
+  accountNumber: string;
+  payerEmail: string;
+  providerCode: string;
+}): Promise<LipaPapPaymentResponse> {
+  const accountNumber = params.accountNumber.replace(/\D/g, "");
+  if (!accountNumber) throw new Error("LipaPap: numéro bénéficiaire invalide");
+  const nameParts = params.beneficiaryName.trim().split(/\s+/).filter(Boolean);
+  const firstName = nameParts[0] || "Client";
+  const lastName = nameParts.slice(1).join(" ") || firstName;
+  const orderAmount = params.amount.toFixed(2);
+  const body: Record<string, unknown> = {
+    action: "MOMOPAYOUT",
+    client_key: config.clientKey,
+    order_id: params.orderId,
+    order_amount: orderAmount,
+    order_currency: params.currency,
+    order_description: "Client WestPay",
+    account_name: params.beneficiaryName.trim() || "Client WestPay",
+    account_number: accountNumber,
+    payer_email: params.payerEmail,
+    payer_phone: accountNumber,
+    payer_first_name: firstName,
+    payer_last_name: lastName,
+    provider_code: params.providerCode,
+    transaction_method: "MOMOPAYOUT",
+    hash: buildLipaPapPayoutHash(params.payerEmail, config.secretKey, accountNumber),
+  };
+  return lipapapRequest(config, body);
+}
+
+export async function getLipaPapPayoutStatus(
+  config: LipaPapConfig,
+  orderId: string,
+  payerEmail: string,
+): Promise<LipaPapPaymentResponse> {
+  const body = {
+    action: "PAYOUT_STATUS",
+    client_key: config.clientKey,
+    order_id: orderId,
+    hash: buildLipaPapPayoutStatusHash(payerEmail, config.secretKey, orderId),
   };
   return lipapapRequest(config, body);
 }

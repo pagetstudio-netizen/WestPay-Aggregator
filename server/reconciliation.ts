@@ -10,7 +10,7 @@ import { getPaymentStatus as sendavaGetStatus, getWithdrawalStatus as sendavaGet
 import { getTransactionStatus as omnipayGetStatus } from "./omnipay";
 import { getTransactionStatus as mbiyoGetStatus } from "./mbiyo";
 import { clapayGetTransactionStatus as clapayGetStatus } from "./clapay";
-import { getLipaPapTransactionStatus, type LipaPapConfig } from "./lipapap";
+import { getLipaPapTransactionStatus, getLipaPapPayoutStatus, LIPAPAP_PAYMENT_URL, type LipaPapConfig } from "./lipapap";
 import { notifyMerchantPayment, notifyAdminPayment, notifyAdminWithdrawal, notifyMerchantWithdrawal } from "./telegram-bot";
 
 import { calcMerchantCredit as calcCredit } from "./feeConfig";
@@ -43,15 +43,17 @@ async function getClapayKey(): Promise<string | undefined> {
 async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
   const clientKey = process.env.LIPAPAP_CLIENT_KEY || await storage.getSetting("lipapap_client_key");
   const secretKey = process.env.LIPAPAP_SECRET_KEY || await storage.getSetting("lipapap_secret_key");
-  const paymentUrl = process.env.LIPAPAP_PAYMENT_URL || await storage.getSetting("lipapap_payment_url");
-  if (!clientKey || !secretKey || !paymentUrl) return undefined;
+  const paymentUrl = process.env.LIPAPAP_PAYMENT_URL || await storage.getSetting("lipapap_payment_url") || LIPAPAP_PAYMENT_URL;
+  const payerEmail = process.env.LIPAPAP_PAYER_EMAIL || await storage.getSetting("lipapap_payer_email");
+  if (!clientKey || !secretKey) return undefined;
   return {
     clientKey,
     secretKey,
     paymentUrl,
     environment: (await storage.getSetting("lipapap_environment")) === "production" ? "production" : "sandbox",
-    action: "MOMOAPM",
+    action: "MOMO",
     networkIds: {},
+    payerEmail: payerEmail || undefined,
   };
 }
 
@@ -297,6 +299,25 @@ async function reconcileStaleWithdrawals(): Promise<void> {
             console.error(`[RECONCILIATION-WD][mbiyo] Erreur retrait #${wd.id}:`, err.message);
           }
         }
+      }
+    }
+
+    // ── LipaPap MOMOPAYOUT ────────────────────────────────────────────────
+    const lipaPapStale = stale.filter((w: any) => w.gateway === "lipapap");
+    if (lipaPapStale.length > 0) {
+      const config = await getLipaPapConfig();
+      if (config?.payerEmail) {
+        for (const wd of lipaPapStale) {
+          try {
+            const result = await getLipaPapPayoutStatus(config, wd.omnipayRef, config.payerEmail);
+            const status = String(result.status || result.result || "").toLowerCase();
+            await applyWithdrawalResult(wd, status, wd.omnipayRef);
+          } catch (err: any) {
+            console.error(`[RECONCILIATION-WD][lipapap] Erreur retrait #${wd.id}:`, err.message);
+          }
+        }
+      } else {
+        console.warn("[RECONCILIATION-WD][lipapap] LIPAPAP_PAYER_EMAIL non configuré — réconciliation ignorée");
       }
     }
 
