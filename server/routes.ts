@@ -92,6 +92,14 @@ import {
   isClapayCheckoutOperator,
   type ClapayWebhookPayload,
 } from "./clapay";
+import {
+  initiateLipaPapPayment,
+  getLipaPapTransactionStatus,
+  verifyLipaPapResponseHash,
+  lipapapCurrency,
+  lipapapNetworkCode,
+  type LipaPapConfig,
+} from "./lipapap";
 import { maskPhone as maskPhoneForLog, maskAddress as maskAddressForLog } from "./logMask";
 import {
   WESTPAY_PAYOUT_BENEFICIARY,
@@ -345,6 +353,47 @@ async function getClapayWebhookSecret(): Promise<string | undefined> {
 
 async function getClapayWebhookUniqueKey(): Promise<string | undefined> {
   return getConfiguredSecret(["CLAPAY_WEBHOOK_UNIQUE_KEY"], ["clapay_webhook_unique_key"]);
+}
+
+async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
+  const [clientKey, secretKey, paymentUrl, environment, action, networkIdsJson] = await Promise.all([
+    getConfiguredSecret(["LIPAPAP_CLIENT_KEY"], ["lipapap_client_key"]),
+    getConfiguredSecret(["LIPAPAP_SECRET_KEY"], ["lipapap_secret_key"]),
+    getConfiguredSecret(["LIPAPAP_PAYMENT_URL"], ["lipapap_payment_url"]),
+    storage.getSetting("lipapap_environment"),
+    storage.getSetting("lipapap_action"),
+    storage.getSetting("lipapap_network_ids"),
+  ]);
+  if (!clientKey || !secretKey || !paymentUrl) return undefined;
+
+  let networkIds: Record<string, string> = {};
+  if (networkIdsJson) {
+    try {
+      const parsed = JSON.parse(networkIdsJson);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("objet attendu");
+      networkIds = Object.fromEntries(
+        Object.entries(parsed)
+          .filter((entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string" && !!entry[1].trim())
+          .map(([key, value]) => [key, value.trim()]),
+      );
+    } catch {
+      throw new Error("La configuration lipapap_network_ids doit être un JSON objet valide");
+    }
+  }
+
+  const normalizedEnvironment = environment === "production" ? "production" : "sandbox";
+  const normalizedAction = action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMOAPM";
+  if (normalizedAction === "C2B_SIMULATE" && normalizedEnvironment !== "sandbox") {
+    throw new Error("LipaPap C2B_SIMULATE est autorisé uniquement en Sandbox");
+  }
+  return {
+    clientKey,
+    secretKey,
+    paymentUrl,
+    environment: normalizedEnvironment,
+    action: normalizedAction,
+    networkIds,
+  };
 }
 
 /* SeaPay : chaque pays possede son propre compte marchand (merchant_id/api_key/api_secret distincts) */
@@ -3887,6 +3936,84 @@ export async function registerRoutes(
     }
   }
 
+  async function settleLipaPapPayment(pending: any, providerTxId: string): Promise<boolean> {
+    const merchant = await storage.getMerchantById(pending.merchantId);
+    const merchantCountry = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
+    if (!merchantCountry) throw new Error(`MerchantCountry introuvable pour le paiement #${pending.id}`);
+
+    const txId = `LP-${providerTxId || pending.omnipayReference}`;
+    const credit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
+    const client = await financialPool.connect();
+    let inserted = false;
+    try {
+      await client.query("BEGIN");
+      const insert = await client.query(
+        `INSERT INTO transactions
+          (merchant_id, country, tx_id, amount, payer_number, payer_name, status, provider,
+           omnipay_tx_id, operator, omnipay_reference, error_message, provider_fee)
+         VALUES ($1,$2,$3,$4,$5,$6,'confirmed','lipapap',$7,$8,$9,NULL,0)
+         ON CONFLICT (tx_id) DO NOTHING RETURNING id`,
+        [
+          pending.merchantId,
+          pending.country,
+          txId,
+          pending.amount,
+          pending.payerPhone || null,
+          pending.payerName || null,
+          providerTxId || null,
+          pending.paymentMethod || null,
+          pending.omnipayReference || null,
+        ],
+      );
+      inserted = Boolean(insert.rowCount);
+      if (inserted) {
+        await client.query("UPDATE merchant_countries SET balance = balance + $1 WHERE id = $2", [credit, merchantCountry.id]);
+      }
+      await client.query(
+        `UPDATE pending_payments SET status = 'omnipay_confirmed'
+         WHERE id = $1 AND status NOT IN ('omnipay_confirmed','confirmed','omnipay_error')`,
+        [pending.id],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    if (inserted) {
+      notifyMerchantPayment(pending.merchantId, {
+        txId,
+        amount: pending.amount,
+        payerNumber: pending.payerPhone,
+        country: pending.country,
+        provider: "westpay",
+      }).catch(() => {});
+      notifyAdminPayment({
+        txId,
+        merchantName: merchant?.name || `#${pending.merchantId}`,
+        payerNumber: pending.payerPhone,
+        country: pending.country,
+        amount: pending.amount,
+        provider: "lipapap",
+        status: "confirmed",
+      }).catch(() => {});
+      notifyConfirmedPaymentWebhook(pending.merchantId, {
+        event: "payment.confirmed",
+        txId,
+        amount: pending.amount,
+        currency: pending.country,
+        payer: pending.payerPhone || "",
+        country: pending.country,
+        merchantSlug: merchant?.slug || "",
+        provider: "lipapap",
+        timestamp: new Date().toISOString(),
+      }).catch(() => {});
+    }
+    return inserted;
+  }
+
   app.get("/api/merchant/webhook", authMiddleware("merchant"), async (req, res) => {
     try {
       const merchant = await storage.getMerchantById((req as any).user.id);
@@ -4483,6 +4610,7 @@ export async function registerRoutes(
       const useSendava = gatewayLower === "sendavapay" || gatewayLower === "sendava";
       const useSeapay = gatewayLower === "seapay";
       const useClapay = gatewayLower === "clapay";
+      const useLipaPap = gatewayLower === "lipapap" || gatewayLower === "lipa";
 
       if (!operatorRecord) {
         console.warn(
@@ -4521,7 +4649,114 @@ export async function registerRoutes(
         });
       }
 
-      if (useSendava) {
+      if (useLipaPap) {
+        let lipaConfig: LipaPapConfig | undefined;
+        try {
+          lipaConfig = await getLipaPapConfig();
+        } catch (configErr: any) {
+          console.error(`[PAYMENT CONFIG] LipaPap configuration invalide: ${configErr.message}`);
+          return res.status(500).json({ message: "Configuration LipaPap invalide. Contactez l'administrateur." });
+        }
+        if (!lipaConfig) {
+          console.error(`[PAYMENT CONFIG] Identifiants LipaPap absents pour pays=${country} opérateur=${paymentMethod}`);
+          notifyAdminPaymentError({
+            merchantName: merchant.name,
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerNumber: msisdn,
+            operator: paymentMethod,
+            gateway: "lipapap",
+            stage: "lecture des identifiants API",
+            error: "LIPAPAP_CLIENT_KEY, LIPAPAP_SECRET_KEY ou LIPAPAP_PAYMENT_URL absent",
+          }).catch(() => {});
+          return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
+        }
+        if (lipaConfig.action === "C2B_SIMULATE" && country !== "Kenya") {
+          return res.status(400).json({ message: "C2B_SIMULATE LipaPap est réservé au Kenya en Sandbox. Utilisez MOMOAPM pour ce pays." });
+        }
+
+        const reference = `LP-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+        const networkCode = lipapapNetworkCode(country, paymentMethod);
+        const networkId = networkCode ? lipaConfig.networkIds[networkCode] : undefined;
+        const callbackUrl = `${callbackBaseUrl}/api/lipapap/callback`;
+        const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&lipapap_return=1`;
+
+        try {
+          const result = await initiateLipaPapPayment(lipaConfig, {
+            orderId: reference,
+            amount: parsedAmount,
+            currency: lipapapCurrency(country),
+            country,
+            phone: msisdn.startsWith("+") ? msisdn : `+${msisdn}`,
+            customerEmail: undefined,
+            customerName: payerName || "Client WestPay",
+            callbackUrl,
+            returnUrl,
+            networkId,
+          });
+          const resultStatus = String(result.status || result.result || "").toUpperCase();
+          const isRejected = ["DECLINED", "FAILED", "ERROR", "REFUND", "REVERSAL", "VOID"].includes(resultStatus)
+            || String(result.result || "").toUpperCase() === "DECLINED";
+          if (isRejected) {
+            const errorMsg = result.decline_reason || result.txMsg || `Paiement LipaPap refusé (${resultStatus || "inconnu"})`;
+            storage.createTransaction({
+              merchantId: merchant.id, country, txId: result.trans_id || reference,
+              amount: parsedAmount, payerNumber: msisdn || null, payerName: payerName || null,
+              status: "failed", provider: "lipapap", omnipayTxId: result.trans_id || null,
+              operator: paymentMethod || networkCode || null, omnipayReference: reference,
+              errorMessage: errorMsg, providerFee: 0,
+            }).catch(() => {});
+            return res.status(400).json({ message: "Paiement non abouti. Veuillez reessayer." });
+          }
+
+          const pending = await storage.createPendingPayment({
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerPhone: payerPhone || null,
+            payerName: payerName || null,
+            paymentMethod,
+            txId: null,
+            status: "omnipay_pending",
+            redirectUrl: redirectUrl || null,
+            omnipayReference: reference,
+            omnipayTxId: result.trans_id || String(result.TransactionID || "") || reference,
+            omnipayPaymentUrl: result.redirect_url || null,
+            gateway: "lipapap",
+            expiresAt,
+          });
+          await storage.createApiLog({
+            merchantId: merchant.id,
+            action: "lipapap_payment_initiated",
+            ip: req.ip || "",
+            description: `Paiement LipaPap initie - Ref: ${reference} - Montant: ${parsedAmount} - réseau: ${networkCode || "automatique"}`,
+          });
+          return res.json({
+            success: true,
+            paymentId: pending.id,
+            omnipay: true,
+            omnipayReference: reference,
+            paymentUrl: result.redirect_url || null,
+            polling: true,
+            fees: 0,
+          });
+        } catch (lipaErr: any) {
+          console.error("[LIPAPAP] Erreur initiation:", lipaErr.message);
+          notifyAdminPaymentError({
+            merchantName: merchant.name,
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerNumber: msisdn,
+            operator: paymentMethod,
+            gateway: "lipapap",
+            stage: "appel API d'initiation du paiement",
+            error: lipaErr,
+          }).catch(() => {});
+          return res.status(502).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
+        }
+      } else if (useSendava) {
         const sendavaApiKey = await getSendavaApiKey();
         if (!sendavaApiKey) {
           console.error(
@@ -5618,6 +5853,22 @@ export async function registerRoutes(
       }
 
       if (pending.omnipayReference) {
+        if (pending.gateway === "lipapap") {
+          const lipaConfig = await getLipaPapConfig();
+          if (!lipaConfig) return res.status(503).json({ message: "LipaPap non configure" });
+          const providerTxId = pending.omnipayTxId || pending.omnipayReference;
+          const statusResult = await getLipaPapTransactionStatus(lipaConfig, providerTxId);
+          const status = String(statusResult.status || statusResult.result || "").toUpperCase();
+          if (status === "SETTLED" || String(statusResult.result || "").toUpperCase() === "SUCCESS") {
+            await settleLipaPapPayment(pending, String(statusResult.trans_id || providerTxId));
+            return res.json({ status: "confirmed", paymentId: pending.id });
+          }
+          if (["DECLINED", "FAILED", "REFUND", "REVERSAL", "VOID"].includes(status)) {
+            await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+            return res.json({ status: "failed", paymentId: pending.id, providerStatus: status });
+          }
+          return res.json({ status: "pending", paymentId: pending.id, providerStatus: status || "PENDING" });
+        }
         if (pending.gateway === "mbiyo" && pending.omnipayTxId) {
           const mbiyoApiKey = await getMbiyoApiKey();
           if (mbiyoApiKey) {
@@ -6425,6 +6676,39 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== LIPAPAP CALLBACK ====================
+  app.post("/api/lipapap/callback", async (req, res) => {
+    try {
+      const body = req.body as Record<string, any>;
+      const orderId = String(body.order_id || "");
+      if (!orderId) return res.status(400).json({ message: "order_id requis" });
+
+      const pending = await storage.getPendingPaymentByOmnipayReference(orderId);
+      if (!pending || pending.gateway !== "lipapap") return res.status(404).json({ message: "Paiement introuvable" });
+
+      const config = await getLipaPapConfig();
+      if (!config) return res.status(503).json({ message: "LipaPap non configure" });
+      if (!verifyLipaPapResponseHash(body, config.secretKey, body.hash)) {
+        console.error(`[LIPAPAP CALLBACK] Signature invalide — ref=${orderId}`);
+        return res.status(403).json({ message: "Signature invalide" });
+      }
+
+      const status = String(body.status || body.result || "").toUpperCase();
+      const providerTxId = String(body.trans_id || orderId);
+      if (status === "SETTLED" || String(body.result || "").toUpperCase() === "SUCCESS") {
+        await settleLipaPapPayment(pending, providerTxId);
+        console.log(`[LIPAPAP CALLBACK] Paiement confirmé — ref=${orderId}`);
+      } else if (["DECLINED", "FAILED", "REFUND", "REVERSAL", "VOID"].includes(status)) {
+        await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+        console.log(`[LIPAPAP CALLBACK] Paiement échoué — ref=${orderId} status=${status}`);
+      }
+      return res.status(200).send("ok");
+    } catch (error: any) {
+      console.error("[LIPAPAP CALLBACK] Erreur:", error.message);
+      return res.status(500).json({ message: "Erreur callback LipaPap" });
+    }
+  });
+
   // ==================== SEAPAY CALLBACK ====================
   app.post("/api/seapay/callback", async (req, res) => {
     try {
@@ -7117,6 +7401,86 @@ export async function registerRoutes(
         await storage.setSetting("sendavapay_webhook_secret", result.data.webhookSecret);
       }
       res.json({ success: result.success, data: result.data, message: result.message });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+  // ==================== LIPAPAP ADMIN SETTINGS ====================
+
+  app.get("/api/admin/lipapap/settings", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const [dbClientKey, dbSecretKey, dbPaymentUrl, environment, action, networkIdsJson] = await Promise.all([
+        storage.getSetting("lipapap_client_key"),
+        storage.getSetting("lipapap_secret_key"),
+        storage.getSetting("lipapap_payment_url"),
+        storage.getSetting("lipapap_environment"),
+        storage.getSetting("lipapap_action"),
+        storage.getSetting("lipapap_network_ids"),
+      ]);
+      const activeConfig = await getLipaPapConfig().catch(() => undefined);
+      res.json({
+        clientKey: dbClientKey ? "••••••••[DB]" : "",
+        secretKey: dbSecretKey ? "••••••••[DB]" : "",
+        paymentUrl: dbPaymentUrl || "",
+        environment: environment === "production" ? "production" : "sandbox",
+        action: action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMOAPM",
+        networkIdsJson: networkIdsJson || "{}",
+        configured: !!activeConfig,
+        envOverride: {
+          clientKey: !!process.env.LIPAPAP_CLIENT_KEY,
+          secretKey: !!process.env.LIPAPAP_SECRET_KEY,
+          paymentUrl: !!process.env.LIPAPAP_PAYMENT_URL,
+        },
+        callbackUrl: `${process.env.APP_URL || "https://westpay.cfd"}/api/lipapap/callback`,
+        payoutSupported: false,
+        payoutMessage: "Le payout mobile money LipaPap reste désactivé : aucun endpoint officiel documenté.",
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+  app.get("/api/admin/lipapap/networks", authMiddleware("admin"), async (_req, res) => {
+    const { LIPAPAP_NETWORKS } = await import("./lipapap");
+    res.json(LIPAPAP_NETWORKS);
+  });
+
+  app.post("/api/admin/lipapap/settings", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { clientKey, secretKey, paymentUrl, environment, action, networkIdsJson } = req.body || {};
+      if (clientKey !== undefined && clientKey !== "") await storage.setSetting("lipapap_client_key", String(clientKey).trim());
+      if (secretKey !== undefined && secretKey !== "") await storage.setSetting("lipapap_secret_key", String(secretKey).trim());
+      if (paymentUrl !== undefined && paymentUrl !== "") {
+        try {
+          const parsedUrl = new URL(String(paymentUrl).trim());
+          if (parsedUrl.protocol !== "https:") throw new Error("HTTPS requis");
+        } catch {
+          return res.status(400).json({ message: "PAYMENT_URL doit être une URL HTTPS valide." });
+        }
+        await storage.setSetting("lipapap_payment_url", String(paymentUrl).trim());
+      }
+      if (environment !== undefined) {
+        if (!["sandbox", "production"].includes(environment)) return res.status(400).json({ message: "Environnement invalide." });
+        await storage.setSetting("lipapap_environment", environment);
+      }
+      if (action !== undefined) {
+        if (!["MOMOAPM", "C2B_SIMULATE"].includes(action)) return res.status(400).json({ message: "Action LipaPap invalide." });
+        const effectiveEnvironment = environment || await storage.getSetting("lipapap_environment") || "sandbox";
+        if (action === "C2B_SIMULATE" && effectiveEnvironment !== "sandbox") {
+          return res.status(400).json({ message: "C2B_SIMULATE est autorisé uniquement en Sandbox." });
+        }
+        await storage.setSetting("lipapap_action", action);
+      }
+      if (networkIdsJson !== undefined) {
+        let parsed: unknown;
+        try { parsed = JSON.parse(String(networkIdsJson)); } catch { return res.status(400).json({ message: "Les IDs réseaux doivent être un JSON valide." }); }
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          return res.status(400).json({ message: "Les IDs réseaux doivent être un objet JSON." });
+        }
+        await storage.setSetting("lipapap_network_ids", JSON.stringify(parsed));
+      }
+      res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }
@@ -8501,6 +8865,11 @@ export async function registerRoutes(
       const useMbiyoPayout = payoutGatewayLower === "mbiyo";
       const useSendavaPayout = payoutGatewayLower === "sendavapay";
       const useClapayPayout = payoutGatewayLower === "clapay";
+      if (payoutGatewayLower === "lipapap" || payoutGatewayLower === "lipa") {
+        return res.status(400).json({
+          message: "Les payouts mobile money LipaPap ne sont pas disponibles : aucun endpoint officiel documenté.",
+        });
+      }
 
       const minAmountRaw = await storage.getSetting("withdrawal_min_amount");
       const withdrawalMinAmount = minAmountRaw ? parseInt(minAmountRaw) || 200 : 200;
@@ -9075,6 +9444,11 @@ export async function registerRoutes(
       const useMbiyoPayout = w.gateway === "mbiyo";
       const useSeapayPayout = w.gateway === "seapay";
       const useClapayPayoutApprove = w.gateway === "clapay";
+      if (w.gateway === "lipapap" || w.gateway === "lipa") {
+        return res.status(400).json({
+          message: "Les payouts mobile money LipaPap ne sont pas disponibles : aucun endpoint officiel documenté.",
+        });
+      }
 
       if (useClapayPayoutApprove) {
         const cpToken = await getClapayApiKey();
@@ -9393,6 +9767,9 @@ export async function registerRoutes(
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
       const provider = requestedProvider || w.gateway || "sendavapay";
+      if (provider === "lipapap" || provider === "lipa") {
+        return res.status(400).json({ message: "Les payouts mobile money LipaPap ne sont pas disponibles : aucun endpoint officiel documenté." });
+      }
       if (!["sendavapay", "mbiyo", "omnipay", "seapay", "clapay"].includes(provider)) {
         return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay, SeaPay ou ClaPay)" });
       }

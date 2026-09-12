@@ -40,7 +40,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
 
-type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "sendavapay" | "seapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge" | "actionlogs";
+type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "sendavapay" | "lipapap" | "seapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge" | "actionlogs";
 
 function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: { staleTime?: number; refetchOnWindowFocus?: boolean }) {
   const { token, logout, restoreUser } = useAuth();
@@ -3771,6 +3771,88 @@ function SendavaPayPanel() {
   );
 }
 
+function LipaPapPanel() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const { data: settings, isLoading } = useAdminFetch("/api/admin/lipapap/settings", ["/api/admin/lipapap/settings"]);
+  const [clientKey, setClientKey] = useState("");
+  const [secretKey, setSecretKey] = useState("");
+  const [paymentUrl, setPaymentUrl] = useState("");
+  const [environment, setEnvironment] = useState("sandbox");
+  const [action, setAction] = useState("MOMOAPM");
+  const [networkIdsJson, setNetworkIdsJson] = useState("{}");
+
+  useEffect(() => {
+    if (!settings) return;
+    setClientKey(settings.clientKey?.includes("[DB]") ? "" : settings.clientKey || "");
+    setSecretKey(settings.secretKey?.includes("[DB]") ? "" : settings.secretKey || "");
+    setPaymentUrl(settings.paymentUrl || "");
+    setEnvironment(settings.environment || "sandbox");
+    setAction(settings.action || "MOMOAPM");
+    setNetworkIdsJson(settings.networkIdsJson || "{}");
+  }, [settings]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/lipapap/settings", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ clientKey, secretKey, paymentUrl, environment, action, networkIdsJson }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || "Erreur de sauvegarde");
+      return body;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/lipapap/settings"] });
+      toast({ title: "Configuration LipaPap sauvegardée" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  if (isLoading) return <LoadingSkeleton />;
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold text-foreground">Configuration LipaPap</h2>
+        <p className="text-sm text-muted-foreground">Pay-in mobile money documenté, en Sandbox au départ. Aucun payout LipaPap n’est activé.</p>
+      </div>
+      <Card>
+        <CardHeader><CardTitle className="text-base flex items-center gap-2"><Globe className="w-4 h-4" />Paramètres API</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+            L’action MOMOAPM et la signature HMAC-SHA256 suivent la documentation officielle. La clé Sandbox peut être ajoutée ultérieurement.
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="space-y-2"><Label>CLIENT_KEY</Label><Input type="password" value={clientKey} onChange={e => setClientKey(e.target.value)} placeholder={settings?.clientKey || "Clé client LipaPap"} data-testid="input-lipapap-client-key" /></div>
+            <div className="space-y-2"><Label>SECRET_KEY</Label><Input type="password" value={secretKey} onChange={e => setSecretKey(e.target.value)} placeholder={settings?.secretKey || "Clé secrète LipaPap"} data-testid="input-lipapap-secret-key" /></div>
+          </div>
+          <div className="space-y-2"><Label>PAYMENT_URL</Label><Input value={paymentUrl} onChange={e => setPaymentUrl(e.target.value)} placeholder="https://..." data-testid="input-lipapap-payment-url" /><p className="text-xs text-muted-foreground">URL HTTPS exacte fournie pour le compte Sandbox ou Production.</p></div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2"><Label>Environnement</Label><select value={environment} onChange={e => setEnvironment(e.target.value)} className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" data-testid="select-lipapap-environment"><option value="sandbox">Sandbox</option><option value="production">Production</option></select></div>
+            <div className="space-y-2"><Label>Action</Label><select value={action} onChange={e => setAction(e.target.value)} className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" data-testid="select-lipapap-action"><option value="MOMOAPM">MOMOAPM</option><option value="C2B_SIMULATE">C2B_SIMULATE (Sandbox)</option></select></div>
+          </div>
+          <div className="space-y-2">
+            <Label>IDs numériques des réseaux (optionnel)</Label>
+            <textarea value={networkIdsJson} onChange={e => setNetworkIdsJson(e.target.value)} rows={5} className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono" placeholder={'{"MPESA_KE":"...","MTN_MOMO_GH":"..."}'} data-testid="textarea-lipapap-network-ids" />
+            <p className="text-xs text-muted-foreground">La documentation publique ne fournit pas ces IDs. Laissez vide tant que LipaPap ne les a pas confirmés.</p>
+          </div>
+          <div className="space-y-2"><Label>Callback</Label><code className="block rounded-md bg-muted px-3 py-2 text-xs break-all">{settings?.callbackUrl}</code></div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <Badge variant={settings?.configured ? "default" : "destructive"}>{settings?.configured ? "Configuré" : "Non configuré"}</Badge>
+            <span className="text-xs text-muted-foreground">Payout : désactivé explicitement</span>
+          </div>
+          <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} data-testid="button-save-lipapap-settings">
+            {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
+            Sauvegarder la configuration
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function AdminWalletTransfersPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
@@ -4588,7 +4670,7 @@ const COUNTRIES_LIST = [
   "Pakistan", "Philippines", "India", "Nigeria",
 ];
 const OPERATOR_TYPES = ["Mobile Money", "Virement bancaire", "Carte bancaire", "Cryptomonnaie", "Autre"];
-const GATEWAYS = ["OmniPay", "Mbiyo", "SendavaPay", "SeaPay", "ClaPay", "Manuel"];
+const GATEWAYS = ["OmniPay", "Mbiyo", "SendavaPay", "LipaPap", "SeaPay", "ClaPay", "Manuel"];
 
 function SortableOpRow({
   op, onEdit, onDelete, onToggle, onUploadLogo, onRemoveLogo, uploadingFor,
@@ -10086,6 +10168,7 @@ export default function AdminDashboard() {
         { title: "OmniPay", icon: Zap, tab: "omnipay" },
         { title: "Mbiyo", icon: Globe, tab: "mbiyo" },
         { title: "SendavaPay", icon: Zap, tab: "sendavapay" },
+        { title: "LipaPap", icon: Globe, tab: "lipapap" },
         { title: "SeaPay", icon: Globe, tab: "seapay" },
         { title: "Crypto", icon: Bitcoin, tab: "cryptoagg" },
         { title: "Retraits Crypto", icon: Download, tab: "cryptowithdrawals" },
@@ -10218,6 +10301,7 @@ export default function AdminDashboard() {
             {activeTab === "omnipay" && <OmniPayPanel />}
             {activeTab === "mbiyo" && <MbiyoPanel />}
             {activeTab === "sendavapay" && <SendavaPayPanel />}
+            {activeTab === "lipapap" && <LipaPapPanel />}
             {activeTab === "seapay" && <SeaPayPanel />}
             {activeTab === "cryptoagg" && <CryptoAggPanel />}
             {activeTab === "cryptowithdrawals" && <CryptoWithdrawalsAdminPanel />}

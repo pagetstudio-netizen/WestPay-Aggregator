@@ -10,6 +10,7 @@ import { getPaymentStatus as sendavaGetStatus, getWithdrawalStatus as sendavaGet
 import { getTransactionStatus as omnipayGetStatus } from "./omnipay";
 import { getTransactionStatus as mbiyoGetStatus } from "./mbiyo";
 import { clapayGetTransactionStatus as clapayGetStatus } from "./clapay";
+import { getLipaPapTransactionStatus, type LipaPapConfig } from "./lipapap";
 import { notifyMerchantPayment, notifyAdminPayment, notifyAdminWithdrawal, notifyMerchantWithdrawal } from "./telegram-bot";
 
 import { calcMerchantCredit as calcCredit } from "./feeConfig";
@@ -37,6 +38,21 @@ async function getMbiyoKey(): Promise<string | undefined> {
 
 async function getClapayKey(): Promise<string | undefined> {
   return process.env.CLAPAY_API_KEY || await storage.getSetting("clapay_api_key");
+}
+
+async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
+  const clientKey = process.env.LIPAPAP_CLIENT_KEY || await storage.getSetting("lipapap_client_key");
+  const secretKey = process.env.LIPAPAP_SECRET_KEY || await storage.getSetting("lipapap_secret_key");
+  const paymentUrl = process.env.LIPAPAP_PAYMENT_URL || await storage.getSetting("lipapap_payment_url");
+  if (!clientKey || !secretKey || !paymentUrl) return undefined;
+  return {
+    clientKey,
+    secretKey,
+    paymentUrl,
+    environment: (await storage.getSetting("lipapap_environment")) === "production" ? "production" : "sandbox",
+    action: "MOMOAPM",
+    networkIds: {},
+  };
 }
 
 async function creditConfirmedPayment(pending: any, txRef: string): Promise<boolean> {
@@ -349,6 +365,23 @@ export async function runReconciliation(): Promise<void> {
             console.log(`[RECONCILIATION] SendavaPay ECHEC — ref=${pending.omnipayReference} status=${status}`);
           } else {
             console.log(`[RECONCILIATION] SendavaPay EN COURS — ref=${pending.omnipayReference} status=${status || "inconnu"}`);
+          }
+        } else if (pending.gateway === "lipapap") {
+          const lipaConfig = await getLipaPapConfig();
+          if (!lipaConfig) continue;
+          const providerTxId = pending.omnipayTxId || pending.omnipayReference;
+          if (!providerTxId) continue;
+          const result = await getLipaPapTransactionStatus(lipaConfig, providerTxId);
+          const status = String(result.status || result.result || "").toUpperCase();
+          if (status === "SETTLED" || String(result.result || "").toUpperCase() === "SUCCESS") {
+            const txRef = `LP-${result.trans_id || providerTxId}`;
+            const credited = await creditConfirmedPayment(pending, txRef);
+            console.log(`[RECONCILIATION] LipaPap OK — ref=${pending.omnipayReference}${credited ? " — crédité" : " — déjà traité"}`);
+          } else if (["DECLINED", "FAILED", "REFUND", "REVERSAL", "VOID"].includes(status)) {
+            await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+            console.log(`[RECONCILIATION] LipaPap ECHEC — ref=${pending.omnipayReference} status=${status}`);
+          } else {
+            console.log(`[RECONCILIATION] LipaPap EN COURS — ref=${pending.omnipayReference} status=${status || "inconnu"}`);
           }
         } else if (pending.gateway === "clapay") {
           // ClaPay ne pousse pas de webhook — polling obligatoire

@@ -12,3 +12,4 @@
 - [Screenshot asset and Git safety](screenshot-gitsafe.md) — preview screenshots can reintroduce uploaded captures through an automatic local safety commit.
 - [Telegram delivery recovery](telegram-delivery-recovery.md) — Telegraf polling launch deletes webhooks; check webhook ownership first and repair stuck webhook queues quickly.
 - [Admin session refresh](admin-session-refresh.md) — restore admin sessions from the httpOnly cookie; only an explicit 401 should trigger logout.
+- [LipaPap integration](lipapap-integration.md) — use documented MOMOAPM/HMAC pay-ins; keep payout disabled until its official mobile-money API is documented.
