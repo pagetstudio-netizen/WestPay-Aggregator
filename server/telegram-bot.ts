@@ -166,11 +166,12 @@ interface CommanderSession {
 }
 const commanderSessions = new Map<string, CommanderSession>();
 
-// ─── Session /desactiverpaiement ────────────────────────────────────────────
-interface MerchantPaymentDisableSession {
+// ─── Sessions /desactiverpaiement et /reactiverpaiement ─────────────────────
+interface MerchantPaymentToggleSession {
   step: "waiting_slug";
+  action: "disable" | "enable";
 }
-const merchantPaymentDisableSessions = new Map<string, MerchantPaymentDisableSession>();
+const merchantPaymentToggleSessions = new Map<string, MerchantPaymentToggleSession>();
 
 // Ajoute le préfixe international à un numéro selon le pays (usage interne bot)
 function botPrependDialCode(phone: string, country: string): string {
@@ -1191,9 +1192,9 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
   // ─── /annuler (annule le broadcast ou commander en cours) ────────────────
   bot.command("annuler", async (ctx) => {
     const chatId = String(ctx.chat.id);
-    if (merchantPaymentDisableSessions.has(chatId)) {
-      merchantPaymentDisableSessions.delete(chatId);
-      await ctx.reply("❌ Désactivation payin/payout annulée.");
+    if (merchantPaymentToggleSessions.has(chatId)) {
+      merchantPaymentToggleSessions.delete(chatId);
+      await ctx.reply("❌ Modification payin/payout annulée.");
     } else if (broadcastSessions.has(chatId)) {
       broadcastSessions.delete(chatId);
       await ctx.reply("❌ Broadcast annulé.");
@@ -1229,7 +1230,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       await ctx.reply("⛔ Cette commande est réservée au groupe admin WestPay.").catch(() => {});
       return;
     }
-    merchantPaymentDisableSessions.set(chatId, { step: "waiting_slug" });
+    merchantPaymentToggleSessions.set(chatId, { step: "waiting_slug", action: "disable" });
     await ctx.reply(
       "🔒 *Désactiver payin et payout*\n\n" +
       "Envoyez maintenant le *slug exact du marchand*.\n\n" +
@@ -1239,6 +1240,26 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       { parse_mode: "Markdown" },
     );
   });
+
+  // ─── /reactiverpaiement et /activerpaiement (groupe admin uniquement) ─────
+  const activateMerchantPayments = async (ctx: any) => {
+    const chatId = String(ctx.chat.id);
+    const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
+    if (!isGroup || !await isAdminGroup(chatId)) {
+      await ctx.reply("⛔ Cette commande est réservée au groupe admin WestPay.").catch(() => {});
+      return;
+    }
+    merchantPaymentToggleSessions.set(chatId, { step: "waiting_slug", action: "enable" });
+    await ctx.reply(
+      "🔓 *Réactiver payin et payout*\n\n" +
+      "Envoyez maintenant le *slug exact du marchand*.\n\n" +
+      "Les nouvelles demandes de ce compte seront de nouveau autorisées.\n\n" +
+      "Envoyez /annuler pour annuler.",
+      { parse_mode: "Markdown" },
+    );
+  };
+  bot.command("reactiverpaiement", activateMerchantPayments);
+  bot.command("activerpaiement", activateMerchantPayments);
 
   // ─── Photo reçue dans le groupe admin (pour le broadcast) ─────────────────
   // Diffuse immédiatement dès réception — pas d'étape intermédiaire.
@@ -1272,20 +1293,20 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
   // ─── Messages texte (flux commander conversationnel) ─────────────────────
   bot.on("message", async (ctx, next) => {
     const chatId = String(ctx.chat.id);
-    const paymentDisableSession = merchantPaymentDisableSessions.get(chatId);
-    if (paymentDisableSession?.step === "waiting_slug") {
+    const paymentToggleSession = merchantPaymentToggleSessions.get(chatId);
+    if (paymentToggleSession?.step === "waiting_slug") {
       const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
       if (!isGroup || !await isAdminGroup(chatId)) {
-        merchantPaymentDisableSessions.delete(chatId);
+        merchantPaymentToggleSessions.delete(chatId);
         return next();
       }
       const msg = ctx.message as any;
       const slug = String(msg.text || "").trim();
       if (!slug || slug.startsWith("/")) return next();
-      merchantPaymentDisableSessions.delete(chatId);
+      merchantPaymentToggleSessions.delete(chatId);
 
       if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/.test(slug)) {
-        await ctx.reply("❌ Slug invalide. Relancez /desactiverpaiement avec le slug exact du marchand.");
+        await ctx.reply(`❌ Slug invalide. Relancez /${paymentToggleSession.action === "enable" ? "reactiverpaiement" : "desactiverpaiement"} avec le slug exact du marchand.`);
         return;
       }
 
@@ -1293,26 +1314,37 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         const merchant = await storage.getMerchantBySlug(slug);
         if (!merchant) {
           await ctx.reply(
-            `❌ Aucun marchand trouvé avec le slug \`${slug}\`. Relancez /desactiverpaiement pour réessayer.`,
+            `❌ Aucun marchand trouvé avec le slug \`${slug}\`. Relancez /${paymentToggleSession.action === "enable" ? "reactiverpaiement" : "desactiverpaiement"} pour réessayer.`,
             { parse_mode: "Markdown" },
           );
           return;
         }
 
+        const enabling = paymentToggleSession.action === "enable";
         await storage.updateMerchant(merchant.id, {
-          payinDisabled: true,
-          withdrawalsDisabled: true,
+          payinDisabled: !enabling,
+          withdrawalsDisabled: !enabling,
         });
-        await ctx.reply(
-          `✅ *Payin et payout désactivés*\n\n` +
-          `🏪 Marchand : *${merchant.name}*\n` +
-          `🔖 Slug : \`${merchant.slug}\`\n\n` +
-          `Toutes les nouvelles demandes via ce compte retournent :\n` +
-          `\`404 未经授权的付款\``,
-          { parse_mode: "Markdown" },
-        );
+        if (enabling) {
+          await ctx.reply(
+            `✅ *Payin et payout réactivés*\n\n` +
+            `🏪 Marchand : *${merchant.name}*\n` +
+            `🔖 Slug : \`${merchant.slug}\`\n\n` +
+            `Les nouvelles demandes de paiement et de retrait sont de nouveau autorisées.`,
+            { parse_mode: "Markdown" },
+          );
+        } else {
+          await ctx.reply(
+            `✅ *Payin et payout désactivés*\n\n` +
+            `🏪 Marchand : *${merchant.name}*\n` +
+            `🔖 Slug : \`${merchant.slug}\`\n\n` +
+            `Toutes les nouvelles demandes via ce compte retournent :\n` +
+            `\`404 未经授权的付款\``,
+            { parse_mode: "Markdown" },
+          );
+        }
       } catch (err: any) {
-        console.error("[TELEGRAM] Désactivation payin/payout impossible:", err?.message || err);
+        console.error("[TELEGRAM] Modification payin/payout impossible:", err?.message || err);
         await ctx.reply("❌ Impossible de modifier ce marchand. Réessayez plus tard.");
       }
       return;
@@ -1581,7 +1613,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `👥 *Marchands*\n` +
           `/marchands — Liste de tous les marchands\n` +
           `/setmarchand CODE — Lier un groupe à un marchand\n\n` +
-          `/desactiverpaiement — Désactiver payin et payout d'un marchand\n\n` +
+           `/desactiverpaiement — Désactiver payin et payout d'un marchand\n\n` +
+           `/reactiverpaiement — Réactiver payin et payout d'un marchand\n\n` +
           `📊 *Statistiques & Soldes*\n` +
           `/stats — Statistiques globales\n` +
           `/solde — Soldes détaillés de tous les marchands\n\n` +

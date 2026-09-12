@@ -9033,7 +9033,7 @@ export async function registerRoutes(
 
           const result = await mbiyoInitiatePayout({
             apiKey: mbiyoApiKey,
-            amount: netAmount,
+            amount: w.amount - (w.fees || 0),
             currency,
             orderId: reference,
             callbackUrl,
@@ -9397,7 +9397,7 @@ export async function registerRoutes(
           const accountNumber = prependDialCode(phone, mc.country);
           const result = await initiateLipaPapPayout(lipaConfig, {
             orderId: reference,
-            amount: netAmount,
+            amount: w.amount - (w.fees || 0),
             currency: lipapapCurrency(mc.country),
             beneficiaryName: recipientName || "Client WestPay",
             accountNumber,
@@ -9763,6 +9763,11 @@ export async function registerRoutes(
         }
       }
 
+      if (useLipaPapPayoutApprove && !sentToProvider) {
+        return res.status(400).json({
+          message: "Le payout LipaPap n’a pas été envoyé : vérifiez CLIENT_KEY, SECRET_KEY, l’email enregistré et le provider_code.",
+        });
+      }
       if (sentToProvider) {
         await storage.updateWithdrawalStatus(id, "pending", `En cours de traitement - en attente de confirmation${note ? ` - Note: ${note}` : ""}`, omnipayRef, fees, fees);
          console.log(`[ADMIN APPROVE WD] Retrait #${id} en attente confirmation ${useLipaPapPayoutApprove ? "LipaPap" : useMbiyoPayout ? "Mbiyo" : "OmniPay"} - ref=${omnipayRef}`);
@@ -9804,8 +9809,8 @@ export async function registerRoutes(
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
       const effectiveProvider = provider || w.gateway || "";
-      if (!["sendavapay", "mbiyo", "omnipay", "seapay", "clapay"].includes(effectiveProvider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay, SeaPay ou ClaPay)" });
+      if (!["sendavapay", "mbiyo", "omnipay", "seapay", "clapay", "lipapap"].includes(effectiveProvider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay, SeaPay, ClaPay ou LipaPap)" });
       }
       if (!w.omnipayRef) return res.status(400).json({ message: "Aucune référence fournisseur pour ce reversement" });
       // ClaPay v3 attend la signature retournée à l'initiation. La référence
@@ -9832,6 +9837,12 @@ export async function registerRoutes(
         const result = await mbiyoGetStatus(mbiyoApiKey, w.omnipayRef);
         return res.json({ provider: "mbiyo", success: result.status === "success", status: result.data?.status, data: result.data, error: result.message });
       }
+      if (effectiveProvider === "lipapap") {
+        const config = await getLipaPapConfig();
+        if (!config?.payerEmail) return res.status(500).json({ message: "Email enregistré LipaPap non configuré" });
+        const result = await getLipaPapPayoutStatus(config, w.omnipayRef, config.payerEmail);
+        return res.json({ provider: "lipapap", success: true, status: result.status || result.result, data: result, error: result.decline_reason || result.message });
+      }
       if (effectiveProvider === "seapay") {
         const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(w.country), getSeapayApiKey(w.country)]);
         if (!spMerchantId || !spApiKey) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
@@ -9856,8 +9867,8 @@ export async function registerRoutes(
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
       const effectiveProvider = provider || w.gateway || "";
-      if (!["sendavapay", "mbiyo", "omnipay", "seapay", "clapay"].includes(effectiveProvider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay, SeaPay ou ClaPay)" });
+      if (!["sendavapay", "mbiyo", "omnipay", "seapay", "clapay", "lipapap"].includes(effectiveProvider)) {
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay, SeaPay, ClaPay ou LipaPap)" });
       }
       if (!w.omnipayRef) return res.status(400).json({ message: "Aucune référence fournisseur pour ce reversement" });
 
@@ -9882,6 +9893,12 @@ export async function registerRoutes(
         const result = await mbiyoGetStatus(mbiyoApiKey, w.omnipayRef);
         providerStatus = (result.data?.status || result.status || "").toLowerCase();
         raw = result.data;
+      } else if (effectiveProvider === "lipapap") {
+        const config = await getLipaPapConfig();
+        if (!config?.payerEmail) return res.status(500).json({ message: "Email enregistré LipaPap non configuré" });
+        const result = await getLipaPapPayoutStatus(config, w.omnipayRef, config.payerEmail);
+        providerStatus = String(result.status || result.result || "").toLowerCase();
+        raw = result;
       } else if (effectiveProvider === "seapay") {
         const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(w.country), getSeapayApiKey(w.country)]);
         if (!spMerchantId || !spApiKey) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
@@ -9910,6 +9927,9 @@ export async function registerRoutes(
       }
       if (failureStatuses.includes(providerStatus)) {
         await storage.updateWithdrawalStatus(id, "failed", `Échec confirmé chez ${effectiveProvider} par l'admin`);
+        if (effectiveProvider === "lipapap" && w.status === "pending") {
+          await storage.incrementMerchantCountryBalance(w.merchantCountryId, w.amount);
+        }
         console.log(`[ADMIN SYNC-STATUS WD] Retrait #${id} marqué échoué suite à ${effectiveProvider} (statut: ${providerStatus})`);
         return res.json({ success: true, applied: "failed", providerStatus, data: raw });
       }
@@ -9928,10 +9948,37 @@ export async function registerRoutes(
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
       const provider = requestedProvider || w.gateway || "sendavapay";
       if (provider === "lipapap" || provider === "lipa") {
-        return res.status(400).json({ message: "Les payouts mobile money LipaPap ne sont pas disponibles : aucun endpoint officiel documenté." });
+        const lipaConfig = await getLipaPapConfig().catch(() => undefined);
+        const providerCode = lipapapPayoutProviderCode(w.country, w.operator || "");
+        if (!lipaConfig?.payerEmail) return res.status(500).json({ message: "Email enregistré LipaPap non configuré" });
+        if (!providerCode) return res.status(400).json({ message: `provider_code LipaPap non documenté pour ${w.country}/${w.operator || "(vide)"}` });
+        const reference = `LP-WD-${id}-${Date.now().toString(36).toUpperCase()}`;
+        try {
+          const result = await initiateLipaPapPayout(lipaConfig, {
+            orderId: reference,
+            amount: netAmount,
+            currency: lipapapCurrency(w.country),
+            beneficiaryName: (w as any).recipientName || WESTPAY_PAYOUT_BENEFICIARY,
+            accountNumber: prependDialCode(w.phone, w.country),
+            payerEmail: lipaConfig.payerEmail,
+            providerCode,
+          });
+          const resultStatus = String(result.status || result.result || "").toUpperCase();
+          if (!["ACCEPTED", "PROCESSING", "PENDING", "SUCCESS", "SETTLED"].includes(resultStatus)) {
+            return res.status(502).json({ success: false, message: result.decline_reason || result.message || "Payout LipaPap refusé" });
+          }
+          await storage.updateWithdrawalGateway(id, "lipapap");
+          await storage.updateWithdrawalStatus(id, "pending", `Relancé chez LipaPap — Ref: ${reference}`, reference, w.fees || 0, 0);
+          if (result.trans_id || result.TransactionID) {
+            await storage.updateWithdrawalProviderTxId(id, String(result.trans_id || result.TransactionID));
+          }
+          return res.json({ success: true, provider: "lipapap", reference, fees: w.fees || 0 });
+        } catch (err: any) {
+          return res.status(502).json({ success: false, message: err.message || "Erreur LipaPap" });
+        }
       }
       if (!["sendavapay", "mbiyo", "omnipay", "seapay", "clapay"].includes(provider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay, SeaPay ou ClaPay)" });
+        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay, SeaPay, ClaPay ou LipaPap)" });
       }
       if (w.status === "pending" && w.omnipayRef && provider === w.gateway) {
         return res.status(400).json({ message: `Ce retrait est déjà en cours de traitement chez ${provider} (réf: ${w.omnipayRef}). Attendez la confirmation ou choisissez un autre fournisseur.` });

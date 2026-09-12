@@ -1,10 +1,10 @@
 ---
 name: LipaPap integration
-description: LipaPap pay-in uses documented MOMOAPM/HMAC flows; payout remains intentionally disabled until an official mobile-money payout API is supplied.
+description: LipaPap uses documented MOMO/MOMOPAYOUT flows; account-balance lookup still needs an official balance API.
 ---
 
-LipaPap pay-in must use the documented `MOMOAPM` action, `hash` field, request Formula 1, and response/callback Formula 2. The public network list contains 20 operator codes, but numeric `momo_network_id` values and a mobile-money payout endpoint are not documented.
+LipaPap pay-in uses the documented `MOMO` action and Formula 1/HMAC callback flow. Mobile-money payout uses `MOMOPAYOUT`, Formula 3 for requests, Formula 4 for `PAYOUT_STATUS`, and Formula 2 for callbacks. The public payout provider-code table currently documents KES/MPESA, GHS/MTN/VOD/ATM, XOF/MTN_BJ/MOOV_BJ/TMONEY_TOGO. The documentation does not expose an account-balance action or endpoint.
 
-**Why:** Inventing network IDs or a payout endpoint could route money incorrectly or create an unsupported withdrawal flow.
+**Why:** Inventing a balance action or endpoint could return misleading funds information; payout requests also need provider codes that are explicitly enabled for the account.
 
-**How to apply:** Keep Sandbox configuration explicit (`CLIENT_KEY`, `SECRET_KEY`, exact `PAYMENT_URL`, optional verified network-ID map). Fail closed when credentials or endpoint are missing, and do not fallback to another gateway for LipaPap payouts.
+**How to apply:** Keep credentials, registered payer email, and the official `https://gateway.lipapap.net/post` endpoint explicit. Fail closed when payout credentials/provider codes are missing. Add a Telegram balance lookup only after LipaPap supplies the balance method, signature, and response schema.
