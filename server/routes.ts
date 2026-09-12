@@ -492,6 +492,7 @@ const SUPPORTED_PAYMENT_GATEWAYS = new Set([
   "sendavapay",
   "seapay",
   "clapay",
+  "lipapap",
   "oxapay",
 ]);
 
