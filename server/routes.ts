@@ -4693,6 +4693,26 @@ export async function registerRoutes(
         const networkId = networkCode ? lipaConfig.networkIds[networkCode] : undefined;
         const callbackUrl = `${callbackBaseUrl}/api/lipapap/callback`;
         const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&lipapap_return=1`;
+        if (!networkCode || networkId === undefined || String(networkId).trim() === "") {
+          const configurationError = !networkCode
+            ? `Réseau LipaPap non mappé pour ${country}/${paymentMethod}`
+            : `momo_network_id LipaPap absent pour ${networkCode}`;
+          console.error(`[PAYMENT CONFIG] ${configurationError}`);
+          notifyAdminPaymentError({
+            merchantName: merchant.name,
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerNumber: msisdn,
+            operator: paymentMethod,
+            gateway: "lipapap",
+            stage: "validation de la configuration réseau",
+            error: configurationError,
+          }).catch(() => {});
+          return res.status(500).json({
+            message: "Configuration du réseau de paiement indisponible. Contactez l'administrateur.",
+          });
+        }
 
         try {
           const result = await initiateLipaPapPayment(lipaConfig, {

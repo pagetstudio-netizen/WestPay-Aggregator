@@ -237,7 +237,17 @@ async function lipapapRequest(config: LipaPapConfig, body: Record<string, unknow
       throw new Error(`Réponse LipaPap invalide (HTTP ${response.status})`);
     }
     if (!response.ok) {
-      throw new Error(data.txMsg || data.decline_reason || `Réponse HTTP ${response.status}`);
+      const providerMessage = [
+        data.txMsg,
+        data.decline_reason,
+        data.message,
+        data.error,
+        data.code,
+      ].find((value) => value !== undefined && value !== null && String(value).trim() !== "");
+      const responseDetail = providerMessage
+        ? String(providerMessage)
+        : JSON.stringify(data).slice(0, 800);
+      throw new Error(`Réponse HTTP ${response.status}${responseDetail ? ` — ${responseDetail}` : ""}`);
     }
     return data;
   } catch (error: any) {
