@@ -17,7 +17,7 @@ The Network ID Mapping table's `LipaPap Code` column is the source for pay-in ma
 
 ## Sandbox validation
 
-The configured Sandbox request reaches the LipaPap endpoint but is rejected with HTTP 400 `Hash mismatch`; replacing the stored credentials with the secure Sandbox pair and adding the provider's sample fields did not change the result, so the exact signing formula/field order still needs confirmation.
+The configured Sandbox request reaches the LipaPap endpoint but is rejected with HTTP 400 `Hash mismatch`; replacing the stored credentials with the secure Sandbox pair and adding the provider's sample fields did not change the result. The current pay-in hash implementation is an unverified reconstruction of the field order, so the official signing formula or SDK is required.
 
 **Why:** Retrying with the same signature only repeats the provider rejection and can create unnecessary Sandbox orders.
 
