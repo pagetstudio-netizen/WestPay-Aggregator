@@ -22,3 +22,9 @@ The configured Sandbox request reaches the LipaPap endpoint but is rejected with
 **Why:** Retrying with the same signature only repeats the provider rejection and can create unnecessary Sandbox orders.
 
 **How to apply:** Confirm the Sandbox `CLIENT_KEY`/`SECRET_KEY` pair and the official Formula 1 field order/format with LipaPap, then update the admin settings or signing code before retrying.
+
+The published Formula 1 implementation was independently validated locally and tested against the Sandbox with `MOMOAPM`, Togo/T-Money, `1000.00` XOF, and the approved test number; LipaPap still returns `Hash mismatch` after excluding `action` from the signature and using the documented decimal amount.
+
+**Why:** The documentation's sample hashes are reused across materially different sample payloads, so they cannot serve as reliable fixtures; the remaining mismatch needs a provider-confirmed canonical payload/signing example rather than more blind retries.
+
+**How to apply:** Obtain one redacted provider-generated signature fixture for the exact `MOMOAPM` payload, especially whether `order_currency` and `payer_ip` are included or empty, before attempting another real Sandbox request.
