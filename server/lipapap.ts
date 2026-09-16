@@ -24,12 +24,10 @@ export const LIPAPAP_CURRENCY_MAP: Record<string, string> = {
   Togo: "XOF",
 };
 
-export const LIPAPAP_PAYMENT_URL = "https://gateway.lipapap.net/post";
-
 /**
  * Operator identifiers from the supplied LipaPap network list.
- * The separate Network ID Mapping table supplies the LipaPap Code values for
- * the networks that are currently mapped below.
+ * This is reference metadata used to normalize the selected country/operator.
+ * LipaPap values themselves are loaded from administrator settings.
  */
 export const LIPAPAP_NETWORKS = [
   { code: "AIRTELTIGO_MONEY_GH", name: "AirtelTigo Money", country: "Ghana" },
@@ -54,33 +52,13 @@ export const LIPAPAP_NETWORKS = [
   { code: "TMONEY_TG", name: "T-Money", country: "Togo" },
 ] as const;
 
-/**
- * Values from LipaPap's Network ID Mapping table.
- * The table's "LipaPap Code" column is used as the pay-in network value.
- * Entries with NULL in the table are intentionally not included.
- */
-export const LIPAPAP_NETWORK_MAPPINGS: Record<string, string | number> = {
-  MPESA_KE: "MPESA_KE",
-  MTN_MOMO_GH: "MTNGH",
-  VODAFONE_CASH_GH: "VODGH",
-  AIRTELTIGO_MONEY_GH: "ATMGH",
-  TMONEY_TG: 165,
-  MOOV_MONEY_ML: 355,
-  ORANGE_MONEY_ML: 353,
-  MTN_MOMO_BJ: 287,
-  MOOV_MONEY_BJ: 419,
-  ORANGE_MONEY_BF: 241,
-};
-
-export function lipapapPayoutProviderCode(country: string, operator: string): string | undefined {
+export function lipapapPayoutProviderCode(
+  country: string,
+  operator: string,
+  configuredCodes: Record<string, Record<string, string>>,
+): string | undefined {
   const normalized = operator.toLowerCase().replace(/[\s\-_]+/g, "");
-  const mappings: Record<string, Record<string, string>> = {
-    Kenya: { mpesa: "MPESA" },
-    Ghana: { mtn: "MTN", mtnmobilemoney: "MTN", vodafone: "VOD", telecelcash: "VOD", airteltigo: "ATM", airteligomoney: "ATM" },
-    Benin: { mtn: "MTN_BJ", mtnmobilemoney: "MTN_BJ", moov: "MOOV_BJ", moovmoney: "MOOV_BJ" },
-    Togo: { tmoney: "TMONEY_TOGO" },
-  };
-  return mappings[country]?.[normalized];
+  return configuredCodes[country]?.[normalized]?.trim() || undefined;
 }
 
 export interface LipaPapConfig {
@@ -90,6 +68,8 @@ export interface LipaPapConfig {
   environment: "sandbox" | "production";
   action: "MOMO" | "MOMOAPM" | "C2B_SIMULATE";
   networkIds: Record<string, string | number>;
+  payoutProviderCodes: Record<string, Record<string, string>>;
+  callbackUrl?: string;
   payerEmail?: string;
 }
 

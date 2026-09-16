@@ -3778,20 +3778,24 @@ function LipaPapPanel() {
   const [clientKey, setClientKey] = useState("");
   const [secretKey, setSecretKey] = useState("");
   const [paymentUrl, setPaymentUrl] = useState("");
+  const [callbackUrl, setCallbackUrl] = useState("");
   const [payerEmail, setPayerEmail] = useState("");
   const [environment, setEnvironment] = useState("sandbox");
   const [action, setAction] = useState("MOMO");
   const [networkIdsJson, setNetworkIdsJson] = useState("{}");
+  const [payoutCodesJson, setPayoutCodesJson] = useState("{}");
 
   useEffect(() => {
     if (!settings) return;
-    setClientKey(settings.clientKey?.includes("[DB]") ? "" : settings.clientKey || "");
-    setSecretKey(settings.secretKey?.includes("[DB]") ? "" : settings.secretKey || "");
-    setPaymentUrl(settings.paymentUrl || "https://gateway.lipapap.net/post");
+    setClientKey(settings.clientKey?.includes("[DB]") || settings.clientKey?.includes("[ENV]") ? "" : settings.clientKey || "");
+    setSecretKey(settings.secretKey?.includes("[DB]") || settings.secretKey?.includes("[ENV]") ? "" : settings.secretKey || "");
+    setPaymentUrl(settings.paymentUrl || "");
+    setCallbackUrl(settings.callbackUrl || "");
     setPayerEmail(settings.payerEmail || "");
     setEnvironment(settings.environment || "sandbox");
     setAction(settings.action || "MOMO");
     setNetworkIdsJson(settings.networkIdsJson || "{}");
+    setPayoutCodesJson(settings.payoutCodesJson || "{}");
   }, [settings]);
 
   const saveMutation = useMutation({
@@ -3800,7 +3804,7 @@ function LipaPapPanel() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ clientKey, secretKey, paymentUrl, payerEmail, environment, action, networkIdsJson }),
+        body: JSON.stringify({ clientKey, secretKey, paymentUrl, callbackUrl, payerEmail, environment, action, networkIdsJson, payoutCodesJson }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.message || "Erreur de sauvegarde");
@@ -3831,21 +3835,43 @@ function LipaPapPanel() {
             <div className="space-y-2"><Label>SECRET_KEY</Label><Input type="password" value={secretKey} onChange={e => setSecretKey(e.target.value)} placeholder={settings?.secretKey || "Clé secrète LipaPap"} data-testid="input-lipapap-secret-key" /></div>
             <div className="space-y-2"><Label>Email enregistré LipaPap</Label><Input type="email" value={payerEmail} onChange={e => setPayerEmail(e.target.value)} placeholder="merchant@votre-domaine.com" data-testid="input-lipapap-payer-email" /><p className="text-xs text-muted-foreground">Utilisé pour la signature des payouts et comme payer_email.</p></div>
           </div>
-          <div className="space-y-2"><Label>PAYMENT_URL</Label><Input value={paymentUrl} onChange={e => setPaymentUrl(e.target.value)} placeholder="https://gateway.lipapap.net/post" data-testid="input-lipapap-payment-url" /><p className="text-xs text-muted-foreground">Valeur officielle : https://gateway.lipapap.net/post</p></div>
+          <div className="space-y-2"><Label>PAYMENT_URL</Label><Input value={paymentUrl} onChange={e => setPaymentUrl(e.target.value)} placeholder="URL HTTPS fournie par LipaPap" data-testid="input-lipapap-payment-url" /><p className="text-xs text-muted-foreground">Cette URL est obligatoire et doit être fournie par LipaPap.</p></div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2"><Label>Environnement</Label><select value={environment} onChange={e => setEnvironment(e.target.value)} className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" data-testid="select-lipapap-environment"><option value="sandbox">Sandbox</option><option value="production">Production</option></select></div>
             <div className="space-y-2"><Label>Action pay-in</Label><select value={action} onChange={e => setAction(e.target.value)} className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" data-testid="select-lipapap-action"><option value="MOMO">MOMO</option><option value="C2B_SIMULATE">C2B_SIMULATE (Sandbox)</option></select></div>
           </div>
+          <div className="space-y-2"><Label>URL callback</Label><Input value={callbackUrl} onChange={e => setCallbackUrl(e.target.value)} placeholder="URL HTTPS callback fournie par LipaPap" data-testid="input-lipapap-callback-url" /><p className="text-xs text-muted-foreground">Cette URL est obligatoire pour envoyer et recevoir les confirmations LipaPap.</p></div>
           <div className="space-y-2">
             <Label>Codes réseau LipaPap</Label>
-            <textarea value={networkIdsJson} onChange={e => setNetworkIdsJson(e.target.value)} rows={5} className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono" placeholder={'{"TMONEY_TG":165,"MTN_MOMO_GH":"MTNGH"}'} data-testid="textarea-lipapap-network-ids" />
-            <p className="text-xs text-muted-foreground">Valeurs issues de la colonne « LipaPap Code » de la table fournie par LipaPap. Les valeurs enregistrées ici remplacent les valeurs par défaut correspondantes.</p>
+            <textarea value={networkIdsJson} onChange={e => setNetworkIdsJson(e.target.value)} rows={5} className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono" placeholder={'{"NETWORK_CODE":"LIPAPAP_CODE"}'} data-testid="textarea-lipapap-network-ids" />
+            <p className="text-xs text-muted-foreground">Saisissez les valeurs de la colonne « LipaPap Code » fournie par LipaPap. Aucun code réseau n’est utilisé automatiquement.</p>
           </div>
-          <div className="space-y-2"><Label>Callback</Label><code className="block rounded-md bg-muted px-3 py-2 text-xs break-all">{settings?.callbackUrl}</code></div>
+          <div className="space-y-2">
+            <Label>Provider codes payout</Label>
+            <textarea value={payoutCodesJson} onChange={e => setPayoutCodesJson(e.target.value)} rows={6} className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono" placeholder={'{"Country":{"operator":"provider_code"}}'} data-testid="textarea-lipapap-payout-codes" />
+            <p className="text-xs text-muted-foreground">Configurez ici les provider_code exacts fournis par LipaPap pour chaque pays et opérateur. Aucun provider_code payout n’est codé en dur.</p>
+          </div>
+          <div className="space-y-2"><Label>Callback configuré</Label><code className="block rounded-md bg-muted px-3 py-2 text-xs break-all">{settings?.callbackUrl || "Non configuré"}</code></div>
           <div className="flex items-center gap-3 flex-wrap">
             <Badge variant={settings?.configured ? "default" : "destructive"}>{settings?.configured ? "Configuré" : "Non configuré"}</Badge>
-            <span className="text-xs text-muted-foreground">{settings?.payoutMessage || "Payout disponible selon les provider_code documentés."}</span>
+            <Badge variant={settings?.payinConfigured ? "default" : "destructive"}>Pay-in : {settings?.payinConfigured ? "prêt" : "incomplet"}</Badge>
+            <Badge variant={settings?.payoutConfigured ? "default" : "destructive"}>Payout : {settings?.payoutConfigured ? "prêt" : "incomplet"}</Badge>
+            <span className="text-xs text-muted-foreground">{settings?.payoutMessage || "Les paramètres LipaPap doivent être saisis dans ce panneau."}</span>
           </div>
+          {settings?.configurationChecks && (
+            <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              <div className="font-medium text-foreground mb-1">Vérification de configuration</div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
+                <span>CLIENT_KEY : {settings.configurationChecks.clientKey ? "✓" : "manquant"}</span>
+                <span>SECRET_KEY : {settings.configurationChecks.secretKey ? "✓" : "manquant"}</span>
+                <span>PAYMENT_URL : {settings.configurationChecks.paymentUrl ? "✓" : "manquant"}</span>
+                <span>Callback : {settings.configurationChecks.callbackUrl ? "✓" : "manquant"}</span>
+                <span>Email payout : {settings.configurationChecks.payerEmail ? "✓" : "manquant"}</span>
+                <span>Codes réseau : {settings.networkMappingCount || 0}</span>
+                <span>Provider codes : {settings.payoutCodeCount || 0}</span>
+              </div>
+            </div>
+          )}
           <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} data-testid="button-save-lipapap-settings">
             {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
             Sauvegarder la configuration

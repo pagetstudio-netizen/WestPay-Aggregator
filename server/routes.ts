@@ -101,8 +101,6 @@ import {
   lipapapCurrency,
   lipapapNetworkCode,
   lipapapPayoutProviderCode,
-  LIPAPAP_PAYMENT_URL,
-  LIPAPAP_NETWORK_MAPPINGS,
   type LipaPapConfig,
 } from "./lipapap";
 import { maskPhone as maskPhoneForLog, maskAddress as maskAddressForLog } from "./logMask";
@@ -320,6 +318,11 @@ async function getConfiguredSecret(
   return undefined;
 }
 
+async function getLipaPapConfiguredValue(envName: string, dbKey: string): Promise<string | undefined> {
+  const dbValue = cleanConfiguredSecret(await storage.getSetting(dbKey));
+  return dbValue || cleanConfiguredSecret(process.env[envName]);
+}
+
 async function getOmnipayApiKey(): Promise<string | undefined> {
   return getConfiguredSecret(["OMNIPAY_API_KEY"], ["omnipay_api_key"]);
 }
@@ -361,24 +364,25 @@ async function getClapayWebhookUniqueKey(): Promise<string | undefined> {
 }
 
 async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
-  const [clientKey, secretKey, configuredPaymentUrl, environment, action, networkIdsJson, payerEmail] = await Promise.all([
-    getConfiguredSecret(["LIPAPAP_CLIENT_KEY"], ["lipapap_client_key"]),
-    getConfiguredSecret(["LIPAPAP_SECRET_KEY"], ["lipapap_secret_key"]),
-    getConfiguredSecret(["LIPAPAP_PAYMENT_URL"], ["lipapap_payment_url"]),
+  const [clientKey, secretKey, paymentUrl, callbackUrl, environment, action, networkIdsJson, payoutCodesJson, payerEmail] = await Promise.all([
+    getLipaPapConfiguredValue("LIPAPAP_CLIENT_KEY", "lipapap_client_key"),
+    getLipaPapConfiguredValue("LIPAPAP_SECRET_KEY", "lipapap_secret_key"),
+    getLipaPapConfiguredValue("LIPAPAP_PAYMENT_URL", "lipapap_payment_url"),
+    storage.getSetting("lipapap_callback_url"),
     storage.getSetting("lipapap_environment"),
     storage.getSetting("lipapap_action"),
     storage.getSetting("lipapap_network_ids"),
-    getConfiguredSecret(["LIPAPAP_PAYER_EMAIL"], ["lipapap_payer_email"]),
+    storage.getSetting("lipapap_payout_codes"),
+    getLipaPapConfiguredValue("LIPAPAP_PAYER_EMAIL", "lipapap_payer_email"),
   ]);
-  if (!clientKey || !secretKey) return undefined;
-  const paymentUrl = configuredPaymentUrl || LIPAPAP_PAYMENT_URL;
+  if (!clientKey || !secretKey || !paymentUrl) return undefined;
 
-  let networkIds: Record<string, string | number> = { ...LIPAPAP_NETWORK_MAPPINGS };
+  let networkIds: Record<string, string | number> = {};
   if (networkIdsJson) {
     try {
       const parsed = JSON.parse(networkIdsJson);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("objet attendu");
-      const configuredNetworkIds = Object.fromEntries(
+      networkIds = Object.fromEntries(
         Object.entries(parsed)
           .filter((entry): entry is [string, string | number] =>
             typeof entry[0] === "string" &&
@@ -387,9 +391,38 @@ async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
           )
           .map(([key, value]) => [key, typeof value === "number" ? value : value.trim()]),
       );
-      networkIds = { ...networkIds, ...configuredNetworkIds };
     } catch {
       throw new Error("La configuration lipapap_network_ids doit être un JSON objet valide");
+    }
+  }
+
+  let payoutProviderCodes: Record<string, Record<string, string>> = {};
+  if (payoutCodesJson) {
+    try {
+      const parsed = JSON.parse(payoutCodesJson);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("objet attendu");
+      payoutProviderCodes = Object.fromEntries(
+        Object.entries(parsed).map(([country, operators]) => {
+          if (!operators || typeof operators !== "object" || Array.isArray(operators)) {
+            throw new Error("les opérateurs doivent être des objets");
+          }
+          const normalizedOperators = Object.fromEntries(
+            Object.entries(operators)
+              .filter((entry): entry is [string, string] =>
+                typeof entry[0] === "string" &&
+                typeof entry[1] === "string" &&
+                entry[1].trim() !== "",
+              )
+              .map(([operator, code]) => [
+                operator.toLowerCase().replace(/[\s\-_]+/g, ""),
+                code.trim(),
+              ]),
+          );
+          return [country, normalizedOperators];
+        }),
+      );
+    } catch {
+      throw new Error("La configuration lipapap_payout_codes doit être un JSON valide");
     }
   }
 
@@ -405,6 +438,8 @@ async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
     environment: normalizedEnvironment,
     action: normalizedAction,
     networkIds,
+    payoutProviderCodes,
+    callbackUrl: cleanConfiguredSecret(callbackUrl) || undefined,
     payerEmail: payerEmail || undefined,
   };
 }
@@ -4693,7 +4728,22 @@ export async function registerRoutes(
         const reference = `LP-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
         const networkCode = lipapapNetworkCode(country, paymentMethod);
         const networkId = networkCode ? lipaConfig.networkIds[networkCode] : undefined;
-        const callbackUrl = `${callbackBaseUrl}/api/lipapap/callback`;
+        const callbackUrl = lipaConfig.callbackUrl;
+        if (!callbackUrl) {
+          const configurationError = "URL callback LipaPap absente";
+          notifyAdminPaymentError({
+            merchantName: merchant.name,
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerNumber: msisdn,
+            operator: paymentMethod,
+            gateway: "lipapap",
+            stage: "validation de la configuration callback",
+            error: configurationError,
+          }).catch(() => {});
+          return res.status(500).json({ message: "Configuration du callback de paiement indisponible. Contactez l'administrateur." });
+        }
         const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&lipapap_return=1`;
         if (!networkCode || networkId === undefined || String(networkId).trim() === "") {
           const configurationError = !networkCode
@@ -7475,44 +7525,87 @@ export async function registerRoutes(
 
   app.get("/api/admin/lipapap/settings", authMiddleware("admin"), async (_req, res) => {
     try {
-      const [dbClientKey, dbSecretKey, dbPaymentUrl, environment, action, networkIdsJson, payerEmail] = await Promise.all([
+      const [dbClientKey, dbSecretKey, dbPaymentUrl, dbCallbackUrl, environment, action, networkIdsJson, payoutCodesJson, payerEmail] = await Promise.all([
         storage.getSetting("lipapap_client_key"),
         storage.getSetting("lipapap_secret_key"),
         storage.getSetting("lipapap_payment_url"),
+        storage.getSetting("lipapap_callback_url"),
         storage.getSetting("lipapap_environment"),
         storage.getSetting("lipapap_action"),
         storage.getSetting("lipapap_network_ids"),
+        storage.getSetting("lipapap_payout_codes"),
         storage.getSetting("lipapap_payer_email"),
       ]);
-      const activeConfig = await getLipaPapConfig().catch(() => undefined);
-      let effectiveNetworkIds = { ...LIPAPAP_NETWORK_MAPPINGS };
-      if (networkIdsJson) {
-        try {
-          const parsed = JSON.parse(networkIdsJson);
-          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-            effectiveNetworkIds = { ...effectiveNetworkIds, ...parsed };
-          }
-        } catch {
-          // The save endpoint rejects invalid JSON; keep the documented defaults visible.
+      const clientKey = cleanConfiguredSecret(dbClientKey) || cleanConfiguredSecret(process.env.LIPAPAP_CLIENT_KEY);
+      const secretKey = cleanConfiguredSecret(dbSecretKey) || cleanConfiguredSecret(process.env.LIPAPAP_SECRET_KEY);
+      const paymentUrl = cleanConfiguredSecret(dbPaymentUrl) || cleanConfiguredSecret(process.env.LIPAPAP_PAYMENT_URL);
+      const callbackUrl = cleanConfiguredSecret(dbCallbackUrl);
+      const payerEmailValue = cleanConfiguredSecret(payerEmail) || cleanConfiguredSecret(process.env.LIPAPAP_PAYER_EMAIL);
+      let networkMappingCount = 0;
+      let payoutCodeCount = 0;
+      try {
+        const parsed = networkIdsJson ? JSON.parse(networkIdsJson) : {};
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          networkMappingCount = Object.entries(parsed).filter(([, value]) =>
+            (typeof value === "string" || typeof value === "number") && String(value).trim() !== "",
+          ).length;
         }
+      } catch {
+        // Invalid saved JSON is reported as missing until corrected in the panel.
       }
+      try {
+        const parsed = payoutCodesJson ? JSON.parse(payoutCodesJson) : {};
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          payoutCodeCount = Object.values(parsed).reduce((count, value) => {
+            if (!value || typeof value !== "object" || Array.isArray(value)) return count;
+            return count + Object.entries(value).filter(([, code]) => typeof code === "string" && code.trim() !== "").length;
+          }, 0);
+        }
+      } catch {
+        // Invalid saved JSON is reported as missing until corrected in the panel.
+      }
+      const configurationChecks = {
+        clientKey: !!clientKey,
+        secretKey: !!secretKey,
+        paymentUrl: !!paymentUrl,
+        callbackUrl: !!callbackUrl,
+        payerEmail: !!payerEmailValue,
+        networkMappings: networkMappingCount > 0,
+        payoutProviderCodes: payoutCodeCount > 0,
+      };
+      const payinConfigured = configurationChecks.clientKey &&
+        configurationChecks.secretKey &&
+        configurationChecks.paymentUrl &&
+        configurationChecks.callbackUrl &&
+        configurationChecks.networkMappings;
+      const payoutConfigured = payinConfigured &&
+        configurationChecks.payerEmail &&
+        configurationChecks.payoutProviderCodes;
       res.json({
-        clientKey: dbClientKey ? "••••••••[DB]" : "",
-        secretKey: dbSecretKey ? "••••••••[DB]" : "",
-        paymentUrl: dbPaymentUrl || LIPAPAP_PAYMENT_URL,
-        payerEmail: payerEmail || "",
+        clientKey: dbClientKey ? "••••••••[DB]" : (process.env.LIPAPAP_CLIENT_KEY ? "••••••••[ENV]" : ""),
+        secretKey: dbSecretKey ? "••••••••[DB]" : (process.env.LIPAPAP_SECRET_KEY ? "••••••••[ENV]" : ""),
+        paymentUrl: paymentUrl || "",
+        payerEmail: payerEmailValue || "",
         environment: environment === "production" ? "production" : "sandbox",
         action: action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMO",
-        networkIdsJson: JSON.stringify(effectiveNetworkIds),
-        configured: !!activeConfig,
+        networkIdsJson: networkIdsJson || "{}",
+        payoutCodesJson: payoutCodesJson || "{}",
+        configured: payinConfigured && payoutConfigured,
+        payinConfigured,
+        payoutConfigured,
+        configurationChecks,
+        networkMappingCount,
+        payoutCodeCount,
         envOverride: {
           clientKey: !!process.env.LIPAPAP_CLIENT_KEY,
           secretKey: !!process.env.LIPAPAP_SECRET_KEY,
           paymentUrl: !!process.env.LIPAPAP_PAYMENT_URL,
         },
-        callbackUrl: `${process.env.APP_URL || "https://westpay.cfd"}/api/lipapap/callback`,
-        payoutSupported: true,
-        payoutMessage: "MOMOPAYOUT est disponible pour les provider_code documentés par LipaPap. Les autres réseaux restent bloqués jusqu’à confirmation de leur code.",
+        callbackUrl: callbackUrl || "",
+        payoutSupported: payoutConfigured,
+        payoutMessage: payoutConfigured
+          ? "MOMOPAYOUT utilise uniquement les provider_code enregistrés dans ce panneau."
+          : "Configurez les provider_code payout dans ce panneau avant d’utiliser les retraits LipaPap.",
       });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
@@ -7526,7 +7619,7 @@ export async function registerRoutes(
 
   app.post("/api/admin/lipapap/settings", authMiddleware("admin"), async (req, res) => {
     try {
-      const { clientKey, secretKey, paymentUrl, payerEmail, environment, action, networkIdsJson } = req.body || {};
+      const { clientKey, secretKey, paymentUrl, callbackUrl, payerEmail, environment, action, networkIdsJson, payoutCodesJson } = req.body || {};
       if (clientKey !== undefined && clientKey !== "") await storage.setSetting("lipapap_client_key", String(clientKey).trim());
       if (secretKey !== undefined && secretKey !== "") await storage.setSetting("lipapap_secret_key", String(secretKey).trim());
       if (payerEmail !== undefined && payerEmail !== "") {
@@ -7544,6 +7637,15 @@ export async function registerRoutes(
           return res.status(400).json({ message: "PAYMENT_URL doit être une URL HTTPS valide." });
         }
         await storage.setSetting("lipapap_payment_url", String(paymentUrl).trim());
+      }
+      if (callbackUrl !== undefined && callbackUrl !== "") {
+        try {
+          const parsedUrl = new URL(String(callbackUrl).trim());
+          if (parsedUrl.protocol !== "https:") throw new Error("HTTPS requis");
+        } catch {
+          return res.status(400).json({ message: "L’URL callback doit être une URL HTTPS valide." });
+        }
+        await storage.setSetting("lipapap_callback_url", String(callbackUrl).trim());
       }
       if (environment !== undefined) {
         if (!["sandbox", "production"].includes(environment)) return res.status(400).json({ message: "Environnement invalide." });
@@ -7564,6 +7666,24 @@ export async function registerRoutes(
           return res.status(400).json({ message: "Les IDs réseaux doivent être un objet JSON." });
         }
         await storage.setSetting("lipapap_network_ids", JSON.stringify(parsed));
+      }
+      if (payoutCodesJson !== undefined) {
+        let parsed: unknown;
+        try { parsed = JSON.parse(String(payoutCodesJson)); } catch { return res.status(400).json({ message: "Les provider_code payout doivent être un JSON valide." }); }
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          return res.status(400).json({ message: "Les provider_code payout doivent être un objet JSON par pays." });
+        }
+        for (const [country, operators] of Object.entries(parsed)) {
+          if (!country.trim() || !operators || typeof operators !== "object" || Array.isArray(operators)) {
+            return res.status(400).json({ message: "Chaque pays doit contenir un objet opérateur/provider_code." });
+          }
+          for (const [operator, code] of Object.entries(operators)) {
+            if (!operator.trim() || typeof code !== "string" || !code.trim()) {
+              return res.status(400).json({ message: "Chaque opérateur payout doit avoir un provider_code non vide." });
+            }
+          }
+        }
+        await storage.setSetting("lipapap_payout_codes", JSON.stringify(parsed));
       }
       res.json({ success: true });
     } catch (err: any) {
@@ -9401,7 +9521,9 @@ export async function registerRoutes(
         } catch (configErr: any) {
           console.error(`[WITHDRAWAL CONFIG] LipaPap configuration invalide: ${configErr.message}`);
         }
-        const providerCode = lipapapPayoutProviderCode(mc.country, operator || "");
+        const providerCode = lipaConfig
+          ? lipapapPayoutProviderCode(mc.country, operator || "", lipaConfig.payoutProviderCodes)
+          : undefined;
         const payerEmail = lipaConfig?.payerEmail;
         if (!lipaConfig || !payerEmail || !providerCode) {
           const reason = !lipaConfig
@@ -9656,7 +9778,9 @@ export async function registerRoutes(
         } catch (configErr: any) {
           console.error(`[ADMIN APPROVE WD LIPAPAP] Configuration invalide: ${configErr.message}`);
         }
-        const providerCode = lipapapPayoutProviderCode(w.country, w.operator || "");
+        const providerCode = lipaConfig
+          ? lipapapPayoutProviderCode(w.country, w.operator || "", lipaConfig.payoutProviderCodes)
+          : undefined;
         const payerEmail = lipaConfig?.payerEmail;
         if (mc && merchant && lipaConfig && payerEmail && providerCode) {
           try {
@@ -9982,7 +10106,9 @@ export async function registerRoutes(
       const provider = requestedProvider || w.gateway || "sendavapay";
       if (provider === "lipapap" || provider === "lipa") {
         const lipaConfig = await getLipaPapConfig().catch(() => undefined);
-        const providerCode = lipapapPayoutProviderCode(w.country, w.operator || "");
+        const providerCode = lipaConfig
+          ? lipapapPayoutProviderCode(w.country, w.operator || "", lipaConfig.payoutProviderCodes)
+          : undefined;
         if (!lipaConfig?.payerEmail) return res.status(500).json({ message: "Email enregistré LipaPap non configuré" });
         if (!providerCode) return res.status(400).json({ message: `provider_code LipaPap non documenté pour ${w.country}/${w.operator || "(vide)"}` });
         const reference = `LP-WD-${id}-${Date.now().toString(36).toUpperCase()}`;

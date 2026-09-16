@@ -10,7 +10,7 @@ import { getPaymentStatus as sendavaGetStatus, getWithdrawalStatus as sendavaGet
 import { getTransactionStatus as omnipayGetStatus } from "./omnipay";
 import { getTransactionStatus as mbiyoGetStatus } from "./mbiyo";
 import { clapayGetTransactionStatus as clapayGetStatus } from "./clapay";
-import { getLipaPapTransactionStatus, getLipaPapPayoutStatus, LIPAPAP_PAYMENT_URL, type LipaPapConfig } from "./lipapap";
+import { getLipaPapTransactionStatus, getLipaPapPayoutStatus, type LipaPapConfig } from "./lipapap";
 import { notifyMerchantPayment, notifyAdminPayment, notifyAdminWithdrawal, notifyMerchantWithdrawal } from "./telegram-bot";
 
 import { calcMerchantCredit as calcCredit } from "./feeConfig";
@@ -41,11 +41,33 @@ async function getClapayKey(): Promise<string | undefined> {
 }
 
 async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
-  const clientKey = process.env.LIPAPAP_CLIENT_KEY || await storage.getSetting("lipapap_client_key");
-  const secretKey = process.env.LIPAPAP_SECRET_KEY || await storage.getSetting("lipapap_secret_key");
-  const paymentUrl = process.env.LIPAPAP_PAYMENT_URL || await storage.getSetting("lipapap_payment_url") || LIPAPAP_PAYMENT_URL;
-  const payerEmail = process.env.LIPAPAP_PAYER_EMAIL || await storage.getSetting("lipapap_payer_email");
-  if (!clientKey || !secretKey) return undefined;
+  const clientKey = await storage.getSetting("lipapap_client_key") || process.env.LIPAPAP_CLIENT_KEY;
+  const secretKey = await storage.getSetting("lipapap_secret_key") || process.env.LIPAPAP_SECRET_KEY;
+  const paymentUrl = await storage.getSetting("lipapap_payment_url") || process.env.LIPAPAP_PAYMENT_URL;
+  const callbackUrl = await storage.getSetting("lipapap_callback_url");
+  const payerEmail = await storage.getSetting("lipapap_payer_email") || process.env.LIPAPAP_PAYER_EMAIL;
+  const payoutCodesJson = await storage.getSetting("lipapap_payout_codes");
+  if (!clientKey || !secretKey || !paymentUrl) return undefined;
+  let payoutProviderCodes: Record<string, Record<string, string>> = {};
+  if (payoutCodesJson) {
+    try {
+      const parsed = JSON.parse(payoutCodesJson);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        payoutProviderCodes = Object.fromEntries(
+          Object.entries(parsed).map(([country, operators]) => [
+            country,
+            Object.fromEntries(
+              Object.entries(operators as Record<string, unknown>)
+                .filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].trim() !== "")
+                .map(([operator, code]) => [operator.toLowerCase().replace(/[\s\-_]+/g, ""), code.trim()]),
+            ),
+          ]),
+        );
+      }
+    } catch {
+      console.warn("[RECONCILIATION-WD][lipapap] Configuration payout invalide — réconciliation payout ignorée");
+    }
+  }
   return {
     clientKey,
     secretKey,
@@ -53,6 +75,8 @@ async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
     environment: (await storage.getSetting("lipapap_environment")) === "production" ? "production" : "sandbox",
     action: "MOMO",
     networkIds: {},
+    payoutProviderCodes,
+    callbackUrl: callbackUrl || undefined,
     payerEmail: payerEmail || undefined,
   };
 }
