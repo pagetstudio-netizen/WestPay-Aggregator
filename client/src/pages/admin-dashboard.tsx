@@ -3781,7 +3781,9 @@ function LipaPapPanel() {
   const [callbackUrl, setCallbackUrl] = useState("");
   const [payerEmail, setPayerEmail] = useState("");
   const [environment, setEnvironment] = useState("sandbox");
-  const [action, setAction] = useState("MOMO");
+  const [action, setAction] = useState("MOMOAPM");
+  const [locale, setLocale] = useState("en_TG");
+  const [connectorName, setConnectorName] = useState("LIPAPAP");
   const [networkIdsJson, setNetworkIdsJson] = useState("{}");
   const [payoutCodesJson, setPayoutCodesJson] = useState("{}");
 
@@ -3793,7 +3795,9 @@ function LipaPapPanel() {
     setCallbackUrl(settings.callbackUrl || "");
     setPayerEmail(settings.payerEmail || "");
     setEnvironment(settings.environment || "sandbox");
-    setAction(settings.action || "MOMO");
+    setAction(settings.action || "MOMOAPM");
+    setLocale(settings.locale || "en_TG");
+    setConnectorName(settings.connectorName || "LIPAPAP");
     setNetworkIdsJson(settings.networkIdsJson || "{}");
     setPayoutCodesJson(settings.payoutCodesJson || "{}");
   }, [settings]);
@@ -3804,7 +3808,7 @@ function LipaPapPanel() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ clientKey, secretKey, paymentUrl, callbackUrl, payerEmail, environment, action, networkIdsJson, payoutCodesJson }),
+        body: JSON.stringify({ clientKey, secretKey, paymentUrl, callbackUrl, payerEmail, environment, action, locale, connectorName, networkIdsJson, payoutCodesJson }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.message || "Erreur de sauvegarde");
@@ -3828,7 +3832,7 @@ function LipaPapPanel() {
         <CardHeader><CardTitle className="text-base flex items-center gap-2"><Globe className="w-4 h-4" />Paramètres API</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
-            L’action MOMO et la signature HMAC-SHA256 suivent la documentation officielle. Le payout utilise MOMOPAYOUT et nécessite l’email enregistré chez LipaPap.
+             L’action MOMOAPM et la signature HMAC-SHA256 suivent la documentation officielle. Le payout utilise MOMOPAYOUT et nécessite l’email enregistré chez LipaPap.
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="space-y-2"><Label>CLIENT_KEY</Label><Input type="password" value={clientKey} onChange={e => setClientKey(e.target.value)} placeholder={settings?.clientKey || "Clé client LipaPap"} data-testid="input-lipapap-client-key" /></div>
@@ -3838,8 +3842,12 @@ function LipaPapPanel() {
           <div className="space-y-2"><Label>PAYMENT_URL</Label><Input value={paymentUrl} onChange={e => setPaymentUrl(e.target.value)} placeholder="URL HTTPS fournie par LipaPap" data-testid="input-lipapap-payment-url" /><p className="text-xs text-muted-foreground">Cette URL est obligatoire et doit être fournie par LipaPap.</p></div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2"><Label>Environnement</Label><select value={environment} onChange={e => setEnvironment(e.target.value)} className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" data-testid="select-lipapap-environment"><option value="sandbox">Sandbox</option><option value="production">Production</option></select></div>
-            <div className="space-y-2"><Label>Action pay-in</Label><select value={action} onChange={e => setAction(e.target.value)} className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" data-testid="select-lipapap-action"><option value="MOMO">MOMO</option><option value="C2B_SIMULATE">C2B_SIMULATE (Sandbox)</option></select></div>
+             <div className="space-y-2"><Label>Action pay-in</Label><select value={action} onChange={e => setAction(e.target.value)} className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" data-testid="select-lipapap-action"><option value="MOMOAPM">MOMOAPM</option><option value="C2B_SIMULATE">C2B_SIMULATE (Sandbox)</option></select></div>
           </div>
+           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+             <div className="space-y-2"><Label>Locale</Label><Input value={locale} onChange={e => setLocale(e.target.value)} placeholder="en_TG" data-testid="input-lipapap-locale" /><p className="text-xs text-muted-foreground">Valeur envoyée au compte LipaPap si votre routage l’utilise.</p></div>
+             <div className="space-y-2"><Label>Connector name</Label><Input value={connectorName} onChange={e => setConnectorName(e.target.value)} placeholder="LIPAPAP" data-testid="input-lipapap-connector-name" /><p className="text-xs text-muted-foreground">Valeur de routage fournie par LipaPap.</p></div>
+           </div>
           <div className="space-y-2"><Label>URL callback</Label><Input value={callbackUrl} onChange={e => setCallbackUrl(e.target.value)} placeholder="URL HTTPS callback fournie par LipaPap" data-testid="input-lipapap-callback-url" /><p className="text-xs text-muted-foreground">Cette URL est obligatoire pour envoyer et recevoir les confirmations LipaPap.</p></div>
           <div className="space-y-2">
             <Label>Codes réseau LipaPap</Label>

@@ -73,7 +73,7 @@ async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
     secretKey,
     paymentUrl,
     environment: (await storage.getSetting("lipapap_environment")) === "production" ? "production" : "sandbox",
-    action: "MOMO",
+    action: "MOMOAPM",
     networkIds: {},
     payoutProviderCodes,
     callbackUrl: callbackUrl || undefined,

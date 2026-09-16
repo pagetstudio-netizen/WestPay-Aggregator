@@ -114,38 +114,49 @@ function hmacSha256(value: string, secretKey: string): string {
   return crypto.createHmac("sha256", secretKey).update(value, "utf8").digest("hex");
 }
 
+/**
+ * LipaPap Formula 1:
+ * HMAC-SHA256(
+ *   client_key + order_id + order_amount + order_currency +
+ *   order_description + card_number + card_exp_month + card_exp_year +
+ *   payer_email + payer_phone + payer_ip + secret_key,
+ *   secret_key
+ * )
+ *
+ * The documentation says omitted optional parameters are represented by an
+ * empty string. APM requests therefore use the same formula with the card
+ * fields, currency, and IP empty when they are not sent.
+ */
 export function buildLipaPapRequestHash(fields: {
   action: string;
   clientKey: string;
   orderId: string;
   orderAmount: string;
+  orderCurrency?: string;
   orderDescription: string;
-  payerEmail: string;
-  payerPhone: string;
-  customerName: string;
-  locale: string;
-  mode: string;
-  environment: string;
-  connectorName: string;
-  networkId: string | number;
+  cardNumber?: string;
+  cardExpMonth?: string;
+  cardExpYear?: string;
+  payerEmail?: string;
+  payerPhone?: string;
+  payerIp?: string;
 }, secretKey: string): string {
   const value = [
     fields.action,
     fields.clientKey,
     fields.orderId,
     fields.orderAmount,
+    fields.orderCurrency,
     fields.orderDescription,
-    fields.payerPhone,
+    fields.cardNumber,
+    fields.cardExpMonth,
+    fields.cardExpYear,
     fields.payerEmail,
-    fields.customerName,
-    fields.locale,
-    fields.mode,
-    fields.environment,
-    fields.connectorName,
-    fields.networkId,
+    fields.payerPhone,
+    fields.payerIp,
     secretKey,
-  ].join("");
-  return crypto.createHash("md5").update(value.toUpperCase(), "utf8").digest("hex");
+  ].map((part) => part == null ? "" : String(part)).join("");
+  return hmacSha256(value, secretKey);
 }
 
 function reverse(value: string): string {
@@ -272,6 +283,7 @@ export async function initiateLipaPapPayment(config: LipaPapConfig, params: {
   customerName?: string;
   callbackUrl: string;
   returnUrl?: string;
+  payerIp?: string;
   networkId?: string | number;
   locale?: string;
   connectorName?: string;
@@ -280,23 +292,23 @@ export async function initiateLipaPapPayment(config: LipaPapConfig, params: {
   const orderDescription = `WestPay payment ${params.orderId}`;
   const payerEmail = params.customerEmail || "";
   const phone = params.phone.replace(/^\+/, "");
-  const locale = params.locale || "en_TG";
-  const connectorName = params.connectorName || "LIPAPAP";
+  const payerCountry = lipapapCountryCode(params.country);
+  const termUrl3ds = params.returnUrl || params.callbackUrl;
+  const timestamp = Date.now().toString();
   const networkId = params.networkId === undefined ? "" : String(params.networkId);
   const body: Record<string, unknown> = {
-    action: config.action === "MOMOAPM" ? "MOMO" : config.action,
+    action: config.action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMOAPM",
+    client_key: config.clientKey,
     order_id: params.orderId,
+    order_amount: orderAmount,
     order_description: orderDescription,
     payer_phone: phone,
     payer_email: payerEmail,
-    customer_name: params.customerName || "Client WestPay",
-    locale,
-    order_amount: orderAmount,
-    client_key: config.clientKey,
-    mode: config.environment,
-    environment: config.environment,
-    connector_name: connectorName,
+    payer_country: payerCountry,
+    term_url_3ds: termUrl3ds,
+    timestamp,
   };
+  if (params.payerIp) body.payer_ip = params.payerIp;
   if (networkId.trim() !== "") {
     const numericNetworkId = Number(networkId);
     if (Number.isInteger(numericNetworkId) && numericNetworkId > 0) {
@@ -307,20 +319,21 @@ export async function initiateLipaPapPayment(config: LipaPapConfig, params: {
       throw new Error("LipaPap: momo_network_id doit être un code LipaPap valide confirmé par LipaPap");
     }
   }
+  // These are account-specific routing extensions used by the supplied
+  // LipaPap merchant configuration. They are intentionally not part of
+  // Formula 1, whose field list is fixed by the public documentation.
+  if (params.locale) body.locale = params.locale;
+  if (params.connectorName) body.connector_name = params.connectorName;
   body.hash = buildLipaPapRequestHash({
     action: String(body.action),
     clientKey: config.clientKey,
     orderId: params.orderId,
     orderAmount,
+    orderCurrency: "",
     orderDescription,
     payerEmail,
     payerPhone: phone,
-    customerName: String(body.customer_name),
-    locale,
-    mode: String(body.mode),
-    environment: String(body.environment),
-    connectorName,
-    networkId,
+    payerIp: params.payerIp,
   }, config.secretKey);
   return lipapapRequest(config, body);
 }
@@ -370,6 +383,7 @@ export async function initiateLipaPapPayout(config: LipaPapConfig, params: {
     payer_phone: accountNumber,
     payer_first_name: firstName,
     payer_last_name: lastName,
+    bankCode: params.providerCode,
     provider_code: params.providerCode,
     transaction_method: "MOMOPAYOUT",
     hash: buildLipaPapPayoutHash(params.payerEmail, config.secretKey, accountNumber),

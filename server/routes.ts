@@ -429,7 +429,7 @@ async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
   }
 
   const normalizedEnvironment = environment === "production" ? "production" : "sandbox";
-  const normalizedAction = action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMO";
+  const normalizedAction = action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMOAPM";
   if (normalizedAction === "C2B_SIMULATE" && normalizedEnvironment !== "sandbox") {
     throw new Error("LipaPap C2B_SIMULATE est autorisé uniquement en Sandbox");
   }
@@ -4781,6 +4781,7 @@ export async function registerRoutes(
             customerName: payerName || "Client WestPay",
             callbackUrl,
             returnUrl,
+            payerIp: getClientIp(req),
             networkId,
             locale: lipaConfig.locale,
             connectorName: lipaConfig.connectorName,
@@ -7531,7 +7532,7 @@ export async function registerRoutes(
 
   app.get("/api/admin/lipapap/settings", authMiddleware("admin"), async (_req, res) => {
     try {
-      const [dbClientKey, dbSecretKey, dbPaymentUrl, dbCallbackUrl, environment, action, networkIdsJson, payoutCodesJson, payerEmail] = await Promise.all([
+      const [dbClientKey, dbSecretKey, dbPaymentUrl, dbCallbackUrl, environment, action, networkIdsJson, payoutCodesJson, payerEmail, locale, connectorName] = await Promise.all([
         storage.getSetting("lipapap_client_key"),
         storage.getSetting("lipapap_secret_key"),
         storage.getSetting("lipapap_payment_url"),
@@ -7541,6 +7542,8 @@ export async function registerRoutes(
         storage.getSetting("lipapap_network_ids"),
         storage.getSetting("lipapap_payout_codes"),
         storage.getSetting("lipapap_payer_email"),
+        storage.getSetting("lipapap_locale"),
+        storage.getSetting("lipapap_connector_name"),
       ]);
       const clientKey = cleanConfiguredSecret(dbClientKey) || cleanConfiguredSecret(process.env.LIPAPAP_CLIENT_KEY);
       const secretKey = cleanConfiguredSecret(dbSecretKey) || cleanConfiguredSecret(process.env.LIPAPAP_SECRET_KEY);
@@ -7593,7 +7596,9 @@ export async function registerRoutes(
         paymentUrl: paymentUrl || "",
         payerEmail: payerEmailValue || "",
         environment: environment === "production" ? "production" : "sandbox",
-        action: action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMO",
+        action: action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMOAPM",
+        locale: locale || "",
+        connectorName: connectorName || "",
         networkIdsJson: networkIdsJson || "{}",
         payoutCodesJson: payoutCodesJson || "{}",
         configured: payinConfigured && payoutConfigured,
@@ -7625,7 +7630,7 @@ export async function registerRoutes(
 
   app.post("/api/admin/lipapap/settings", authMiddleware("admin"), async (req, res) => {
     try {
-      const { clientKey, secretKey, paymentUrl, callbackUrl, payerEmail, environment, action, networkIdsJson, payoutCodesJson } = req.body || {};
+      const { clientKey, secretKey, paymentUrl, callbackUrl, payerEmail, environment, action, networkIdsJson, payoutCodesJson, locale, connectorName } = req.body || {};
       if (clientKey !== undefined && clientKey !== "") await storage.setSetting("lipapap_client_key", String(clientKey).trim());
       if (secretKey !== undefined && secretKey !== "") await storage.setSetting("lipapap_secret_key", String(secretKey).trim());
       if (payerEmail !== undefined && payerEmail !== "") {
@@ -7663,7 +7668,21 @@ export async function registerRoutes(
         if (action === "C2B_SIMULATE" && effectiveEnvironment !== "sandbox") {
           return res.status(400).json({ message: "C2B_SIMULATE est autorisé uniquement en Sandbox." });
         }
-        await storage.setSetting("lipapap_action", action === "MOMOAPM" ? "MOMO" : action);
+        await storage.setSetting("lipapap_action", action === "MOMO" ? "MOMOAPM" : action);
+      }
+      if (locale !== undefined) {
+        const normalizedLocale = String(locale).trim();
+        if (!normalizedLocale || normalizedLocale.length > 32) {
+          return res.status(400).json({ message: "La locale LipaPap est invalide." });
+        }
+        await storage.setSetting("lipapap_locale", normalizedLocale);
+      }
+      if (connectorName !== undefined) {
+        const normalizedConnectorName = String(connectorName).trim();
+        if (!normalizedConnectorName || normalizedConnectorName.length > 64) {
+          return res.status(400).json({ message: "Le connector_name LipaPap est invalide." });
+        }
+        await storage.setSetting("lipapap_connector_name", normalizedConnectorName);
       }
       if (networkIdsJson !== undefined) {
         let parsed: unknown;
