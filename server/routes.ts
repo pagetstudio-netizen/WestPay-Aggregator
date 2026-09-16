@@ -364,7 +364,7 @@ async function getClapayWebhookUniqueKey(): Promise<string | undefined> {
 }
 
 async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
-  const [clientKey, secretKey, paymentUrl, callbackUrl, environment, action, networkIdsJson, payoutCodesJson, payerEmail] = await Promise.all([
+  const [clientKey, secretKey, paymentUrl, callbackUrl, environment, action, networkIdsJson, payoutCodesJson, payerEmail, locale, connectorName] = await Promise.all([
     getLipaPapConfiguredValue("LIPAPAP_CLIENT_KEY", "lipapap_client_key"),
     getLipaPapConfiguredValue("LIPAPAP_SECRET_KEY", "lipapap_secret_key"),
     getLipaPapConfiguredValue("LIPAPAP_PAYMENT_URL", "lipapap_payment_url"),
@@ -374,6 +374,8 @@ async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
     storage.getSetting("lipapap_network_ids"),
     storage.getSetting("lipapap_payout_codes"),
     getLipaPapConfiguredValue("LIPAPAP_PAYER_EMAIL", "lipapap_payer_email"),
+    storage.getSetting("lipapap_locale"),
+    storage.getSetting("lipapap_connector_name"),
   ]);
   if (!clientKey || !secretKey || !paymentUrl) return undefined;
 
@@ -441,6 +443,8 @@ async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
     payoutProviderCodes,
     callbackUrl: cleanConfiguredSecret(callbackUrl) || undefined,
     payerEmail: payerEmail || undefined,
+    locale: cleanConfiguredSecret(locale) || undefined,
+    connectorName: cleanConfiguredSecret(connectorName) || undefined,
   };
 }
 
@@ -4772,12 +4776,14 @@ export async function registerRoutes(
             amount: parsedAmount,
             currency: lipapapCurrency(country),
             country,
-            phone: msisdn.startsWith("+") ? msisdn : `+${msisdn}`,
-            customerEmail: undefined,
+            phone: msisdn,
+            customerEmail: lipaConfig.payerEmail,
             customerName: payerName || "Client WestPay",
             callbackUrl,
             returnUrl,
             networkId,
+            locale: lipaConfig.locale,
+            connectorName: lipaConfig.connectorName,
           });
           const resultStatus = String(result.status || result.result || "").toUpperCase();
           const isRejected = ["DECLINED", "FAILED", "ERROR", "REFUND", "REVERSAL", "VOID"].includes(resultStatus)

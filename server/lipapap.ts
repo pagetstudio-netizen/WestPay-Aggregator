@@ -71,6 +71,8 @@ export interface LipaPapConfig {
   payoutProviderCodes: Record<string, Record<string, string>>;
   callbackUrl?: string;
   payerEmail?: string;
+  locale?: string;
+  connectorName?: string;
 }
 
 export interface LipaPapPaymentResponse {
@@ -113,33 +115,37 @@ function hmacSha256(value: string, secretKey: string): string {
 }
 
 export function buildLipaPapRequestHash(fields: {
+  action: string;
   clientKey: string;
   orderId: string;
   orderAmount: string;
-  orderCurrency: string;
   orderDescription: string;
-  cardNumber?: string;
-  cardExpMonth?: string;
-  cardExpYear?: string;
-  payerEmail?: string;
-  payerPhone?: string;
-  payerIp?: string;
+  payerEmail: string;
+  payerPhone: string;
+  customerName: string;
+  locale: string;
+  mode: string;
+  environment: string;
+  connectorName: string;
+  networkId: string | number;
 }, secretKey: string): string {
   const value = [
+    fields.action,
     fields.clientKey,
     fields.orderId,
     fields.orderAmount,
-    fields.orderCurrency,
     fields.orderDescription,
-    fields.cardNumber || "",
-    fields.cardExpMonth || "",
-    fields.cardExpYear || "",
-    fields.payerEmail || "",
-    fields.payerPhone || "",
-    fields.payerIp || "",
+    fields.payerPhone,
+    fields.payerEmail,
+    fields.customerName,
+    fields.locale,
+    fields.mode,
+    fields.environment,
+    fields.connectorName,
+    fields.networkId,
     secretKey,
   ].join("");
-  return hmacSha256(value, secretKey);
+  return crypto.createHash("md5").update(value.toUpperCase(), "utf8").digest("hex");
 }
 
 function reverse(value: string): string {
@@ -267,46 +273,54 @@ export async function initiateLipaPapPayment(config: LipaPapConfig, params: {
   callbackUrl: string;
   returnUrl?: string;
   networkId?: string | number;
+  locale?: string;
+  connectorName?: string;
 }): Promise<LipaPapPaymentResponse> {
-  const orderAmount = params.amount.toFixed(2);
+  const orderAmount = String(params.amount);
   const orderDescription = `WestPay payment ${params.orderId}`;
-  const payerEmail = params.customerEmail || "customer@westpay.cfd";
-  const timestamp = String(Date.now());
+  const payerEmail = params.customerEmail || "";
+  const phone = params.phone.replace(/^\+/, "");
+  const locale = params.locale || "en_TG";
+  const connectorName = params.connectorName || "LIPAPAP";
+  const networkId = params.networkId === undefined ? "" : String(params.networkId);
   const body: Record<string, unknown> = {
     action: config.action === "MOMOAPM" ? "MOMO" : config.action,
-    client_key: config.clientKey,
     order_id: params.orderId,
-    order_amount: orderAmount,
-    order_currency: params.currency,
     order_description: orderDescription,
-    payer_phone: params.phone,
+    payer_phone: phone,
     payer_email: payerEmail,
     customer_name: params.customerName || "Client WestPay",
-    payer_country: lipapapCountryCode(params.country),
+    locale,
+    order_amount: orderAmount,
+    client_key: config.clientKey,
     mode: config.environment,
     environment: config.environment,
-    term_url_3ds: params.returnUrl || params.callbackUrl,
-    timestamp,
+    connector_name: connectorName,
   };
-  if (params.networkId !== undefined && String(params.networkId).trim() !== "") {
-    const rawNetworkId = String(params.networkId).trim();
-    const numericNetworkId = Number(rawNetworkId);
+  if (networkId.trim() !== "") {
+    const numericNetworkId = Number(networkId);
     if (Number.isInteger(numericNetworkId) && numericNetworkId > 0) {
       body.momo_network_id = numericNetworkId;
-    } else if (/^[A-Za-z0-9_-]+$/.test(rawNetworkId)) {
-      body.momo_network_id = rawNetworkId;
+    } else if (/^[A-Za-z0-9_-]+$/.test(networkId)) {
+      body.momo_network_id = networkId;
     } else {
       throw new Error("LipaPap: momo_network_id doit être un code LipaPap valide confirmé par LipaPap");
     }
   }
   body.hash = buildLipaPapRequestHash({
+    action: String(body.action),
     clientKey: config.clientKey,
     orderId: params.orderId,
     orderAmount,
-    orderCurrency: params.currency,
     orderDescription,
     payerEmail,
-    payerPhone: params.phone,
+    payerPhone: phone,
+    customerName: String(body.customer_name),
+    locale,
+    mode: String(body.mode),
+    environment: String(body.environment),
+    connectorName,
+    networkId,
   }, config.secretKey);
   return lipapapRequest(config, body);
 }

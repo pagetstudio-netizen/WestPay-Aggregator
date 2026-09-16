@@ -17,7 +17,7 @@ The Network ID Mapping table's `LipaPap Code` column is the source for pay-in ma
 
 ## Sandbox validation
 
-The configured Sandbox request reached the LipaPap endpoint but was rejected with HTTP 400 `Hash mismatch`; the application and provider transport were therefore reachable, but the account's credential pair or Formula 1 signature inputs still need confirmation before another attempt.
+The configured Sandbox request reached the LipaPap endpoint but was rejected with HTTP 400 `Hash mismatch`; adding the provider's sample fields and using the configured WestPay test email did not change that result, so the account's credential pair or signing formula still needs confirmation.
 
 **Why:** Retrying with the same signature only repeats the provider rejection and can create unnecessary Sandbox orders.
 
