@@ -47,3 +47,11 @@ Helper functions in storage.ts: `getFeeExemptIds()`, `getMerchantNameMap()`, `ex
 **Why:** Two separate PostgreSQL services have no shared FK integrity; enforcing at app layer keeps the two DBs independently scalable and avoids vendor lock-in to a single provider.
 
 **How to apply:** Any new table must be classified Auth or Financial before creation. Any method accessing both must use the two-query + app-merge pattern.
+
+## Supabase connectivity
+
+The direct Supabase database hostname may resolve only to IPv6 in the Replit runtime. The Supabase Session Pooler URL is the reachable alternative, but it requires the exact PostgreSQL database password and the `postgres.<project_ref>` pooler username.
+
+**Why:** The direct Auth URL failed at DNS while Neon connected normally; the Session Pooler later connected once the correct database credentials were supplied.
+
+**How to apply:** Keep `AUTH_DATABASE_URL` on the official Supabase Session Pooler URI, never paste database credentials into chat, and restart the workflow after changing the secret.

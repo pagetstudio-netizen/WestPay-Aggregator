@@ -14,3 +14,11 @@ The Network ID Mapping table's `LipaPap Code` column is the source for pay-in ma
 **Why:** The table has separate `ID`, `Network ID`, and `LipaPap Code` columns; using the row ID would send the wrong provider value, and documented codes are mixed numeric/text. Provider values can change without a code release.
 
 **How to apply:** Enter the documented non-NULL `LipaPap Code` values in the admin network mapping JSON, allow numeric and alphanumeric values, and configure payout `provider_code` mappings separately in the admin panel.
+
+## Sandbox validation
+
+The configured Sandbox request reached the LipaPap endpoint but was rejected with HTTP 400 `Hash mismatch`; the application and provider transport were therefore reachable, but the account's credential pair or Formula 1 signature inputs still need confirmation before another attempt.
+
+**Why:** Retrying with the same signature only repeats the provider rejection and can create unnecessary Sandbox orders.
+
+**How to apply:** Confirm the Sandbox `CLIENT_KEY`/`SECRET_KEY` pair and the official Formula 1 field order/format with LipaPap, then update the admin settings or signing code before retrying.
