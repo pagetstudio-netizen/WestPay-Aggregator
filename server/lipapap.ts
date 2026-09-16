@@ -128,7 +128,6 @@ function hmacSha256(value: string, secretKey: string): string {
  * fields, currency, and IP empty when they are not sent.
  */
 export function buildLipaPapRequestHash(fields: {
-  action: string;
   clientKey: string;
   orderId: string;
   orderAmount: string;
@@ -142,7 +141,6 @@ export function buildLipaPapRequestHash(fields: {
   payerIp?: string;
 }, secretKey: string): string {
   const value = [
-    fields.action,
     fields.clientKey,
     fields.orderId,
     fields.orderAmount,
@@ -288,7 +286,10 @@ export async function initiateLipaPapPayment(config: LipaPapConfig, params: {
   locale?: string;
   connectorName?: string;
 }): Promise<LipaPapPaymentResponse> {
-  const orderAmount = String(params.amount);
+  // LipaPap's documented examples use a two-decimal string. This exact
+  // representation is part of Formula 1, so it must be stable in the body
+  // and in the HMAC input.
+  const orderAmount = params.amount.toFixed(2);
   const orderDescription = `WestPay payment ${params.orderId}`;
   const payerEmail = params.customerEmail || "";
   const phone = params.phone.replace(/^\+/, "");
@@ -301,6 +302,7 @@ export async function initiateLipaPapPayment(config: LipaPapConfig, params: {
     client_key: config.clientKey,
     order_id: params.orderId,
     order_amount: orderAmount,
+    order_currency: params.currency,
     order_description: orderDescription,
     payer_phone: phone,
     payer_email: payerEmail,
@@ -325,11 +327,10 @@ export async function initiateLipaPapPayment(config: LipaPapConfig, params: {
   if (params.locale) body.locale = params.locale;
   if (params.connectorName) body.connector_name = params.connectorName;
   body.hash = buildLipaPapRequestHash({
-    action: String(body.action),
     clientKey: config.clientKey,
     orderId: params.orderId,
     orderAmount,
-    orderCurrency: "",
+    orderCurrency: params.currency,
     orderDescription,
     payerEmail,
     payerPhone: phone,
