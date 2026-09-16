@@ -102,6 +102,7 @@ import {
   lipapapNetworkCode,
   lipapapPayoutProviderCode,
   LIPAPAP_PAYMENT_URL,
+  LIPAPAP_NETWORK_MAPPINGS,
   type LipaPapConfig,
 } from "./lipapap";
 import { maskPhone as maskPhoneForLog, maskAddress as maskAddressForLog } from "./logMask";
@@ -372,12 +373,12 @@ async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
   if (!clientKey || !secretKey) return undefined;
   const paymentUrl = configuredPaymentUrl || LIPAPAP_PAYMENT_URL;
 
-  let networkIds: Record<string, string | number> = {};
+  let networkIds: Record<string, string | number> = { ...LIPAPAP_NETWORK_MAPPINGS };
   if (networkIdsJson) {
     try {
       const parsed = JSON.parse(networkIdsJson);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("objet attendu");
-      networkIds = Object.fromEntries(
+      const configuredNetworkIds = Object.fromEntries(
         Object.entries(parsed)
           .filter((entry): entry is [string, string | number] =>
             typeof entry[0] === "string" &&
@@ -386,6 +387,7 @@ async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
           )
           .map(([key, value]) => [key, typeof value === "number" ? value : value.trim()]),
       );
+      networkIds = { ...networkIds, ...configuredNetworkIds };
     } catch {
       throw new Error("La configuration lipapap_network_ids doit être un JSON objet valide");
     }
@@ -7483,6 +7485,17 @@ export async function registerRoutes(
         storage.getSetting("lipapap_payer_email"),
       ]);
       const activeConfig = await getLipaPapConfig().catch(() => undefined);
+      let effectiveNetworkIds = { ...LIPAPAP_NETWORK_MAPPINGS };
+      if (networkIdsJson) {
+        try {
+          const parsed = JSON.parse(networkIdsJson);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            effectiveNetworkIds = { ...effectiveNetworkIds, ...parsed };
+          }
+        } catch {
+          // The save endpoint rejects invalid JSON; keep the documented defaults visible.
+        }
+      }
       res.json({
         clientKey: dbClientKey ? "••••••••[DB]" : "",
         secretKey: dbSecretKey ? "••••••••[DB]" : "",
@@ -7490,7 +7503,7 @@ export async function registerRoutes(
         payerEmail: payerEmail || "",
         environment: environment === "production" ? "production" : "sandbox",
         action: action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMO",
-        networkIdsJson: networkIdsJson || "{}",
+        networkIdsJson: JSON.stringify(effectiveNetworkIds),
         configured: !!activeConfig,
         envOverride: {
           clientKey: !!process.env.LIPAPAP_CLIENT_KEY,

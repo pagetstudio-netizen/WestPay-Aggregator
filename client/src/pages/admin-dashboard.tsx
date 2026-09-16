@@ -3837,9 +3837,9 @@ function LipaPapPanel() {
             <div className="space-y-2"><Label>Action pay-in</Label><select value={action} onChange={e => setAction(e.target.value)} className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" data-testid="select-lipapap-action"><option value="MOMO">MOMO</option><option value="C2B_SIMULATE">C2B_SIMULATE (Sandbox)</option></select></div>
           </div>
           <div className="space-y-2">
-            <Label>IDs numériques des réseaux (optionnel)</Label>
-            <textarea value={networkIdsJson} onChange={e => setNetworkIdsJson(e.target.value)} rows={5} className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono" placeholder={'{"MPESA_KE":"...","MTN_MOMO_GH":"..."}'} data-testid="textarea-lipapap-network-ids" />
-            <p className="text-xs text-muted-foreground">La documentation publique ne fournit pas ces IDs. Laissez vide tant que LipaPap ne les a pas confirmés.</p>
+            <Label>Codes réseau LipaPap</Label>
+            <textarea value={networkIdsJson} onChange={e => setNetworkIdsJson(e.target.value)} rows={5} className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono" placeholder={'{"TMONEY_TG":165,"MTN_MOMO_GH":"MTNGH"}'} data-testid="textarea-lipapap-network-ids" />
+            <p className="text-xs text-muted-foreground">Valeurs issues de la colonne « LipaPap Code » de la table fournie par LipaPap. Les valeurs enregistrées ici remplacent les valeurs par défaut correspondantes.</p>
           </div>
           <div className="space-y-2"><Label>Callback</Label><code className="block rounded-md bg-muted px-3 py-2 text-xs break-all">{settings?.callbackUrl}</code></div>
           <div className="flex items-center gap-3 flex-wrap">

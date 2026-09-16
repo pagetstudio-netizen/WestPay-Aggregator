@@ -28,8 +28,8 @@ export const LIPAPAP_PAYMENT_URL = "https://gateway.lipapap.net/post";
 
 /**
  * Operator identifiers from the supplied LipaPap network list.
- * The public documentation does not publish numeric momo_network_id values,
- * so numeric IDs remain an explicit admin configuration rather than guesses.
+ * The separate Network ID Mapping table supplies the LipaPap Code values for
+ * the networks that are currently mapped below.
  */
 export const LIPAPAP_NETWORKS = [
   { code: "AIRTELTIGO_MONEY_GH", name: "AirtelTigo Money", country: "Ghana" },
@@ -53,6 +53,24 @@ export const LIPAPAP_NETWORKS = [
   { code: "ORANGE_MONEY_ML", name: "Orange Money", country: "Mali" },
   { code: "TMONEY_TG", name: "T-Money", country: "Togo" },
 ] as const;
+
+/**
+ * Values from LipaPap's Network ID Mapping table.
+ * The table's "LipaPap Code" column is used as the pay-in network value.
+ * Entries with NULL in the table are intentionally not included.
+ */
+export const LIPAPAP_NETWORK_MAPPINGS: Record<string, string | number> = {
+  MPESA_KE: "MPESA_KE",
+  MTN_MOMO_GH: "MTNGH",
+  VODAFONE_CASH_GH: "VODGH",
+  AIRTELTIGO_MONEY_GH: "ATMGH",
+  TMONEY_TG: 165,
+  MOOV_MONEY_ML: 355,
+  ORANGE_MONEY_ML: 353,
+  MTN_MOMO_BJ: 287,
+  MOOV_MONEY_BJ: 419,
+  ORANGE_MONEY_BF: 241,
+};
 
 export function lipapapPayoutProviderCode(country: string, operator: string): string | undefined {
   const normalized = operator.toLowerCase().replace(/[\s\-_]+/g, "");
@@ -268,7 +286,7 @@ export async function initiateLipaPapPayment(config: LipaPapConfig, params: {
   customerName?: string;
   callbackUrl: string;
   returnUrl?: string;
-  networkId?: string;
+  networkId?: string | number;
 }): Promise<LipaPapPaymentResponse> {
   const orderAmount = params.amount.toFixed(2);
   const orderDescription = `WestPay payment ${params.orderId}`;
@@ -290,12 +308,16 @@ export async function initiateLipaPapPayment(config: LipaPapConfig, params: {
     term_url_3ds: params.returnUrl || params.callbackUrl,
     timestamp,
   };
-  if (params.networkId) {
-    const numericNetworkId = Number(params.networkId);
-    if (!Number.isInteger(numericNetworkId) || numericNetworkId <= 0) {
-      throw new Error("LipaPap: momo_network_id doit être un entier positif confirmé par LipaPap");
+  if (params.networkId !== undefined && String(params.networkId).trim() !== "") {
+    const rawNetworkId = String(params.networkId).trim();
+    const numericNetworkId = Number(rawNetworkId);
+    if (Number.isInteger(numericNetworkId) && numericNetworkId > 0) {
+      body.momo_network_id = numericNetworkId;
+    } else if (/^[A-Za-z0-9_-]+$/.test(rawNetworkId)) {
+      body.momo_network_id = rawNetworkId;
+    } else {
+      throw new Error("LipaPap: momo_network_id doit être un code LipaPap valide confirmé par LipaPap");
     }
-    body.momo_network_id = numericNetworkId;
   }
   body.hash = buildLipaPapRequestHash({
     clientKey: config.clientKey,
