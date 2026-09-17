@@ -280,6 +280,9 @@ export async function initiateLipaPapPayment(config: LipaPapConfig, params: {
   const orderAmount = params.amount.toFixed(2);
   const orderDescription = `WestPay payment ${params.orderId}`;
   const payerEmail = params.customerEmail || "";
+  // The shared PHP hash example uses the numeric phone/account value.
+  // Keep the same representation in the body until LipaPap confirms the
+  // exact Sandbox mobile-number format accepted for MOMO.
   const phone = params.phone.replace(/^\+/, "");
   const payerCountry = lipapapCountryCode(params.country);
   const termUrl3ds = params.returnUrl || params.callbackUrl;

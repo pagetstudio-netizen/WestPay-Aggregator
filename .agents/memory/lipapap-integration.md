@@ -46,3 +46,9 @@ LipaPap subsequently confirmed that the PHP calculation example is shared by bot
 **Why:** The provider's direct clarification supersedes the earlier public-document interpretation for this merchant account; the HMAC attempt remained rejected.
 
 **How to apply:** Use the shared MD5 formula for both pay-in and payout initiation requests, while keeping callback/status signatures unchanged until LipaPap confirms those flows separately.
+
+With the shared MD5 formula, numeric Togo MSISDN `22872086435` passes LipaPap's hash validation but returns `Invalid mobile number`; adding `+` to the body while hashing digits returns `Hash mismatch`, so the exact Sandbox mobile-number representation remains provider-specific.
+
+**Why:** This isolates the remaining pay-in failure to phone canonicalization/number eligibility rather than the shared hash.
+
+**How to apply:** Preserve the numeric representation for signing and obtain LipaPap's exact accepted T-Money Sandbox phone format before another real retry.
