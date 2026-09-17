@@ -429,7 +429,10 @@ async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
   }
 
   const normalizedEnvironment = environment === "production" ? "production" : "sandbox";
-  const normalizedAction = action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMOAPM";
+  // LipaPap confirmed that the initial mobile-money pay-in action is MOMO.
+  // Normalize the legacy MOMOAPM setting so stale admin values cannot send
+  // the wrong action to the provider.
+  const normalizedAction = action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMO";
   if (normalizedAction === "C2B_SIMULATE" && normalizedEnvironment !== "sandbox") {
     throw new Error("LipaPap C2B_SIMULATE est autorisé uniquement en Sandbox");
   }
@@ -4726,7 +4729,7 @@ export async function registerRoutes(
           return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
         }
         if (lipaConfig.action === "C2B_SIMULATE" && country !== "Kenya") {
-          return res.status(400).json({ message: "C2B_SIMULATE LipaPap est réservé au Kenya en Sandbox. Utilisez MOMOAPM pour ce pays." });
+          return res.status(400).json({ message: "C2B_SIMULATE LipaPap est réservé au Kenya en Sandbox. Utilisez MOMO pour ce pays." });
         }
 
         const reference = `LP-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
@@ -7596,7 +7599,7 @@ export async function registerRoutes(
         paymentUrl: paymentUrl || "",
         payerEmail: payerEmailValue || "",
         environment: environment === "production" ? "production" : "sandbox",
-        action: action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMOAPM",
+        action: action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMO",
         locale: locale || "",
         connectorName: connectorName || "",
         networkIdsJson: networkIdsJson || "{}",
@@ -7668,7 +7671,7 @@ export async function registerRoutes(
         if (action === "C2B_SIMULATE" && effectiveEnvironment !== "sandbox") {
           return res.status(400).json({ message: "C2B_SIMULATE est autorisé uniquement en Sandbox." });
         }
-        await storage.setSetting("lipapap_action", action === "MOMO" ? "MOMOAPM" : action);
+        await storage.setSetting("lipapap_action", action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMO");
       }
       if (locale !== undefined) {
         const normalizedLocale = String(locale).trim();

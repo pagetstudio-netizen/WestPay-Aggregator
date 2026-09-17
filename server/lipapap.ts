@@ -298,7 +298,7 @@ export async function initiateLipaPapPayment(config: LipaPapConfig, params: {
   const timestamp = Date.now().toString();
   const networkId = params.networkId === undefined ? "" : String(params.networkId);
   const body: Record<string, unknown> = {
-    action: config.action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMOAPM",
+    action: config.action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMO",
     client_key: config.clientKey,
     order_id: params.orderId,
     order_amount: orderAmount,
