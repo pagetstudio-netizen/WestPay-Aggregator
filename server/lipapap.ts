@@ -301,7 +301,6 @@ export async function initiateLipaPapPayment(config: LipaPapConfig, params: {
     term_url_3ds: termUrl3ds,
     timestamp,
   };
-  if (params.payerIp) body.payer_ip = params.payerIp;
   if (networkId.trim() !== "") {
     const numericNetworkId = Number(networkId);
     if (Number.isInteger(numericNetworkId) && numericNetworkId > 0) {

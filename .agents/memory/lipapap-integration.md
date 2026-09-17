@@ -58,3 +58,9 @@ Using the provider-confirmed PHP formula independently for local `72086435`, int
 **Why:** Testing all three canonical phone representations isolates the remaining failure to the Sandbox number's eligibility or T-Money test data, not hash formatting.
 
 **How to apply:** Ask LipaPap for a valid Togo/T-Money Sandbox test MSISDN and confirm the account's network mapping before further retries.
+
+The operator-code document lists Côte d'Ivoire MTN as operator ID `32` to send; `433` is reference-only. A direct Sandbox `MOMO` request with CI/MTN/`2250789012345` returned HTTP 200 `PENDING`, and the full Homily application flow succeeded after routing Homily's CI pay-in to LipaPap.
+
+**Why:** This validates the shared MD5 formula, CI country/network mapping, and application routing independently of the still-unsupported Togo Sandbox case.
+
+**How to apply:** Route CI MTN pay-ins through LipaPap with `momo_network_id=32`; do not send `433`. Keep `payer_ip` out of LipaPap pay-in payloads because the provider returned a decryption error when the application included it, while the same request without it succeeded.
