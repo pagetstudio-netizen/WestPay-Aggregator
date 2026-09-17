@@ -34,3 +34,9 @@ The published Formula 1 implementation was independently validated locally and t
 **Why:** The documentation's sample hashes are reused across materially different sample payloads, so they cannot serve as reliable fixtures; the remaining mismatch needs a provider-confirmed canonical payload/signing example rather than more blind retries.
 
 **How to apply:** Obtain one redacted provider-generated signature fixture for the exact `MOMOAPM` payload, especially whether `order_currency` and `payer_ip` are included or empty, before attempting another real Sandbox request.
+
+LipaPap explicitly confirmed that the initial pay-in action must be `MOMO`; after normalizing the application to send `MOMO`, the Sandbox still returned `Hash mismatch`.
+
+**Why:** The action name was an independent provider requirement, but changing it did not resolve the signature rejection; the remaining discrepancy is in the canonical pay-in signing inputs or credentials.
+
+**How to apply:** Keep `MOMO` as the normal pay-in action and do not revert to `MOMOAPM`; obtain a provider-generated `MOMO` signature fixture or exact signed-string definition before another real retry.
