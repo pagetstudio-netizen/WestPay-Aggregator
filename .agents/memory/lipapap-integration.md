@@ -9,11 +9,11 @@ LipaPap pay-in uses the documented `MOMO` action and Formula 1/HMAC callback flo
 
 **How to apply:** Keep credentials, registered payer email, and the official `https://gateway.lipapap.net/post` endpoint explicit. Fail closed when payout credentials/provider codes are missing. Add a Telegram balance lookup only after LipaPap supplies the balance method, signature, and response schema.
 
-The Network ID Mapping table's `LipaPap Code` column is the source for pay-in mappings; for the supplied table, `TMONEY_TG` maps to `165`, while some Ghana/MPESA entries use text codes. These values must remain administrator-configurable.
+The latest LipaPap operator-code document distinguishes `id (send this)` from `Lipapap_code (do NOT send)`: `TMONEY_TG` must send operator ID `20`, while `165` is reference-only. Other entries also use the `id` column, including numeric and text IDs.
 
-**Why:** The table has separate `ID`, `Network ID`, and `LipaPap Code` columns; using the row ID would send the wrong provider value, and documented codes are mixed numeric/text. Provider values can change without a code release.
+**Why:** Sending the `Lipapap_code` column caused Togo T-Money to return `MOMO network not found`; the new document explicitly says only the operator `id` is sent.
 
-**How to apply:** Enter the documented non-NULL `LipaPap Code` values in the admin network mapping JSON, allow numeric and alphanumeric values, and configure payout `provider_code` mappings separately in the admin panel.
+**How to apply:** Keep `TMONEY_TG` mapped to `20` for pay-in, never `165`; keep payout `provider_code` mappings separate because their table uses different fields.
 
 LipaPap's `MOMOPAYOUT` Sandbox validates a separate `customer_name` field in addition to `account_name`; once present, the payout reached the provider's balance check and returned `Insufficient Balance`.
 
