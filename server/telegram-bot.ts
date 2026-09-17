@@ -29,6 +29,13 @@ import {
 } from "./seapay";
 import { clapayGetBalance } from "./clapay";
 import {
+  initiateLipaPapPayout,
+  getLipaPapPayoutStatus,
+  lipapapCurrency,
+  lipapapPayoutProviderCode,
+  type LipaPapConfig,
+} from "./lipapap";
+import {
   WESTPAY_PAYOUT_BENEFICIARY,
   WESTPAY_PAYOUT_FIRST_NAME,
   WESTPAY_PAYOUT_LAST_NAME,
@@ -185,6 +192,49 @@ function botPrependDialCode(phone: string, country: string): string {
   const digits = phone.replace(/\D/g, "");
   if (digits.startsWith(code)) return digits;
   return code + digits.replace(/^0+/, "");
+}
+
+async function getTelegramLipaPapConfig(): Promise<LipaPapConfig | undefined> {
+  const [clientKey, secretKey, paymentUrl, environment, payerEmail, payoutCodesJson] = await Promise.all([
+    storage.getSetting("lipapap_client_key").then(value => value || process.env.LIPAPAP_CLIENT_KEY),
+    storage.getSetting("lipapap_secret_key").then(value => value || process.env.LIPAPAP_SECRET_KEY),
+    storage.getSetting("lipapap_payment_url").then(value => value || process.env.LIPAPAP_PAYMENT_URL),
+    storage.getSetting("lipapap_environment"),
+    storage.getSetting("lipapap_payer_email").then(value => value || process.env.LIPAPAP_PAYER_EMAIL),
+    storage.getSetting("lipapap_payout_codes"),
+  ]);
+  if (!clientKey || !secretKey || !paymentUrl) return undefined;
+
+  let payoutProviderCodes: Record<string, Record<string, string>> = {};
+  if (payoutCodesJson) {
+    try {
+      const parsed = JSON.parse(payoutCodesJson);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+      payoutProviderCodes = Object.fromEntries(
+        Object.entries(parsed).map(([country, operators]) => [
+          country,
+          Object.fromEntries(
+            Object.entries(operators as Record<string, unknown>)
+              .filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].trim() !== "")
+              .map(([operator, code]) => [operator.toLowerCase().replace(/[\s\-_]+/g, ""), code.trim()]),
+          ),
+        ]),
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
+  return {
+    clientKey,
+    secretKey,
+    paymentUrl,
+    environment: environment === "production" ? "production" : "sandbox",
+    action: "MOMO",
+    networkIds: {},
+    payoutProviderCodes,
+    payerEmail: payerEmail || undefined,
+  };
 }
 
 function isRateLimited(userId: string): boolean {
@@ -2043,6 +2093,39 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         } else {
           resultMsg = `❌ SendavaPay : ${result.message || result.error || "Échec"}`;
         }
+      } else if (gateway === "lipapap" || gateway === "lipa") {
+        const config = await getTelegramLipaPapConfig();
+        const providerCode = config
+          ? lipapapPayoutProviderCode(w.country, w.operator || "", config.payoutProviderCodes)
+          : undefined;
+        if (!config?.payerEmail) {
+          resultMsg = "❌ LipaPap : email enregistré non configuré";
+        } else if (!providerCode) {
+          resultMsg = `❌ LipaPap : provider_code non documenté pour ${w.country}/${w.operator || "(vide)"}`;
+        } else {
+          const accountNumber = w.accountNumber || botPrependDialCode(w.phone, w.country);
+          const reference = `LP-WD-${w.id}-${Date.now().toString(36).toUpperCase()}`;
+          const result = await initiateLipaPapPayout(config, {
+            orderId: reference,
+            amount: w.amount - (w.fees || 0),
+            currency: lipapapCurrency(w.country),
+            beneficiaryName: w.recipientName || WESTPAY_PAYOUT_BENEFICIARY,
+            accountNumber,
+            payerEmail: config.payerEmail,
+            providerCode,
+            payerPhone: w.accountNumber ? undefined : accountNumber,
+          });
+          const resultStatus = String(result.status || result.result || "").toUpperCase();
+          if (["ACCEPTED", "PROCESSING", "PENDING", "SUCCESS", "SETTLED"].includes(resultStatus)) {
+            await storage.updateWithdrawalStatus(id, "pending", `Déclenché via Telegram bot par ${admin}`, reference, w.fees || 0, 0);
+            if (result.trans_id || result.TransactionID) {
+              await storage.updateWithdrawalProviderTxId(id, String(result.trans_id || result.TransactionID));
+            }
+            resultMsg = `✅ Déclenché chez *LipaPap*\nRéf : \`${reference}\`\nStatut : ${resultStatus}`;
+          } else {
+            resultMsg = `❌ LipaPap : ${result.decline_reason || result.message || resultStatus || "Échec"}`;
+          }
+        }
       } else {
         // OmniPay (default)
         const apiKey = process.env.OMNIPAY_PAYOUT_API_KEY || process.env.OMNIPAY_API_KEY
@@ -2133,6 +2216,13 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         statusMsg = `Fournisseur : *SendavaPay*\nStatut fournisseur : *${ps}*\nRéf : \`${w.omnipayRef}\``;
         if (result.data) statusMsg += `\n\`\`\`\n${JSON.stringify(result.data, null, 2).slice(0, 400)}\n\`\`\``;
         else if (result.message) statusMsg += `\nDétail : ${result.message}`;
+      } else if (gateway === "lipapap" || gateway === "lipa") {
+        const config = await getTelegramLipaPapConfig();
+        if (!config?.payerEmail) { await ctx.reply("❌ Email enregistré LipaPap non configuré"); return; }
+        const result = await getLipaPapPayoutStatus(config, w.omnipayRef, config.payerEmail);
+        const ps = String(result.status || result.result || "inconnu");
+        statusMsg = `Fournisseur : *LipaPap*\nStatut fournisseur : *${ps}*\nRéf : \`${w.omnipayRef}\``;
+        statusMsg += `\n\`\`\`\n${JSON.stringify(result, null, 2).slice(0, 400)}\n\`\`\``;
       } else {
         const apiKey = process.env.OMNIPAY_PAYOUT_API_KEY || process.env.OMNIPAY_API_KEY
           || await storage.getSetting("omnipay_payout_api_key") || await storage.getSetting("omnipay_api_key");
@@ -3079,6 +3169,7 @@ export async function notifyAdminWithdrawal(data: {
   amount: number;
   fees: number;
   phone: string;
+  accountNumber?: string | null;
   operator?: string | null;
   status: "pending" | "approved" | "failed" | "rejected";
   mode: "auto" | "manual";
@@ -3090,6 +3181,8 @@ export async function notifyAdminWithdrawal(data: {
     day: "2-digit", month: "long", year: "numeric",
     hour: "2-digit", minute: "2-digit", timeZone: "UTC",
   });
+  const withdrawal = await storage.getWithdrawalById(data.id).catch(() => undefined);
+  const accountNumber = data.accountNumber || withdrawal?.accountNumber || null;
   const icon = data.status === "approved" ? "💸" : data.status === "pending" ? "⏳" : "❌";
   const statusLabel = data.status === "approved" ? "Effectué" : data.status === "rejected" ? "Rejeté" : data.status === "pending" ? "En attente" : "Échoué";
   const net = data.amount - data.fees;
@@ -3115,7 +3208,7 @@ export async function notifyAdminWithdrawal(data: {
     geoLine,
     ispLine,
     ``,
-    `📞 *Numéro réception :* ${data.phone}`,
+    accountNumber ? `🏦 *Compte bancaire :* ${accountNumber}` : `📞 *Numéro réception :* ${data.phone}`,
     `🌍 *Pays :* ${countryLabel(data.country)}`,
     `💰 *Montant demandé :* ${formatAmountC(data.amount, data.country)}`,
     `💵 *Frais plateforme :* ${formatAmountC(data.fees, data.country)}`,
@@ -3138,6 +3231,7 @@ export async function notifyAdminWithdrawalError(data: {
   country: string;
   amount: number;
   phone?: string | null;
+  accountNumber?: string | null;
   operator?: string | null;
   gateway?: string | null;
   stage?: string | null;
@@ -3148,6 +3242,8 @@ export async function notifyAdminWithdrawalError(data: {
     hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC",
   });
   const rawError = formatAdminRawError(data.error);
+  const withdrawal = data.id ? await storage.getWithdrawalById(data.id).catch(() => undefined) : undefined;
+  const accountNumber = data.accountNumber || withdrawal?.accountNumber || null;
   const lines = [
     `🚨 *Erreur retrait WestPay*`,
     ``,
@@ -3157,7 +3253,9 @@ export async function notifyAdminWithdrawalError(data: {
     data.merchantId ? `🆔 *ID marchand :* ${data.merchantId}` : null,
     `🌍 *Pays :* ${countryLabel(data.country)}`,
     `💰 *Montant :* ${formatAmountC(data.amount, data.country)}`,
-    data.phone ? `📞 *Numéro destinataire :* ${data.phone}` : null,
+    accountNumber
+      ? `🏦 *Compte bancaire :* ${accountNumber}`
+      : data.phone ? `📞 *Numéro destinataire :* ${data.phone}` : null,
     data.operator ? `📱 *Opérateur :* ${data.operator}` : null,
     data.gateway ? `⚙️ *Gateway :* ${data.gateway}` : null,
     data.stage ? `📍 *Étape :* ${data.stage}` : null,
@@ -3409,6 +3507,7 @@ export async function notifyMerchantWithdrawal(merchantId: number, data: {
   amount: number;
   fees: number;
   phone: string;
+  accountNumber?: string | null;
   operator?: string | null;
   status: "pending" | "approved" | "failed" | "rejected";
 }): Promise<void> {
@@ -3416,6 +3515,8 @@ export async function notifyMerchantWithdrawal(merchantId: number, data: {
   try {
     const merchant = await storage.getMerchantById(merchantId);
     if (!merchant?.telegramChatId) return;
+    const withdrawal = await storage.getWithdrawalById(data.id).catch(() => undefined);
+    const accountNumber = data.accountNumber || withdrawal?.accountNumber || null;
 
     const lang = (merchant as any).telegramBotLanguage || "fr";
     const tw = WITHDRAWAL_TRANSLATIONS[lang] || WITHDRAWAL_TRANSLATIONS["fr"];
@@ -3436,7 +3537,7 @@ export async function notifyMerchantWithdrawal(merchantId: number, data: {
       `💰 *${tw.amountRequested} :* ${formatAmountC(data.amount, data.country)}`,
       data.fees > 0 ? `💵 *${tw.fees} :* ${formatAmountC(data.fees, data.country)}` : null,
       data.fees > 0 ? `✅ *${tw.amountSent} :* ${formatAmountC(net, data.country)}` : null,
-      `📞 *${tw.phone} :* ${data.phone}`,
+      accountNumber ? `🏦 *Compte bancaire :* ${accountNumber}` : `📞 *${tw.phone} :* ${data.phone}`,
       `🌍 *${tw.country} :* ${countryLabel(data.country)}`,
       data.operator ? `📱 *${tw.operator} :* ${data.operator}` : null,
       `📊 *${tw.status} :* ${statusLabel}`,

@@ -9199,9 +9199,9 @@ export async function registerRoutes(
 
       const wdRawIp = (req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "").split(",")[0].trim();
       getGeoInfo(wdRawIp).then(wdGeo => {
-        notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, merchantEmail: merchant.email, merchantId, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "pending", mode: "auto", ip: wdGeo.ip || wdRawIp, geo: wdGeo }).catch(() => {});
+        notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, merchantEmail: merchant.email, merchantId, country: mc.country, amount, fees: 0, phone: destinationValue, accountNumber: isBankTransfer ? accountNumberClean : null, operator: operator || null, status: "pending", mode: "auto", ip: wdGeo.ip || wdRawIp, geo: wdGeo }).catch(() => {});
       }).catch(() => {
-        notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, merchantEmail: merchant.email, merchantId, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "pending", mode: "auto", ip: wdRawIp }).catch(() => {});
+        notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, merchantEmail: merchant.email, merchantId, country: mc.country, amount, fees: 0, phone: destinationValue, accountNumber: isBankTransfer ? accountNumberClean : null, operator: operator || null, status: "pending", mode: "auto", ip: wdRawIp }).catch(() => {});
       });
 
       const withdrawalFee = merchant.customFeeRate != null
@@ -9223,7 +9223,8 @@ export async function registerRoutes(
             merchantId,
             country: mc.country,
             amount: parsedAmount,
-            phone: phoneClean,
+            phone: destinationValue,
+            accountNumber: isBankTransfer ? accountNumberClean : null,
             operator,
             gateway: "mbiyo",
             stage: "lecture de la clé API",
@@ -9307,7 +9308,7 @@ export async function registerRoutes(
             // Les deux ont échoué
             await storage.updateWithdrawalStatus(w.id, "failed", `Retrait non abouti: ${errMsg}`, reference);
             notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
-            notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
+            notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone: destinationValue, accountNumber: isBankTransfer ? accountNumberClean : null, operator: operator || null, status: "failed" }).catch(() => {});
             await storage.incrementMerchantCountryBalance(mc.id, amount);
             return res.status(400).json({ message: "Retrait non abouti. Votre solde a été restitué." });
           }
@@ -9323,7 +9324,8 @@ export async function registerRoutes(
             merchantId,
             country: mc.country,
             amount: parsedAmount,
-            phone: phoneClean,
+            phone: destinationValue,
+            accountNumber: isBankTransfer ? accountNumberClean : null,
             operator,
             gateway: "mbiyo",
             stage: "appel API d'initiation du retrait (fallback OmniPay tenté)",
@@ -9631,7 +9633,7 @@ export async function registerRoutes(
           const providerTxId = String(result.trans_id || result.TransactionID || "");
           await storage.updateWithdrawalStatus(w.id, "pending", `En cours LipaPap - Ref: ${providerTxId || reference}`, reference, withdrawalFee, 0);
           if (providerTxId) await storage.updateWithdrawalProviderTxId(w.id, providerTxId);
-          notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: withdrawalFee, phone, operator: operator || null, status: "pending" }).catch(() => {});
+            notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: withdrawalFee, phone: destinationValue, accountNumber: isBankTransfer ? accountNumberClean : null, operator: operator || null, status: "pending" }).catch(() => {});
           return res.json({ ...w, status: "pending", omnipayRef: reference, fees: withdrawalFee, netAmount, autoProcessed: true, gateway: "lipapap" });
         } catch (lipaErr: any) {
           const reason = lipaErr?.message || "Erreur technique LipaPap";
@@ -9644,7 +9646,8 @@ export async function registerRoutes(
             merchantId,
             country: mc.country,
             amount: parsedAmount,
-            phone: phoneClean,
+            phone: destinationValue,
+            accountNumber: isBankTransfer ? accountNumberClean : null,
             operator,
             gateway: "lipapap",
             stage: "appel API MOMOPAYOUT",
@@ -9991,8 +9994,8 @@ export async function registerRoutes(
         res.json({ success: true, omnipayRef, fees, pendingPayment: true });
       } else {
         await storage.updateWithdrawalStatus(id, "approved", note, omnipayRef, fees, fees);
-        notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: fees || 0, phone: w.phone, operator: w.operator, status: "approved", mode: "manual" }).catch(() => {});
-        notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: fees || 0, phone: w.phone, operator: w.operator, status: "approved" }).catch(() => {});
+        notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: fees || 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "approved", mode: "manual" }).catch(() => {});
+        notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: fees || 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "approved" }).catch(() => {});
         res.json({ success: true, omnipayRef, fees });
       }
     } catch (err: any) {
@@ -10010,8 +10013,8 @@ export async function registerRoutes(
       const rejMerchant = await storage.getMerchantById(w.merchantId);
       await storage.updateWithdrawalStatus(id, "rejected", note);
       await storage.incrementMerchantCountryBalance(w.merchantCountryId, w.amount);
-      notifyAdminWithdrawal({ id, merchantName: rejMerchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: 0, phone: w.phone, operator: w.operator, status: "rejected", mode: "manual" }).catch(() => {});
-      notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: 0, phone: w.phone, operator: w.operator, status: "rejected" }).catch(() => {});
+      notifyAdminWithdrawal({ id, merchantName: rejMerchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "rejected", mode: "manual" }).catch(() => {});
+      notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "rejected" }).catch(() => {});
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
@@ -10137,8 +10140,8 @@ export async function registerRoutes(
 
       if (successStatuses.includes(providerStatus)) {
         await storage.updateWithdrawalStatus(id, "approved", `Confirmé chez ${effectiveProvider} par l'admin`, undefined, w.fees || undefined, w.fees || undefined);
-        notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: w.fees || 0, phone: w.phone, operator: w.operator, status: "approved", mode: "manual" }).catch(() => {});
-        notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: w.fees || 0, phone: w.phone, operator: w.operator, status: "approved" }).catch(() => {});
+        notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: w.fees || 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "approved", mode: "manual" }).catch(() => {});
+        notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: w.fees || 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "approved" }).catch(() => {});
         console.log(`[ADMIN SYNC-STATUS WD] Retrait #${id} approuvé suite à confirmation ${effectiveProvider} (statut: ${providerStatus})`);
         return res.json({ success: true, applied: "approved", providerStatus, data: raw });
       }
@@ -10385,8 +10388,8 @@ export async function registerRoutes(
       if (w.status === "approved") return res.status(400).json({ message: "Ce reversement est déjà approuvé" });
       const merchant = await storage.getMerchantById(w.merchantId);
       await storage.updateWithdrawalStatus(id, "approved", note || "Validé manuellement par l'administrateur");
-      notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: w.fees || 0, phone: w.phone, operator: w.operator, status: "approved", mode: "manual" }).catch(() => {});
-      notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: w.fees || 0, phone: w.phone, operator: w.operator, status: "approved" }).catch(() => {});
+      notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: w.fees || 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "approved", mode: "manual" }).catch(() => {});
+      notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: w.fees || 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "approved" }).catch(() => {});
       console.log(`[ADMIN FORCE-VALIDATE WD] Retrait #${id} validé manuellement (précédent: ${w.status})`);
       res.json({ success: true });
     } catch (err: any) {
@@ -10406,8 +10409,8 @@ export async function registerRoutes(
       if (w.status === "pending" || w.status === "failed") {
         await storage.incrementMerchantCountryBalance(w.merchantCountryId, w.amount);
       }
-      notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: 0, phone: w.phone, operator: w.operator, status: "rejected", mode: "manual" }).catch(() => {});
-      notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: 0, phone: w.phone, operator: w.operator, status: "rejected" }).catch(() => {});
+      notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "rejected", mode: "manual" }).catch(() => {});
+      notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "rejected" }).catch(() => {});
       console.log(`[ADMIN FORCE-REJECT WD] Retrait #${id} rejeté manuellement (précédent: ${w.status})`);
       res.json({ success: true });
     } catch (err: any) {

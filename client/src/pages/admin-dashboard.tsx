@@ -3826,7 +3826,7 @@ function LipaPapPanel() {
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold text-foreground">Configuration LipaPap</h2>
-        <p className="text-sm text-muted-foreground">Pay-in et payout mobile money LipaPap. Commencez en Sandbox et passez en Production après validation.</p>
+        <p className="text-sm text-muted-foreground">Pay-in mobile money et payout mobile money ou bancaire LipaPap. Commencez en Sandbox et passez en Production après validation.</p>
       </div>
       <Card>
         <CardHeader><CardTitle className="text-base flex items-center gap-2"><Globe className="w-4 h-4" />Paramètres API</CardTitle></CardHeader>
@@ -3851,8 +3851,8 @@ function LipaPapPanel() {
           <div className="space-y-2"><Label>URL callback</Label><Input value={callbackUrl} onChange={e => setCallbackUrl(e.target.value)} placeholder="URL HTTPS callback fournie par LipaPap" data-testid="input-lipapap-callback-url" /><p className="text-xs text-muted-foreground">Cette URL est obligatoire pour envoyer et recevoir les confirmations LipaPap.</p></div>
           <div className="space-y-2">
             <Label>Codes réseau LipaPap</Label>
-            <textarea value={networkIdsJson} onChange={e => setNetworkIdsJson(e.target.value)} rows={5} className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono" placeholder={'{"NETWORK_CODE":"LIPAPAP_CODE"}'} data-testid="textarea-lipapap-network-ids" />
-            <p className="text-xs text-muted-foreground">Saisissez les valeurs de la colonne « LipaPap Code » fournie par LipaPap. Aucun code réseau n’est utilisé automatiquement.</p>
+             <textarea value={networkIdsJson} onChange={e => setNetworkIdsJson(e.target.value)} rows={5} className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono" placeholder={'{"NETWORK_CODE":"id"}'} data-testid="textarea-lipapap-network-ids" />
+             <p className="text-xs text-muted-foreground">Saisissez la valeur de la colonne « id (send this) » fournie par LipaPap, jamais la colonne « Lipapap_code » de référence. Kenya/M-Pesa STK_PUSH n’utilise pas ce champ.</p>
           </div>
           <div className="space-y-2">
             <Label>Provider codes payout</Label>
