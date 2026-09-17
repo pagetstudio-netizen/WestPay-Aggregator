@@ -378,6 +378,7 @@ export async function initiateLipaPapPayout(config: LipaPapConfig, params: {
     order_amount: orderAmount,
     order_currency: params.currency,
     order_description: "Client WestPay",
+    customer_name: params.beneficiaryName.trim() || "Client WestPay",
     account_name: params.beneficiaryName.trim() || "Client WestPay",
     account_number: accountNumber,
     payer_email: params.payerEmail,

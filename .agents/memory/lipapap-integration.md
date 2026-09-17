@@ -15,6 +15,12 @@ The Network ID Mapping table's `LipaPap Code` column is the source for pay-in ma
 
 **How to apply:** Enter the documented non-NULL `LipaPap Code` values in the admin network mapping JSON, allow numeric and alphanumeric values, and configure payout `provider_code` mappings separately in the admin panel.
 
+LipaPap's `MOMOPAYOUT` Sandbox validates a separate `customer_name` field in addition to `account_name`; once present, the payout reached the provider's balance check and returned `Insufficient Balance`.
+
+**Why:** Sending only the account/beneficiary name is rejected before signature or balance validation, while the provider's 402 response confirms the remaining payload and payout hash were accepted far enough to check funds.
+
+**How to apply:** Keep `customer_name` and `account_name` in payout payloads, use the configured country/operator `provider_code`, and treat HTTP 402 `Insufficient Balance` as a provider-account funding issue rather than a payload or signature error.
+
 ## Sandbox validation
 
 The configured Sandbox request reaches the LipaPap endpoint but is rejected with HTTP 400 `Hash mismatch`; the official v5.3.1 docs define Formula 1 as HMAC-SHA256 over client_key, order_id, order_amount, order_currency, order_description, card fields, payer_email, payer_phone, payer_ip, secret_key, using secret_key as the HMAC key.
