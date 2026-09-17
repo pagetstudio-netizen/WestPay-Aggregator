@@ -35,8 +35,14 @@ The published Formula 1 implementation was independently validated locally and t
 
 **How to apply:** Obtain one redacted provider-generated signature fixture for the exact `MOMOAPM` payload, especially whether `order_currency` and `payer_ip` are included or empty, before attempting another real Sandbox request.
 
-LipaPap explicitly confirmed that the initial pay-in action must be `MOMO`; after normalizing the application to send `MOMO`, the Sandbox still returned `Hash mismatch`.
+LipaPap explicitly confirmed that the initial pay-in action must be `MOMO`; after normalizing the application to send `MOMO`, the Sandbox still returned `Hash mismatch` while Formula 1 HMAC was used.
 
 **Why:** The action name was an independent provider requirement, but changing it did not resolve the signature rejection; the remaining discrepancy is in the canonical pay-in signing inputs or credentials.
 
-**How to apply:** Keep `MOMO` as the normal pay-in action and do not revert to `MOMOAPM`; obtain a provider-generated `MOMO` signature fixture or exact signed-string definition before another real retry.
+**How to apply:** Keep `MOMO` as the normal pay-in action and do not revert to `MOMOAPM`; use the provider-confirmed shared request hash below.
+
+LipaPap subsequently confirmed that the PHP calculation example is shared by both `MOMO` and `MOMOPAYOUT`; it uses MD5 over uppercase(reverse(email) + secret + reverse(first six + last four phone/account)), producing 32 characters.
+
+**Why:** The provider's direct clarification supersedes the earlier public-document interpretation for this merchant account; the HMAC attempt remained rejected.
+
+**How to apply:** Use the shared MD5 formula for both pay-in and payout initiation requests, while keeping callback/status signatures unchanged until LipaPap confirms those flows separately.

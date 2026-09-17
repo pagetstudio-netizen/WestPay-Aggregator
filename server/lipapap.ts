@@ -115,17 +115,15 @@ function hmacSha256(value: string, secretKey: string): string {
 }
 
 /**
- * LipaPap Formula 1:
- * HMAC-SHA256(
- *   client_key + order_id + order_amount + order_currency +
- *   order_description + card_number + card_exp_month + card_exp_year +
- *   payer_email + payer_phone + payer_ip + secret_key,
- *   secret_key
- * )
+ * LipaPap's shared request hash for MOMO and MOMOPAYOUT:
+ * MD5(UPPERCASE(
+ *   reverse(email) + secret_key +
+ *   reverse(first six + last four phone/account number)
+ * ))
  *
- * The documentation says omitted optional parameters are represented by an
- * empty string. APM requests therefore use the same formula with the card
- * fields, currency, and IP empty when they are not sent.
+ * LipaPap confirmed that the same calculation example is used for both
+ * pay-in and payout requests. The order fields remain in the request body,
+ * but are not part of this shared hash formula.
  */
 export function buildLipaPapRequestHash(fields: {
   clientKey: string;
@@ -140,21 +138,11 @@ export function buildLipaPapRequestHash(fields: {
   payerPhone?: string;
   payerIp?: string;
 }, secretKey: string): string {
-  const value = [
-    fields.clientKey,
-    fields.orderId,
-    fields.orderAmount,
-    fields.orderCurrency,
-    fields.orderDescription,
-    fields.cardNumber,
-    fields.cardExpMonth,
-    fields.cardExpYear,
-    fields.payerEmail,
-    fields.payerPhone,
-    fields.payerIp,
+  return buildLipaPapPayoutHash(
+    fields.payerEmail || "",
     secretKey,
-  ].map((part) => part == null ? "" : String(part)).join("").toUpperCase();
-  return hmacSha256(value, secretKey);
+    fields.payerPhone || "",
+  );
 }
 
 function reverse(value: string): string {
