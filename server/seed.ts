@@ -214,6 +214,53 @@ async function ensureClapayOperatorsExist() {
   }
 }
 
+// ── LipaPap — Nigeria NIP bank transfer ─────────────────────────────────────
+// The supplied LipaPap provider table documents NGN / 000033 / NIP. This is
+// deliberately a bank-transfer operator, not a mobile-money network.
+async function ensureLipaPapOperatorsExist() {
+  try {
+    const existing = await storage.getWithdrawalOperatorByNameAndCountry("NIP", "Nigeria");
+    if (!existing) {
+      await storage.createWithdrawalOperator({
+        name: "NIP",
+        type: "Virement bancaire",
+        country: "Nigeria",
+        dailyLimit: 10000000,
+        gateway: "LipaPap",
+        sortOrder: 0,
+        active: true,
+      } as any);
+      console.log("[SEED] Opérateur LipaPap NIP Nigeria créé");
+    } else {
+      const updates: Record<string, unknown> = {};
+      if (existing.type !== "Virement bancaire") updates.type = "Virement bancaire";
+      if (existing.gateway.toLowerCase() !== "lipapap") updates.gateway = "LipaPap";
+      if (Object.keys(updates).length > 0) {
+        const { db } = await import("./db");
+        const { withdrawalOperators } = await import("@shared/schema");
+        const { eq } = await import("drizzle-orm");
+        await db.update(withdrawalOperators).set(updates as any).where(eq(withdrawalOperators.id, existing.id));
+      }
+    }
+
+    const currentCodes = await storage.getSetting("lipapap_payout_codes");
+    let parsed: Record<string, Record<string, string>> = {};
+    try {
+      const candidate = currentCodes ? JSON.parse(currentCodes) : {};
+      if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) parsed = candidate;
+    } catch {
+      parsed = {};
+    }
+    if (!parsed.Nigeria || typeof parsed.Nigeria !== "object" || parsed.Nigeria.NIP !== "000033") {
+      parsed.Nigeria = { ...(parsed.Nigeria || {}), NIP: "000033" };
+      await storage.setSetting("lipapap_payout_codes", JSON.stringify(parsed));
+      console.log("[SEED] Provider code LipaPap Nigeria/NIP configuré (000033)");
+    }
+  } catch (err: any) {
+    console.error("[SEED] Erreur opérateur LipaPap NIP:", err.message);
+  }
+}
+
 async function ensureSeaPayOperatorsExist() {
   try {
     // Pakistan — 46 banques + 5 portefeuilles/cartes (SeaPay)
@@ -291,6 +338,7 @@ export async function seedDatabase() {
 
   // ClaPay : créer les opérateurs mobile money pour tous les pays supportés
   await ensureClapayOperatorsExist();
+  await ensureLipaPapOperatorsExist();
 
   // Protection permanente : ne JAMAIS recréer de compte admin automatiquement
   // Ce flag est posé une fois en DB et ne peut pas être retiré par un redémarrage

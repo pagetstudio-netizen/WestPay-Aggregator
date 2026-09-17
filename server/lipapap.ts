@@ -10,6 +10,7 @@ export const LIPAPAP_COUNTRY_CODES: Record<string, string> = {
   Kenya: "KE",
   Mali: "ML",
   Togo: "TG",
+  Nigeria: "NG",
 };
 
 export const LIPAPAP_CURRENCY_MAP: Record<string, string> = {
@@ -22,6 +23,7 @@ export const LIPAPAP_CURRENCY_MAP: Record<string, string> = {
   Kenya: "KES",
   Mali: "XOF",
   Togo: "XOF",
+  Nigeria: "NGN",
 };
 
 /**
@@ -275,6 +277,7 @@ export async function initiateLipaPapPayment(config: LipaPapConfig, params: {
   returnUrl?: string;
   payerIp?: string;
   networkId?: string | number;
+  paymentAction?: "MOMO" | "STK_PUSH" | "C2B_SIMULATE";
   locale?: string;
   connectorName?: string;
 }): Promise<LipaPapPaymentResponse> {
@@ -292,8 +295,9 @@ export async function initiateLipaPapPayment(config: LipaPapConfig, params: {
   const termUrl3ds = params.returnUrl || params.callbackUrl;
   const timestamp = Date.now().toString();
   const networkId = params.networkId === undefined ? "" : String(params.networkId);
+  const paymentAction = params.paymentAction || (config.action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMO");
   const body: Record<string, unknown> = {
-    action: config.action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMO",
+    action: paymentAction,
     client_key: config.clientKey,
     order_id: params.orderId,
     order_amount: orderAmount,
@@ -305,7 +309,9 @@ export async function initiateLipaPapPayment(config: LipaPapConfig, params: {
     term_url_3ds: termUrl3ds,
     timestamp,
   };
-  if (networkId.trim() !== "") {
+  // Kenya M-Pesa STK_PUSH is routed by the action itself. The documented
+  // request does not require a mobile-money network id for this flow.
+  if (paymentAction !== "STK_PUSH" && networkId.trim() !== "") {
     const numericNetworkId = Number(networkId);
     if (Number.isInteger(numericNetworkId) && numericNetworkId > 0) {
       body.momo_network_id = numericNetworkId;
@@ -358,6 +364,7 @@ export async function initiateLipaPapPayout(config: LipaPapConfig, params: {
   accountNumber: string;
   payerEmail: string;
   providerCode: string;
+  payerPhone?: string;
 }): Promise<LipaPapPaymentResponse> {
   const accountNumber = params.accountNumber.replace(/\D/g, "");
   if (!accountNumber) throw new Error("LipaPap: numéro bénéficiaire invalide");
@@ -376,7 +383,6 @@ export async function initiateLipaPapPayout(config: LipaPapConfig, params: {
     account_name: params.beneficiaryName.trim() || "Client WestPay",
     account_number: accountNumber,
     payer_email: params.payerEmail,
-    payer_phone: accountNumber,
     payer_first_name: firstName,
     payer_last_name: lastName,
     bankCode: params.providerCode,
@@ -384,6 +390,7 @@ export async function initiateLipaPapPayout(config: LipaPapConfig, params: {
     transaction_method: "MOMOPAYOUT",
     hash: buildLipaPapPayoutHash(params.payerEmail, config.secretKey, accountNumber),
   };
+  if (params.payerPhone) body.payer_phone = params.payerPhone.replace(/\D/g, "");
   return lipapapRequest(config, body);
 }
 

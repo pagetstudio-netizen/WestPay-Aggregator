@@ -1568,6 +1568,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
   const [selectedOperator, setSelectedOperator] = useState("");
   const [amount, setAmount] = useState("");
   const [phone, setPhone] = useState("");
+  const [accountNumber, setAccountNumber] = useState("");
   const [recipientName, setRecipientName] = useState("");
   const [retryState, setRetryState] = useState<{ retriesLeft?: number; blocked?: boolean; blockedUntil?: number } | null>(null);
   const [showPkModal, setShowPkModal] = useState(false);
@@ -1592,12 +1593,13 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
     setSelectedWalletId(walletId);
     setSelectedOperator("");
     setPhone("");
+    setAccountNumber("");
     setAmount("");
     setRecipientName("");
   };
 
   const createMutation = useMutation({
-    mutationFn: async (data: { merchantCountryId: number; amount: number; phone: string; operator: string; recipientName?: string }) => {
+    mutationFn: async (data: { merchantCountryId: number; amount: number; phone?: string; accountNumber?: string; operator: string; recipientName?: string }) => {
       const res = await fetch("/api/merchant/withdrawals", {
         method: "POST",
         credentials: "include",
@@ -1617,6 +1619,7 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/withdrawals"] });
       queryClient.invalidateQueries({ queryKey: ["/api/merchant/balance"] });
       setAmount(""); setPhone(""); setSelectedOperator(""); setRecipientName("");
+      setAccountNumber("");
       setRetryState(null);
       toast({ title: t("success"), description: t("processing") });
     },
@@ -1636,7 +1639,9 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
 
   const handleSubmit = (e: { preventDefault: () => void }) => {
     e.preventDefault();
-    if (!selectedWalletId || !selectedOperator || !amount || !phone) return;
+    const selectedOperatorRecord = operatorList.find(op => op.name === selectedOperator);
+    const isBankTransfer = selectedOperatorRecord?.type === "Virement bancaire";
+    if (!selectedWalletId || !selectedOperator || !amount || (isBankTransfer ? !accountNumber : !phone)) return;
     const amountNum = parseInt(amount);
     if (isNaN(amountNum) || amountNum <= 0) return;
     if (amountNum < withdrawalMinAmount) {
@@ -1647,7 +1652,14 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
       toast({ title: t("insufficientFunds"), description: `${t("availableBalance")}: ${selectedWallet.balance.toLocaleString(localeForLanguage(lang))} ${countryToCurrency(selectedWallet.country)}.`, variant: "destructive" });
       return;
     }
-    createMutation.mutate({ merchantCountryId: Number(selectedWalletId), amount: amountNum, phone, operator: selectedOperator, recipientName: recipientName.trim() || undefined });
+    createMutation.mutate({
+      merchantCountryId: Number(selectedWalletId),
+      amount: amountNum,
+      phone: isBankTransfer ? undefined : phone,
+      accountNumber: isBankTransfer ? accountNumber : undefined,
+      operator: selectedOperator,
+      recipientName: recipientName.trim() || undefined,
+    });
   };
 
   const totalWithdrawn = (withdrawalList as Withdrawal[]).filter(w => w.status === "approved").reduce((s, w) => s + w.amount, 0);
@@ -1986,22 +1998,38 @@ function WithdrawalsPanel({ token }: { token: string | null }) {
                     data-testid="input-withdrawal-recipient-name"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>{t("phone")}</label>
-                  <input
-                    type="text"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="Ex: +22507XXXXXXXX"
-                    className="w-full rounded-xl px-4 py-2.5 text-sm outline-none transition-all"
-                    style={{ border: "1.5px solid #e2e8f0", background: "#fff", color: "#1a1a1a" }}
-                    data-testid="input-withdrawal-phone"
-                  />
-                  <p className="text-xs mt-1" style={{ color: "#aaa" }}>{selectedOperator}</p>
-                </div>
+                {operatorList.find(op => op.name === selectedOperator)?.type === "Virement bancaire" ? (
+                  <div>
+                    <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>Numéro de compte bancaire</label>
+                    <input
+                      type="text"
+                      value={accountNumber}
+                      onChange={(e) => setAccountNumber(e.target.value)}
+                      placeholder="Ex: 0123456789"
+                      className="w-full rounded-xl px-4 py-2.5 text-sm outline-none transition-all"
+                      style={{ border: "1.5px solid #e2e8f0", background: "#fff", color: "#1a1a1a" }}
+                      data-testid="input-withdrawal-account-number"
+                    />
+                    <p className="text-xs mt-1" style={{ color: "#aaa" }}>{selectedOperator} · virement bancaire NIP</p>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-semibold mb-1.5" style={{ color: "#333" }}>{t("phone")}</label>
+                    <input
+                      type="text"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="Ex: +22507XXXXXXXX"
+                      className="w-full rounded-xl px-4 py-2.5 text-sm outline-none transition-all"
+                      style={{ border: "1.5px solid #e2e8f0", background: "#fff", color: "#1a1a1a" }}
+                      data-testid="input-withdrawal-phone"
+                    />
+                    <p className="text-xs mt-1" style={{ color: "#aaa" }}>{selectedOperator}</p>
+                  </div>
+                )}
                 <button
                   type="submit"
-                  disabled={createMutation.isPending || !amount || !phone}
+                  disabled={createMutation.isPending || !amount || (operatorList.find(op => op.name === selectedOperator)?.type === "Virement bancaire" ? !accountNumber : !phone)}
                   className="w-full rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 transition-all"
                   style={{ background: createMutation.isPending || !amount || !phone ? "#ccc" : "#00b050", color: "#fff", border: "none", cursor: createMutation.isPending ? "not-allowed" : "pointer" }}
                   data-testid="button-submit-withdrawal"

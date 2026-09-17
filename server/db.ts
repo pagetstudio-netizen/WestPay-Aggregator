@@ -550,6 +550,7 @@ export async function runFinancialMigrations() {
         country text NOT NULL,
         amount integer NOT NULL,
         phone text NOT NULL,
+        account_number text,
         recipient_name text,
         operator text,
         status text NOT NULL DEFAULT 'pending',
@@ -675,6 +676,10 @@ export async function runFinancialMigrations() {
       await client.query(`
         ALTER TABLE withdrawals
         ADD COLUMN IF NOT EXISTS provider_tx_id text;
+      `);
+      await client.query(`
+        ALTER TABLE withdrawals
+        ADD COLUMN IF NOT EXISTS account_number text;
       `);
 
     // pgvector (knowledge_chunks — RAG)

@@ -4735,6 +4735,7 @@ export async function registerRoutes(
         const reference = `LP-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
         const networkCode = lipapapNetworkCode(country, paymentMethod);
         const networkId = networkCode ? lipaConfig.networkIds[networkCode] : undefined;
+        const isKenyaMpesaStkPush = country === "Kenya" && networkCode === "MPESA_KE";
         const callbackUrl = lipaConfig.callbackUrl;
         if (!callbackUrl) {
           const configurationError = "URL callback LipaPap absente";
@@ -4752,7 +4753,7 @@ export async function registerRoutes(
           return res.status(500).json({ message: "Configuration du callback de paiement indisponible. Contactez l'administrateur." });
         }
         const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&lipapap_return=1`;
-        if (!networkCode || networkId === undefined || String(networkId).trim() === "") {
+        if (!networkCode || (!isKenyaMpesaStkPush && (networkId === undefined || String(networkId).trim() === ""))) {
           const configurationError = !networkCode
             ? `Réseau LipaPap non mappé pour ${country}/${paymentMethod}`
             : `momo_network_id LipaPap absent pour ${networkCode}`;
@@ -4786,6 +4787,7 @@ export async function registerRoutes(
             returnUrl,
             payerIp: getClientIp(req),
             networkId,
+            paymentAction: isKenyaMpesaStkPush ? "STK_PUSH" : undefined,
             locale: lipaConfig.locale,
             connectorName: lipaConfig.connectorName,
           });
@@ -4804,7 +4806,10 @@ export async function registerRoutes(
             return res.status(400).json({ message: "Paiement non abouti. Veuillez reessayer." });
           }
 
-          const pending = await storage.createPendingPayment({
+            const providerReference = result.trans_id
+              || String(result.TransactionID || result.CheckoutRequestID || "")
+              || reference;
+            const pending = await storage.createPendingPayment({
             merchantId: merchant.id,
             country,
             amount: parsedAmount,
@@ -4815,7 +4820,7 @@ export async function registerRoutes(
             status: "omnipay_pending",
             redirectUrl: redirectUrl || null,
             omnipayReference: reference,
-            omnipayTxId: result.trans_id || String(result.TransactionID || "") || reference,
+              omnipayTxId: providerReference,
             omnipayPaymentUrl: result.redirect_url || null,
             gateway: "lipapap",
             expiresAt,
@@ -6797,7 +6802,7 @@ export async function registerRoutes(
       }
 
       const status = String(body.status || body.result || "").toUpperCase();
-      const providerTxId = String(body.trans_id || orderId);
+      const providerTxId = String(body.trans_id || body.TransactionID || body.CheckoutRequestID || orderId);
       const withdrawal = await storage.getWithdrawalByOmnipayRef(orderId);
       if (withdrawal?.gateway === "lipapap") {
         if (["SUCCESS", "SETTLED", "APPROVED"].includes(status) || String(body.result || "").toUpperCase() === "SUCCESS") {
@@ -9069,14 +9074,18 @@ export async function registerRoutes(
       }
 
       // ── Validation des entrées ────────────────────────────────────────────────
-      const { merchantCountryId, amount, phone, operator, recipientName } = req.body;
-      if (!merchantCountryId || !amount || !phone) return res.status(400).json({ message: "Champs requis manquants" });
+        const { merchantCountryId, amount, phone, accountNumber, operator, recipientName } = req.body;
+        if (!merchantCountryId || !amount || (!phone && !accountNumber)) return res.status(400).json({ message: "Champs requis manquants" });
 
       // Validation stricte du numéro de téléphone (chiffres + indicatifs internationaux)
       const phoneClean = String(phone).trim();
-      if (!/^\+?[0-9\s\-().]{6,20}$/.test(phoneClean)) {
+        const accountNumberClean = String(accountNumber || "").replace(/[\s\-().]/g, "");
+        if (phone && !/^\+?[0-9\s\-().]{6,20}$/.test(phoneClean)) {
         return res.status(400).json({ message: "Numéro de téléphone invalide" });
       }
+        if (accountNumber && !/^[0-9]{6,34}$/.test(accountNumberClean)) {
+          return res.status(400).json({ message: "Numéro de compte bancaire invalide" });
+        }
       // Validation du montant : entier positif raisonnable
       const parsedAmount = Number(amount);
       if (!Number.isInteger(parsedAmount) || parsedAmount <= 0 || parsedAmount > 50_000_000) {
@@ -9111,6 +9120,14 @@ export async function registerRoutes(
       const useSendavaPayout = payoutGatewayLower === "sendavapay";
       const useClapayPayout = payoutGatewayLower === "clapay";
       const useLipaPapPayout = payoutGatewayLower === "lipapap" || payoutGatewayLower === "lipa";
+        const isBankTransfer = payoutOpRecord?.type === "Virement bancaire";
+        if (isBankTransfer && !accountNumberClean) {
+          return res.status(400).json({ message: "Le numéro de compte bancaire est requis pour ce mode de retrait." });
+        }
+        if (!isBankTransfer && !phoneClean) {
+          return res.status(400).json({ message: "Le numéro de téléphone est requis pour ce mode de retrait." });
+        }
+        const destinationValue = isBankTransfer ? accountNumberClean : phoneClean;
 
       const minAmountRaw = await storage.getSetting("withdrawal_min_amount");
       const withdrawalMinAmount = minAmountRaw ? parseInt(minAmountRaw) || 200 : 200;
@@ -9125,7 +9142,7 @@ export async function registerRoutes(
            AND status IN ('pending', 'approved')
            AND created_at > NOW() - INTERVAL '2 hours'
          ORDER BY created_at DESC LIMIT 1`,
-        [merchantId, phoneClean, parsedAmount, mc.country]
+          [merchantId, destinationValue, parsedAmount, mc.country]
       );
       if (recentDuplicate.rowCount && recentDuplicate.rowCount > 0) {
         const dup = recentDuplicate.rows[0];
@@ -9170,7 +9187,8 @@ export async function registerRoutes(
         merchantCountryId: mc.id,
         country: mc.country,
         amount: parsedAmount,
-        phone: phoneClean,
+          phone: destinationValue,
+          accountNumber: isBankTransfer ? accountNumberClean : null,
         recipientName: recipientName || null,
         operator: operator || null,
         status: "pending",
@@ -9589,15 +9607,16 @@ export async function registerRoutes(
           return res.status(400).json({ message: `Retrait LipaPap impossible : ${reason}. Votre solde a été restitué.` });
         }
         try {
-          const accountNumber = prependDialCode(phone, mc.country);
+          const payoutAccountNumber = isBankTransfer ? accountNumberClean : prependDialCode(phoneClean, mc.country);
           const result = await initiateLipaPapPayout(lipaConfig, {
             orderId: reference,
             amount: w.amount - (w.fees || 0),
             currency: lipapapCurrency(mc.country),
             beneficiaryName: recipientName || "Client WestPay",
-            accountNumber,
+            accountNumber: payoutAccountNumber,
             payerEmail,
             providerCode,
+            payerPhone: isBankTransfer ? undefined : payoutAccountNumber,
           });
           const resultStatus = String(result.status || result.result || "").toUpperCase();
           const accepted = ["ACCEPTED", "PROCESSING", "PENDING", "SUCCESS", "SETTLED"].includes(resultStatus)
@@ -9830,9 +9849,10 @@ export async function registerRoutes(
               amount: w.amount,
               currency: lipapapCurrency(w.country),
               beneficiaryName: (w as any).recipientName || WESTPAY_PAYOUT_BENEFICIARY,
-              accountNumber: prependDialCode(w.phone, w.country),
+              accountNumber: w.accountNumber || prependDialCode(w.phone, w.country),
               payerEmail,
               providerCode,
+              payerPhone: w.accountNumber ? undefined : prependDialCode(w.phone, w.country),
             });
             const resultStatus = String(result.status || result.result || "").toUpperCase();
             if (["ACCEPTED", "PROCESSING", "PENDING", "SUCCESS", "SETTLED"].includes(resultStatus)) {
@@ -10145,6 +10165,8 @@ export async function registerRoutes(
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
       const provider = requestedProvider || w.gateway || "sendavapay";
       if (provider === "lipapap" || provider === "lipa") {
+        const retryFees = w.fees || 0;
+        const retryNetAmount = w.amount - retryFees;
         const lipaConfig = await getLipaPapConfig().catch(() => undefined);
         const providerCode = lipaConfig
           ? lipapapPayoutProviderCode(w.country, w.operator || "", lipaConfig.payoutProviderCodes)
@@ -10155,12 +10177,13 @@ export async function registerRoutes(
         try {
           const result = await initiateLipaPapPayout(lipaConfig, {
             orderId: reference,
-            amount: netAmount,
+            amount: retryNetAmount,
             currency: lipapapCurrency(w.country),
             beneficiaryName: (w as any).recipientName || WESTPAY_PAYOUT_BENEFICIARY,
-            accountNumber: prependDialCode(w.phone, w.country),
+            accountNumber: w.accountNumber || prependDialCode(w.phone, w.country),
             payerEmail: lipaConfig.payerEmail,
             providerCode,
+            payerPhone: w.accountNumber ? undefined : prependDialCode(w.phone, w.country),
           });
           const resultStatus = String(result.status || result.result || "").toUpperCase();
           if (!["ACCEPTED", "PROCESSING", "PENDING", "SUCCESS", "SETTLED"].includes(resultStatus)) {

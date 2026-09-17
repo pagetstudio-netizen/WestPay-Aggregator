@@ -196,6 +196,7 @@ export const withdrawals = pgTable("withdrawals", {
   country: text("country").notNull(),
   amount: integer("amount").notNull(),
   phone: text("phone").notNull(),
+  accountNumber: text("account_number"),
   recipientName: text("recipient_name"),
   operator: text("operator"),
   status: text("status").notNull().default("pending"),
