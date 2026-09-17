@@ -64,3 +64,9 @@ The operator-code document lists Côte d'Ivoire MTN as operator ID `32` to send;
 **Why:** This validates the shared MD5 formula, CI country/network mapping, and application routing independently of the still-unsupported Togo Sandbox case.
 
 **How to apply:** Route CI MTN pay-ins through LipaPap with `momo_network_id=32`; do not send `433`. Keep `payer_ip` out of LipaPap pay-in payloads because the provider returned a decryption error when the application included it, while the same request without it succeeded.
+
+The supplied v5.3.1 documentation confirms Kenya M-Pesa pay-in through `STK_PUSH` with KES and a `2547...` phone number; this flow must not require `momo_network_id`. Nigeria is confirmed only for NIP bank payout: NGN, provider code `000033`, and a bank account number distinct from a mobile phone.
+
+**Why:** Nigeria's supplied documentation does not define a mobile-money pay-in operator or network id, while treating a bank account as a phone number would create an invalid payout request.
+
+**How to apply:** Route only Kenya M-Pesa to `STK_PUSH`; keep other pay-ins on their documented action. Route Nigeria NIP as a bank transfer with provider code `000033`, store/use `account_number` separately, and fail closed for Nigeria pay-in until LipaPap supplies its operator mapping.
