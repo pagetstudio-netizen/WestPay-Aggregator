@@ -1,6 +1,7 @@
 import { storage } from "./storage";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { LIPAPAP_DEFAULT_NETWORK_IDS } from "./lipapap";
 
 function generateSecureApiKey(country: string): string {
   const prefixes: Record<string, string> = {
@@ -219,6 +220,29 @@ async function ensureClapayOperatorsExist() {
 // deliberately a bank-transfer operator, not a mobile-money network.
 async function ensureLipaPapOperatorsExist() {
   try {
+    const currentNetworkIds = await storage.getSetting("lipapap_network_ids");
+    let networkIds: Record<string, unknown> = {};
+    try {
+      const candidate = currentNetworkIds ? JSON.parse(currentNetworkIds) : {};
+      if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+        networkIds = candidate;
+      }
+    } catch {
+      networkIds = {};
+    }
+
+    let networkIdsChanged = false;
+    for (const [networkCode, operatorId] of Object.entries(LIPAPAP_DEFAULT_NETWORK_IDS)) {
+      if (networkIds[networkCode] !== operatorId) {
+        networkIds[networkCode] = operatorId;
+        networkIdsChanged = true;
+      }
+    }
+    if (networkIdsChanged) {
+      await storage.setSetting("lipapap_network_ids", JSON.stringify(networkIds));
+      console.log("[SEED] IDs réseau LipaPap synchronisés depuis la colonne officielle id (send this)");
+    }
+
     const existing = await storage.getWithdrawalOperatorByNameAndCountry("NIP", "Nigeria");
     if (!existing) {
       await storage.createWithdrawalOperator({
