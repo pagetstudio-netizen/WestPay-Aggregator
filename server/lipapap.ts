@@ -153,7 +153,7 @@ export function buildLipaPapRequestHash(fields: {
     fields.payerPhone,
     fields.payerIp,
     secretKey,
-  ].map((part) => part == null ? "" : String(part)).join("");
+  ].map((part) => part == null ? "" : String(part)).join("").toUpperCase();
   return hmacSha256(value, secretKey);
 }
 
