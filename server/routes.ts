@@ -4829,7 +4829,9 @@ export async function registerRoutes(
           return res.json({
             success: true,
             paymentId: pending.id,
-            omnipay: true,
+            gateway: "lipapap",
+            provider: "LipaPap",
+            reference,
             omnipayReference: reference,
             paymentUrl: result.redirect_url || null,
             polling: true,
@@ -5013,7 +5015,7 @@ export async function registerRoutes(
           if (!operatorId) {
             // Pas d'opérateur trouvé → polling, le webhook confirmera
             console.warn("[SENDAVAPAY] Opérateur introuvable — passage en polling");
-            return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, proxyToken: spProxyToken, polling: true, fees: 0 });
+            return res.json({ success: true, paymentId: pending.id, sendavapay: true, gateway: "sendavapay", provider: "SendavaPay", reference: spReference, omnipayReference: spReference, proxyToken: spProxyToken, polling: true, fees: 0 });
           }
 
           try {
@@ -5029,7 +5031,7 @@ export async function registerRoutes(
             if (!initResult.success) {
               // SERVER_ERROR ou PAYMENT_IN_PROGRESS → polling (le webhook arrivera)
               if (initResult.code === "SERVER_ERROR" || initResult.code === "PAYMENT_IN_PROGRESS") {
-                return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, proxyToken: spProxyToken, polling: true, fees: 0 });
+                return res.json({ success: true, paymentId: pending.id, sendavapay: true, gateway: "sendavapay", provider: "SendavaPay", reference: spReference, omnipayReference: spReference, proxyToken: spProxyToken, polling: true, fees: 0 });
               }
               const errMsg = initResult.error || initResult.message || "Erreur initiation paiement";
               console.error(`[SENDAVAPAY] initiate-payment erreur: ${errMsg}`);
@@ -5037,7 +5039,7 @@ export async function registerRoutes(
             }
 
             if (initResult.requiresRedirect && initResult.redirectUrl) {
-              return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, proxyToken: spProxyToken, paymentUrl: initResult.redirectUrl, fees: 0 });
+              return res.json({ success: true, paymentId: pending.id, sendavapay: true, gateway: "sendavapay", provider: "SendavaPay", reference: spReference, omnipayReference: spReference, proxyToken: spProxyToken, paymentUrl: initResult.redirectUrl, fees: 0 });
             }
             if (initResult.requiresOtp) {
               // Store the OTP token server-side so the proxy submit-otp route can use it
@@ -5045,10 +5047,10 @@ export async function registerRoutes(
               if (initResult.otpToken) {
                 await storage.updatePendingPaymentOtpToken(pending.id, initResult.otpToken);
               }
-              return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, proxyToken: spProxyToken, requiresOtp: true, fees: 0 });
+              return res.json({ success: true, paymentId: pending.id, sendavapay: true, gateway: "sendavapay", provider: "SendavaPay", reference: spReference, omnipayReference: spReference, proxyToken: spProxyToken, requiresOtp: true, fees: 0 });
             }
             // Succès normal : push USSD envoyé → polling
-            return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, proxyToken: spProxyToken, polling: true, fees: 0 });
+            return res.json({ success: true, paymentId: pending.id, sendavapay: true, gateway: "sendavapay", provider: "SendavaPay", reference: spReference, omnipayReference: spReference, proxyToken: spProxyToken, polling: true, fees: 0 });
           } catch (initErr: any) {
             console.error("[SENDAVAPAY] Erreur initiation paiement:", initErr.message);
             // Timeout ou erreur réseau → polling quand même (le webhook peut confirmer)
@@ -5167,7 +5169,9 @@ export async function registerRoutes(
           res.json({
             success: true,
             paymentId: pending.id,
-            omnipay: true,
+            gateway: "mbiyo",
+            provider: "MbiyoPay",
+            reference,
             omnipayReference: reference,
             paymentUrl: paymentUrl || (network === "wave" ? returnUrl : null),
             fees: mbiyoResult.data.fee || 0,
@@ -5282,6 +5286,9 @@ export async function registerRoutes(
             success: true,
             paymentId: pending.id,
             seapay: true,
+            gateway: "seapay",
+            provider: "SeaPay",
+            reference,
             omnipayReference: reference,
             paymentUrl,
             fees: 0,
@@ -5421,6 +5428,9 @@ export async function registerRoutes(
             success: true,
             paymentId: pending.id,
             clapay: true,
+            gateway: "clapay",
+            provider: "ClaPay",
+            reference,
             omnipayReference: reference,
             paymentUrl,
             fees: 0,
@@ -5538,7 +5548,9 @@ export async function registerRoutes(
           res.json({
             success: true,
             paymentId: pending.id,
-            omnipay: true,
+            gateway: "omnipay",
+            provider: "OmniPay",
+            reference,
             omnipayReference: reference,
             paymentUrl: omnipayResult.payment_url || null,
             fees: omnipayResult.fees || 0,
