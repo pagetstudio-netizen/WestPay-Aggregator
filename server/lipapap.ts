@@ -27,9 +27,9 @@ export const LIPAPAP_CURRENCY_MAP: Record<string, string> = {
 };
 
 /**
- * Operator identifiers from the supplied LipaPap network list.
- * This is reference metadata used to normalize the selected country/operator.
- * LipaPap values themselves are loaded from administrator settings.
+ * Operator identifiers from the supplied LipaPap operator-code document.
+ * These are the values from the `id (send this)` column. The separate
+ * `Lipapap_code` column is reference-only and must never be sent.
  */
 export const LIPAPAP_NETWORKS = [
   { code: "AIRTELTIGO_MONEY_GH", name: "AirtelTigo Money", country: "Ghana" },
@@ -53,6 +53,31 @@ export const LIPAPAP_NETWORKS = [
   { code: "ORANGE_MONEY_ML", name: "Orange Money", country: "Mali" },
   { code: "TMONEY_TG", name: "T-Money", country: "Togo" },
 ] as const;
+
+/**
+ * Official mobile-money operator IDs supplied by LipaPap.
+ * Kenya M-Pesa is included for reference (`1`), but the documented
+ * STK_PUSH request intentionally does not send `momo_network_id`.
+ */
+export const LIPAPAP_DEFAULT_NETWORK_IDS: Record<string, number> = {
+  MOOV_MONEY_BF: 26,
+  ORANGE_MONEY_BF: 25,
+  MTN_MOMO_BJ: 23,
+  MOOV_MONEY_BJ: 24,
+  ORANGE_MONEY_CI: 29,
+  MTN_MOMO_CI: 32,
+  MOOV_MONEY_CI: 31,
+  WAVE_CI: 30,
+  ORANGE_MONEY_CM: 27,
+  MTN_MOMO_CM: 28,
+  ORANGE_MONEY_ML: 22,
+  MOOV_MONEY_ML: 21,
+  MTN_MOMO_GH: 8,
+  VODAFONE_CASH_GH: 9,
+  AIRTELTIGO_MONEY_GH: 10,
+  MPESA_KE: 1,
+  TMONEY_TG: 20,
+};
 
 export function lipapapPayoutProviderCode(
   country: string,

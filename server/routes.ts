@@ -100,6 +100,7 @@ import {
   verifyLipaPapResponseHash,
   lipapapCurrency,
   lipapapNetworkCode,
+  LIPAPAP_DEFAULT_NETWORK_IDS,
   lipapapPayoutProviderCode,
   type LipaPapConfig,
 } from "./lipapap";
@@ -379,12 +380,14 @@ async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
   ]);
   if (!clientKey || !secretKey || !paymentUrl) return undefined;
 
-  let networkIds: Record<string, string | number> = {};
+  let networkIds: Record<string, string | number> = { ...LIPAPAP_DEFAULT_NETWORK_IDS };
   if (networkIdsJson) {
     try {
       const parsed = JSON.parse(networkIdsJson);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("objet attendu");
-      networkIds = Object.fromEntries(
+      networkIds = {
+        ...LIPAPAP_DEFAULT_NETWORK_IDS,
+        ...Object.fromEntries(
         Object.entries(parsed)
           .filter((entry): entry is [string, string | number] =>
             typeof entry[0] === "string" &&
@@ -392,7 +395,8 @@ async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
             String(entry[1]).trim() !== "",
           )
           .map(([key, value]) => [key, typeof value === "number" ? value : value.trim()]),
-      );
+        ),
+      };
     } catch {
       throw new Error("La configuration lipapap_network_ids doit être un JSON objet valide");
     }
@@ -7573,7 +7577,7 @@ export async function registerRoutes(
       let networkMappingCount = 0;
       let payoutCodeCount = 0;
       try {
-        const parsed = networkIdsJson ? JSON.parse(networkIdsJson) : {};
+        const parsed = networkIdsJson ? JSON.parse(networkIdsJson) : LIPAPAP_DEFAULT_NETWORK_IDS;
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
           networkMappingCount = Object.entries(parsed).filter(([, value]) =>
             (typeof value === "string" || typeof value === "number") && String(value).trim() !== "",
@@ -7619,7 +7623,7 @@ export async function registerRoutes(
         action: action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMO",
         locale: locale || "",
         connectorName: connectorName || "",
-        networkIdsJson: networkIdsJson || "{}",
+        networkIdsJson: networkIdsJson || JSON.stringify(LIPAPAP_DEFAULT_NETWORK_IDS),
         payoutCodesJson: payoutCodesJson || "{}",
         configured: payinConfigured && payoutConfigured,
         payinConfigured,
