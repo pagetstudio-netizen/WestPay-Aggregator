@@ -107,7 +107,11 @@ export function lipapapNetworkCode(country: string, operator: string): string | 
     (item.name.toLowerCase().replace(/[\s\-_]+/g, "") === normalized ||
       item.code.toLowerCase().replace(/[\s\-_]+/g, "") === normalized)
   );
-  return network?.code;
+  if (network?.code) return network.code;
+  if (country === "Kenya" && normalized.includes("safaricom") && normalized.includes("mpesa")) {
+    return "MPESA_KE";
+  }
+  return undefined;
 }
 
 function hmacSha256(value: string, secretKey: string): string {
