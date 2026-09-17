@@ -52,3 +52,9 @@ With the shared MD5 formula, numeric Togo MSISDN `22872086435` passes LipaPap's 
 **Why:** This isolates the remaining pay-in failure to phone canonicalization/number eligibility rather than the shared hash.
 
 **How to apply:** Preserve the numeric representation for signing and obtain LipaPap's exact accepted T-Money Sandbox phone format before another real retry.
+
+Using the provider-confirmed PHP formula independently for local `72086435`, international `22872086435`, and `+22872086435` all produced 32-character hashes and all reached LipaPap, which returned `Invalid mobile number` for each.
+
+**Why:** Testing all three canonical phone representations isolates the remaining failure to the Sandbox number's eligibility or T-Money test data, not hash formatting.
+
+**How to apply:** Ask LipaPap for a valid Togo/T-Money Sandbox test MSISDN and confirm the account's network mapping before further retries.
