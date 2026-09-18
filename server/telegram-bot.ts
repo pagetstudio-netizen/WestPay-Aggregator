@@ -1047,7 +1047,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       if (linked) {
         await ctx.reply(merchantBotText(linked.telegramBotLanguage).alreadyLinked(linked.name), { parse_mode: "Markdown" });
       } else {
-        await ctx.reply("🔒 此机器人仅供已获授权的 WestPay 商户使用。\n\n如果您是商户，请向您的管理员申请激活码。", { parse_mode: "Markdown" });
+        await ctx.reply("🔒 Ce bot est réservé aux marchands WestPay autorisés.\n\nSi vous êtes marchand, demandez un code d'activation à votre administrateur.", { parse_mode: "Markdown" });
       }
       return;
     }
@@ -2793,7 +2793,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         const candidate = ipMatch[1];
         console.log(`[TG] IP détectée (texte) dans groupe marchand ${chatId}: ${candidate}`);
 
-        await ctx.reply("请稍等，我这就添加。");
+        await ctx.reply("⏳ Ajout de l’adresse IP en cours...");
         await whitelistMerchantIp(ctx, candidate, merchant);
         return;
       }
@@ -2801,7 +2801,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       // Message privé d'un utilisateur non lié
       const merchant = await storage.getMerchantByTelegramChatId(chatId);
       if (!merchant) {
-        await ctx.reply("🔒 此机器人仅供已获授权的 WestPay 商户使用。\n\n如果您是商户，请向您的管理员申请激活码。");
+        await ctx.reply("🔒 Ce bot est réservé aux marchands WestPay autorisés.\n\nSi vous êtes marchand, demandez un code d'activation à votre administrateur.");
       }
     } catch (e: any) {
       console.error("[TG] catch-all message error:", e?.message);
@@ -3005,6 +3005,11 @@ const NOTIFY_TRANSLATIONS: Record<string, {
   country: string;
   via: string;
   mobileMoney: string;
+  grossReceived: string;
+  westpayFee: string;
+  netCredited: string;
+  amountCredited: string;
+  noFee: string;
   balanceHeader: string;
   totalBalance: string;
   payoutBalance: string;
@@ -3020,6 +3025,11 @@ const NOTIFY_TRANSLATIONS: Record<string, {
     country: "🌍 *Pays :*",
     via: "📡 *Via :*",
     mobileMoney: "Mobile Money",
+    grossReceived: "💳 *Brut reçu :*",
+    westpayFee: "📉 *Frais WestPay",
+    netCredited: "✅ *Net crédité :*",
+    amountCredited: "💳 *Montant crédité :*",
+    noFee: "sans frais",
     balanceHeader: `🧡🧡 *Solde compte* 🧡🧡`,
     totalBalance: "💰 Solde total :",
     payoutBalance: "💳 Solde reversement :",
@@ -3035,6 +3045,11 @@ const NOTIFY_TRANSLATIONS: Record<string, {
     country: "🌍 *Country:*",
     via: "📡 *Via:*",
     mobileMoney: "Mobile Money",
+    grossReceived: "💳 *Gross received:*",
+    westpayFee: "📉 *WestPay fee",
+    netCredited: "✅ *Net credited:*",
+    amountCredited: "💳 *Amount credited:*",
+    noFee: "no fee",
     balanceHeader: `🧡🧡 *Account Balance* 🧡🧡`,
     totalBalance: "💰 Total balance:",
     payoutBalance: "💳 Payout balance:",
@@ -3050,6 +3065,11 @@ const NOTIFY_TRANSLATIONS: Record<string, {
     country: "🌍 *国家：*",
     via: "📡 *通过：*",
     mobileMoney: "手机支付",
+    grossReceived: "💳 *收到总额：*",
+    westpayFee: "📉 *WestPay 手续费",
+    netCredited: "✅ *入账净额：*",
+    amountCredited: "💳 *入账金额：*",
+    noFee: "无手续费",
     balanceHeader: `🧡🧡 *账户余额* 🧡🧡`,
     totalBalance: "💰 总余额：",
     payoutBalance: "💳 付款余额：",
@@ -3065,6 +3085,11 @@ const NOTIFY_TRANSLATIONS: Record<string, {
     country: "🌍 *Land:*",
     via: "📡 *Über:*",
     mobileMoney: "Mobile Money",
+    grossReceived: "💳 *Brutto erhalten:*",
+    westpayFee: "📉 *WestPay-Gebühr",
+    netCredited: "✅ *Netto gutgeschrieben:*",
+    amountCredited: "💳 *Gutgeschriebener Betrag:*",
+    noFee: "gebührenfrei",
     balanceHeader: `🧡🧡 *Kontostand* 🧡🧡`,
     totalBalance: "💰 Gesamtguthaben:",
     payoutBalance: "💳 Auszahlungssaldo:",
@@ -3080,6 +3105,11 @@ const NOTIFY_TRANSLATIONS: Record<string, {
     country: "🌍 *देश:*",
     via: "📡 *माध्यम:*",
     mobileMoney: "मोबाइल मनी",
+    grossReceived: "💳 *प्राप्त सकल राशि:*",
+    westpayFee: "📉 *WestPay शुल्क",
+    netCredited: "✅ *जमा शुद्ध राशि:*",
+    amountCredited: "💳 *जमा राशि:*",
+    noFee: "बिना शुल्क",
     balanceHeader: `🧡🧡 *खाता शेष* 🧡🧡`,
     totalBalance: "💰 कुल शेष:",
     payoutBalance: "💳 निकासी शेष:",
@@ -3101,7 +3131,7 @@ export async function notifyMerchantPayment(merchantId: number, data: {
     const merchant = await storage.getMerchantById(merchantId);
     if (!merchant?.telegramChatId) return;
 
-    const lang = merchant.telegramBotLanguage || "fr";
+    const lang = normalizeBotLanguage(merchant.telegramBotLanguage);
     const t = NOTIFY_TRANSLATIONS[lang] || NOTIFY_TRANSLATIONS["fr"];
 
     const countries = await storage.getMerchantCountries(merchantId);
@@ -3131,21 +3161,13 @@ export async function notifyMerchantPayment(merchantId: number, data: {
     const westpayFee = Math.round(grossAmount * feeRate);
     const netCredited = grossAmount - westpayFee;
 
-    const feeLinesFr = feeRate > 0 ? [
-      `💳 *Brut reçu :* ${formatAmountC(grossAmount, data.country)}`,
-      `📉 *Frais WestPay (${feePct}%) :* -${formatAmountC(westpayFee, data.country)}`,
-      `✅ *Net crédité :* ${formatAmountC(netCredited, data.country)}`,
+    const feeLines = feeRate > 0 ? [
+      `${t.grossReceived} ${formatAmountC(grossAmount, data.country)}`,
+      `${t.westpayFee} (${lang === "fr" ? feePct : feePctEn}%):* -${formatAmountC(westpayFee, data.country)}`,
+      `${t.netCredited} ${formatAmountC(netCredited, data.country)}`,
     ] : [
-      `💳 *Montant crédité :* ${formatAmountC(grossAmount, data.country)} *(sans frais)*`,
+      `${t.amountCredited} ${formatAmountC(grossAmount, data.country)} *(${t.noFee})*`,
     ];
-    const feeLinesEn = feeRate > 0 ? [
-      `💳 *Gross received:* ${formatAmountC(grossAmount, data.country)}`,
-      `📉 *WestPay fee (${feePctEn}%):* -${formatAmountC(westpayFee, data.country)}`,
-      `✅ *Net credited:* ${formatAmountC(netCredited, data.country)}`,
-    ] : [
-      `💳 *Amount credited:* ${formatAmountC(grossAmount, data.country)} *(no fee)*`,
-    ];
-    const feeLines = lang === "fr" ? feeLinesFr : feeLinesEn;
 
     const msg = [
       t.header(countryLabel(data.country)),
@@ -3153,8 +3175,8 @@ export async function notifyMerchantPayment(merchantId: number, data: {
       t.newPayment,
       ``,
       ...feeLines,
-      `📞 *Payeur :* ${data.payerNumber || "N/A"}`,
-      `🌍 *Pays :* ${countryLabel(data.country)}`,
+      `${t.payer} ${data.payerNumber || "N/A"}`,
+      `${t.country} ${countryLabel(data.country)}`,
       `🔖 *TX :* \`${data.txId}\``,
       ``,
       t.balanceHeader,
@@ -3560,6 +3582,7 @@ const WITHDRAWAL_TRANSLATIONS: Record<string, {
   amountSent: string;
   phone: string;
   country: string;
+  account: string;
   operator: string;
   status: string;
   date: string;
@@ -3577,6 +3600,7 @@ const WITHDRAWAL_TRANSLATIONS: Record<string, {
     amountSent: "Montant envoyé",
     phone: "Numéro de réception",
     country: "Pays",
+    account: "Compte bancaire",
     operator: "Opérateur",
     status: "Statut",
     date: "Date",
@@ -3594,6 +3618,7 @@ const WITHDRAWAL_TRANSLATIONS: Record<string, {
     amountSent: "Amount sent",
     phone: "Receiving number",
     country: "Country",
+    account: "Bank account",
     operator: "Operator",
     status: "Status",
     date: "Date",
@@ -3611,6 +3636,7 @@ const WITHDRAWAL_TRANSLATIONS: Record<string, {
     amountSent: "发送金额",
     phone: "收款号码",
     country: "国家",
+    account: "银行账户",
     operator: "运营商",
     status: "状态",
     date: "日期",
@@ -3628,6 +3654,7 @@ const WITHDRAWAL_TRANSLATIONS: Record<string, {
     amountSent: "Gesendeter Betrag",
     phone: "Empfangsnummer",
     country: "Land",
+    account: "Bankkonto",
     operator: "Betreiber",
     status: "Status",
     date: "Datum",
@@ -3645,6 +3672,7 @@ const WITHDRAWAL_TRANSLATIONS: Record<string, {
     amountSent: "भेजी गई राशि",
     phone: "प्राप्त नंबर",
     country: "देश",
+    account: "बैंक खाता",
     operator: "ऑपरेटर",
     status: "स्थिति",
     date: "तिथि",
@@ -3765,7 +3793,7 @@ export async function notifyMerchantWithdrawal(merchantId: number, data: {
     const withdrawal = await storage.getWithdrawalById(data.id).catch(() => undefined);
     const accountNumber = data.accountNumber || withdrawal?.accountNumber || null;
 
-    const lang = (merchant as any).telegramBotLanguage || "fr";
+    const lang = normalizeBotLanguage((merchant as any).telegramBotLanguage);
     const tw = WITHDRAWAL_TRANSLATIONS[lang] || WITHDRAWAL_TRANSLATIONS["fr"];
 
     const dateStr = new Date().toLocaleString(tw.dateLocale, {
@@ -3784,7 +3812,7 @@ export async function notifyMerchantWithdrawal(merchantId: number, data: {
       `💰 *${tw.amountRequested} :* ${formatAmountC(data.amount, data.country)}`,
       data.fees > 0 ? `💵 *${tw.fees} :* ${formatAmountC(data.fees, data.country)}` : null,
       data.fees > 0 ? `✅ *${tw.amountSent} :* ${formatAmountC(net, data.country)}` : null,
-      accountNumber ? `🏦 *Compte bancaire :* ${accountNumber}` : `📞 *${tw.phone} :* ${data.phone}`,
+      accountNumber ? `🏦 *${tw.account} :* ${accountNumber}` : `📞 *${tw.phone} :* ${data.phone}`,
       `🌍 *${tw.country} :* ${countryLabel(data.country)}`,
       data.operator ? `📱 *${tw.operator} :* ${data.operator}` : null,
       `📊 *${tw.status} :* ${statusLabel}`,
@@ -3811,7 +3839,7 @@ export async function notifyMerchantWalletTransfer(merchantId: number, data: {
     const merchant = await storage.getMerchantById(merchantId);
     if (!merchant?.telegramChatId) return;
 
-    const lang = (merchant as any).telegramBotLanguage || "fr";
+    const lang = normalizeBotLanguage((merchant as any).telegramBotLanguage);
     const tt = TRANSFER_TRANSLATIONS[lang] || TRANSFER_TRANSLATIONS["fr"];
 
     const dateStr = new Date().toLocaleString(tt.dateLocale, {

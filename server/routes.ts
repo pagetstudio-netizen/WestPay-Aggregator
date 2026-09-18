@@ -3739,7 +3739,7 @@ export async function registerRoutes(
     try {
       const merchantId = parseInt(req.params.id);
       const { language } = req.body;
-      const allowed = ["fr", "en", "zh", "de"];
+      const allowed = ["fr", "en", "zh", "de", "hi"];
       if (!allowed.includes(language)) return res.status(400).json({ message: "Langue non supportee" });
       await storage.updateMerchantTelegramBotLanguage(merchantId, language);
       res.json({ success: true });
