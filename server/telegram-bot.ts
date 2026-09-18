@@ -545,6 +545,62 @@ function merchantHelpMessage(name: string, language?: unknown): string {
   return merchantBotText(language).helpMessage(name);
 }
 
+const MERCHANT_BALANCE_LABELS: Record<BotLanguage, {
+  noActive: (name: string) => string;
+  country: string;
+  key: string;
+  accountBalance: string;
+  payoutBalance: string;
+  successfulDeposits: string;
+  successRate: string;
+}> = {
+  fr: {
+    noActive: (name) => `_Aucun pays actif pour ${name}_`,
+    country: "Pays",
+    key: "Clé",
+    accountBalance: "Solde compte",
+    payoutBalance: "Solde reversement",
+    successfulDeposits: "Dépôts réussis aujourd'hui",
+    successRate: "Taux de réussite aujourd'hui",
+  },
+  en: {
+    noActive: (name) => `_No active country for ${name}_`,
+    country: "Country",
+    key: "Key",
+    accountBalance: "Account balance",
+    payoutBalance: "Payout balance",
+    successfulDeposits: "Successful deposits today",
+    successRate: "Success rate today",
+  },
+  zh: {
+    noActive: (name) => `_${name} 没有启用的国家_`,
+    country: "国家",
+    key: "密钥",
+    accountBalance: "账户余额",
+    payoutBalance: "提现余额",
+    successfulDeposits: "今日成功存款",
+    successRate: "今日成功率",
+  },
+  de: {
+    noActive: (name) => `_Kein aktives Land für ${name}_`,
+    country: "Land",
+    key: "Schlüssel",
+    accountBalance: "Kontostand",
+    payoutBalance: "Auszahlungssaldo",
+    successfulDeposits: "Erfolgreiche Einzahlungen heute",
+    successRate: "Erfolgsquote heute",
+  },
+  hi: {
+    noActive: (name) => `_${name} के लिए कोई सक्रिय देश नहीं है_`,
+    country: "देश",
+    key: "कुंजी",
+    accountBalance: "खाता बैलेंस",
+    payoutBalance: "निकासी बैलेंस",
+    successfulDeposits: "आज के सफल जमा",
+    successRate: "आज की सफलता दर",
+  },
+};
+
 // ─── Security helpers ─────────────────────────────────────────────────────────
 async function getAdminGroupId(): Promise<string | undefined> {
   const now = Date.now();
@@ -615,21 +671,22 @@ function successRate(success: number, total: number): string {
 }
 
 // ─── Solde par pays (format enrichi) ─────────────────────────────────────────
-async function buildMerchantSoldeMessage(merchantId: number, merchantName: string): Promise<string> {
+async function buildMerchantSoldeMessage(merchantId: number, merchantName: string, language: unknown = "fr"): Promise<string> {
+  const labels = MERCHANT_BALANCE_LABELS[normalizeBotLanguage(language)];
   const countries = await storage.getMerchantCountries(merchantId);
   const active = countries.filter(mc => mc.active);
-  if (active.length === 0) return `_Aucun pays actif pour ${merchantName}_`;
+  if (active.length === 0) return labels.noActive(merchantName);
 
   const parts: string[] = [];
   for (const mc of active) {
     const stats = await getTodayStatsByCountry(merchantId, mc.country);
     parts.push(
-      `🌍 *Pays :* ${countryLabel(mc.country)}\n` +
-      `📌 *Clé :* \`${mc.apiKey.slice(-12)}\`\n` +
-      `💰 *Solde compte :* ${formatAmountPlain(mc.balance)} ${currencyForCountry(mc.country)}\n` +
-      `💳 *Solde reversement :* ${formatAmountPlain(mc.balance)} ${currencyForCountry(mc.country)}\n` +
-      `📊 *Dépôts réussis aujourd'hui :* ${stats.success}\n` +
-      `📈 *Taux de réussite aujourd'hui :* ${successRate(stats.success, stats.total)}`
+      `🌍 *${labels.country} :* ${countryLabel(mc.country)}\n` +
+      `📌 *${labels.key} :* \`${mc.apiKey.slice(-12)}\`\n` +
+      `💰 *${labels.accountBalance} :* ${formatAmountPlain(mc.balance)} ${currencyForCountry(mc.country)}\n` +
+      `💳 *${labels.payoutBalance} :* ${formatAmountPlain(mc.balance)} ${currencyForCountry(mc.country)}\n` +
+      `📊 *${labels.successfulDeposits} :* ${stats.success}\n` +
+      `📈 *${labels.successRate} :* ${successRate(stats.success, stats.total)}`
     );
   }
   return parts.join("\n\n─────────────────\n\n");
