@@ -39,7 +39,6 @@ import {
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
-import { providerLabel } from "@shared/provider-labels";
 
 type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "sendavapay" | "lipapap" | "seapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge" | "actionlogs";
 
@@ -1777,7 +1776,7 @@ function TransactionsPanel() {
   };
 
   const getProviderName = (provider: string | null | undefined, ref: string | null | undefined): string => {
-    return providerLabel(provider, ref);
+    return "WestPay";
   };
 
   return (

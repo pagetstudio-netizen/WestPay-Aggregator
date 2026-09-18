@@ -9,7 +9,6 @@ import { db, pool, financialDb, financialPool } from "./db";
 import { generateSecret as totpGenerateSecret, generateURI as totpGenerateURI, verifySync as totpVerifySync } from "otplib";
 import QRCode from "qrcode";
 import { admins, merchantCountries, transactions, pendingPayments } from "@shared/schema";
-import { resolveProviderCode } from "@shared/provider-labels";
 import { normalizeEmailInput } from "@shared/email-validation";
 import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
@@ -3418,7 +3417,7 @@ export async function registerRoutes(
         merchantName: merchantMap.get(t.merchantId) || `Marchand #${t.merchantId}`,
         payerNumber: t.payerNumber,
         operator: t.operator,
-        provider: resolveProviderCode(t.provider, t.omnipayReference),
+        provider: "westpay",
         omnipayReference: t.omnipayReference,
         errorMessage: t.errorMessage,
         createdAt: t.createdAt,
@@ -3436,7 +3435,7 @@ export async function registerRoutes(
         merchantName: w.merchantName,
         payerNumber: w.phone,
         operator: w.operator,
-        provider: resolveProviderCode(w.gateway, w.omnipayRef),
+        provider: "westpay",
         omnipayReference: w.omnipayRef,
         errorMessage: w.adminNote,
         createdAt: w.createdAt,
@@ -3476,7 +3475,7 @@ export async function registerRoutes(
           merchantName: merchantMap.get(p.merchantId) || `Marchand #${p.merchantId}`,
           payerNumber: p.payerPhone,
           operator: p.paymentMethod,
-          provider: resolveProviderCode((p as any).gateway, p.omnipayReference),
+          provider: "westpay",
           omnipayReference: p.omnipayReference,
           errorMessage: (p as any).errorMessage || null,
           createdAt: p.createdAt,
@@ -3787,7 +3786,7 @@ export async function registerRoutes(
       // Sanitize: never expose internal provider/gateway names to merchants
       const sanitized = txs.map((t: any) => ({
         ...t,
-        provider: resolveProviderCode(t.provider, t.omnipayReference),
+        provider: "westpay",
         errorMessage: t.errorMessage
           ? sanitizePublicPaymentMessage(t.errorMessage)
           : t.errorMessage,

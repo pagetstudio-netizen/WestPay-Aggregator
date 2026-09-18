@@ -28,7 +28,6 @@ import {
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry, Withdrawal } from "@shared/schema";
-import { providerLabel as getProviderLabel } from "@shared/provider-labels";
 import { useLanguage, LANGUAGES } from "@/lib/language";
 import { sanitizePaymentMessage } from "@/lib/sanitize-payment-message";
 import { copyTextToClipboard } from "@/lib/clipboard";
@@ -525,10 +524,8 @@ function TransactionDetailDrawer({ tx, onClose }: { tx: any; onClose: () => void
       ? { label: t("pendingLabel"), title: t("transactionPending"), bg: "#fffbeb", color: "#d97706", border: "#fde68a", iconBg: "#f59e0b", dot: "#f59e0b" }
       : { label: t("failedLabel"), title: t("transactionFailed"), bg: "#fef2f2", color: "#dc2626", border: "#fecaca", iconBg: "#dc2626", dot: "#ef4444" };
 
-  const providerLabel = (p: string, ref?: string | null) => {
-    if (p === "crypto") return t("cryptoProvider");
-    if (p === "sms") return t("smsProvider");
-    return getProviderLabel(p, ref);
+  const providerLabel = (_p: string, _ref?: string | null) => {
+    return "WestPay";
   };
 
   const transactionCurrency = tx.currency || countryToCurrency(tx.country || "");
@@ -648,10 +645,8 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
       ? { label: t("pending"), bg: "#fffbeb", color: "#d97706", border: "#fde68a", dot: "#f59e0b" }
       : { label: t("failed"), bg: "#fef2f2", color: "#dc2626", border: "#fecaca", dot: "#ef4444" };
 
-  const providerLabel = (p: string, ref?: string | null) => {
-    if (p === "crypto") return t("cryptoProvider");
-    if (p === "sms") return t("smsProvider");
-    return getProviderLabel(p, ref);
+  const providerLabel = (_p: string, _ref?: string | null) => {
+    return "WestPay";
   };
 
   return (
@@ -756,14 +751,7 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
             data-testid="select-filter-provider"
           >
             <option value="all">{t("all")}</option>
-            <option value="omnipay">OmniPay</option>
-            <option value="lipapap">LipaPap</option>
-            <option value="clapay">ClaPay</option>
-            <option value="mbiyo">Mbiyo</option>
-            <option value="sendavapay">SendavaPay</option>
-            <option value="seapay">SeaPay</option>
-            <option value="sms">SMS</option>
-            <option value="crypto">Crypto</option>
+            <option value="westpay">WestPay</option>
           </select>
         </div>
       </div>
