@@ -1073,7 +1073,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
 
     const existingMerchant = await storage.getMerchantByTelegramChatId(chatId);
     if (existingMerchant) {
-      await ctx.reply(`ℹ️ Ce compte Telegram est déjà lié à *${existingMerchant.name}*.`, { parse_mode: "Markdown" });
+      await ctx.reply(merchantBotText(existingMerchant.telegramBotLanguage).alreadyLinked(existingMerchant.name), { parse_mode: "Markdown" });
       return;
     }
 
@@ -1345,7 +1345,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           const merchants = await storage.getMerchants();
           if (merchants.length === 0) { await ctx.reply("Aucun marchand enregistré."); return; }
           for (const m of merchants.filter(m => !m.suspended).slice(0, 10)) {
-            const msg = await buildMerchantSoldeMessage(m.id, m.name);
+            const msg = await buildMerchantSoldeMessage(m.id, m.name, m.telegramBotLanguage);
             await ctx.reply(`🏪 *${m.name}*\n\n${msg}`, { parse_mode: "Markdown" });
           }
         } catch { await ctx.reply("❌ Erreur."); }
