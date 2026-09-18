@@ -70,3 +70,9 @@ The supplied v5.3.1 documentation confirms Kenya M-Pesa pay-in through `STK_PUSH
 **Why:** Nigeria's supplied documentation does not define a mobile-money pay-in operator or network id, while treating a bank account as a phone number would create an invalid payout request.
 
 **How to apply:** Route only Kenya M-Pesa to `STK_PUSH`; keep other pay-ins on their documented action. Route Nigeria NIP as a bank transfer with provider code `000033`, store/use `account_number` separately, and fail closed for Nigeria pay-in until LipaPap supplies its operator mapping.
+
+The pay-in initiation can be accepted while the current transaction-status probe returns `ERROR` with a “Missing required fields” response, even when the JSON includes `client_key`, `transactionId`, and `hash`; the status endpoint/schema is not yet confirmed.
+
+**Why:** LipaPap’s status response did not match the initiation endpoint’s JSON contract, so treating that probe result as a payment failure could misclassify an accepted live payment.
+
+**How to apply:** Keep live payment records pending until LipaPap confirms the exact status endpoint, content type, field names, and signing formula; do not retry the payment just because the status probe returns this error.

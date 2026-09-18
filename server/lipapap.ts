@@ -371,7 +371,7 @@ export async function getLipaPapTransactionStatus(
   const body = {
     action: "GET_TRANS_STATUS",
     client_key: config.clientKey,
-    trans_id: transactionId,
+    transactionId,
     hash: buildLipaPapResponseHash({
       action: "GET_TRANS_STATUS",
       status: "",
