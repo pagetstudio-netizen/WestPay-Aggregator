@@ -359,15 +359,191 @@ async function getMerchantForGroup(chatId: string) {
   return merchant;
 }
 
-const MERCHANT_AIDE_MSG = (name: string) =>
-  `📖 *Commandes disponibles — ${name}*\n\n` +
-  `💰 /solde — Solde détaillé par pays\n` +
-  `📋 /transactions — Les 5 dernières transactions\n` +
-  `📊 /stats — Vos statistiques globales\n` +
-  `🌐 /addip ADRESSE\\_IP — Ajouter une IP à la whitelist\n` +
-  `❓ /aide — Afficher cette aide\n\n` +
-  `📲 *Notifications automatiques*\nChaque paiement confirmé est affiché ici en temps réel.\n\n` +
-  `💡 *Astuce IP :* Si le bot ne répond pas quand vous envoyez une IP en texte, utilisez la commande \`/addip 1.2.3.4\` à la place.`;
+type BotLanguage = "fr" | "en" | "zh" | "de" | "hi";
+
+const BOT_DATE_LOCALES: Record<BotLanguage, string> = {
+  fr: "fr-FR",
+  en: "en-GB",
+  zh: "zh-CN",
+  de: "de-DE",
+  hi: "hi-IN",
+};
+
+type MerchantBotText = {
+  helpMessage: (name: string) => string;
+  alreadyLinked: (name: string) => string;
+  linkedWelcome: (name: string) => string;
+  groupLinked: (name: string, email: string, help: string) => string;
+  groupActive: (name: string, help: string) => string;
+  groupAdded: (groupTitle: string) => string;
+  stats: (name: string, transactions: number, volume: string) => string;
+  balances: (name: string, details: string) => string;
+  transactionsTitle: (name: string, personal: boolean) => string;
+  noTransactions: string;
+  suspended: string;
+  suspendedContact: string;
+  genericError: string;
+  ipUsage: string;
+  ipProcessing: string;
+  ipDone: string;
+  ipDenied: string;
+  ipError: string;
+};
+
+const BOT_TEXTS: Record<BotLanguage, MerchantBotText> = {
+  fr: {
+    helpMessage: (name) =>
+      `📖 *Commandes disponibles — ${name}*\n\n` +
+      `💰 /solde — Solde détaillé par pays\n` +
+      `📋 /transactions — Les 5 dernières transactions\n` +
+      `📊 /stats — Vos statistiques globales\n` +
+      `🌐 /addip ADRESSE\\_IP — Ajouter une IP à la whitelist\n` +
+      `❓ /aide — Afficher cette aide\n\n` +
+      `📲 *Notifications automatiques*\nChaque paiement confirmé est affiché ici en temps réel.\n\n` +
+      `💡 *Astuce IP :* Si le bot ne répond pas quand vous envoyez une IP en texte, utilisez \`/addip 1.2.3.4\`.`,
+    alreadyLinked: (name) => `✅ Votre compte *${name}* est déjà lié.\n\nTapez /aide pour voir vos commandes.`,
+    linkedWelcome: (name) => `✅ *Compte lié avec succès !*\n\nBienvenue, *${name}* 👋\n\nVous recevrez désormais vos notifications de paiement ici.\n\nTapez /aide pour voir vos commandes.`,
+    groupLinked: (name, email, help) => `✅ *Groupe lié au marchand !*\n\n🏪 Marchand : *${name}*\n📧 ${email}\n\n${help}`,
+    groupActive: (name, help) => `✅ *Bot WestPay actif — ${name}*\n\n${help}`,
+    groupAdded: (groupTitle) => `👋 *Bot WestPay ajouté à ${groupTitle}.*\n\nPour lier ce groupe à un compte marchand :\n\n\`/setmarchand CODE\`\n\n_(Le code d'activation est généré depuis le dashboard WestPay)_`,
+    stats: (name, transactions, volume) => `📊 *Vos statistiques — ${name}*\n\n💳 Transactions : *${transactions}*\n💰 Volume total : *${volume}*`,
+    balances: (name, details) => `💰 *Soldes — ${name}*\n\n${details}`,
+    transactionsTitle: (name, personal) => personal ? `📋 *Vos 5 dernières transactions*` : `📋 *5 dernières transactions — ${name}*`,
+    noTransactions: "Aucune transaction enregistrée.",
+    suspended: "⚠️ Compte suspendu.",
+    suspendedContact: "⚠️ Compte suspendu. Contactez votre administrateur.",
+    genericError: "❌ Erreur.",
+    ipUsage: "❌ Usage : `/addip ADRESSE_IP`\n\nExemple : `/addip 41.207.187.10` ou `/addip 2409:4053:59e:9bec::1`",
+    ipProcessing: "⏳ Ajout de l’adresse IP en cours...",
+    ipDone: "✅ Adresse IP ajoutée à la liste blanche.",
+    ipDenied: "❌ Cette adresse IP ne peut pas être autorisée.",
+    ipError: "❌ Erreur lors de l'ajout. Contactez l'administrateur.",
+  },
+  en: {
+    helpMessage: (name) =>
+      `📖 *Available commands — ${name}*\n\n` +
+      `💰 /solde — Detailed balance by country\n` +
+      `📋 /transactions — Your 5 latest transactions\n` +
+      `📊 /stats — Your overall statistics\n` +
+      `🌐 /addip IP\\_ADDRESS — Add an IP to the whitelist\n` +
+      `❓ /aide — Show this help\n\n` +
+      `📲 *Automatic notifications*\nEvery confirmed payment appears here in real time.\n\n` +
+      `💡 *IP tip:* If the bot does not answer when you send an IP as text, use \`/addip 1.2.3.4\`.`,
+    alreadyLinked: (name) => `✅ Your *${name}* account is already linked.\n\nType /aide to see your commands.`,
+    linkedWelcome: (name) => `✅ *Account linked successfully!*\n\nWelcome, *${name}* 👋\n\nYou will now receive your payment notifications here.\n\nType /aide to see your commands.`,
+    groupLinked: (name, email, help) => `✅ *Group linked to the merchant!*\n\n🏪 Merchant: *${name}*\n📧 ${email}\n\n${help}`,
+    groupActive: (name, help) => `✅ *WestPay bot active — ${name}*\n\n${help}`,
+    groupAdded: (groupTitle) => `👋 *WestPay bot added to ${groupTitle}.*\n\nTo link this group to a merchant account:\n\n\`/setmarchand CODE\`\n\n_(The activation code is generated from the WestPay dashboard)_`,
+    stats: (name, transactions, volume) => `📊 *Your statistics — ${name}*\n\n💳 Transactions: *${transactions}*\n💰 Total volume: *${volume}*`,
+    balances: (name, details) => `💰 *Balances — ${name}*\n\n${details}`,
+    transactionsTitle: (name, personal) => personal ? `📋 *Your 5 latest transactions*` : `📋 *5 latest transactions — ${name}*`,
+    noTransactions: "No transactions recorded.",
+    suspended: "⚠️ Account suspended.",
+    suspendedContact: "⚠️ Account suspended. Contact your administrator.",
+    genericError: "❌ Error.",
+    ipUsage: "❌ Usage: `/addip IP_ADDRESS`\n\nExample: `/addip 41.207.187.10` or `/addip 2409:4053:59e:9bec::1`",
+    ipProcessing: "⏳ Adding the IP address...",
+    ipDone: "✅ IP address added to the whitelist.",
+    ipDenied: "❌ This IP address cannot be authorized.",
+    ipError: "❌ Error while adding the IP address. Contact the administrator.",
+  },
+  zh: {
+    helpMessage: (name) =>
+      `📖 *可用命令 — ${name}*\n\n` +
+      `💰 /solde — 查看各国详细余额\n` +
+      `📋 /transactions — 查看最近 5 笔交易\n` +
+      `📊 /stats — 查看总体统计\n` +
+      `🌐 /addip IP\\_地址 — 将 IP 加入白名单\n` +
+      `❓ /aide — 显示帮助\n\n` +
+      `📲 *自动通知*\n每笔已确认的付款都会实时显示在这里。\n\n` +
+      `💡 *IP 提示：* 如果直接发送 IP 没有响应，请使用 \`/addip 1.2.3.4\`。`,
+    alreadyLinked: (name) => `✅ 您的 *${name}* 账户已经绑定。\n\n输入 /aide 查看可用命令。`,
+    linkedWelcome: (name) => `✅ *账户绑定成功！*\n\n欢迎，*${name}* 👋\n\n您现在将在这里收到付款通知。\n\n输入 /aide 查看可用命令。`,
+    groupLinked: (name, email, help) => `✅ *群组已与商户绑定！*\n\n🏪 商户：*${name}*\n📧 ${email}\n\n${help}`,
+    groupActive: (name, help) => `✅ *WestPay 机器人已启用 — ${name}*\n\n${help}`,
+    groupAdded: (groupTitle) => `👋 *WestPay 机器人已添加到 ${groupTitle}。*\n\n要将此群组绑定到商户账户：\n\n\`/setmarchand CODE\`\n\n_(激活码在 WestPay 管理后台生成)_`,
+    stats: (name, transactions, volume) => `📊 *您的统计 — ${name}*\n\n💳 交易数：*${transactions}*\n💰 总交易量：*${volume}*`,
+    balances: (name, details) => `💰 *余额 — ${name}*\n\n${details}`,
+    transactionsTitle: (name, personal) => personal ? `📋 *最近 5 笔交易*` : `📋 *最近 5 笔交易 — ${name}*`,
+    noTransactions: "暂无交易记录。",
+    suspended: "⚠️ 账户已暂停。",
+    suspendedContact: "⚠️ 账户已暂停。请联系管理员。",
+    genericError: "❌ 出错了。",
+    ipUsage: "❌ 用法：`/addip IP地址`\n\n示例：`/addip 41.207.187.10` 或 `/addip 2409:4053:59e:9bec::1`",
+    ipProcessing: "⏳ 正在添加 IP 地址...",
+    ipDone: "✅ IP 地址已加入白名单。",
+    ipDenied: "❌ 此 IP 地址无法授权。",
+    ipError: "❌ 添加 IP 时出错。请联系管理员。",
+  },
+  de: {
+    helpMessage: (name) =>
+      `📖 *Verfügbare Befehle — ${name}*\n\n` +
+      `💰 /solde — Detaillierter Kontostand nach Land\n` +
+      `📋 /transactions — Die letzten 5 Transaktionen\n` +
+      `📊 /stats — Ihre Gesamtstatistik\n` +
+      `🌐 /addip IP\\_ADRESSE — Eine IP zur Whitelist hinzufügen\n` +
+      `❓ /aide — Diese Hilfe anzeigen\n\n` +
+      `📲 *Automatische Benachrichtigungen*\nJede bestätigte Zahlung wird hier in Echtzeit angezeigt.\n\n` +
+      `💡 *IP-Tipp:* Wenn der Bot auf eine IP als Text nicht antwortet, verwenden Sie \`/addip 1.2.3.4\`.`,
+    alreadyLinked: (name) => `✅ Ihr Konto *${name}* ist bereits verknüpft.\n\nGeben Sie /aide ein, um Ihre Befehle zu sehen.`,
+    linkedWelcome: (name) => `✅ *Konto erfolgreich verknüpft!*\n\nWillkommen, *${name}* 👋\n\nSie erhalten Ihre Zahlungsbenachrichtigungen ab jetzt hier.\n\nGeben Sie /aide ein, um Ihre Befehle zu sehen.`,
+    groupLinked: (name, email, help) => `✅ *Gruppe mit dem Händler verknüpft!*\n\n🏪 Händler: *${name}*\n📧 ${email}\n\n${help}`,
+    groupActive: (name, help) => `✅ *WestPay-Bot aktiv — ${name}*\n\n${help}`,
+    groupAdded: (groupTitle) => `👋 *WestPay-Bot zu ${groupTitle} hinzugefügt.*\n\nUm diese Gruppe mit einem Händlerkonto zu verknüpfen:\n\n\`/setmarchand CODE\`\n\n_(Der Aktivierungscode wird im WestPay-Dashboard erstellt)_`,
+    stats: (name, transactions, volume) => `📊 *Ihre Statistik — ${name}*\n\n💳 Transaktionen: *${transactions}*\n💰 Gesamtvolumen: *${volume}*`,
+    balances: (name, details) => `💰 *Kontostände — ${name}*\n\n${details}`,
+    transactionsTitle: (name, personal) => personal ? `📋 *Ihre letzten 5 Transaktionen*` : `📋 *Die letzten 5 Transaktionen — ${name}*`,
+    noTransactions: "Keine Transaktionen vorhanden.",
+    suspended: "⚠️ Konto gesperrt.",
+    suspendedContact: "⚠️ Konto gesperrt. Kontaktieren Sie Ihren Administrator.",
+    genericError: "❌ Fehler.",
+    ipUsage: "❌ Verwendung: `/addip IP_ADRESSE`\n\nBeispiel: `/addip 41.207.187.10` oder `/addip 2409:4053:59e:9bec::1`",
+    ipProcessing: "⏳ IP-Adresse wird hinzugefügt...",
+    ipDone: "✅ IP-Adresse zur Whitelist hinzugefügt.",
+    ipDenied: "❌ Diese IP-Adresse kann nicht autorisiert werden.",
+    ipError: "❌ Fehler beim Hinzufügen. Kontaktieren Sie den Administrator.",
+  },
+  hi: {
+    helpMessage: (name) =>
+      `📖 *उपलब्ध कमांड — ${name}*\n\n` +
+      `💰 /solde — देश के अनुसार विस्तृत बैलेंस\n` +
+      `📋 /transactions — पिछली 5 लेन-देन\n` +
+      `📊 /stats — आपके कुल आँकड़े\n` +
+      `🌐 /addip IP\\_ADDRESS — IP को whitelist में जोड़ें\n` +
+      `❓ /aide — सहायता दिखाएँ\n\n` +
+      `📲 *स्वचालित सूचनाएँ*\nहर पुष्टि किया गया भुगतान यहाँ तुरंत दिखाई देगा।\n\n` +
+      `💡 *IP सुझाव:* यदि IP को टेक्स्ट के रूप में भेजने पर जवाब न मिले, तो \`/addip 1.2.3.4\` का उपयोग करें।`,
+    alreadyLinked: (name) => `✅ आपका *${name}* खाता पहले से जुड़ा है।\n\nअपने कमांड देखने के लिए /aide लिखें।`,
+    linkedWelcome: (name) => `✅ *खाता सफलतापूर्वक जुड़ गया!*\n\nस्वागत है, *${name}* 👋\n\nअब आपको भुगतान सूचनाएँ यहाँ मिलेंगी।\n\nअपने कमांड देखने के लिए /aide लिखें।`,
+    groupLinked: (name, email, help) => `✅ *समूह व्यापारी से जुड़ गया!*\n\n🏪 व्यापारी: *${name}*\n📧 ${email}\n\n${help}`,
+    groupActive: (name, help) => `✅ *WestPay बॉट सक्रिय — ${name}*\n\n${help}`,
+    groupAdded: (groupTitle) => `👋 *WestPay बॉट ${groupTitle} में जोड़ा गया।*\n\nइस समूह को व्यापारी खाते से जोड़ने के लिए:\n\n\`/setmarchand CODE\`\n\n_(सक्रियण कोड WestPay डैशबोर्ड से बनाया जाता है)_`,
+    stats: (name, transactions, volume) => `📊 *आपके आँकड़े — ${name}*\n\n💳 लेन-देन: *${transactions}*\n💰 कुल मात्रा: *${volume}*`,
+    balances: (name, details) => `💰 *बैलेंस — ${name}*\n\n${details}`,
+    transactionsTitle: (name, personal) => personal ? `📋 *आपके पिछले 5 लेन-देन*` : `📋 *पिछले 5 लेन-देन — ${name}*`,
+    noTransactions: "कोई लेन-देन दर्ज नहीं है।",
+    suspended: "⚠️ खाता निलंबित है।",
+    suspendedContact: "⚠️ खाता निलंबित है। अपने व्यवस्थापक से संपर्क करें।",
+    genericError: "❌ त्रुटि।",
+    ipUsage: "❌ उपयोग: `/addip IP_ADDRESS`\n\nउदाहरण: `/addip 41.207.187.10` या `/addip 2409:4053:59e:9bec::1`",
+    ipProcessing: "⏳ IP पता जोड़ा जा रहा है...",
+    ipDone: "✅ IP पता whitelist में जोड़ दिया गया है।",
+    ipDenied: "❌ इस IP पते को अधिकृत नहीं किया जा सकता।",
+    ipError: "❌ IP जोड़ते समय त्रुटि हुई। व्यवस्थापक से संपर्क करें।",
+  },
+};
+
+function normalizeBotLanguage(language: unknown): BotLanguage {
+  return language === "en" || language === "zh" || language === "de" || language === "hi" ? language : "fr";
+}
+
+function merchantBotText(language: unknown): MerchantBotText {
+  return BOT_TEXTS[normalizeBotLanguage(language)];
+}
+
+function merchantHelpMessage(name: string, language?: unknown): string {
+  return merchantBotText(language).helpMessage(name);
+}
 
 // ─── Security helpers ─────────────────────────────────────────────────────────
 async function getAdminGroupId(): Promise<string | undefined> {
@@ -812,7 +988,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     if (!code) {
       const linked = await storage.getMerchantByTelegramChatId(chatId);
       if (linked) {
-        await ctx.reply(`✅ Votre compte *${linked.name}* est déjà lié.\n\nTapez /aide pour voir vos commandes.`, { parse_mode: "Markdown" });
+        await ctx.reply(merchantBotText(linked.telegramBotLanguage).alreadyLinked(linked.name), { parse_mode: "Markdown" });
       } else {
         await ctx.reply("🔒 此机器人仅供已获授权的 WestPay 商户使用。\n\n如果您是商户，请向您的管理员申请激活码。", { parse_mode: "Markdown" });
       }
@@ -850,7 +1026,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
 
     const merchant = await storage.getMerchantById(ac.merchantId);
     await ctx.reply(
-      `✅ *Compte lié avec succès !*\n\nBienvenue, *${merchant?.name}* 👋\n\nVous recevrez désormais vos notifications de paiement ici.\n\nTapez /aide pour voir vos commandes.`,
+      merchantBotText(merchant?.telegramBotLanguage).linkedWelcome(merchant?.name || ""),
       { parse_mode: "Markdown" }
     );
 
@@ -950,9 +1126,13 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     resetAttempts(userId);
 
     const merchant = await storage.getMerchantById(ac.merchantId);
+    const merchantText = merchantBotText(merchant?.telegramBotLanguage);
     await ctx.reply(
-      `✅ *Groupe lié au marchand !*\n\n🏪 Marchand : *${merchant?.name}*\n📧 ${merchant?.email}\n\n` +
-      MERCHANT_AIDE_MSG(merchant?.name || ""),
+      merchantText.groupLinked(
+        merchant?.name || "",
+        merchant?.email || "",
+        merchantHelpMessage(merchant?.name || "", merchant?.telegramBotLanguage),
+      ),
       { parse_mode: "Markdown" }
     );
 
@@ -1697,14 +1877,14 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       }
       const merchant = await getMerchantForGroup(chatId);
       if (merchant) {
-        await ctx.reply(MERCHANT_AIDE_MSG(merchant.name), { parse_mode: "Markdown" });
+         await ctx.reply(merchantHelpMessage(merchant.name, merchant.telegramBotLanguage), { parse_mode: "Markdown" });
       }
       return;
     }
 
     const merchant = await storage.getMerchantByTelegramChatId(chatId);
     if (merchant) {
-      await ctx.reply(MERCHANT_AIDE_MSG(merchant.name), { parse_mode: "Markdown" });
+       await ctx.reply(merchantHelpMessage(merchant.name, merchant.telegramBotLanguage), { parse_mode: "Markdown" });
     }
   });
 
@@ -1818,7 +1998,10 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     const linkedMerchant = await getMerchantForGroup(chatId);
     if (linkedMerchant) {
       await bot!.telegram.sendMessage(chatId,
-        `✅ *Bot WestPay actif — ${linkedMerchant.name}*\n\n` + MERCHANT_AIDE_MSG(linkedMerchant.name),
+         merchantBotText(linkedMerchant.telegramBotLanguage).groupActive(
+           linkedMerchant.name,
+           merchantHelpMessage(linkedMerchant.name, linkedMerchant.telegramBotLanguage),
+         ),
         { parse_mode: "Markdown" }
       ).catch(() => {});
       return;
@@ -1854,7 +2037,10 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     const linkedMerchant = await getMerchantForGroup(chatId);
     if (linkedMerchant) {
       await ctx.reply(
-        `✅ *Bot WestPay actif — ${linkedMerchant.name}*\n\n` + MERCHANT_AIDE_MSG(linkedMerchant.name),
+         merchantBotText(linkedMerchant.telegramBotLanguage).groupActive(
+           linkedMerchant.name,
+           merchantHelpMessage(linkedMerchant.name, linkedMerchant.telegramBotLanguage),
+         ),
         { parse_mode: "Markdown" }
       );
       return;
