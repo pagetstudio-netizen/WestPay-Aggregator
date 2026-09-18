@@ -1220,27 +1220,29 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       }
       const merchant = await getMerchantForGroup(chatId);
       if (!merchant) return;
-      if (merchant.suspended) { await ctx.reply("⚠️ Compte suspendu."); return; }
+      const merchantText = merchantBotText(merchant.telegramBotLanguage);
+      if (merchant.suspended) { await ctx.reply(merchantText.suspended); return; }
       try {
         const stats = await storage.getMerchantStats(merchant.id);
         await ctx.reply(
-          `📊 *Vos statistiques — ${merchant.name}*\n\n💳 Transactions : *${stats.transactionCount}*\n💰 Volume total : *${formatAmount(stats.totalVolume)}*`,
+          merchantText.stats(merchant.name, stats.transactionCount, formatAmount(stats.totalVolume)),
           { parse_mode: "Markdown" }
         );
-      } catch { await ctx.reply("❌ Erreur."); }
+      } catch { await ctx.reply(merchantText.genericError); }
       return;
     }
 
     const merchant = await storage.getMerchantByTelegramChatId(chatId);
     if (!merchant) return;
-    if (merchant.suspended) { await ctx.reply("⚠️ Compte suspendu."); return; }
+    const merchantText = merchantBotText(merchant.telegramBotLanguage);
+    if (merchant.suspended) { await ctx.reply(merchantText.suspended); return; }
     try {
       const stats = await storage.getMerchantStats(merchant.id);
       await ctx.reply(
-        `📊 *Vos statistiques — ${merchant.name}*\n\n💳 Transactions : *${stats.transactionCount}*\n💰 Volume total : *${formatAmount(stats.totalVolume)}*`,
+        merchantText.stats(merchant.name, stats.transactionCount, formatAmount(stats.totalVolume)),
         { parse_mode: "Markdown" }
       );
-    } catch { await ctx.reply("❌ Erreur."); }
+    } catch { await ctx.reply(merchantText.genericError); }
   });
 
   // ─── /marchands (groupe admin uniquement) ─────────────────────────────────
@@ -1351,21 +1353,23 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       }
       const merchant = await getMerchantForGroup(chatId);
       if (!merchant) return;
-      if (merchant.suspended) { await ctx.reply("⚠️ Compte suspendu. Contactez votre administrateur."); return; }
+      const merchantText = merchantBotText(merchant.telegramBotLanguage);
+      if (merchant.suspended) { await ctx.reply(merchantText.suspendedContact); return; }
       try {
-        const msg = await buildMerchantSoldeMessage(merchant.id, merchant.name);
-        await ctx.reply(`💰 *Soldes — ${merchant.name}*\n\n${msg}`, { parse_mode: "Markdown" });
-      } catch { await ctx.reply("❌ Erreur."); }
+        const msg = await buildMerchantSoldeMessage(merchant.id, merchant.name, merchant.telegramBotLanguage);
+        await ctx.reply(merchantText.balances(merchant.name, msg), { parse_mode: "Markdown" });
+      } catch { await ctx.reply(merchantText.genericError); }
       return;
     }
 
     const merchant = await storage.getMerchantByTelegramChatId(chatId);
     if (!merchant) return;
-    if (merchant.suspended) { await ctx.reply("⚠️ Compte suspendu. Contactez votre administrateur."); return; }
+    const merchantText = merchantBotText(merchant.telegramBotLanguage);
+    if (merchant.suspended) { await ctx.reply(merchantText.suspendedContact); return; }
     try {
-      const msg = await buildMerchantSoldeMessage(merchant.id, merchant.name);
-      await ctx.reply(`💰 *Soldes — ${merchant.name}*\n\n${msg}`, { parse_mode: "Markdown" });
-    } catch { await ctx.reply("❌ Erreur."); }
+      const msg = await buildMerchantSoldeMessage(merchant.id, merchant.name, merchant.telegramBotLanguage);
+      await ctx.reply(merchantText.balances(merchant.name, msg), { parse_mode: "Markdown" });
+    } catch { await ctx.reply(merchantText.genericError); }
   });
 
   // ─── /transactions (DM et groupe marchand) ────────────────────────────────
@@ -1377,33 +1381,35 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       if (await isAdminGroup(chatId)) return;
       const merchant = await getMerchantForGroup(chatId);
       if (!merchant) return;
+      const merchantText = merchantBotText(merchant.telegramBotLanguage);
       try {
         const txs = await storage.getTransactions(merchant.id);
         const recent = txs.slice(0, 5);
-        if (recent.length === 0) { await ctx.reply("Aucune transaction enregistrée."); return; }
+        if (recent.length === 0) { await ctx.reply(merchantText.noTransactions); return; }
         const lines = recent.map((t, i) => {
-          const date = new Date(t.createdAt).toLocaleDateString("fr-FR");
+          const date = new Date(t.createdAt).toLocaleDateString(BOT_DATE_LOCALES[normalizeBotLanguage(merchant.telegramBotLanguage)]);
           const statusIcon = t.status === "confirmed" ? "✅" : "⏳";
           return `${i + 1}. ${statusIcon} *${formatAmountC(t.amount, t.country)}*\n   ${countryLabel(t.country)} — ${date}${t.payerNumber ? `\n   📞 ${t.payerNumber}` : ""}\n   🔖 \`${t.txId}\``;
         });
-        await ctx.reply(`📋 *5 dernières transactions — ${merchant.name}*\n\n${lines.join("\n\n")}`, { parse_mode: "Markdown" });
-      } catch { await ctx.reply("❌ Erreur."); }
+        await ctx.reply(`${merchantText.transactionsTitle(merchant.name, false)}\n\n${lines.join("\n\n")}`, { parse_mode: "Markdown" });
+      } catch { await ctx.reply(merchantText.genericError); }
       return;
     }
 
     const merchant = await storage.getMerchantByTelegramChatId(chatId);
     if (!merchant) return;
+    const merchantText = merchantBotText(merchant.telegramBotLanguage);
     try {
       const txs = await storage.getTransactions(merchant.id);
       const recent = txs.slice(0, 5);
-      if (recent.length === 0) { await ctx.reply("Aucune transaction enregistrée."); return; }
+      if (recent.length === 0) { await ctx.reply(merchantText.noTransactions); return; }
       const lines = recent.map((t, i) => {
-        const date = new Date(t.createdAt).toLocaleDateString("fr-FR");
+        const date = new Date(t.createdAt).toLocaleDateString(BOT_DATE_LOCALES[normalizeBotLanguage(merchant.telegramBotLanguage)]);
         const statusIcon = t.status === "confirmed" ? "✅" : "⏳";
         return `${i + 1}. ${statusIcon} *${formatAmountC(t.amount, t.country)}*\n   ${countryLabel(t.country)} — ${date}${t.payerNumber ? `\n   📞 ${t.payerNumber}` : ""}\n   🔖 \`${t.txId}\``;
       });
-      await ctx.reply(`📋 *Vos 5 dernières transactions*\n\n${lines.join("\n\n")}`, { parse_mode: "Markdown" });
-    } catch { await ctx.reply("❌ Erreur."); }
+      await ctx.reply(`${merchantText.transactionsTitle(merchant.name, true)}\n\n${lines.join("\n\n")}`, { parse_mode: "Markdown" });
+    } catch { await ctx.reply(merchantText.genericError); }
   });
 
   // ─── /broadcast (groupe admin — flux conversationnel) ─────────────────────
@@ -2687,11 +2693,12 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
 
   // ─── Fonction utilitaire partagée : whitelist une IP depuis un groupe marchand ─
   async function whitelistMerchantIp(ctx: any, candidate: string, merchant: any) {
+    const merchantText = merchantBotText(merchant.telegramBotLanguage);
     const geo = await getGeoInfo(candidate);
     console.log(`[TG/addip] geo pour ${candidate}: country="${geo.country}" city="${geo.city}"`);
 
     if (!geo.country || !AFRICAN_COUNTRIES.has(geo.country)) {
-      await ctx.reply("Fake ip 您无法访问该平台。请联系客服。");
+      await ctx.reply(merchantText.ipDenied);
       await alertAdminGroup(
         `⚠️ *IP non africaine refusée*\n\n` +
         `👤 Marchand : *${merchant.name}*\n` +
@@ -2718,7 +2725,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         action: "allowed_via_merchant_telegram",
         details: `IP ajoutée par le marchand ${merchant.name} via Telegram — ${geo.city}, ${geo.country}`,
       }).catch(() => {});
-      await ctx.reply("done ✅");
+      await ctx.reply(merchantText.ipDone);
       await alertAdminGroup(
         `✅ *IP autorisée via Telegram marchand*\n\n` +
         `👤 Marchand : *${merchant.name}*\n` +
@@ -2728,7 +2735,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       );
     } catch (err: any) {
       console.error(`[TG/addip] Erreur addAllowedIp pour ${candidate}:`, err?.message);
-      await ctx.reply(`❌ Erreur lors de l'ajout : ${err?.message || "inconnue"}. Contactez l'administrateur.`);
+      await ctx.reply(merchantText.ipError);
     }
   }
 
@@ -2753,14 +2760,11 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     const args = (ctx.message.text || "").split(/\s+/).slice(1);
     const ip = args[0]?.trim();
     if (!ip || !isValidIp(ip)) {
-      await ctx.reply(
-        `❌ Usage : \`/addip ADRESSE_IP\`\n\nExemple : \`/addip 41.207.187.10\` ou \`/addip 2409:4053:59e:9bec::1\``,
-        { parse_mode: "Markdown" }
-      );
+      await ctx.reply(merchantBotText(merchant.telegramBotLanguage).ipUsage, { parse_mode: "Markdown" });
       return;
     }
 
-    await ctx.reply("请稍等，我这就添加。");
+    await ctx.reply(merchantBotText(merchant.telegramBotLanguage).ipProcessing);
     await whitelistMerchantIp(ctx, ip, merchant);
   });
 
