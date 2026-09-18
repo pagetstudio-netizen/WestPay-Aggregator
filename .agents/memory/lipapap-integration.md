@@ -76,3 +76,9 @@ The pay-in initiation can be accepted while the current transaction-status probe
 **Why:** LipaPap’s status response did not match the initiation endpoint’s JSON contract, so treating that probe result as a payment failure could misclassify an accepted live payment.
 
 **How to apply:** Keep live payment records pending until LipaPap confirms the exact status endpoint, content type, field names, and signing formula; do not retry the payment just because the status probe returns this error.
+
+The production `GET_TRANS_STATUS` endpoint recognizes `transaction_id` (snake case), despite its missing-fields message naming `transactionId`; camel case returns the missing-fields error, while snake case reaches the lookup and currently returns `Transaction not found`.
+
+**Why:** This distinguishes a request-schema error from an identifier or provider-availability error without creating another live payment.
+
+**How to apply:** Send `transaction_id` for status lookups, preserve the provider's “not found” response for investigation, and do not treat it as proof of a customer payment failure.

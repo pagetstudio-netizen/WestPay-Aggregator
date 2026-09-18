@@ -4810,7 +4810,8 @@ export async function registerRoutes(
             return res.status(400).json({ message: "Paiement non abouti. Veuillez reessayer." });
           }
 
-            const providerReference = result.trans_id
+          const providerReference = result.trans_id
+            || result.transaction_id
               || String(result.TransactionID || result.CheckoutRequestID || "")
               || reference;
             const pending = await storage.createPendingPayment({
@@ -5972,14 +5973,19 @@ export async function registerRoutes(
           const statusResult = await getLipaPapTransactionStatus(lipaConfig, providerTxId);
           const status = String(statusResult.status || statusResult.result || "").toUpperCase();
           if (status === "SETTLED" || String(statusResult.result || "").toUpperCase() === "SUCCESS") {
-            await settleLipaPapPayment(pending, String(statusResult.trans_id || providerTxId));
+            await settleLipaPapPayment(pending, String(statusResult.trans_id || statusResult.transaction_id || providerTxId));
             return res.json({ status: "confirmed", paymentId: pending.id });
           }
           if (["DECLINED", "FAILED", "REFUND", "REVERSAL", "VOID"].includes(status)) {
             await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
             return res.json({ status: "failed", paymentId: pending.id, providerStatus: status });
           }
-          return res.json({ status: "pending", paymentId: pending.id, providerStatus: status || "PENDING" });
+          return res.json({
+            status: "pending",
+            paymentId: pending.id,
+            providerStatus: status || "PENDING",
+            providerMessage: statusResult.message || statusResult.decline_reason || undefined,
+          });
         }
         if (pending.gateway === "mbiyo" && pending.omnipayTxId) {
           const mbiyoApiKey = await getMbiyoApiKey();

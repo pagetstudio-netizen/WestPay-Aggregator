@@ -116,6 +116,7 @@ export interface LipaPapPaymentResponse {
   decline_reason?: string;
   message?: string;
   TransactionID?: string;
+  transaction_id?: string;
   [key: string]: unknown;
 }
 
@@ -371,7 +372,7 @@ export async function getLipaPapTransactionStatus(
   const body = {
     action: "GET_TRANS_STATUS",
     client_key: config.clientKey,
-    transactionId,
+    transaction_id: transactionId,
     hash: buildLipaPapResponseHash({
       action: "GET_TRANS_STATUS",
       status: "",

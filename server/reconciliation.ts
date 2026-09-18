@@ -419,14 +419,17 @@ export async function runReconciliation(): Promise<void> {
           const result = await getLipaPapTransactionStatus(lipaConfig, providerTxId);
           const status = String(result.status || result.result || "").toUpperCase();
           if (status === "SETTLED" || String(result.result || "").toUpperCase() === "SUCCESS") {
-            const txRef = `LP-${result.trans_id || providerTxId}`;
+            const txRef = `LP-${result.trans_id || result.transaction_id || providerTxId}`;
             const credited = await creditConfirmedPayment(pending, txRef);
             console.log(`[RECONCILIATION] LipaPap OK — ref=${pending.omnipayReference}${credited ? " — crédité" : " — déjà traité"}`);
           } else if (["DECLINED", "FAILED", "REFUND", "REVERSAL", "VOID"].includes(status)) {
             await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
             console.log(`[RECONCILIATION] LipaPap ECHEC — ref=${pending.omnipayReference} status=${status}`);
           } else {
-            console.log(`[RECONCILIATION] LipaPap EN COURS — ref=${pending.omnipayReference} status=${status || "inconnu"}`);
+            console.log(
+              `[RECONCILIATION] LipaPap EN COURS — ref=${pending.omnipayReference} ` +
+              `status=${status || "inconnu"}${result.message ? ` message=${result.message}` : ""}`,
+            );
           }
         } else if (pending.gateway === "clapay") {
           // ClaPay ne pousse pas de webhook — polling obligatoire
