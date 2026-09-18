@@ -1,6 +1,6 @@
 /**
  * Job de réconciliation automatique
- * Vérifie toutes les 5 minutes les paiements bloqués "omnipay_pending"
+ * Vérifie toutes les 5 minutes les paiements bloqués par fournisseur
  * depuis plus de 3 minutes et les crédite si le prestataire les confirme.
  */
 
@@ -83,14 +83,15 @@ async function getLipaPapConfig(): Promise<LipaPapConfig | undefined> {
 }
 
 async function creditConfirmedPayment(pending: any, txRef: string): Promise<boolean> {
+  const confirmedStatus = pending.gateway === "lipapap" ? "lipapap_confirmed" : "omnipay_confirmed";
   // ── CAS atomique : on ne crédite QUE si c'est nous qui faisons la transition
   // de statut. Si le callback ou un autre cycle de réconciliation a déjà
   // changé le statut, rowCount = 0 → on sort sans toucher au solde.
   const casResult = await financialPool.query(
-    `UPDATE pending_payments SET status = 'omnipay_confirmed'
-     WHERE id = $1 AND status NOT IN ('omnipay_confirmed','confirmed','omnipay_error')
+    `UPDATE pending_payments SET status = $1
+     WHERE id = $2 AND status NOT IN ('omnipay_confirmed','lipapap_confirmed','confirmed','omnipay_error','lipapap_error')
      RETURNING id`,
-    [pending.id]
+    [confirmedStatus, pending.id]
   );
   if (!casResult.rowCount || casResult.rowCount === 0) return false;
 
@@ -362,7 +363,7 @@ export async function runReconciliation(): Promise<void> {
     const FOUR_HOURS = 4 * 60 * 60 * 1000;
 
     const stale = allPending.filter(p => {
-      if (p.status !== "omnipay_pending") return false;
+      if (!["omnipay_pending", "lipapap_pending"].includes(p.status)) return false;
       if (!p.omnipayReference) return false;
       const age = now - new Date(p.createdAt).getTime();
       return age >= THREE_MIN && age < FOUR_HOURS;
@@ -423,8 +424,8 @@ export async function runReconciliation(): Promise<void> {
             const txRef = `LP-${result.trans_id || result.transaction_id || providerTxId}`;
             const credited = await creditConfirmedPayment(pending, txRef);
             console.log(`[RECONCILIATION] LipaPap OK — ref=${pending.omnipayReference}${credited ? " — crédité" : " — déjà traité"}`);
-          } else if (["DECLINED", "FAILED", "REFUND", "REVERSAL", "VOID"].includes(status)) {
-            await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+          } else if (["DECLINED", "FAILED", "ERROR", "REFUND", "REVERSAL", "VOID"].includes(status)) {
+            await storage.updatePendingPaymentStatus(pending.id, "lipapap_failed");
             console.log(`[RECONCILIATION] LipaPap ECHEC — ref=${pending.omnipayReference} status=${status}`);
           } else {
             console.log(

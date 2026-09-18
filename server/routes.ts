@@ -118,6 +118,16 @@ import {
 
 const BANK1_CHECKOUT_URL = "https://checkout1.westpay.cfd";
 
+function providerAwarePendingStatus(gateway: unknown, status: string | null | undefined): string | null | undefined {
+  if (gateway !== "lipapap" || !status) return status;
+  if (status === "omnipay_pending") return "lipapap_pending";
+  if (status === "omnipay_confirmed") return "lipapap_confirmed";
+  if (status === "omnipay_failed") return "lipapap_failed";
+  if (status === "omnipay_error") return "lipapap_error";
+  if (status.startsWith("omnipay_status_")) return status.replace(/^omnipay_/, "lipapap_");
+  return status;
+}
+
 // ── Multer — logo opérateur ───────────────────────────────────────────────────
 const LOGOS_DIR = path.resolve(process.cwd(), "uploads", "operator-logos");
 if (!fs.existsSync(LOGOS_DIR)) fs.mkdirSync(LOGOS_DIR, { recursive: true });
@@ -3459,10 +3469,10 @@ export async function registerRoutes(
         createdAt: t.createdAt,
       }));
 
-      // Seuls les paiements vraiment EN COURS (omnipay_pending/submitted) sont affichés ici.
+      // Seuls les paiements vraiment EN COURS sont affichés ici.
       // Les confirmés et échoués apparaissent déjà via la table transactions → pas de doublon.
       const pendingItems = pendingPays
-        .filter(p => ["omnipay_pending", "submitted", "pending"].includes(p.status))
+        .filter(p => ["omnipay_pending", "lipapap_pending", "submitted", "pending"].includes(p.status))
         .map(p => ({
           id: `pp-${p.id}`,
           rowId: p.id,
@@ -4030,8 +4040,8 @@ export async function registerRoutes(
         await client.query("UPDATE merchant_countries SET balance = balance + $1 WHERE id = $2", [credit, merchantCountry.id]);
       }
       await client.query(
-        `UPDATE pending_payments SET status = 'omnipay_confirmed'
-         WHERE id = $1 AND status NOT IN ('omnipay_confirmed','confirmed','omnipay_error')`,
+        `UPDATE pending_payments SET status = 'lipapap_confirmed'
+         WHERE id = $1 AND status NOT IN ('lipapap_confirmed','omnipay_confirmed','confirmed','lipapap_error','omnipay_error')`,
         [pending.id],
       );
       await client.query("COMMIT");
@@ -4571,7 +4581,7 @@ export async function registerRoutes(
       if (!pending) return res.status(404).json({ message: "Paiement introuvable" });
 
       // Ne pas écraser un statut déjà finalisé (confirmed/failed)
-      if (!["pending", "omnipay_pending", "submitted"].includes(pending.status)) {
+      if (!["pending", "omnipay_pending", "lipapap_pending", "submitted"].includes(pending.status)) {
         return res.json({ ok: true });
       }
 
@@ -4822,7 +4832,7 @@ export async function registerRoutes(
             payerName: payerName || null,
             paymentMethod,
             txId: null,
-            status: "omnipay_pending",
+            status: "lipapap_pending",
             redirectUrl: redirectUrl || null,
             omnipayReference: reference,
               omnipayTxId: providerReference,
@@ -5656,7 +5666,7 @@ export async function registerRoutes(
         amount: pending.amount,
         country: pending.country,
         redirectUrl: pending.redirectUrl || null,
-        status: pending.status,
+        status: providerAwarePendingStatus(pending.gateway, pending.status),
         gateway: pending.gateway,
         omnipayReference: pending.omnipayReference,
       });
@@ -5958,10 +5968,11 @@ export async function registerRoutes(
       const pending = await storage.getPendingPaymentById(parseInt(req.params.paymentId));
       if (!pending) return res.status(404).json({ message: "Paiement non trouve" });
 
-      if (pending.status === "omnipay_confirmed") {
+      const providerStatus = providerAwarePendingStatus(pending.gateway, pending.status);
+      if (providerStatus === "lipapap_confirmed" || providerStatus === "omnipay_confirmed") {
         return res.json({ status: "confirmed", paymentId: pending.id });
       }
-      if (pending.status === "omnipay_failed" || pending.status === "omnipay_error") {
+      if (providerStatus === "lipapap_failed" || providerStatus === "lipapap_error" || providerStatus === "omnipay_failed" || providerStatus === "omnipay_error") {
         return res.json({ status: "failed", paymentId: pending.id });
       }
 
@@ -5976,8 +5987,8 @@ export async function registerRoutes(
             await settleLipaPapPayment(pending, String(statusResult.trans_id || statusResult.transaction_id || providerTxId));
             return res.json({ status: "confirmed", paymentId: pending.id });
           }
-          if (["DECLINED", "FAILED", "REFUND", "REVERSAL", "VOID"].includes(status)) {
-            await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+          if (["DECLINED", "FAILED", "ERROR", "REFUND", "REVERSAL", "VOID"].includes(status)) {
+            await storage.updatePendingPaymentStatus(pending.id, "lipapap_failed");
             return res.json({ status: "failed", paymentId: pending.id, providerStatus: status });
           }
           return res.json({
@@ -6847,8 +6858,8 @@ export async function registerRoutes(
       if (status === "SETTLED" || String(body.result || "").toUpperCase() === "SUCCESS") {
         await settleLipaPapPayment(pending, providerTxId);
         console.log(`[LIPAPAP CALLBACK] Paiement confirmé — ref=${orderId}`);
-      } else if (["DECLINED", "FAILED", "REFUND", "REVERSAL", "VOID"].includes(status)) {
-        await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
+      } else if (["DECLINED", "FAILED", "ERROR", "REFUND", "REVERSAL", "VOID"].includes(status)) {
+        await storage.updatePendingPaymentStatus(pending.id, "lipapap_failed");
         console.log(`[LIPAPAP CALLBACK] Paiement échoué — ref=${orderId} status=${status}`);
       }
       return res.status(200).send("ok");

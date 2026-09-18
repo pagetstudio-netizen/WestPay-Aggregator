@@ -1733,8 +1733,8 @@ function TransactionsPanel() {
     const matchStatus =
       statusFilter === "all" ||
       (statusFilter === "confirmed" && ["confirmed", "approved", "success", "completed"].includes(t.status)) ||
-      (statusFilter === "failed" && ["failed", "rejected", "omnipay_failed"].includes(t.status)) ||
-      (statusFilter === "pending" && ["pending", "omnipay_pending", "submitted"].includes(t.status));
+      (statusFilter === "failed" && ["failed", "rejected", "omnipay_failed", "lipapap_failed"].includes(t.status)) ||
+      (statusFilter === "pending" && ["pending", "omnipay_pending", "lipapap_pending", "submitted"].includes(t.status));
     const matchType =
       typeFilter === "all" ||
       t.type === typeFilter;
@@ -1768,9 +1768,9 @@ function TransactionsPanel() {
   const getStatusBadge = (status: string) => {
     if (["confirmed", "approved", "success", "completed"].includes(status))
       return <Badge variant="default" className="text-xs">{status === "approved" ? "Approuvé" : "Confirmé"}</Badge>;
-    if (["failed", "rejected", "omnipay_failed"].includes(status))
+    if (["failed", "rejected", "omnipay_failed", "lipapap_failed"].includes(status))
       return <Badge variant="destructive" className="text-xs">{status === "rejected" ? "Rejeté" : "Échoué"}</Badge>;
-    if (["omnipay_pending", "submitted"].includes(status))
+    if (["omnipay_pending", "lipapap_pending", "submitted"].includes(status))
       return <Badge className="text-xs bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400">En cours</Badge>;
     return <Badge variant="secondary" className="text-xs">En attente</Badge>;
   };
@@ -1860,8 +1860,8 @@ function TransactionsPanel() {
             <Card><CardContent className="p-6 text-center text-muted-foreground text-sm">Aucune transaction pour cette période</CardContent></Card>
           ) : (
             filtered.map((tx: any) => {
-              const isFailed = ["failed", "rejected", "omnipay_failed"].includes(tx.status);
-              const isPendingInProgress = tx.type === "pending" || ["omnipay_pending", "submitted"].includes(tx.status);
+              const isFailed = ["failed", "rejected", "omnipay_failed", "lipapap_failed"].includes(tx.status);
+              const isPendingInProgress = tx.type === "pending" || ["omnipay_pending", "lipapap_pending", "submitted"].includes(tx.status);
               return (
                 <Card key={tx.id} className={isFailed ? "border-destructive/40 bg-destructive/5 dark:bg-destructive/10" : isPendingInProgress ? "border-yellow-300 dark:border-yellow-700" : ""}>
                   <CardContent className="p-4">
@@ -1912,7 +1912,7 @@ function TransactionsPanel() {
                           <p className={`text-lg font-bold ${isFailed ? "text-destructive" : "text-foreground"}`}>{tx.amount?.toLocaleString("fr-FR")}</p>
                           <p className="text-xs text-muted-foreground">F CFA</p>
                           <div className="flex gap-1 mt-1 flex-wrap justify-end">
-                            {["pending", "en cours", "approved", "confirmed", "omnipay_pending", "submitted"].includes(tx.status) && (
+                            {["pending", "en cours", "approved", "confirmed", "omnipay_pending", "lipapap_pending", "submitted"].includes(tx.status) && (
                               <>
                                 <ProviderPickerButton label="Vérifier statut" icon={RefreshCw} colorClass="border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50"
                                   onPick={(provider) => checkTxStatus(tx, provider)} testId={`button-check-status-tx-${tx.id}`} />
@@ -1921,7 +1921,7 @@ function TransactionsPanel() {
                                   onPick={(provider) => syncTxStatusMutation.mutate({ tx, provider })} testId={`button-sync-status-tx-${tx.id}`} />
                               </>
                             )}
-                            {(tx.type === "pending" || ["omnipay_pending", "submitted"].includes(tx.status)) && (
+                            {(tx.type === "pending" || ["omnipay_pending", "lipapap_pending", "submitted"].includes(tx.status)) && (
                               <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
                                 disabled={retryTxMutation.isPending}
                                 onPick={async (provider) => { if (await showConfirm(`Déclencher le paiement chez ${provider} ?\nUne nouvelle invite USSD sera envoyée au client.`)) retryTxMutation.mutate({ tx, provider }); }}

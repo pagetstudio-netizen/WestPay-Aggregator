@@ -280,10 +280,10 @@ export default function Bank2PaymentPage() {
             countries: data.country ? [data.country] : [],
           });
           if (data.redirectUrl) redirectRef.current = data.redirectUrl;
-          if (["confirmed", "omnipay_confirmed"].includes(data.status)) {
+          if (["confirmed", "omnipay_confirmed", "lipapap_confirmed"].includes(data.status)) {
             setConfirmedAt(new Date());
             setScreen("success");
-          } else if (["failed", "omnipay_failed", "omnipay_error"].includes(data.status)) {
+          } else if (["failed", "omnipay_failed", "lipapap_failed", "omnipay_error", "lipapap_error"].includes(data.status)) {
             setError("Le paiement n’a pas pu être confirmé. Veuillez réessayer.");
             setScreen("failed");
           } else {

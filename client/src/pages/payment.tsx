@@ -282,10 +282,10 @@ export default function PaymentPage() {
           if (d.merchantName || d.merchantSlug) {
             setMerchantInfo({ name: d.merchantName || d.merchantSlug, slug: d.merchantSlug || "", countries: d.country ? [d.country] : [] });
           }
-          if (["omnipay_confirmed", "confirmed"].includes(d.status)) {
+          if (["omnipay_confirmed", "lipapap_confirmed", "confirmed"].includes(d.status)) {
             setConfirmedAt(new Date());
             setStep(3);
-          } else if (["omnipay_failed", "omnipay_error", "failed", "expired"].includes(d.status)) {
+          } else if (["omnipay_failed", "lipapap_failed", "omnipay_error", "lipapap_error", "failed", "expired"].includes(d.status)) {
             setFailed(true);
             setFailReason(t("payFailedDesc"));
             setStep(2);

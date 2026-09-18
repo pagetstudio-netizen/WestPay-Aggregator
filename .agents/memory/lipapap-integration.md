@@ -82,3 +82,9 @@ The production `GET_TRANS_STATUS` endpoint recognizes `transaction_id` (snake ca
 **Why:** This distinguishes a request-schema error from an identifier or provider-availability error without creating another live payment.
 
 **How to apply:** Send `transaction_id` for status lookups, preserve the provider's “not found” response for investigation, and do not treat it as proof of a customer payment failure.
+
+LipaPap pending-payment records use provider-specific statuses (`lipapap_pending`, `lipapap_confirmed`, `lipapap_failed`, `lipapap_error`), not the legacy `omnipay_*` prefix.
+
+**Why:** Reusing the historical OmniPay prefix mislabels LipaPap results in internal responses and makes provider diagnostics ambiguous.
+
+**How to apply:** Keep legacy-status normalization for older LipaPap rows, but write and transition all new LipaPap payment states with the `lipapap_*` prefix.
