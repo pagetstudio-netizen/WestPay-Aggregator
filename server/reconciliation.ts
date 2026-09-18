@@ -12,6 +12,7 @@ import { getTransactionStatus as mbiyoGetStatus } from "./mbiyo";
 import { clapayGetTransactionStatus as clapayGetStatus } from "./clapay";
 import { getLipaPapTransactionStatus, getLipaPapPayoutStatus, type LipaPapConfig } from "./lipapap";
 import { notifyMerchantPayment, notifyAdminPayment, notifyAdminWithdrawal, notifyMerchantWithdrawal } from "./telegram-bot";
+import { resolveProviderCode } from "@shared/provider-labels";
 
 import { calcMerchantCredit as calcCredit } from "./feeConfig";
 
@@ -118,7 +119,7 @@ async function creditConfirmedPayment(pending: any, txRef: string): Promise<bool
     payerNumber: pending.payerPhone || null,
     payerName: pending.payerName || null,
     status: "confirmed",
-    provider: "westpay",
+    provider: resolveProviderCode(pending.gateway, pending.omnipayReference),
     omnipayTxId: null,
     operator: pending.paymentMethod || null,
     omnipayReference: pending.omnipayReference || null,
@@ -131,7 +132,7 @@ async function creditConfirmedPayment(pending: any, txRef: string): Promise<bool
     amount: pending.amount,
     payerNumber: pending.payerPhone,
     country: pending.country,
-    provider: "westpay",
+    provider: resolveProviderCode(pending.gateway, pending.omnipayReference),
   }).catch(() => {});
 
   notifyAdminPayment({
@@ -140,7 +141,7 @@ async function creditConfirmedPayment(pending: any, txRef: string): Promise<bool
     payerNumber: pending.payerPhone,
     country: pending.country,
     amount: pending.amount,
-    provider: "westpay",
+    provider: resolveProviderCode(pending.gateway, pending.omnipayReference),
     status: "confirmed",
   }).catch(() => {});
 
@@ -399,7 +400,7 @@ export async function runReconciliation(): Promise<void> {
                 payerNumber: pending.payerPhone || null,
                 payerName: pending.payerName || null,
                 status: "failed",
-                provider: "westpay",
+                provider: "sendavapay",
                 omnipayTxId: null,
                 operator: pending.paymentMethod || null,
                 omnipayReference: pending.omnipayReference || null,

@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry, Withdrawal } from "@shared/schema";
+import { providerLabel as getProviderLabel } from "@shared/provider-labels";
 import { useLanguage, LANGUAGES } from "@/lib/language";
 import { sanitizePaymentMessage } from "@/lib/sanitize-payment-message";
 import { copyTextToClipboard } from "@/lib/clipboard";
@@ -524,10 +525,10 @@ function TransactionDetailDrawer({ tx, onClose }: { tx: any; onClose: () => void
       ? { label: t("pendingLabel"), title: t("transactionPending"), bg: "#fffbeb", color: "#d97706", border: "#fde68a", iconBg: "#f59e0b", dot: "#f59e0b" }
       : { label: t("failedLabel"), title: t("transactionFailed"), bg: "#fef2f2", color: "#dc2626", border: "#fecaca", iconBg: "#dc2626", dot: "#ef4444" };
 
-  const providerLabel = (p: string) => {
+  const providerLabel = (p: string, ref?: string | null) => {
     if (p === "crypto") return t("cryptoProvider");
     if (p === "sms") return t("smsProvider");
-    return t("mobileMoney");
+    return getProviderLabel(p, ref);
   };
 
   const transactionCurrency = tx.currency || countryToCurrency(tx.country || "");
@@ -628,7 +629,7 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
     const header = `TXID,${t("payer")},${t("phone")},${t("amount")},${t("country")},${t("status")},${t("provider")},${t("date")}\n`;
     const locale = lang === "fr" ? "fr-FR" : lang === "zh" ? "zh-CN" : lang === "pt" ? "pt-PT" : lang === "hi" ? "hi-IN" : "en-US";
     const rows = filtered.map((tx) =>
-      `${tx.txId},"${(tx as any).payerName || ""}",${tx.payerNumber || ""},${tx.amount},${tx.country},${tx.status},${providerLabel(tx.provider)},${new Date(tx.createdAt).toLocaleString(locale)}`
+      `${tx.txId},"${(tx as any).payerName || ""}",${tx.payerNumber || ""},${tx.amount},${tx.country},${tx.status},${providerLabel(tx.provider, tx.omnipayReference)},${new Date(tx.createdAt).toLocaleString(locale)}`
     ).join("\n");
     const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -647,10 +648,10 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
       ? { label: t("pending"), bg: "#fffbeb", color: "#d97706", border: "#fde68a", dot: "#f59e0b" }
       : { label: t("failed"), bg: "#fef2f2", color: "#dc2626", border: "#fecaca", dot: "#ef4444" };
 
-  const providerLabel = (p: string) => {
+  const providerLabel = (p: string, ref?: string | null) => {
     if (p === "crypto") return t("cryptoProvider");
     if (p === "sms") return t("smsProvider");
-    return t("mobileMoney");
+    return getProviderLabel(p, ref);
   };
 
   return (
@@ -755,7 +756,12 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
             data-testid="select-filter-provider"
           >
             <option value="all">{t("all")}</option>
-            <option value="omnipay">{t("mobileMoney")}</option>
+            <option value="omnipay">OmniPay</option>
+            <option value="lipapap">LipaPap</option>
+            <option value="clapay">ClaPay</option>
+            <option value="mbiyo">Mbiyo</option>
+            <option value="sendavapay">SendavaPay</option>
+            <option value="seapay">SeaPay</option>
             <option value="sms">SMS</option>
             <option value="crypto">Crypto</option>
           </select>
@@ -782,9 +788,10 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
         ) : (
           <div className="border border-gray-100 rounded-2xl overflow-hidden bg-white" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
             {/* Table header — desktop */}
-            <div className="hidden sm:grid grid-cols-[1fr_auto_auto_auto] gap-4 px-4 py-3 border-b border-gray-100 bg-gray-50">
+             <div className="hidden sm:grid grid-cols-[1fr_auto_auto_auto_auto] gap-4 px-4 py-3 border-b border-gray-100 bg-gray-50">
               <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{t("reference")} / {t("payer")}</span>
               <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider text-center">{t("country")}</span>
+               <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider text-center">{t("provider")}</span>
               <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider text-center">{t("status")}</span>
               <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider text-right">{t("amount")}</span>
             </div>
@@ -798,7 +805,7 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
               return (
                 <div
                   key={tx.id}
-                  className={`flex sm:grid sm:grid-cols-[1fr_auto_auto_auto] gap-3 sm:gap-4 px-4 py-4 cursor-pointer hover:bg-gray-50 transition-colors items-center ${idx !== 0 ? "border-t border-gray-100" : ""}`}
+                   className={`flex sm:grid sm:grid-cols-[1fr_auto_auto_auto_auto] gap-3 sm:gap-4 px-4 py-4 cursor-pointer hover:bg-gray-50 transition-colors items-center ${idx !== 0 ? "border-t border-gray-100" : ""}`}
                   onClick={() => setSelectedTx(tx)}
                   data-testid={`card-tx-${tx.id}`}
                 >
@@ -825,6 +832,11 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
 
                   {/* Country — hidden on mobile, shown inline */}
                   <span className="hidden sm:block text-xs font-medium text-gray-500 bg-gray-100 px-2.5 py-1 rounded-lg text-center whitespace-nowrap">{tx.country}</span>
+
+                  {/* Provider — explicit name, never a generic mobile-money label */}
+                  <span className="hidden sm:block text-xs font-semibold text-gray-600 bg-blue-50 px-2.5 py-1 rounded-lg text-center whitespace-nowrap">
+                    {isTransfer ? "—" : providerLabel(tx.provider, tx.omnipayReference)}
+                  </span>
 
                   {/* Status */}
                   <span

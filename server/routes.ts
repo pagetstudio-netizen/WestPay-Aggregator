@@ -9,6 +9,7 @@ import { db, pool, financialDb, financialPool } from "./db";
 import { generateSecret as totpGenerateSecret, generateURI as totpGenerateURI, verifySync as totpVerifySync } from "otplib";
 import QRCode from "qrcode";
 import { admins, merchantCountries, transactions, pendingPayments } from "@shared/schema";
+import { resolveProviderCode } from "@shared/provider-labels";
 import { normalizeEmailInput } from "@shared/email-validation";
 import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
@@ -3417,7 +3418,7 @@ export async function registerRoutes(
         merchantName: merchantMap.get(t.merchantId) || `Marchand #${t.merchantId}`,
         payerNumber: t.payerNumber,
         operator: t.operator,
-        provider: t.provider,
+        provider: resolveProviderCode(t.provider, t.omnipayReference),
         omnipayReference: t.omnipayReference,
         errorMessage: t.errorMessage,
         createdAt: t.createdAt,
@@ -3435,7 +3436,7 @@ export async function registerRoutes(
         merchantName: w.merchantName,
         payerNumber: w.phone,
         operator: w.operator,
-         provider: w.gateway,
+        provider: resolveProviderCode(w.gateway, w.omnipayRef),
         omnipayReference: w.omnipayRef,
         errorMessage: w.adminNote,
         createdAt: w.createdAt,
@@ -3475,7 +3476,7 @@ export async function registerRoutes(
           merchantName: merchantMap.get(p.merchantId) || `Marchand #${p.merchantId}`,
           payerNumber: p.payerPhone,
           operator: p.paymentMethod,
-          provider: (p as any).gateway || null,
+          provider: resolveProviderCode((p as any).gateway, p.omnipayReference),
           omnipayReference: p.omnipayReference,
           errorMessage: (p as any).errorMessage || null,
           createdAt: p.createdAt,
@@ -3786,7 +3787,7 @@ export async function registerRoutes(
       // Sanitize: never expose internal provider/gateway names to merchants
       const sanitized = txs.map((t: any) => ({
         ...t,
-        provider: "westpay",
+        provider: resolveProviderCode(t.provider, t.omnipayReference),
         errorMessage: t.errorMessage
           ? sanitizePublicPaymentMessage(t.errorMessage)
           : t.errorMessage,
@@ -4048,7 +4049,7 @@ export async function registerRoutes(
         amount: pending.amount,
         payerNumber: pending.payerPhone,
         country: pending.country,
-        provider: "westpay",
+        provider: "lipapap",
       }).catch(() => {});
       notifyAdminPayment({
         txId,
@@ -4928,7 +4929,7 @@ export async function registerRoutes(
               payerNumber: msisdn || null,
               payerName: payerName || null,
               status: "failed",
-              provider: "westpay",
+              provider: "sendavapay",
               omnipayTxId: null,
               operator: paymentMethod || null,
               omnipayReference: reference,
@@ -5142,7 +5143,7 @@ export async function registerRoutes(
               payerNumber: msisdn || null,
               payerName: payerName || null,
               status: "failed",
-              provider: "westpay",
+              provider: "mbiyo",
               omnipayTxId: null,
               operator: operator || network || null,
               omnipayReference: reference,
@@ -5165,7 +5166,7 @@ export async function registerRoutes(
             omnipayReference: reference,
             omnipayTxId: mbiyoResult.data.transaction_id,
             omnipayPaymentUrl: paymentUrl,
-            gateway: "westpay",
+            gateway: "mbiyo",
             expiresAt,
           });
 
@@ -5519,7 +5520,7 @@ export async function registerRoutes(
               payerNumber: msisdn || null,
               payerName: payerName || null,
               status: "failed",
-              provider: "westpay",
+              provider: "omnipay",
               omnipayTxId: null,
               operator: operator || omnipayOperator || null,
               omnipayReference: reference,
@@ -5541,7 +5542,7 @@ export async function registerRoutes(
             omnipayReference: reference,
             omnipayTxId: omnipayResult.id ? String(omnipayResult.id) : null,
             omnipayPaymentUrl: omnipayResult.payment_url || null,
-            gateway: "westpay",
+            gateway: "omnipay",
             expiresAt,
           });
 
@@ -5861,7 +5862,7 @@ export async function registerRoutes(
               payerNumber: payload.msisdn || pending.payerPhone || null,
               payerName: payerFullName,
               status: "confirmed",
-              provider: "westpay",
+              provider: "omnipay",
               omnipayTxId: payload.id || null,
               omnipayReference: pending.omnipayReference || payload.reference || null,
               providerFee: payload.fees != null ? parseInt(String(payload.fees)) || 0 : 0,
@@ -5887,7 +5888,7 @@ export async function registerRoutes(
                 payer: payload.msisdn || pending.payerPhone || "",
                 country: pending.country,
                 merchantSlug: merchant.slug,
-                provider: "westpay",
+                provider: "omnipay",
                 omnipayReference: payload.reference,
                 timestamp: new Date().toISOString(),
               }).catch(err => console.error("[WEBHOOK] Erreur async:", err));
@@ -5898,7 +5899,7 @@ export async function registerRoutes(
               amount: pending.amount,
               payerNumber: payload.msisdn || pending.payerPhone,
               country: pending.country,
-              provider: "westpay",
+              provider: "omnipay",
             }).catch(() => {});
 
             notifyAdminPayment({
@@ -5907,7 +5908,7 @@ export async function registerRoutes(
               payerNumber: payload.msisdn || pending.payerPhone,
               country: pending.country,
               amount: pending.amount,
-              provider: "westpay",
+              provider: "omnipay",
               status: "confirmed",
             }).catch(() => {});
           }
@@ -5927,7 +5928,7 @@ export async function registerRoutes(
           payerNumber: payload.msisdn || pending.payerPhone || null,
           payerName: pending.payerName || null,
           status: "failed",
-          provider: "westpay",
+          provider: "omnipay",
           omnipayTxId: payload.id ? String(payload.id) : null,
           operator: null,
           omnipayReference: failedRef,
@@ -6015,7 +6016,7 @@ export async function registerRoutes(
                         payerNumber: pending.payerPhone || null,
                         payerName: pending.payerName || null,
                         status: "confirmed",
-                        provider: "westpay",
+                        provider: "mbiyo",
                         omnipayTxId: statusResult.data.transaction_id || null,
                         operator: pending.paymentMethod || null,
                         omnipayReference: pending.omnipayReference,
@@ -6035,10 +6036,10 @@ export async function registerRoutes(
                       country: pending.country,
                       status: "confirmed",
                       reference: pending.omnipayReference,
-                      provider: "westpay",
+                      provider: "mbiyo",
                     }).catch((err) => console.error("[WEBHOOK] Erreur async:", err));
-                    notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "westpay" }).catch(() => {});
-                    notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "westpay", status: "confirmed" }).catch(() => {});
+                    notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "mbiyo" }).catch(() => {});
+                    notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "mbiyo", status: "confirmed" }).catch(() => {});
                   } else {
                     console.error(`[POLL MBIYO] MerchantCountry introuvable pour merchantId=${pending.merchantId} country="${pending.country}"`);
                   }
@@ -6058,7 +6059,7 @@ export async function registerRoutes(
                       payerNumber: pending.payerPhone || null,
                       payerName: pending.payerName || null,
                       status: "failed",
-                      provider: "westpay",
+                      provider: "mbiyo",
                       omnipayTxId: null,
                       operator: pending.paymentMethod || null,
                       omnipayReference: pending.omnipayReference,
@@ -6101,7 +6102,7 @@ export async function registerRoutes(
                       payerNumber: pending.payerPhone || null,
                       payerName: pending.payerName || null,
                       status: "confirmed",
-                      provider: "westpay",
+                      provider: "sendavapay",
                       omnipayTxId: null,
                       operator: pending.paymentMethod || null,
                       omnipayReference: pending.omnipayReference,
@@ -6109,8 +6110,8 @@ export async function registerRoutes(
                       providerFee: westpayFee,
                     });
                     console.log(`[POLL SENDAVAPAY] Paiement credite via polling — ref=${pending.omnipayReference} montant=${pending.amount} frais=${westpayFee} credit=${credit}`);
-                    notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "westpay" }).catch(() => {});
-                    notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "westpay", status: "confirmed" }).catch(() => {});
+                    notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "sendavapay" }).catch(() => {});
+                    notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "sendavapay", status: "confirmed" }).catch(() => {});
                   }
                 }
                 return res.json({ status: "confirmed", paymentId: pending.id });
@@ -6129,7 +6130,7 @@ export async function registerRoutes(
                     payerNumber: pending.payerPhone || null,
                     payerName: pending.payerName || null,
                     status: "failed",
-                    provider: "westpay",
+                    provider: "sendavapay",
                     omnipayTxId: null,
                     operator: pending.paymentMethod || null,
                     omnipayReference: pending.omnipayReference,
@@ -6333,7 +6334,7 @@ export async function registerRoutes(
           payerNumber: pending.payerPhone || null,
           payerName: pending.payerName || null,
           status: "confirmed",
-          provider: "westpay",
+          provider: "mbiyo",
           omnipayTxId: payload.transaction_id || null,
           operator: pending.paymentMethod || null,
           omnipayReference: payload.order_id,
@@ -6358,7 +6359,7 @@ export async function registerRoutes(
                   payerName: tx.payerName,
                   status: "confirmed",
                   reference: payload.order_id,
-                  provider: "westpay",
+                  provider: "mbiyo",
                 };
                 const hmac = crypto.createHmac("sha256", merchant.webhookSecret || "").update(JSON.stringify(webhookPayload)).digest("hex");
                 await fetch(merchant.webhookUrl, {
@@ -6369,8 +6370,8 @@ export async function registerRoutes(
               } catch {}
             }
             if (merchant) {
-              notifyMerchantPayment(pending.merchantId, { txId: tx.txId || txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "westpay" }).catch(() => {});
-              notifyAdminPayment({ txId: tx.txId || txRef, merchantName: merchant.name, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "westpay", status: "confirmed" }).catch(() => {});
+              notifyMerchantPayment(pending.merchantId, { txId: tx.txId || txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "mbiyo" }).catch(() => {});
+              notifyAdminPayment({ txId: tx.txId || txRef, merchantName: merchant.name, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "mbiyo", status: "confirmed" }).catch(() => {});
             }
           } catch {}
         });
@@ -6385,7 +6386,7 @@ export async function registerRoutes(
           payerNumber: pending.payerPhone || null,
           payerName: pending.payerName || null,
           status: "failed",
-          provider: "westpay",
+          provider: "mbiyo",
           omnipayTxId: payload.transaction_id || null,
           operator: pending.paymentMethod || null,
           omnipayReference: payload.order_id,
@@ -7408,7 +7409,7 @@ export async function registerRoutes(
             payerNumber: payload.customerPhone || pending.payerPhone || null,
             payerName: pending.payerName || null,
             status: "confirmed",
-            provider: "westpay",
+            provider: "sendavapay",
             omnipayTxId: null,
             omnipayReference: pending.omnipayReference || reference,
             providerFee: westpayFee,
@@ -7424,12 +7425,12 @@ export async function registerRoutes(
             payer: payload.customerPhone || pending.payerPhone,
             country: pending.country,
             merchantSlug: merchant?.slug || "",
-            provider: "westpay",
+            provider: "sendavapay",
             timestamp: new Date().toISOString(),
           }).catch(() => {});
 
-          notifyMerchantPayment(pending.merchantId, { txId, amount: pending.amount, payerNumber: payload.customerPhone || pending.payerPhone, country: pending.country, provider: "westpay" }).catch(() => {});
-          notifyAdminPayment({ txId, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: payload.customerPhone || pending.payerPhone, country: pending.country, amount: pending.amount, provider: "westpay", status: "confirmed" }).catch(() => {});
+          notifyMerchantPayment(pending.merchantId, { txId, amount: pending.amount, payerNumber: payload.customerPhone || pending.payerPhone, country: pending.country, provider: "sendavapay" }).catch(() => {});
+          notifyAdminPayment({ txId, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: payload.customerPhone || pending.payerPhone, country: pending.country, amount: pending.amount, provider: "sendavapay", status: "confirmed" }).catch(() => {});
         }
 
         return res.json({ status: "confirmed" });
@@ -7447,7 +7448,7 @@ export async function registerRoutes(
             payerNumber: payload.customerPhone || pending.payerPhone || null,
             payerName: pending.payerName || null,
             status: "failed",
-            provider: "westpay",
+            provider: "sendavapay",
             omnipayTxId: null,
             omnipayReference: pending.omnipayReference || reference,
             errorMessage: `Paiement ${payload.status || "refusé"}`,
@@ -7821,7 +7822,7 @@ export async function registerRoutes(
         payerNumber: pending.payerPhone || null,
         payerName: pending.payerName || null,
         status: "confirmed",
-        provider: "westpay",
+        provider: "mbiyo",
         omnipayTxId: txId || null,
         operator: pending.paymentMethod || null,
         omnipayReference: reference,
@@ -8003,7 +8004,7 @@ export async function registerRoutes(
         amount: -parsedAmount,
         payerNumber: msisdn,
         status: "confirmed",
-        provider: "westpay",
+        provider: "omnipay",
         omnipayTxId: result.id ? String(result.id) : null,
       });
 
@@ -9268,7 +9269,7 @@ export async function registerRoutes(
             const mbiyoFee = Math.round(parseFloat(String(result.data!.fee || 0)) || withdrawalFee);
             await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - TxID: ${mbiyoRef}`, reference, mbiyoFee, mbiyoFee);
             console.log(`[WITHDRAWAL MBIYO] Initié (statut: ${result.status}) - TxID: ${mbiyoRef} ref=${reference}`);
-            return res.json({ ...w, status: "pending", omnipayRef: reference, fees: mbiyoFee, netAmount, autoProcessed: true, gateway: "westpay" });
+            return res.json({ ...w, status: "pending", omnipayRef: reference, fees: mbiyoFee, netAmount, autoProcessed: true, gateway: "mbiyo" });
           } else {
             const errMsg = result.message || "Echec du transfert";
             console.warn(`[WITHDRAWAL MBIYO] Echec: ${errMsg} — tentative fallback OmniPay...`);
@@ -9306,7 +9307,7 @@ export async function registerRoutes(
                   const fbProviderFee = fallbackResult.fees || 0;
                   await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - Frais prévus: ${withdrawalFee} F`, omnipayRef, withdrawalFee, fbProviderFee);
                   console.log(`[WITHDRAWAL FALLBACK] Basculé sur OmniPay ref=${omnipayRef}`);
-                  return res.json({ ...w, status: "pending", omnipayRef, fees: withdrawalFee, netAmount, autoProcessed: true, gateway: "westpay" });
+                  return res.json({ ...w, status: "pending", omnipayRef, fees: withdrawalFee, netAmount, autoProcessed: true, gateway: "omnipay" });
                 }
               } catch (fbErr: any) {
                 console.error(`[WITHDRAWAL FALLBACK] OmniPay fallback échoué: ${fbErr.message}`);
@@ -9359,7 +9360,7 @@ export async function registerRoutes(
                 const fbProviderFee2 = fallbackResult.fees || 0;
                 await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - Frais prévus: ${withdrawalFee} F`, omnipayRef, withdrawalFee, fbProviderFee2);
                 console.log(`[WITHDRAWAL FALLBACK] Basculé sur OmniPay ref=${omnipayRef} (après erreur Mbiyo)`);
-                return res.json({ ...w, status: "pending", omnipayRef, fees: withdrawalFee, netAmount, autoProcessed: true, gateway: "westpay" });
+                return res.json({ ...w, status: "pending", omnipayRef, fees: withdrawalFee, netAmount, autoProcessed: true, gateway: "omnipay" });
               }
             } catch (fbErr: any) {
               console.error(`[WITHDRAWAL FALLBACK] OmniPay fallback échoué: ${fbErr.message}`);
@@ -10736,7 +10737,7 @@ export async function registerRoutes(
           omnipayReference: reference,
           omnipayTxId: result.id ? String(result.id) : null,
           omnipayPaymentUrl: result.payment_url || null,
-          gateway: "westpay",
+          gateway: "omnipay",
         }).where(eq(pendingPayments.id, id));
         console.log(`[ADMIN TRIGGER TX] Paiement #${id} re-déclenché chez OmniPay — ref=${reference}`);
         return res.json({ success: true, provider: "omnipay", reference, paymentUrl: result.payment_url });
@@ -11818,7 +11819,7 @@ export async function registerRoutes(
         omnipayReference: internalRef,
         omnipayTxId: null,
         omnipayPaymentUrl: null,
-        gateway: "westpay",
+        gateway: "mbiyo",
         expiresAt,
       });
 
@@ -12013,7 +12014,7 @@ export async function registerRoutes(
         operator: metadata.network,
         adminNote: null,
         fees,
-        gateway: "westpay",
+        gateway: "mbiyo",
         omnipayRef: internalRef,
       });
 
