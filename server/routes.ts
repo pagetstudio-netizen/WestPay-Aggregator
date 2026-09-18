@@ -5204,10 +5204,7 @@ export async function registerRoutes(
         /* ── SeaPay : GCash / Maya / UPI / EasyPaisa / JazzCash ─────────── */
         const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(country), getSeapayApiKey(country)]);
         if (!spMerchantId || !spApiKey) {
-          console.error(
-            `[PAYMENT CONFIG] Identifiants incomplets pour gateway=seapay pays=${country} opérateur=${paymentMethod} ` +
-            `(merchantId=${!!spMerchantId}, apiKey=${!!spApiKey})`,
-          );
+          console.error(`[PAYMENT CONFIG] Identifiants SeaPay incomplets pour pays=${country} opérateur=${paymentMethod}`);
           notifyAdminPaymentError({
             merchantName: merchant.name,
             merchantId: merchant.id,
@@ -5217,7 +5214,7 @@ export async function registerRoutes(
             operator: paymentMethod,
             gateway: "seapay",
             stage: "lecture des identifiants pays",
-            error: `Identifiants SeaPay incomplets (merchantId=${!!spMerchantId}, apiKey=${!!spApiKey})`,
+            error: "Identifiants SeaPay incomplets",
           }).catch(() => {});
           return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
         }
