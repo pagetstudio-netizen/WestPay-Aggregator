@@ -13,3 +13,4 @@
 - [Telegram delivery recovery](telegram-delivery-recovery.md) — Telegraf polling launch deletes webhooks; check webhook ownership first and repair stuck webhook queues quickly.
 - [Admin session refresh](admin-session-refresh.md) — restore admin sessions from the httpOnly cookie; only an explicit 401 should trigger logout.
 - [LipaPap integration](lipapap-integration.md) — MOMO/MOMOPAYOUT are documented; account-balance lookup still needs an official LipaPap API.
+- [ClaPay failed-status diagnostics](clapay-status-diagnostics.md) — a FAILED status may expose only a generic observation; compare non-sensitive routing fields and don't infer the cause.
