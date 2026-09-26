@@ -156,13 +156,13 @@ interface BroadcastSession {
 }
 const broadcastSessions = new Map<string, BroadcastSession>(); // chatId -> session
 
-// ─── Session /commander ────────────────────────────────────────────────────
+// ─── Session /findwithdrawal ────────────────────────────────────────────────
 interface CommanderSession {
   step: "waiting_phone";
 }
 const commanderSessions = new Map<string, CommanderSession>();
 
-// ─── Sessions /desactiverpaiement et /reactiverpaiement ─────────────────────
+// ─── Sessions /disablepayments et /enablepayments ───────────────────────────
 interface MerchantPaymentToggleSession {
   step: "waiting_slug";
   action: "disable" | "enable";
@@ -383,18 +383,18 @@ const BOT_TEXTS: Record<BotLanguage, MerchantBotText> = {
   fr: {
     helpMessage: (name) =>
       `📖 *Commandes disponibles — ${name}*\n\n` +
-      `💰 /solde — Solde détaillé par pays\n` +
+      `💰 /balance — Solde détaillé par pays\n` +
       `📋 /transactions — Les 5 dernières transactions\n` +
       `📊 /stats — Vos statistiques globales\n` +
       `🌐 /addip ADRESSE\\_IP — Ajouter une IP à la whitelist\n` +
-      `❓ /aide — Afficher cette aide\n\n` +
+      `❓ /help — Afficher cette aide\n\n` +
       `📲 *Notifications automatiques*\nChaque paiement confirmé est affiché ici en temps réel.\n\n` +
       `💡 *Astuce IP :* Si le bot ne répond pas quand vous envoyez une IP en texte, utilisez \`/addip 1.2.3.4\`.`,
-    alreadyLinked: (name) => `✅ Votre compte *${name}* est déjà lié.\n\nTapez /aide pour voir vos commandes.`,
-    linkedWelcome: (name) => `✅ *Compte lié avec succès !*\n\nBienvenue, *${name}* 👋\n\nVous recevrez désormais vos notifications de paiement ici.\n\nTapez /aide pour voir vos commandes.`,
+    alreadyLinked: (name) => `✅ Votre compte *${name}* est déjà lié.\n\nTapez /help pour voir vos commandes.`,
+    linkedWelcome: (name) => `✅ *Compte lié avec succès !*\n\nBienvenue, *${name}* 👋\n\nVous recevrez désormais vos notifications de paiement ici.\n\nTapez /help pour voir vos commandes.`,
     groupLinked: (name, email, help) => `✅ *Groupe lié au marchand !*\n\n🏪 Marchand : *${name}*\n📧 ${email}\n\n${help}`,
     groupActive: (name, help) => `✅ *Bot WestPay actif — ${name}*\n\n${help}`,
-    groupAdded: (groupTitle) => `👋 *Bot WestPay ajouté à ${groupTitle}.*\n\nPour lier ce groupe à un compte marchand :\n\n\`/setmarchand CODE\`\n\n_(Le code d'activation est généré depuis le dashboard WestPay)_`,
+    groupAdded: (groupTitle) => `👋 *Bot WestPay ajouté à ${groupTitle}.*\n\nPour lier ce groupe à un compte marchand :\n\n\`/setmerchant CODE\`\n\n_(Le code d'activation est généré depuis le dashboard WestPay)_`,
     stats: (name, transactions, volume) => `📊 *Vos statistiques — ${name}*\n\n💳 Transactions : *${transactions}*\n💰 Volume total : *${volume}*`,
     balances: (name, details) => `💰 *Soldes — ${name}*\n\n${details}`,
     transactionsTitle: (name, personal) => personal ? `📋 *Vos 5 dernières transactions*` : `📋 *5 dernières transactions — ${name}*`,
@@ -411,18 +411,18 @@ const BOT_TEXTS: Record<BotLanguage, MerchantBotText> = {
   en: {
     helpMessage: (name) =>
       `📖 *Available commands — ${name}*\n\n` +
-      `💰 /solde — Detailed balance by country\n` +
+      `💰 /balance — Detailed balance by country\n` +
       `📋 /transactions — Your 5 latest transactions\n` +
       `📊 /stats — Your overall statistics\n` +
       `🌐 /addip IP\\_ADDRESS — Add an IP to the whitelist\n` +
-      `❓ /aide — Show this help\n\n` +
+      `❓ /help — Show this help\n\n` +
       `📲 *Automatic notifications*\nEvery confirmed payment appears here in real time.\n\n` +
       `💡 *IP tip:* If the bot does not answer when you send an IP as text, use \`/addip 1.2.3.4\`.`,
-    alreadyLinked: (name) => `✅ Your *${name}* account is already linked.\n\nType /aide to see your commands.`,
-    linkedWelcome: (name) => `✅ *Account linked successfully!*\n\nWelcome, *${name}* 👋\n\nYou will now receive your payment notifications here.\n\nType /aide to see your commands.`,
+    alreadyLinked: (name) => `✅ Your *${name}* account is already linked.\n\nType /help to see your commands.`,
+    linkedWelcome: (name) => `✅ *Account linked successfully!*\n\nWelcome, *${name}* 👋\n\nYou will now receive your payment notifications here.\n\nType /help to see your commands.`,
     groupLinked: (name, email, help) => `✅ *Group linked to the merchant!*\n\n🏪 Merchant: *${name}*\n📧 ${email}\n\n${help}`,
     groupActive: (name, help) => `✅ *WestPay bot active — ${name}*\n\n${help}`,
-    groupAdded: (groupTitle) => `👋 *WestPay bot added to ${groupTitle}.*\n\nTo link this group to a merchant account:\n\n\`/setmarchand CODE\`\n\n_(The activation code is generated from the WestPay dashboard)_`,
+    groupAdded: (groupTitle) => `👋 *WestPay bot added to ${groupTitle}.*\n\nTo link this group to a merchant account:\n\n\`/setmerchant CODE\`\n\n_(The activation code is generated from the WestPay dashboard)_`,
     stats: (name, transactions, volume) => `📊 *Your statistics — ${name}*\n\n💳 Transactions: *${transactions}*\n💰 Total volume: *${volume}*`,
     balances: (name, details) => `💰 *Balances — ${name}*\n\n${details}`,
     transactionsTitle: (name, personal) => personal ? `📋 *Your 5 latest transactions*` : `📋 *5 latest transactions — ${name}*`,
@@ -439,18 +439,18 @@ const BOT_TEXTS: Record<BotLanguage, MerchantBotText> = {
   zh: {
     helpMessage: (name) =>
       `📖 *可用命令 — ${name}*\n\n` +
-      `💰 /solde — 查看各国详细余额\n` +
+      `💰 /balance — 查看各国详细余额\n` +
       `📋 /transactions — 查看最近 5 笔交易\n` +
       `📊 /stats — 查看总体统计\n` +
       `🌐 /addip IP\\_地址 — 将 IP 加入白名单\n` +
-      `❓ /aide — 显示帮助\n\n` +
+      `❓ /help — 显示帮助\n\n` +
       `📲 *自动通知*\n每笔已确认的付款都会实时显示在这里。\n\n` +
       `💡 *IP 提示：* 如果直接发送 IP 没有响应，请使用 \`/addip 1.2.3.4\`。`,
-    alreadyLinked: (name) => `✅ 您的 *${name}* 账户已经绑定。\n\n输入 /aide 查看可用命令。`,
-    linkedWelcome: (name) => `✅ *账户绑定成功！*\n\n欢迎，*${name}* 👋\n\n您现在将在这里收到付款通知。\n\n输入 /aide 查看可用命令。`,
+    alreadyLinked: (name) => `✅ 您的 *${name}* 账户已经绑定。\n\n输入 /help 查看可用命令。`,
+    linkedWelcome: (name) => `✅ *账户绑定成功！*\n\n欢迎，*${name}* 👋\n\n您现在将在这里收到付款通知。\n\n输入 /help 查看可用命令。`,
     groupLinked: (name, email, help) => `✅ *群组已与商户绑定！*\n\n🏪 商户：*${name}*\n📧 ${email}\n\n${help}`,
     groupActive: (name, help) => `✅ *WestPay 机器人已启用 — ${name}*\n\n${help}`,
-    groupAdded: (groupTitle) => `👋 *WestPay 机器人已添加到 ${groupTitle}。*\n\n要将此群组绑定到商户账户：\n\n\`/setmarchand CODE\`\n\n_(激活码在 WestPay 管理后台生成)_`,
+    groupAdded: (groupTitle) => `👋 *WestPay 机器人已添加到 ${groupTitle}。*\n\n要将此群组绑定到商户账户：\n\n\`/setmerchant CODE\`\n\n_(激活码在 WestPay 管理后台生成)_`,
     stats: (name, transactions, volume) => `📊 *您的统计 — ${name}*\n\n💳 交易数：*${transactions}*\n💰 总交易量：*${volume}*`,
     balances: (name, details) => `💰 *余额 — ${name}*\n\n${details}`,
     transactionsTitle: (name, personal) => personal ? `📋 *最近 5 笔交易*` : `📋 *最近 5 笔交易 — ${name}*`,
@@ -467,18 +467,18 @@ const BOT_TEXTS: Record<BotLanguage, MerchantBotText> = {
   de: {
     helpMessage: (name) =>
       `📖 *Verfügbare Befehle — ${name}*\n\n` +
-      `💰 /solde — Detaillierter Kontostand nach Land\n` +
+      `💰 /balance — Detaillierter Kontostand nach Land\n` +
       `📋 /transactions — Die letzten 5 Transaktionen\n` +
       `📊 /stats — Ihre Gesamtstatistik\n` +
       `🌐 /addip IP\\_ADRESSE — Eine IP zur Whitelist hinzufügen\n` +
-      `❓ /aide — Diese Hilfe anzeigen\n\n` +
+      `❓ /help — Diese Hilfe anzeigen\n\n` +
       `📲 *Automatische Benachrichtigungen*\nJede bestätigte Zahlung wird hier in Echtzeit angezeigt.\n\n` +
       `💡 *IP-Tipp:* Wenn der Bot auf eine IP als Text nicht antwortet, verwenden Sie \`/addip 1.2.3.4\`.`,
-    alreadyLinked: (name) => `✅ Ihr Konto *${name}* ist bereits verknüpft.\n\nGeben Sie /aide ein, um Ihre Befehle zu sehen.`,
-    linkedWelcome: (name) => `✅ *Konto erfolgreich verknüpft!*\n\nWillkommen, *${name}* 👋\n\nSie erhalten Ihre Zahlungsbenachrichtigungen ab jetzt hier.\n\nGeben Sie /aide ein, um Ihre Befehle zu sehen.`,
+    alreadyLinked: (name) => `✅ Ihr Konto *${name}* ist bereits verknüpft.\n\nGeben Sie /help ein, um Ihre Befehle zu sehen.`,
+    linkedWelcome: (name) => `✅ *Konto erfolgreich verknüpft!*\n\nWillkommen, *${name}* 👋\n\nSie erhalten Ihre Zahlungsbenachrichtigungen ab jetzt hier.\n\nGeben Sie /help ein, um Ihre Befehle zu sehen.`,
     groupLinked: (name, email, help) => `✅ *Gruppe mit dem Händler verknüpft!*\n\n🏪 Händler: *${name}*\n📧 ${email}\n\n${help}`,
     groupActive: (name, help) => `✅ *WestPay-Bot aktiv — ${name}*\n\n${help}`,
-    groupAdded: (groupTitle) => `👋 *WestPay-Bot zu ${groupTitle} hinzugefügt.*\n\nUm diese Gruppe mit einem Händlerkonto zu verknüpfen:\n\n\`/setmarchand CODE\`\n\n_(Der Aktivierungscode wird im WestPay-Dashboard erstellt)_`,
+    groupAdded: (groupTitle) => `👋 *WestPay-Bot zu ${groupTitle} hinzugefügt.*\n\nUm diese Gruppe mit einem Händlerkonto zu verknüpfen:\n\n\`/setmerchant CODE\`\n\n_(Der Aktivierungscode wird im WestPay-Dashboard erstellt)_`,
     stats: (name, transactions, volume) => `📊 *Ihre Statistik — ${name}*\n\n💳 Transaktionen: *${transactions}*\n💰 Gesamtvolumen: *${volume}*`,
     balances: (name, details) => `💰 *Kontostände — ${name}*\n\n${details}`,
     transactionsTitle: (name, personal) => personal ? `📋 *Ihre letzten 5 Transaktionen*` : `📋 *Die letzten 5 Transaktionen — ${name}*`,
@@ -495,18 +495,18 @@ const BOT_TEXTS: Record<BotLanguage, MerchantBotText> = {
   hi: {
     helpMessage: (name) =>
       `📖 *उपलब्ध कमांड — ${name}*\n\n` +
-      `💰 /solde — देश के अनुसार विस्तृत बैलेंस\n` +
+      `💰 /balance — देश के अनुसार विस्तृत बैलेंस\n` +
       `📋 /transactions — पिछली 5 लेन-देन\n` +
       `📊 /stats — आपके कुल आँकड़े\n` +
       `🌐 /addip IP\\_ADDRESS — IP को whitelist में जोड़ें\n` +
-      `❓ /aide — सहायता दिखाएँ\n\n` +
+      `❓ /help — सहायता दिखाएँ\n\n` +
       `📲 *स्वचालित सूचनाएँ*\nहर पुष्टि किया गया भुगतान यहाँ तुरंत दिखाई देगा।\n\n` +
       `💡 *IP सुझाव:* यदि IP को टेक्स्ट के रूप में भेजने पर जवाब न मिले, तो \`/addip 1.2.3.4\` का उपयोग करें।`,
-    alreadyLinked: (name) => `✅ आपका *${name}* खाता पहले से जुड़ा है।\n\nअपने कमांड देखने के लिए /aide लिखें।`,
-    linkedWelcome: (name) => `✅ *खाता सफलतापूर्वक जुड़ गया!*\n\nस्वागत है, *${name}* 👋\n\nअब आपको भुगतान सूचनाएँ यहाँ मिलेंगी।\n\nअपने कमांड देखने के लिए /aide लिखें।`,
+    alreadyLinked: (name) => `✅ आपका *${name}* खाता पहले से जुड़ा है।\n\nअपने कमांड देखने के लिए /help लिखें।`,
+    linkedWelcome: (name) => `✅ *खाता सफलतापूर्वक जुड़ गया!*\n\nस्वागत है, *${name}* 👋\n\nअब आपको भुगतान सूचनाएँ यहाँ मिलेंगी।\n\nअपने कमांड देखने के लिए /help लिखें।`,
     groupLinked: (name, email, help) => `✅ *समूह व्यापारी से जुड़ गया!*\n\n🏪 व्यापारी: *${name}*\n📧 ${email}\n\n${help}`,
     groupActive: (name, help) => `✅ *WestPay बॉट सक्रिय — ${name}*\n\n${help}`,
-    groupAdded: (groupTitle) => `👋 *WestPay बॉट ${groupTitle} में जोड़ा गया।*\n\nइस समूह को व्यापारी खाते से जोड़ने के लिए:\n\n\`/setmarchand CODE\`\n\n_(सक्रियण कोड WestPay डैशबोर्ड से बनाया जाता है)_`,
+    groupAdded: (groupTitle) => `👋 *WestPay बॉट ${groupTitle} में जोड़ा गया।*\n\nइस समूह को व्यापारी खाते से जोड़ने के लिए:\n\n\`/setmerchant CODE\`\n\n_(सक्रियण कोड WestPay डैशबोर्ड से बनाया जाता है)_`,
     stats: (name, transactions, volume) => `📊 *आपके आँकड़े — ${name}*\n\n💳 लेन-देन: *${transactions}*\n💰 कुल मात्रा: *${volume}*`,
     balances: (name, details) => `💰 *बैलेंस — ${name}*\n\n${details}`,
     transactionsTitle: (name, personal) => personal ? `📋 *आपके पिछले 5 लेन-देन*` : `📋 *पिछले 5 लेन-देन — ${name}*`,
@@ -1090,8 +1090,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     );
   });
 
-  // ─── /setmarchand (liaison groupe → marchand) ─────────────────────────────
-  bot.command("setmarchand", async (ctx) => {
+  // ─── /setmerchant (liaison groupe → marchand) ─────────────────────────────
+  bot.command("setmerchant", async (ctx) => {
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
     if (!isGroup) { await ctx.reply("❌ Cette commande doit être utilisée dans un groupe dédié au marchand."); return; }
 
@@ -1101,13 +1101,13 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     const code = text.split(" ")[1]?.trim();
 
     if (!code) {
-      await ctx.reply("❌ Code manquant.\n\nUtilisez : `/setmarchand CODE`\n\nLe code est généré depuis le dashboard WestPay.", { parse_mode: "Markdown" });
+      await ctx.reply("❌ Code manquant.\n\nUtilisez : `/setmerchant CODE`\n\nLe code est généré depuis le dashboard WestPay.", { parse_mode: "Markdown" });
       return;
     }
 
     if (isRateLimited(userId)) {
       await ctx.reply("⛔ Trop de tentatives. Réessayez dans 1 heure.");
-      await alertAdminGroup(`⚠️ *Tentative bloquée /setmarchand*\n\n👤 ${formatUser(ctx)}\n👥 Groupe : ${(ctx.chat as any).title || chatId}`);
+      await alertAdminGroup(`⚠️ *Tentative bloquée /setmerchant*\n\n👤 ${formatUser(ctx)}\n👥 Groupe : ${(ctx.chat as any).title || chatId}`);
       return;
     }
 
@@ -1116,7 +1116,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       const remaining = recordFailed(userId);
       if (remaining <= 0) {
         await ctx.reply("⛔ Code invalide. Bloqué pendant 1 heure.");
-        await alertAdminGroup(`🚨 *Bloqué (trop de tentatives /setmarchand)*\n\n👤 ${formatUser(ctx)}\n👥 ${(ctx.chat as any).title || chatId}`);
+        await alertAdminGroup(`🚨 *Bloqué (trop de tentatives /setmerchant)*\n\n👤 ${formatUser(ctx)}\n👥 ${(ctx.chat as any).title || chatId}`);
       } else {
         await ctx.reply(`❌ Code invalide ou expiré.\n⚠️ Tentatives restantes : *${remaining}*`, { parse_mode: "Markdown" });
       }
@@ -1194,8 +1194,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     } catch { await ctx.reply(merchantText.genericError); }
   });
 
-  // ─── /marchands (groupe admin uniquement) ─────────────────────────────────
-  bot.command("marchands", async (ctx) => {
+  // ─── /merchants (groupe admin uniquement) ─────────────────────────────────
+  bot.command("merchants", async (ctx) => {
     const chatId = String(ctx.chat.id);
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
     if (!isGroup) return;
@@ -1215,8 +1215,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     } catch { await ctx.reply("❌ Erreur."); }
   });
 
-  // ─── /soldegateway (groupe admin uniquement) ─────────────────────────────
-  bot.command("soldegateway", async (ctx) => {
+  // ─── /gatewaybalance (groupe admin uniquement) ────────────────────────────
+  bot.command("gatewaybalance", async (ctx) => {
     const chatId = String(ctx.chat.id);
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
     if (!isGroup || !await isAdminGroup(chatId)) return;
@@ -1283,8 +1283,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     }
   });
 
-  // ─── /solde ────────────────────────────────────────────────────────────────
-  bot.command("solde", async (ctx) => {
+  // ─── /balance ─────────────────────────────────────────────────────────────
+  bot.command("balance", async (ctx) => {
     const chatId = String(ctx.chat.id);
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
 
@@ -1431,8 +1431,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     );
   });
 
-  // ─── /annuler (annule le broadcast ou commander en cours) ────────────────
-  bot.command("annuler", async (ctx) => {
+  // ─── /cancel (annule le broadcast ou la recherche de retrait en cours) ────
+  bot.command("cancel", async (ctx) => {
     const chatId = String(ctx.chat.id);
     if (merchantPaymentToggleSessions.has(chatId)) {
       merchantPaymentToggleSessions.delete(chatId);
@@ -1442,13 +1442,13 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       await ctx.reply("❌ Broadcast annulé.");
     } else if (commanderSessions.has(chatId)) {
       commanderSessions.delete(chatId);
-      await ctx.reply("❌ Commander annulé.");
+      await ctx.reply("❌ Recherche de retrait annulée.");
     }
   });
 
-  // ─── /commander (groupe admin uniquement) ─────────────────────────────────
+  // ─── /findwithdrawal (groupe admin uniquement) ────────────────────────────
   // Recherche un retrait par numéro de téléphone et propose 4 actions.
-  bot.command("commander", async (ctx) => {
+  bot.command("findwithdrawal", async (ctx) => {
     const chatId = String(ctx.chat.id);
     if (!await isAdminGroup(chatId)) {
       await ctx.reply("⛔ Cette commande est réservée au groupe admin WestPay.").catch(() => {});
@@ -1456,16 +1456,16 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     }
     commanderSessions.set(chatId, { step: "waiting_phone" });
     await ctx.reply(
-      "📱 *Commander — Recherche de retrait*\n\n" +
+      "📱 *Recherche de retrait*\n\n" +
       "Envoyez le numéro de téléphone du bénéficiaire :\n" +
       "_(ex: 22890123456 ou 90123456)_\n\n" +
-      "Envoyez /annuler pour annuler.",
+      "Envoyez /cancel pour annuler.",
       { parse_mode: "Markdown" }
     );
   });
 
-  // ─── /desactiverpaiement (groupe admin uniquement) ─────────────────────────
-  bot.command("desactiverpaiement", async (ctx) => {
+  // ─── /disablepayments (groupe admin uniquement) ────────────────────────────
+  bot.command("disablepayments", async (ctx) => {
     const chatId = String(ctx.chat.id);
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
     if (!isGroup || !await isAdminGroup(chatId)) {
@@ -1478,12 +1478,12 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       "Envoyez maintenant le *slug exact du marchand*.\n\n" +
       "Toutes les nouvelles demandes de ce compte retourneront :\n" +
       "`404 未经授权的付款`\n\n" +
-      "Envoyez /annuler pour annuler.",
+      "Envoyez /cancel pour annuler.",
       { parse_mode: "Markdown" },
     );
   });
 
-  // ─── /reactiverpaiement et /activerpaiement (groupe admin uniquement) ─────
+  // ─── /enablepayments et /activatepayments (groupe admin uniquement) ───────
   const activateMerchantPayments = async (ctx: any) => {
     const chatId = String(ctx.chat.id);
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
@@ -1496,12 +1496,12 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       "🔓 *Réactiver payin et payout*\n\n" +
       "Envoyez maintenant le *slug exact du marchand*.\n\n" +
       "Les nouvelles demandes de ce compte seront de nouveau autorisées.\n\n" +
-      "Envoyez /annuler pour annuler.",
+      "Envoyez /cancel pour annuler.",
       { parse_mode: "Markdown" },
     );
   };
-  bot.command("reactiverpaiement", activateMerchantPayments);
-  bot.command("activerpaiement", activateMerchantPayments);
+  bot.command("enablepayments", activateMerchantPayments);
+  bot.command("activatepayments", activateMerchantPayments);
 
   // ─── Photo reçue dans le groupe admin (pour le broadcast) ─────────────────
   // Diffuse immédiatement dès réception — pas d'étape intermédiaire.
@@ -1714,8 +1714,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     }
   });
 
-  // ─── /restreint (groupe admin uniquement) ─────────────────────────────────
-  bot.command("restreint", async (ctx) => {
+  // ─── /blockedusers (groupe admin uniquement) ──────────────────────────────
+  bot.command("blockedusers", async (ctx) => {
     const chatId = String(ctx.chat.id);
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
     if (!isGroup || !await isAdminGroup(chatId)) return;
@@ -1739,13 +1739,13 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       });
       await ctx.reply(
         `🚫 *Utilisateurs bloqués (${blocked.length})*\n\n${lines.join("\n")}\n\n` +
-        `Pour débloquer :\n\`/restreint ID_UTILISATEUR\`\nPour tout débloquer : \`/restreint tous\``,
+        `Pour débloquer :\n\`/blockedusers USER_ID\`\nPour tout débloquer : \`/blockedusers all\``,
         { parse_mode: "Markdown" }
       );
       return;
     }
 
-    if (arg === "tous") {
+    if (arg === "all") {
       const count = resetAllAttempts();
       await ctx.reply(
         `✅ *Tous les compteurs réinitialisés*\n\n🔓 ${count} utilisateur(s) débloqué(s)\nChacun dispose à nouveau de *${MAX_FAILED} tentatives*.`,
@@ -1792,8 +1792,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     }
   });
 
-  // ─── /connexionid (groupe admin uniquement) ───────────────────────────────
-  bot.command("connexionid", async (ctx) => {
+  // ─── /logininfo (groupe admin uniquement) ─────────────────────────────────
+  bot.command("logininfo", async (ctx) => {
     const chatId = String(ctx.chat.id);
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
 
@@ -1840,8 +1840,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     await ctx.reply(`✅ URL de la plateforme mise à jour :\n${url}`, { parse_mode: "Markdown" });
   });
 
-  // ─── /aide ─────────────────────────────────────────────────────────────────
-  bot.command("aide", async (ctx) => {
+  // ─── /help ────────────────────────────────────────────────────────────────
+  bot.command("help", async (ctx) => {
     const chatId = String(ctx.chat.id);
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
 
