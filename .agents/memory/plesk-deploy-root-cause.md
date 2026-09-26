@@ -3,17 +3,17 @@ name: Plesk deploy.sh root cause
 description: Why the Plesk/Passenger app kept crashing and how it was fixed.
 ---
 
-## The rule
-Never run `npm run build` in deploy.sh on the production server. The pre-built `dist/` is committed to git and arrives via `git pull` — no server-side rebuild needed.
+## Artifact handling rule
+Plesk/Passenger serves the versioned `dist/` from git. Keep generated bundles updated locally; do not add a build step to the production deploy script.
 
-**Why:** `script/build.ts` calls `rm("dist", { recursive: true, force: true })` at the start. If the build then fails on Plesk (memory, permissions, missing env, etc.), `dist/index.cjs` is permanently deleted. Passenger then tries to start `node dist/index.cjs` → MODULE_NOT_FOUND → "something went wrong" on every request.
+**Why:** The Vite build uses `emptyOutDir: true` for `dist/public`, which removes files stored there that are not part of `client/public`—including uploaded assets. The current build script preserves `dist/index.cjs` until the server bundle is rebuilt, but the public assets are still cleared earlier.
 
 **How to apply:** deploy.sh should only do:
 ```bash
 npm install
 npm prune --omit=dev
 ```
-The `dist/` comes from git, not from a server-side rebuild.
+The `dist/` comes from git, not from a server-side rebuild. When generating it locally, preserve files in `dist/public/assets` that are not emitted by Vite.
 
 ## Plesk domain configuration
 In this project's Plesk setup, the main domain and `payment.bank2.westpay.cfd` can share the same `Document Root` and `Application Root`; the second Node.js entry works with those shared paths.

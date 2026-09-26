@@ -3,7 +3,7 @@
 - [SeaPay operator seeding](seapay-operator-seeding.md) — new-country withdrawal operators are seeded idempotently on every server start, not one-time; India has no fixed bank list (IFSC is per-transaction).
 - [NoWallet (ClaPay) API v3](nowallet-v3-integration.md) — payloads, phone format, tunnel modes, and status check endpoint differ significantly from older API.
 - [Dual-database architecture](dual-db-architecture.md) — Auth tables on Supabase (AUTH_DATABASE_URL), financial tables on Neon (FINANCIAL_DATABASE_URL). Cross-DB FKs impossible: enforced at app layer.
-- [Plesk deploy.sh root cause](plesk-deploy-root-cause.md) — deploy.sh ran npm run build which deletes dist/ first; if build fails on server, dist/ is gone → Passenger crash. Fix: remove build step, use pre-built dist/ from git.
+- [Plesk deploy artifacts](plesk-deploy-root-cause.md) — production serves versioned dist; local rebuilds must preserve uploaded files because Vite clears dist/public.
 - [GitHub shell authentication](github-shell-auth.md) — attaching Replit’s GitHub connection does not necessarily authenticate local `git push`; use the workspace Git flow or secure API path.
 - [Bank 1 loading state](bank1-loading-state.md) — the checkout spinner must define its animation before the page’s early loading return; validated working on mobile after deployment.
 - [Merchant payment disable flags](merchant-payment-disable.md) — keep payout on withdrawals_disabled; use payin_disabled separately and enforce both before transaction side effects.
