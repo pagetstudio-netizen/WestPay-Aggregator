@@ -1426,7 +1426,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       `• Texte seul → envoyez le texte\n` +
       `• Avec image → envoyez une *photo* (la légende sera le texte du message)\n\n` +
       `Vous pouvez utiliser *gras*, _italique_, \`code\` (Markdown Telegram).\n\n` +
-      `Envoyez /annuler pour annuler.`,
+      `Envoyez /cancel pour annuler.`,
       { parse_mode: "Markdown" }
     );
   });
@@ -1849,40 +1849,42 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       if (await isAdminGroup(chatId)) {
         await ctx.reply(
           `📖 *Commandes Admin — WestPay Bot*\n\n` +
+          `/help — Afficher cette aide\n` +
+          `/cancel — Annuler une action en cours\n\n` +
           `━━━━━━━━━━━━━━━━\n` +
           `⚙️ *Configuration*\n` +
-          `/setgroup CLE\\_API — Enregistrer ce groupe admin\n\n` +
+          `/setgroup API\\_KEY — Enregistrer ce groupe admin\n\n` +
           `👥 *Marchands*\n` +
-          `/marchands — Liste de tous les marchands\n` +
-          `/setmarchand CODE — Lier un groupe à un marchand\n\n` +
-           `/desactiverpaiement — Désactiver payin et payout d'un marchand\n\n` +
-           `/reactiverpaiement — Réactiver payin et payout d'un marchand\n\n` +
+          `/merchants — Liste de tous les marchands\n` +
+          `/setmerchant CODE — Lier un groupe à un marchand\n\n` +
+           `/disablepayments — Désactiver payin et payout d'un marchand\n\n` +
+           `/enablepayments (/activatepayments) — Réactiver payin et payout d'un marchand\n\n` +
           `📊 *Statistiques & Soldes*\n` +
           `/stats — Statistiques globales\n` +
-          `/solde — Soldes détaillés de tous les marchands\n\n` +
-          `/commander@Westpaybot — Rechercher un retrait par numéro\n` +
-          `/soldegateway@Westpaybot — Consulter le solde d'un gateway et ses wallets pays\n\n` +
+          `/balance — Soldes détaillés de tous les marchands\n\n` +
+          `/findwithdrawal@Westpaybot — Rechercher un retrait par numéro\n` +
+          `/gatewaybalance@Westpaybot — Consulter le solde d'un gateway et ses wallets pays\n\n` +
           `📢 *Diffusion*\n` +
           `/broadcast — Envoyer un message dans les groupes\n` +
-          `/groupes — Lister tous les groupes où le bot est présent\n` +
-          `/scangroupes — Synchroniser et enregistrer tous les groupes\n\n` +
+          `/groups — Lister tous les groupes où le bot est présent\n` +
+          `/scangroups — Synchroniser et enregistrer tous les groupes\n\n` +
           `🔐 *Utilitaires*\n` +
           `/status — Vérifier l'état du bot et du webhook\n` +
-          `/connexionid — Rappel des URLs et identifiants admin\n` +
+          `/logininfo — Rappel des URLs et identifiants admin\n` +
           `/seturl URL — Définir l'URL de la plateforme\n` +
-          `/restreint — Voir les utilisateurs bloqués\n` +
-          `/restreint ID — Débloquer un utilisateur spécifique\n` +
-          `/restreint tous — Débloquer tout le monde\n\n` +
+          `/blockedusers — Voir les utilisateurs bloqués\n` +
+          `/blockedusers ID — Débloquer un utilisateur spécifique\n` +
+          `/blockedusers all — Débloquer tout le monde\n\n` +
           `🛡️ *Gestion des IPs*\n` +
-          `/listeips — Voir toutes les IPs autorisées et bloquées\n` +
-          `/autoriserip IP [note] — Autoriser une adresse IP\n` +
-          `/bloquerip IP [raison] — Bloquer une adresse IP\n` +
-          `/debloquerip IP — Retirer une IP de toutes les listes\n\n` +
+          `/listips — Voir toutes les IPs autorisées et bloquées\n` +
+          `/allowip IP [note] — Autoriser une adresse IP\n` +
+          `/blockip IP [reason] — Bloquer une adresse IP\n` +
+          `/unblockip IP — Retirer une IP de toutes les listes\n\n` +
           `━━━━━━━━━━━━━━━━\n` +
           `💡 *Configurer un groupe marchand :*\n` +
           `1️⃣ Générer un code dans le dashboard WestPay\n` +
           `2️⃣ Ajouter le bot au groupe du marchand\n` +
-          `3️⃣ Envoyer \`/setmarchand CODE\` dans ce groupe`,
+          `3️⃣ Envoyer \`/setmerchant CODE\` dans ce groupe`,
           { parse_mode: "Markdown" }
         );
         return;
@@ -1900,8 +1902,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     }
   });
 
-  // ─── /groupes (groupe admin uniquement) — liste et nettoyage des groupes connus ──
-  bot.command("groupes", async (ctx) => {
+  // ─── /groups (groupe admin uniquement) — liste et nettoyage des groupes connus ──
+  bot.command("groups", async (ctx) => {
     const chatId = String(ctx.chat.id);
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
     if (!isGroup || !await isAdminGroup(chatId)) return;
@@ -1953,8 +1955,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     }
   });
 
-  // ─── /scangroupes (groupe admin uniquement) — force-sync tous les groupes ───
-  bot.command("scangroupes", async (ctx) => {
+  // ─── /scangroups (groupe admin uniquement) — force-sync tous les groupes ───
+  bot.command("scangroups", async (ctx) => {
     const chatId = String(ctx.chat.id);
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
     if (!isGroup || !await isAdminGroup(chatId)) return;
@@ -1966,7 +1968,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         `✅ *Synchronisation terminée*\n\n` +
         `📦 Total groupes connus : *${result.total}*\n` +
         `✨ Nouvellement ajoutés : *${result.added}*\n\n` +
-        `💡 Utilisez /groupes pour voir la liste complète.\n` +
+        `💡 Utilisez /groups pour voir la liste complète.\n` +
         `📢 Le prochain broadcast _"Tous les groupes"_ couvrira ces ${result.total} groupe(s).`,
         { parse_mode: "Markdown" }
       );
@@ -2001,7 +2003,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
 
     if (await isAdminGroup(chatId)) {
       await bot!.telegram.sendMessage(chatId,
-        "✅ *Bot WestPay actif dans le groupe admin.*\n\nTapez /aide pour voir toutes les commandes.",
+        "✅ *Bot WestPay actif dans le groupe admin.*\n\nTapez /help pour voir toutes les commandes.",
         { parse_mode: "Markdown" }
       ).catch(() => {});
       return;
@@ -2022,7 +2024,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     await bot!.telegram.sendMessage(chatId,
       `👋 *Bot WestPay ajouté à ${groupTitle}.*\n\n` +
       `Pour lier ce groupe à un compte marchand :\n\n` +
-      `\`/setmarchand CODE\`\n\n` +
+      `\`/setmerchant CODE\`\n\n` +
       `_(Le code d'activation est généré depuis le dashboard WestPay)_`,
       { parse_mode: "Markdown" }
     ).catch(() => {});
@@ -2042,7 +2044,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     await registerKnownGroup(chatId);
 
     if (await isAdminGroup(chatId)) {
-      await ctx.reply("✅ *Bot WestPay actif dans le groupe admin.*\n\nTapez /aide pour voir toutes les commandes.", { parse_mode: "Markdown" });
+      await ctx.reply("✅ *Bot WestPay actif dans le groupe admin.*\n\nTapez /help pour voir toutes les commandes.", { parse_mode: "Markdown" });
       return;
     }
 
@@ -2061,7 +2063,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     await ctx.reply(
       `👋 *Bot WestPay ajouté à ${groupTitle}.*\n\n` +
       `Pour lier ce groupe à un compte marchand :\n\n` +
-      `\`/setmarchand CODE\`\n\n` +
+      `\`/setmerchant CODE\`\n\n` +
       `_(Le code d'activation est généré depuis le dashboard WestPay)_`,
       { parse_mode: "Markdown" }
     );
@@ -2164,7 +2166,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     await ctx.answerCbQuery();
   });
 
-  // ─── Actions boutons /commander ───────────────────────────────────────────
+  // ─── Actions boutons /findwithdrawal ──────────────────────────────────────
 
   // wd:noop — bouton inerte après action confirmée
   bot.action("wd:noop", async (ctx) => { await ctx.answerCbQuery(); });
@@ -2451,14 +2453,14 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
 
   // ─── Gestion des IPs depuis le groupe admin ─────────────────────────────────
 
-  bot.command("autoriserip", async (ctx) => {
+  bot.command("allowip", async (ctx) => {
     const chatId = String(ctx.chat.id);
     if (!(await isAdminGroup(chatId))) return;
     const args = (ctx.message.text || "").split(/\s+/).slice(1);
     const ip = args[0]?.trim();
     const note = args.slice(1).join(" ") || "Ajouté via Telegram";
     if (!ip) {
-      await ctx.reply("❌ Usage : `/autoriserip <ip> [note]`\nEx: `/autoriserip 1.2.3.4 Bureau Paris`", { parse_mode: "Markdown" });
+      await ctx.reply("❌ Usage : `/allowip <ip> [note]`\nEx: `/allowip 1.2.3.4 Office Paris`", { parse_mode: "Markdown" });
       return;
     }
     try {
@@ -2483,14 +2485,14 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     }
   });
 
-  bot.command("bloquerip", async (ctx) => {
+  bot.command("blockip", async (ctx) => {
     const chatId = String(ctx.chat.id);
     if (!(await isAdminGroup(chatId))) return;
     const args = (ctx.message.text || "").split(/\s+/).slice(1);
     const ip = args[0]?.trim();
     const reason = args.slice(1).join(" ") || "Bloqué via Telegram";
     if (!ip) {
-      await ctx.reply("❌ Usage : `/bloquerip <ip> [raison]`\nEx: `/bloquerip 1.2.3.4 Comportement suspect`", { parse_mode: "Markdown" });
+      await ctx.reply("❌ Usage : `/blockip <ip> [reason]`\nEx: `/blockip 1.2.3.4 Suspicious activity`", { parse_mode: "Markdown" });
       return;
     }
     try {
@@ -2517,13 +2519,13 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     }
   });
 
-  bot.command("debloquerip", async (ctx) => {
+  bot.command("unblockip", async (ctx) => {
     const chatId = String(ctx.chat.id);
     if (!(await isAdminGroup(chatId))) return;
     const args = (ctx.message.text || "").split(/\s+/).slice(1);
     const ip = args[0]?.trim();
     if (!ip) {
-      await ctx.reply("❌ Usage : `/debloquerip <ip>`\nEx: `/debloquerip 1.2.3.4`", { parse_mode: "Markdown" });
+      await ctx.reply("❌ Usage : `/unblockip <ip>`\nEx: `/unblockip 1.2.3.4`", { parse_mode: "Markdown" });
       return;
     }
     try {
@@ -2546,7 +2548,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     }
   });
 
-  bot.command("listeips", async (ctx) => {
+  bot.command("listips", async (ctx) => {
     const chatId = String(ctx.chat.id);
     if (!(await isAdminGroup(chatId))) return;
     try {
@@ -2577,9 +2579,9 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
 
       msg += `\n━━━━━━━━━━━━━━━━\n`;
       msg += `📌 Commandes :\n`;
-      msg += `/autoriserip <ip> [note]\n`;
-      msg += `/bloquerip <ip> [raison]\n`;
-      msg += `/debloquerip <ip>`;
+      msg += `/allowip <ip> [note]\n`;
+      msg += `/blockip <ip> [reason]\n`;
+      msg += `/unblockip <ip>`;
 
       await ctx.reply(msg, { parse_mode: "Markdown" });
     } catch (err: any) {

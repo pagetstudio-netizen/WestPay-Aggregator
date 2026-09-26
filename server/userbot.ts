@@ -892,8 +892,8 @@ async function handleMessage(event: any): Promise<void> {
   const chatId = chat.id.toString();
   const text: string = message.text || "";
 
-  // ── Handle /setmarchand CODE ──────────────────────────────────────────────
-  const setMerchantMatch = text.match(/^\/setmarchand\s+([A-Z0-9]+)/i);
+  // ── Handle /setmerchant CODE ──────────────────────────────────────────────
+  const setMerchantMatch = text.match(/^\/setmerchant\s+([A-Z0-9]+)/i);
   if (setMerchantMatch) {
     const code = setMerchantMatch[1].trim().toUpperCase();
     const { merchantId, valid } = await resolveActivationCode(code);

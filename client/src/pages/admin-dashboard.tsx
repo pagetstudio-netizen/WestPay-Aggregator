@@ -290,7 +290,7 @@ function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string
               ) : (
                 <div className="space-y-1">
                   <p className="text-sm font-medium">Dans le groupe dédié, envoyer :</p>
-                  <code className="block bg-muted rounded p-2 text-sm text-center">/setmarchand {generatedCode}</code>
+                  <code className="block bg-muted rounded p-2 text-sm text-center">/setmerchant {generatedCode}</code>
                   <p className="text-xs text-muted-foreground">Ajoutez le bot au groupe du marchand, puis envoyez cette commande dans ce groupe.</p>
                 </div>
               )}
@@ -8042,10 +8042,10 @@ function TelegramBotPanel() {
             <p>4. Vérifiez que l'URL webhook affichée commence par <code className="bg-muted px-1 rounded">https://westpay.cfd/api/telegram/webhook/</code></p>
             <p>5. Le bot doit être <strong>membre administrateur</strong> du groupe (sinon il ne voit pas les messages)</p>
             <p className="mt-1 font-semibold text-amber-600 dark:text-amber-400">⚠ Commandes disponibles dans le groupe admin :</p>
-            <p><code className="bg-muted px-1 rounded">/setgroup CLE_ADMIN</code> · <code className="bg-muted px-1 rounded">/broadcast MSG</code> · <code className="bg-muted px-1 rounded">/listeips</code></p>
+            <p><code className="bg-muted px-1 rounded">/setgroup ADMIN_KEY</code> · <code className="bg-muted px-1 rounded">/broadcast MESSAGE</code> · <code className="bg-muted px-1 rounded">/listips</code></p>
             <p className="font-semibold text-amber-600 dark:text-amber-400">⚠ Commandes marchands (groupe lié uniquement) :</p>
-            <p><code className="bg-muted px-1 rounded">/solde</code> · <code className="bg-muted px-1 rounded">/transactions</code> · <code className="bg-muted px-1 rounded">/stats</code> · <code className="bg-muted px-1 rounded">/aide</code></p>
-            <p className="text-blue-600 dark:text-blue-400 font-medium">ℹ Dans le groupe admin, le bot n'exécute PAS les commandes marchands (/solde, /stats…). Il faut un groupe marchand lié séparément.</p>
+            <p><code className="bg-muted px-1 rounded">/balance</code> · <code className="bg-muted px-1 rounded">/transactions</code> · <code className="bg-muted px-1 rounded">/stats</code> · <code className="bg-muted px-1 rounded">/help</code></p>
+            <p className="text-blue-600 dark:text-blue-400 font-medium">ℹ Dans le groupe admin, le bot n'exécute PAS les commandes marchands (/balance, /stats…). Il faut un groupe marchand lié séparément.</p>
           </div>
         </CardContent>
       </Card>
@@ -8370,7 +8370,7 @@ function UserbotPanel() {
           <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">1</span>Connecter le compte Telegram ci-dessus</li>
           <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">2</span>Ajouter ce compte dans le groupe Telegram du marchand</li>
           <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">3</span>Générer un code d'activation depuis le profil du marchand</li>
-          <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">4</span>Envoyer <code className="bg-muted px-1 rounded font-mono">/setmarchand CODE</code> dans le groupe</li>
+          <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">4</span>Envoyer <code className="bg-muted px-1 rounded font-mono">/setmerchant CODE</code> dans le groupe</li>
           <li className="flex gap-2"><span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">5</span>Le compte répond naturellement dans la langue du message</li>
         </ol>
         <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground space-y-1">
@@ -9230,7 +9230,7 @@ function SecurityIpsPanel() {
                   Bloquer
                 </Button>
               </div>
-              <p className="text-xs text-muted-foreground mt-2">Appuyez sur Entrée ou cliquez Bloquer · Via Telegram : <span className="font-mono">/bloquerip 1.2.3.4 raison</span></p>
+              <p className="text-xs text-muted-foreground mt-2">Appuyez sur Entrée ou cliquez Bloquer · Via Telegram : <span className="font-mono">/blockip 1.2.3.4 reason</span></p>
             </CardContent>
           </Card>
 
