@@ -3,6 +3,7 @@ export type ProviderCode =
   | "clapay"
   | "mbiyo"
   | "seapay"
+  | "drimpay"
   | "oxapay"
   | "sms"
   | "crypto"
@@ -23,6 +24,7 @@ const EXPLICIT_PROVIDER_CODES: Record<string, ProviderCode> = {
   mbiyo: "mbiyo",
   mbiyopay: "mbiyo",
   seapay: "seapay",
+  drimpay: "drimpay",
   oxapay: "oxapay",
   sms: "sms",
   crypto: "crypto",
@@ -43,6 +45,7 @@ function providerFromReference(reference: unknown): ProviderCode | undefined {
   if (ref.startsWith("LP-")) return "lipapap";
   if (ref.startsWith("CP-")) return "clapay";
   if (ref.startsWith("MB") || ref.startsWith("MB-") || ref.startsWith("MBY")) return "mbiyo";
+  if (ref.startsWith("DP-")) return "drimpay";
   return undefined;
 }
 
@@ -67,6 +70,7 @@ export function providerLabel(provider: unknown, reference?: unknown): string {
     case "clapay": return "ClaPay";
     case "mbiyo": return "Mbiyo";
     case "seapay": return "SeaPay";
+    case "drimpay": return "Drimpay";
     case "oxapay": return "OxaPay";
     case "sms": return "SMS";
     case "crypto": return "Crypto";

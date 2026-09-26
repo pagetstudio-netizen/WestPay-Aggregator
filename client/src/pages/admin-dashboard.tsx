@@ -6,7 +6,7 @@ import { getAvatarUrl, getInitials, getAvatarColor } from "@/lib/avatar";
 import { adminConfig } from "@/lib/admin-config";
 import { useAuth } from "@/lib/auth";
 import { useLocation } from "wouter";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { showConfirm } from "@/components/ui/modal-toast";
@@ -40,7 +40,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
 
-type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "mbiyo" | "lipapap" | "seapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge" | "actionlogs";
+type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "mbiyo" | "lipapap" | "drimpay" | "seapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge" | "actionlogs";
 
 function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: { staleTime?: number; refetchOnWindowFocus?: boolean }) {
   const { token, logout, restoreUser } = useAuth();
@@ -1562,6 +1562,8 @@ const PROVIDER_CHOICES: [string, string][] = [
     ["mbiyo", "Mbiyo"],
     ["clapay", "ClaPay"],
   ["seapay", "SeaPay"],
+  ["lipapap", "LipaPap"],
+  ["drimpay", "Drimpay"],
 ];
 
 function ProviderPickerButton({ label, icon: Icon, colorClass, disabled, onPick, testId }: { label: string; icon: any; colorClass: string; disabled?: boolean; onPick: (provider: string) => void; testId: string }) {
@@ -3389,7 +3391,117 @@ function MbiyoManualConfirmCard({ token }: { token: string | null }) {
   );
 }
 
- function LipaPapPanel() {
+function DrimpayPanel() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { data: settings, isLoading } = useAdminFetch("/api/admin/drimpay/settings", ["/api/admin/drimpay/settings"]);
+  const [apiKey, setApiKey] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [environment, setEnvironment] = useState("sandbox");
+  const [countryMappingsJson, setCountryMappingsJson] = useState("{}");
+
+  useEffect(() => {
+    if (!settings) return;
+    setApiKey("");
+    setWebhookSecret("");
+    setEnvironment(settings.environment || "sandbox");
+    setCountryMappingsJson(settings.countryMappingsJson || "{}");
+  }, [settings]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/drimpay/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ apiKey, webhookSecret, environment, countryMappingsJson }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || "Erreur de sauvegarde");
+      return body;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/drimpay/settings"] });
+      setApiKey("");
+      setWebhookSecret("");
+      toast({ title: "Configuration Drimpay sauvegardée" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+
+  if (isLoading) return <LoadingSkeleton />;
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold text-foreground">Configuration Drimpay</h2>
+        <p className="text-sm text-muted-foreground">Pay-in et payouts mobile money sur les parcours Bank 1 et Bank 2, selon le routage fournisseur du pays.</p>
+      </div>
+      <Card>
+        <CardHeader><CardTitle className="text-base flex items-center gap-2"><Globe className="w-4 h-4" />Paramètres API</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+            Utilisez les codes pays et opérateurs exacts fournis par Drimpay. Les payouts bancaires ne sont pas envoyés car le schéma documenté ne définit pas leurs champs. Aucun solde Drimpay n’est affiché sans endpoint officiel.
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Clé API Drimpay</Label>
+              <Input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={settings?.apiKey || "Laisser vide pour conserver la clé"} data-testid="input-drimpay-api-key" />
+            </div>
+            <div className="space-y-2">
+              <Label>Secret du webhook</Label>
+              <Input type="password" value={webhookSecret} onChange={e => setWebhookSecret(e.target.value)} placeholder={settings?.webhookSecret || "Laisser vide pour conserver le secret"} data-testid="input-drimpay-webhook-secret" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Environnement</Label>
+            <select value={environment} onChange={e => setEnvironment(e.target.value)} className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" data-testid="select-drimpay-environment">
+              <option value="sandbox">Sandbox</option>
+              <option value="production">Production</option>
+            </select>
+          </div>
+          <div className="space-y-2">
+            <Label>Correspondances pays et opérateurs (JSON)</Label>
+            <textarea
+              value={countryMappingsJson}
+              onChange={e => setCountryMappingsJson(e.target.value)}
+              rows={12}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono"
+              placeholder={'{"Nom du pays":{"countryCode":"XX","currency":"XXX","operators":{"Nom opérateur":"CODE_PAYIN"},"payoutOperators":{"Nom opérateur":"CODE_PAYOUT"}}}'}
+              data-testid="textarea-drimpay-country-mappings"
+            />
+            <p className="text-xs text-muted-foreground">Le champ payoutOperators est facultatif; sans lui, Drimpay réutilise le code correspondant dans operators. Les correspondances manquantes bloquent l’opération au lieu d’inventer un code.</p>
+          </div>
+          <div className="space-y-2">
+            <Label>URL du webhook à déclarer chez Drimpay</Label>
+            <code className="block rounded-md bg-muted px-3 py-2 text-xs break-all">{settings?.callbackUrl || settings?.callbackPath || "/api/drimpay/webhook"}</code>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <Badge variant={settings?.configured ? "default" : "destructive"}>{settings?.configured ? "Configuré" : "Configuration incomplète"}</Badge>
+            <Badge variant={settings?.payinConfigured ? "default" : "destructive"}>Pay-in : {settings?.payinConfigured ? "prêt" : "incomplet"}</Badge>
+            <Badge variant={settings?.payoutConfigured ? "default" : "destructive"}>Payout : {settings?.payoutConfigured ? "prêt" : "incomplet"}</Badge>
+            <span className="text-xs text-muted-foreground">{settings?.countryCount || 0} pays · {settings?.operatorCount || 0} correspondances opérateur</span>
+          </div>
+          {settings?.configurationChecks && (
+            <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              <div className="font-medium text-foreground mb-1">Vérification de configuration</div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
+                <span>Clé API : {settings.configurationChecks.apiKey ? "présente" : "manquante"}</span>
+                <span>Secret webhook : {settings.configurationChecks.webhookSecret ? "présent" : "manquant"}</span>
+                <span>Codes pays/opérateurs : {settings.configurationChecks.countryMappings ? "configurés" : "manquants"}</span>
+              </div>
+            </div>
+          )}
+          <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} data-testid="button-save-drimpay-settings">
+            {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
+            Sauvegarder la configuration
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function LipaPapPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
   const { data: settings, isLoading } = useAdminFetch("/api/admin/lipapap/settings", ["/api/admin/lipapap/settings"]);
@@ -4325,7 +4437,7 @@ const COUNTRIES_LIST = [
   "Pakistan", "Philippines", "India", "Nigeria",
 ];
 const OPERATOR_TYPES = ["Mobile Money", "Virement bancaire", "Carte bancaire", "Cryptomonnaie", "Autre"];
-const GATEWAYS = ["Mbiyo", "LipaPap", "SeaPay", "ClaPay", "Manuel"];
+const GATEWAYS = ["Mbiyo", "LipaPap", "SeaPay", "ClaPay", "Drimpay", "Manuel"];
 
 function SortableOpRow({
   op, onEdit, onDelete, onToggle, onUploadLogo, onRemoveLogo, uploadingFor,
@@ -9822,6 +9934,7 @@ export default function AdminDashboard() {
       items: [
         { title: "Mbiyo", icon: Globe, tab: "mbiyo" },
         { title: "LipaPap", icon: Globe, tab: "lipapap" },
+        { title: "Drimpay", icon: Globe, tab: "drimpay" },
         { title: "SeaPay", icon: Globe, tab: "seapay" },
         { title: "Crypto", icon: Bitcoin, tab: "cryptoagg" },
         { title: "Retraits Crypto", icon: Download, tab: "cryptowithdrawals" },
@@ -9953,6 +10066,7 @@ export default function AdminDashboard() {
             {activeTab === "apikeys" && <ApiKeysManagementPanel />}
             {activeTab === "mbiyo" && <MbiyoPanel />}
             {activeTab === "lipapap" && <LipaPapPanel />}
+            {activeTab === "drimpay" && <DrimpayPanel />}
             {activeTab === "seapay" && <SeaPayPanel />}
             {activeTab === "cryptoagg" && <CryptoAggPanel />}
             {activeTab === "cryptowithdrawals" && <CryptoWithdrawalsAdminPanel />}

@@ -8,9 +8,9 @@ import { storage } from "./storage";
 import { db, pool, financialDb, financialPool } from "./db";
 import { generateSecret as totpGenerateSecret, generateURI as totpGenerateURI, verifySync as totpVerifySync } from "otplib";
 import QRCode from "qrcode";
-import { admins, merchantCountries, transactions, pendingPayments } from "@shared/schema";
+import { admins, merchantCountries, transactions, pendingPayments, withdrawals } from "@shared/schema";
 import { normalizeEmailInput } from "@shared/email-validation";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
@@ -75,6 +75,18 @@ import {
   lipapapPayoutProviderCode,
   type LipaPapConfig,
 } from "./lipapap";
+import {
+  getDrimpayConfig,
+  DrimpayApiError,
+  initiateDrimpayPayin,
+  initiateDrimpayPayout,
+  getDrimpayPayinStatus,
+  getDrimpayPayoutStatus,
+  normalizeDrimpayStatus,
+  parseDrimpayCountryMappings,
+  resolveDrimpayRoute,
+  verifyDrimpayWebhookSignature,
+} from "./drimpay";
 import { maskPhone as maskPhoneForLog, maskAddress as maskAddressForLog } from "./logMask";
 import {
   WESTPAY_PAYOUT_BENEFICIARY,
@@ -497,6 +509,7 @@ const SUPPORTED_PAYMENT_GATEWAYS = new Set([
   "seapay",
   "clapay",
   "lipapap",
+  "drimpay",
   "oxapay",
 ]);
 
@@ -1894,13 +1907,101 @@ export async function registerRoutes(
     const configuredCountry = await storage.getWalletTransferCountryByName(country);
     return configuredCountry?.currencyZone ?? null;
   };
+  const persistDrimpayPayoutReference = async (withdrawalId: number, reference: string): Promise<void> => {
+    const result = await financialPool.query(
+      `UPDATE withdrawals
+       SET gateway = 'drimpay', provider_reference = $1
+       WHERE id = $2 AND (provider_reference IS NULL OR provider_reference = '')
+       RETURNING id`,
+      [reference, withdrawalId],
+    );
+    if (!result.rowCount) {
+      throw new Error("Le retrait possède déjà une référence fournisseur; aucune nouvelle demande Drimpay n’a été envoyée.");
+    }
+  };
+
+  const finalizeDrimpayWithdrawal = async (withdrawal: any, providerStatus: string): Promise<"approved" | "failed" | "none"> => {
+    const successStatuses = new Set(["success", "successful", "completed", "complete", "confirmed", "approved", "paid", "sent", "delivered"]);
+    const failureStatuses = new Set(["failed", "failure", "cancelled", "canceled", "rejected", "declined", "error", "expired", "reversed", "refunded", "refund"]);
+    const nextStatus = successStatuses.has(providerStatus)
+      ? "approved"
+      : failureStatuses.has(providerStatus)
+        ? "failed"
+        : null;
+    if (!nextStatus) return "none";
+
+    const client = await financialPool.connect();
+    let claimed = false;
+    try {
+      await client.query("BEGIN");
+      const update = await client.query(
+        `UPDATE withdrawals SET status = $1
+         WHERE id = $2 AND status = 'pending' RETURNING id`,
+        [nextStatus, withdrawal.id],
+      );
+      if (update.rowCount) {
+        if (nextStatus === "failed") {
+          const refund = await client.query(
+            `UPDATE merchant_countries SET balance = balance + $1
+             WHERE id = $2 RETURNING id`,
+            [withdrawal.amount, withdrawal.merchantCountryId],
+          );
+          if (!refund.rowCount) {
+            throw new Error(`MerchantCountry introuvable pour le retrait Drimpay #${withdrawal.id}`);
+          }
+        }
+        claimed = true;
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+    if (!claimed) return "none";
+
+    const fees = nextStatus === "approved" ? withdrawal.fees || 0 : 0;
+    await storage.updateWithdrawalStatus(
+      withdrawal.id,
+      nextStatus,
+      `${nextStatus === "approved" ? "Confirmation" : "Échec"} Drimpay (${providerStatus})`,
+      withdrawal.providerReference || undefined,
+      fees,
+      nextStatus === "approved" ? withdrawal.providerPayoutFee || 0 : 0,
+    );
+    const merchant = await storage.getMerchantById(withdrawal.merchantId);
+    notifyAdminWithdrawal({
+      id: withdrawal.id,
+      merchantName: merchant?.name || `#${withdrawal.merchantId}`,
+      country: withdrawal.country,
+      amount: withdrawal.amount,
+      fees,
+      phone: withdrawal.phone,
+      operator: withdrawal.operator,
+      status: nextStatus,
+      mode: "auto",
+    }).catch(() => {});
+    notifyMerchantWithdrawal(withdrawal.merchantId, {
+      id: withdrawal.id,
+      country: withdrawal.country,
+      amount: withdrawal.amount,
+      fees,
+      phone: withdrawal.phone,
+      operator: withdrawal.operator,
+      status: nextStatus,
+    }).catch(() => {});
+    return nextStatus;
+  };
+
   type WithdrawalPayoutResult =
     | { accepted: true; reference: string; providerTxId: string | null; fees: number; providerPayoutFee: number }
-    | { accepted: false; message: string; uncertain: boolean };
+    | { accepted: false; message: string; uncertain: boolean; reference?: string };
   const initiateWithdrawalPayout = async (
     withdrawal: any,
     requestedProvider: string,
     callbackBaseUrl: string,
+    beforeDrimpaySend?: (reference: string) => Promise<void>,
   ): Promise<WithdrawalPayoutResult> => {
     const provider = normalizeGatewayName(requestedProvider);
     const fees = Number(withdrawal.fees) || 0;
@@ -2033,6 +2134,66 @@ export async function registerRoutes(
           return { accepted: false, message: result.msg || "Payout SeaPay refusé", uncertain: false };
         }
         return { accepted: true, reference, providerTxId: result.data.trade_no ? String(result.data.trade_no) : null, fees, providerPayoutFee: fees };
+      }
+
+      if (provider === "drimpay") {
+        const config = await getDrimpayConfig();
+        if (!config) return { accepted: false, message: "Clé API Drimpay non configurée", uncertain: false };
+        const operator = withdrawal.operator
+          ? await storage.getWithdrawalOperatorByNameAndCountry(withdrawal.operator, withdrawal.country)
+          : null;
+        if (operator?.type === "Virement bancaire" || withdrawal.accountNumber) {
+          return { accepted: false, message: "Drimpay n’est pas configuré ici pour les virements bancaires.", uncertain: false };
+        }
+        let route: ReturnType<typeof resolveDrimpayRoute>;
+        try {
+          route = resolveDrimpayRoute(config, withdrawal.country, withdrawal.operator || "", "payout");
+        } catch (error: any) {
+          return { accepted: false, message: safeErrMsg(error), uncertain: false };
+        }
+        const orderId = `DP-WD-${withdrawal.id}-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+        const destinationPhone = String(withdrawal.phone || "").trim();
+        if (!destinationPhone) return { accepted: false, message: "Numéro de téléphone requis pour un payout Drimpay.", uncertain: false };
+        const phone = prependDialCode(destinationPhone, withdrawal.country);
+        await beforeDrimpaySend?.(orderId);
+        let result: Awaited<ReturnType<typeof initiateDrimpayPayout>>;
+        try {
+          result = await initiateDrimpayPayout(config, {
+            amount: netAmount,
+            currency: route.currency,
+            countryCode: route.countryCode,
+            operator: route.operatorCode,
+            phone,
+            orderId,
+            webhookUrl: `${callbackBaseUrl}/api/drimpay/webhook`,
+          });
+        } catch (error: any) {
+          const statusCode = error instanceof DrimpayApiError ? error.statusCode : undefined;
+          const uncertain = !statusCode || statusCode === 408 || statusCode === 409 || statusCode === 429 || statusCode >= 500;
+          if (!uncertain && beforeDrimpaySend) {
+            await financialPool.query(
+              `UPDATE withdrawals SET provider_reference = NULL
+               WHERE id = $1 AND provider_reference = $2 AND provider_tx_id IS NULL`,
+              [withdrawal.id, orderId],
+            );
+          }
+          return {
+            accepted: false,
+            message: safeErrMsg(error),
+            uncertain,
+            ...(uncertain ? { reference: orderId } : {}),
+          };
+        }
+        if (["failed", "failure", "declined", "rejected", "error", "cancelled", "canceled"].includes(result.status)) {
+          return { accepted: false, message: `Payout Drimpay refusé (${result.status}).`, uncertain: false };
+        }
+        return {
+          accepted: true,
+          reference: orderId,
+          providerTxId: result.reference,
+          fees,
+          providerPayoutFee: 0,
+        };
       }
 
       return { accepted: false, message: "Passerelle de retrait invalide", uncertain: false };
@@ -4177,6 +4338,115 @@ export async function registerRoutes(
     return inserted;
   }
 
+  async function settleDrimpayPendingPayment(
+    pending: any,
+    providerStatus: string,
+    providerTxId?: string | null,
+  ): Promise<"confirmed" | "failed" | "none"> {
+    const status = normalizeDrimpayStatus({ status: providerStatus });
+    const successStatuses = new Set(["success", "successful", "completed", "complete", "paid", "approved", "confirmed", "settled"]);
+    const failureStatuses = new Set(["failed", "failure", "cancelled", "canceled", "rejected", "declined", "error", "expired", "reversed", "refunded", "refund", "void"]);
+    if (!successStatuses.has(status) && !failureStatuses.has(status)) return "none";
+
+    const externalReference = providerTxId || pending.providerTxId || null;
+    const txId = `DP-${externalReference || pending.providerReference}`;
+    const merchant = await storage.getMerchantById(pending.merchantId);
+    const merchantCountry = successStatuses.has(status)
+      ? await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country)
+      : null;
+    if (successStatuses.has(status) && !merchantCountry) {
+      throw new Error(`MerchantCountry introuvable pour le paiement Drimpay #${pending.id}`);
+    }
+
+    const client = await financialPool.connect();
+    let inserted = false;
+    const finalStatus = successStatuses.has(status) ? "confirmed" : "failed";
+    try {
+      await client.query("BEGIN");
+      const claim = await client.query(
+        `UPDATE pending_payments
+         SET status = $2, provider_tx_id = COALESCE(provider_tx_id, $3)
+         WHERE id = $1 AND status IN ('gateway_pending','pending','submitted')
+         RETURNING id`,
+        [pending.id, successStatuses.has(status) ? "gateway_confirmed" : "gateway_failed", externalReference],
+      );
+      if (!claim.rowCount) {
+        await client.query("COMMIT");
+        return "none";
+      }
+
+      const credit = successStatuses.has(status)
+        ? calcMerchantCreditForMerchant(pending.amount, pending.country, merchant)
+        : 0;
+      const insert = await client.query(
+        `INSERT INTO transactions
+          (merchant_id, country, tx_id, amount, payer_number, payer_name, status, provider,
+           provider_tx_id, operator, provider_reference, error_message, provider_fee)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'drimpay',$8,$9,$10,$11,$12)
+         ON CONFLICT (tx_id) DO NOTHING RETURNING id`,
+        [
+          pending.merchantId,
+          pending.country,
+          txId,
+          pending.amount,
+          pending.payerPhone || null,
+          pending.payerName || null,
+          finalStatus,
+          externalReference,
+          pending.paymentMethod || null,
+          pending.providerReference || null,
+          successStatuses.has(status) ? null : `Paiement Drimpay ${status}`,
+          successStatuses.has(status) ? pending.amount - credit : 0,
+        ],
+      );
+      inserted = Boolean(insert.rowCount);
+      if (inserted && successStatuses.has(status)) {
+        await client.query(
+          "UPDATE merchant_countries SET balance = balance + $1 WHERE id = $2",
+          [credit, merchantCountry!.id],
+        );
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    if (inserted && successStatuses.has(status)) {
+      notifyMerchantPayment(pending.merchantId, {
+        txId,
+        amount: pending.amount,
+        payerNumber: pending.payerPhone,
+        country: pending.country,
+        provider: "drimpay",
+      }).catch(() => {});
+      notifyAdminPayment({
+        txId,
+        merchantName: merchant?.name || `#${pending.merchantId}`,
+        payerNumber: pending.payerPhone,
+        country: pending.country,
+        amount: pending.amount,
+        provider: "drimpay",
+        status: "confirmed",
+      }).catch(() => {});
+      notifyConfirmedPaymentWebhook(pending.merchantId, {
+        event: "payment.confirmed",
+        txId,
+        amount: pending.amount,
+        currency: pending.country,
+        payer: pending.payerPhone || "",
+        country: pending.country,
+        merchantSlug: merchant?.slug || "",
+        provider: "drimpay",
+        reference: externalReference || pending.providerReference,
+        timestamp: new Date().toISOString(),
+      }).catch(() => {});
+    }
+    return finalStatus;
+  }
+
   app.get("/api/merchant/webhook", authMiddleware("merchant"), async (req, res) => {
     try {
       const merchant = await storage.getMerchantById((req as any).user.id);
@@ -4998,8 +5268,122 @@ export async function registerRoutes(
           }).catch(() => {});
           return res.status(502).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
         }
-      } else
-      if (useMbiyo) {
+      } else if (gatewayLower === "drimpay") {
+        let drimpayConfig: Awaited<ReturnType<typeof getDrimpayConfig>>;
+        let drimpayRoute: ReturnType<typeof resolveDrimpayRoute>;
+        try {
+          drimpayConfig = await getDrimpayConfig();
+          if (!drimpayConfig) {
+            return res.status(500).json({ message: "Clé API Drimpay non configurée dans l’administration." });
+          }
+          drimpayRoute = resolveDrimpayRoute(drimpayConfig, country, paymentMethod, "payin");
+        } catch (configError: any) {
+          console.error(`[DRIMPAY CONFIG] Configuration pay-in invalide: ${configError.message}`);
+          return res.status(500).json({ message: configError.message || "Configuration Drimpay invalide." });
+        }
+
+        const orderId = `DP-PAY-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(5).toString("hex").toUpperCase()}`;
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        const pending = await storage.createPendingPayment({
+          merchantId: merchant.id,
+          country,
+          amount: parsedAmount,
+          payerPhone: payerPhone || null,
+          payerName: payerName || null,
+          paymentMethod,
+          txId: orderId,
+          status: "gateway_pending",
+          redirectUrl: redirectUrl || null,
+          providerReference: orderId,
+          providerTxId: null,
+          providerPaymentUrl: null,
+          gateway: "drimpay",
+          expiresAt,
+        });
+        try {
+          const result = await initiateDrimpayPayin(drimpayConfig, {
+            amount: parsedAmount,
+            currency: drimpayRoute.currency,
+            countryCode: drimpayRoute.countryCode,
+            operator: drimpayRoute.operatorCode,
+            phone: msisdn,
+            orderId,
+            webhookUrl: `${callbackBaseUrl}/api/drimpay/webhook`,
+            description: `Paiement WestPay ${merchant.name}`,
+            expiresInMinutes: 5,
+          });
+          if (["failed", "failure", "declined", "rejected", "error", "expired", "cancelled", "canceled"].includes(result.status)) {
+            await financialPool.query(
+              `UPDATE pending_payments SET status = 'gateway_failed'
+               WHERE id = $1 AND status IN ('gateway_pending','pending','submitted')`,
+              [pending.id],
+            );
+            return res.status(502).json({ message: "Drimpay a refusé le paiement. Veuillez réessayer." });
+          }
+
+          await financialPool.query(
+            `UPDATE pending_payments
+             SET provider_tx_id = COALESCE(provider_tx_id, $2),
+                 provider_payment_url = COALESCE(provider_payment_url, $3)
+             WHERE id = $1`,
+            [pending.id, result.reference, result.paymentUrl],
+          );
+          await storage.createApiLog({
+            merchantId: merchant.id,
+            action: "drimpay_payment_initiated",
+            ip: req.ip || "",
+            description: `Paiement Drimpay initié - Réf: ${orderId} - Montant: ${parsedAmount} - pays: ${country}`,
+          });
+          return res.json({
+            success: true,
+            paymentId: pending.id,
+            gateway: "drimpay",
+            provider: "Drimpay",
+            reference: orderId,
+            providerReference: orderId,
+            paymentUrl: result.paymentUrl,
+            polling: true,
+            fees: 0,
+          });
+        } catch (drimpayError: any) {
+          console.error("[DRIMPAY] Erreur initiation pay-in:", drimpayError.message);
+          notifyAdminPaymentError({
+            merchantName: merchant.name,
+            merchantId: merchant.id,
+            country,
+            amount: parsedAmount,
+            payerNumber: msisdn,
+            operator: paymentMethod,
+            gateway: "drimpay",
+            stage: "appel API d'initiation du paiement",
+            error: drimpayError,
+          }).catch(() => {});
+          const statusCode = drimpayError instanceof DrimpayApiError ? drimpayError.statusCode : undefined;
+          const definitiveRejection = !!statusCode && statusCode >= 400 && statusCode < 500 &&
+            ![408, 409, 429].includes(statusCode);
+          if (definitiveRejection) {
+            await financialPool.query(
+              `UPDATE pending_payments SET status = 'gateway_failed'
+               WHERE id = $1 AND status IN ('gateway_pending','pending','submitted')`,
+              [pending.id],
+            );
+            return res.status(502).json({ message: "Drimpay a refusé le paiement. Vérifiez les paramètres avant de réessayer." });
+          }
+          return res.status(202).json({
+            success: true,
+            paymentId: pending.id,
+            gateway: "drimpay",
+            provider: "Drimpay",
+            reference: orderId,
+            providerReference: orderId,
+            paymentUrl: null,
+            polling: true,
+            pending: true,
+            outcomeUnknown: true,
+            message: "La demande a été enregistrée et sa confirmation est en cours. Ne la relancez pas.",
+          });
+        }
+      } else if (useMbiyo) {
         const mbiyoApiKey = await getMbiyoApiKey();
         if (!mbiyoApiKey) {
           console.error(
@@ -5392,7 +5776,7 @@ export async function registerRoutes(
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
       if (w.status !== "pending") return res.status(409).json({ message: "Ce retrait est déjà finalisé" });
       const effectiveProvider = requestedProvider || normalizeGatewayName(w.gateway);
-      if (!["mbiyo", "seapay", "clapay", "lipapap"].includes(effectiveProvider)) {
+      if (!["mbiyo", "seapay", "clapay", "lipapap", "drimpay"].includes(effectiveProvider)) {
         return res.status(400).json({ message: "Choisissez une passerelle de retrait active." });
       }
       if (normalizeGatewayName(w.gateway) !== effectiveProvider) {
@@ -5401,6 +5785,9 @@ export async function registerRoutes(
       if (!w.providerReference) return res.status(400).json({ message: "Aucune référence fournisseur pour ce reversement" });
       if (effectiveProvider === "clapay" && !/^CP/i.test(w.providerReference)) {
         return res.status(410).json({ message: "Le statut de cette ancienne opération n'est plus interrogeable." });
+      }
+      if (effectiveProvider === "drimpay" && !w.providerReference.startsWith("DP-WD-")) {
+        return res.status(410).json({ message: "Cette référence ne correspond pas à un payout Drimpay récent." });
       }
 
       let providerStatus = "";
@@ -5430,10 +5817,24 @@ export async function registerRoutes(
         const result = await getLipaPapPayoutStatus(config, w.providerReference, config.payerEmail);
         providerStatus = String(result.status || result.result || "").toLowerCase();
         raw = result;
+      } else if (effectiveProvider === "drimpay") {
+        if (!w.providerTxId) {
+          return res.status(409).json({ message: "Drimpay n’a pas renvoyé sa référence fournisseur. Ne relancez pas l’opération; attendez le webhook ou vérifiez la référence locale auprès de Drimpay." });
+        }
+        const config = await getDrimpayConfig();
+        if (!config) return res.status(500).json({ message: "Clé API Drimpay non configurée" });
+        const result = await getDrimpayPayoutStatus(config, w.providerTxId || w.providerReference);
+        providerStatus = normalizeDrimpayStatus(result);
+        raw = result?.data || result;
       }
 
-      const successStatuses = ["success", "successful", "completed", "complete", "confirmed", "approved", "paid"];
-      const failureStatuses = ["failed", "failure", "cancelled", "canceled", "rejected", "expired"];
+      const successStatuses = ["success", "successful", "completed", "complete", "confirmed", "approved", "paid", "sent", "delivered"];
+      const failureStatuses = ["failed", "failure", "cancelled", "canceled", "rejected", "expired", "reversed", "refunded", "refund"];
+      if (effectiveProvider === "drimpay" &&
+        (successStatuses.includes(providerStatus) || failureStatuses.includes(providerStatus))) {
+        const applied = await finalizeDrimpayWithdrawal(w, providerStatus);
+        return res.json({ success: true, applied, providerStatus, data: raw });
+      }
       const merchant = await storage.getMerchantById(w.merchantId);
 
       if (successStatuses.includes(providerStatus)) {
@@ -5476,6 +5877,32 @@ export async function registerRoutes(
       if (w.providerReference) {
         return res.status(409).json({ message: "Ce retrait possède déjà une référence fournisseur. Il faut d'abord le résoudre ou le rejeter avant toute nouvelle demande." });
       }
+      if (provider === "drimpay") {
+        const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+        const payout = await initiateWithdrawalPayout(
+          w,
+          provider,
+          callbackBaseUrl,
+          provider === "drimpay" ? reference => persistDrimpayPayoutReference(id, reference) : undefined,
+        );
+        if (!payout.accepted) {
+          if (payout.uncertain && payout.reference) {
+            await storage.updateWithdrawalGateway(id, "drimpay");
+            await storage.updateWithdrawalStatus(
+              id,
+              "pending",
+              `Résultat Drimpay incertain — ne pas relancer sans vérification (${payout.reference})`,
+              payout.reference,
+              w.fees || 0,
+              0,
+            );
+            return res.status(202).json({ success: true, provider, reference: payout.reference, outcomeUnknown: true });
+          }
+          return res.status(502).json({ success: false, message: payout.message });
+        }
+        if (payout.providerTxId) await storage.updateWithdrawalProviderTxId(id, payout.providerTxId);
+        return res.json({ success: true, provider, reference: payout.reference, fees: payout.fees });
+      }
       if (provider === "lipapap") {
         const retryFees = w.fees || 0;
         const retryNetAmount = w.amount - retryFees;
@@ -5511,8 +5938,8 @@ export async function registerRoutes(
           return res.status(502).json({ success: false, message: err.message || "Erreur LipaPap" });
         }
       }
-      if (!["mbiyo", "seapay", "clapay", "lipapap"].includes(provider)) {
-        return res.status(400).json({ message: "Choisissez une passerelle de retrait active (Mbiyo, SeaPay, ClaPay ou LipaPap)." });
+      if (!["mbiyo", "seapay", "clapay", "lipapap", "drimpay"].includes(provider)) {
+        return res.status(400).json({ message: "Choisissez une passerelle de retrait active (Mbiyo, SeaPay, ClaPay, LipaPap ou Drimpay)." });
       }
       const mc = await storage.getMerchantCountryById(w.merchantCountryId);
       const merchant = await storage.getMerchantById(w.merchantId);
@@ -5724,7 +6151,7 @@ export async function registerRoutes(
         txCountry = txRecord.country;
       }
       if (!ref) return res.status(400).json({ message: "Aucune référence fournisseur pour ce paiement" });
-      if (!["mbiyo", "seapay", "clapay", "lipapap"].includes(provider)) {
+      if (!["mbiyo", "seapay", "clapay", "lipapap", "drimpay"].includes(provider)) {
         return res.status(400).json({ message: "Choisissez une passerelle de paiement active." });
       }
       const storedGateway = normalizeGatewayName(pendingRecord?.gateway || txRecord?.provider);
@@ -5733,6 +6160,9 @@ export async function registerRoutes(
       }
       if (provider === "clapay" && !/^CP/i.test(ref)) {
         return res.status(410).json({ message: "Le statut de cette ancienne opération n'est plus interrogeable." });
+      }
+      if (provider === "drimpay" && !ref.startsWith("DP-PAY-")) {
+        return res.status(410).json({ message: "Cette référence ne correspond pas à un pay-in Drimpay récent." });
       }
 
       if (provider === "clapay") {
@@ -5756,6 +6186,16 @@ export async function registerRoutes(
         const result = await seapayQuery(spMerchantId, ref, currency, spApiKey);
         return res.json({ provider: "seapay", success: result.code === 200, status: result.data?.status, data: result.data, error: result.msg });
       }
+      if (provider === "drimpay") {
+        const providerReference = pendingRecord?.providerTxId || txRecord?.providerTxId;
+        if (!providerReference) {
+          return res.status(409).json({ message: "Drimpay n’a pas encore renvoyé sa référence fournisseur. Attendez le webhook; ne créez pas une seconde demande." });
+        }
+        const config = await getDrimpayConfig();
+        if (!config) return res.status(500).json({ message: "Clé API Drimpay non configurée" });
+        const result = await getDrimpayPayinStatus(config, providerReference);
+        return res.json({ provider: "drimpay", success: true, status: normalizeDrimpayStatus(result), data: result?.data || result });
+      }
       const config = await getLipaPapConfig();
       if (!config) return res.status(500).json({ message: "Configuration LipaPap non disponible" });
       const result = await getLipaPapTransactionStatus(config, pendingRecord?.providerTxId || txRecord?.providerTxId || ref);
@@ -5772,7 +6212,7 @@ export async function registerRoutes(
       if (isNaN(id)) return res.status(400).json({ message: "ID invalide" });
       const source = String(req.body.source || "payment");
       const provider = normalizeGatewayName(req.body.provider);
-      if (!["mbiyo", "seapay", "clapay", "lipapap"].includes(provider)) {
+      if (!["mbiyo", "seapay", "clapay", "lipapap", "drimpay"].includes(provider)) {
         return res.status(400).json({ message: "Choisissez une passerelle de paiement active." });
       }
 
@@ -5827,8 +6267,26 @@ export async function registerRoutes(
         const lipaRef = pendingRecord?.providerTxId || txRecord?.providerTxId || ref;
         const result = await getLipaPapTransactionStatus(config, lipaRef);
         providerStatus = String(result.status || result.result || "").toLowerCase();
+      } else if (provider === "drimpay") {
+        const providerReference = pendingRecord?.providerTxId || txRecord?.providerTxId;
+        if (!providerReference) {
+          return res.status(409).json({ message: "Drimpay n’a pas encore renvoyé sa référence fournisseur. Attendez le webhook; ne créez pas une seconde demande." });
+        }
+        const config = await getDrimpayConfig();
+        if (!config) return res.status(500).json({ message: "Clé API Drimpay non configurée" });
+        const result = await getDrimpayPayinStatus(config, providerReference);
+        providerStatus = normalizeDrimpayStatus(result);
       } else {
         return res.status(400).json({ message: "Passerelle non prise en charge" });
+      }
+
+      if (provider === "drimpay" && source === "pending" && pendingRecord) {
+        const applied = await settleDrimpayPendingPayment(
+          pendingRecord,
+          providerStatus,
+          pendingRecord.providerTxId || null,
+        );
+        return res.json({ success: true, applied, providerStatus });
       }
 
       const successStatuses = ["success", "successful", "completed", "complete", "confirmed", "approved", "paid"];
@@ -8438,6 +8896,192 @@ app.post("/api/clapay/payout-callback", async (req, res) => {
     }
   });
 
+app.post("/api/drimpay/webhook", async (req, res) => {
+    try {
+      const config = await getDrimpayConfig();
+      if (!config?.webhookSecret) {
+        return res.status(503).json({ message: "Secret webhook Drimpay non configuré." });
+      }
+      const rawBody = (req.rawBody as Buffer | undefined)?.toString("utf8") || JSON.stringify(req.body || {});
+      const signature = req.get("X-DrimPay-Signature") || undefined;
+      const timestampHeader = req.get("X-DrimPay-Timestamp") || undefined;
+      if (!verifyDrimpayWebhookSignature({
+        signature,
+        timestampHeader,
+        secret: config.webhookSecret,
+        rawBody,
+      })) {
+        return res.status(401).json({ message: "Signature Drimpay invalide." });
+      }
+
+      const payload = req.body && typeof req.body === "object" ? req.body : {};
+      const data = payload.data && typeof payload.data === "object" ? payload.data : payload;
+      const event = String(payload.event || payload.type || data.event || "").toLowerCase();
+      const orderId = String(data.order_id || data.orderId || payload.order_id || "").trim();
+      const externalReference = String(
+        data.reference || data.payment_reference || data.transaction_reference ||
+        payload.reference || payload.payment_reference || payload.transaction_reference || "",
+      ).trim();
+      const isPayout = orderId.startsWith("DP-WD-") || event.includes("payout");
+
+      if (isPayout) {
+        const conditions = [eq(withdrawals.gateway, "drimpay")];
+        const referenceConditions = [];
+        if (orderId) referenceConditions.push(eq(withdrawals.providerReference, orderId));
+        if (externalReference) referenceConditions.push(eq(withdrawals.providerTxId, externalReference));
+        if (referenceConditions.length === 0) {
+          return res.status(400).json({ message: "Référence de retrait absente du webhook Drimpay." });
+        }
+        const [withdrawal] = await financialDb.select().from(withdrawals)
+          .where(and(...conditions, or(...referenceConditions)))
+          .limit(1);
+        if (!withdrawal) return res.status(404).json({ message: "Retrait Drimpay introuvable." });
+        if (!withdrawal.providerReference?.startsWith("DP-WD-")) {
+          return res.status(409).json({ message: "Référence Drimpay locale invalide pour ce retrait." });
+        }
+        if (externalReference && externalReference !== withdrawal.providerTxId) {
+          await storage.updateWithdrawalProviderTxId(withdrawal.id, externalReference);
+        }
+
+        const providerReference = externalReference || withdrawal.providerTxId;
+        const providerResult = providerReference
+          ? await getDrimpayPayoutStatus(config, providerReference)
+          : payload;
+        const providerStatus = normalizeDrimpayStatus(providerResult);
+        const successStatuses = new Set(["success", "successful", "completed", "complete", "confirmed", "approved", "paid", "sent"]);
+        const failureStatuses = new Set(["failed", "failure", "cancelled", "canceled", "rejected", "declined", "error", "expired", "reversed", "refunded", "refund"]);
+        if (successStatuses.has(providerStatus) || failureStatuses.has(providerStatus)) {
+          const applied = await finalizeDrimpayWithdrawal(withdrawal, providerStatus);
+          return res.json({ received: true, provider: "drimpay", status: providerStatus, applied });
+        }
+        return res.json({ received: true, provider: "drimpay", status: providerStatus || "unknown" });
+      }
+
+      const paymentConditions = [];
+      if (orderId) {
+        paymentConditions.push(eq(pendingPayments.providerReference, orderId));
+        paymentConditions.push(eq(pendingPayments.txId, orderId));
+      }
+      if (externalReference) paymentConditions.push(eq(pendingPayments.providerTxId, externalReference));
+      if (paymentConditions.length === 0) {
+        return res.status(400).json({ message: "Référence de paiement absente du webhook Drimpay." });
+      }
+      const [pending] = await financialDb.select().from(pendingPayments)
+        .where(and(eq(pendingPayments.gateway, "drimpay"), or(...paymentConditions)))
+        .limit(1);
+      if (!pending) return res.status(404).json({ message: "Paiement Drimpay introuvable." });
+      if (!pending.providerReference?.startsWith("DP-PAY-")) {
+        return res.status(409).json({ message: "Référence Drimpay locale invalide pour ce paiement." });
+      }
+
+      let result: any = payload;
+      const providerReference = externalReference || pending.providerTxId;
+      if (providerReference) result = await getDrimpayPayinStatus(config, providerReference);
+      const applied = await settleDrimpayPendingPayment(
+        pending,
+        normalizeDrimpayStatus(result),
+        providerReference,
+      );
+      return res.json({ received: true, provider: "drimpay", status: normalizeDrimpayStatus(result), applied });
+    } catch (err: any) {
+      console.error("[DRIMPAY WEBHOOK] Erreur:", err.message);
+      return res.status(502).json({ message: "Impossible de traiter le webhook Drimpay." });
+    }
+  });
+
+app.get("/api/admin/drimpay/settings", authMiddleware("admin"), async (req, res) => {
+    try {
+      const [storedApiKey, storedWebhookSecret, storedEnvironment, countryMappingsJson] = await Promise.all([
+        storage.getSetting("drimpay_api_key"),
+        storage.getSetting("drimpay_webhook_secret"),
+        storage.getSetting("drimpay_environment"),
+        storage.getSetting("drimpay_country_mappings"),
+      ]);
+      const activeApiKey = cleanConfiguredSecret(storedApiKey) || cleanConfiguredSecret(process.env.DRIMPAY_API_KEY);
+      const activeWebhookSecret = cleanConfiguredSecret(storedWebhookSecret) || cleanConfiguredSecret(process.env.DRIMPAY_WEBHOOK_SECRET);
+      let countryCount = 0;
+      let operatorCount = 0;
+      try {
+        const mappings = parseDrimpayCountryMappings(countryMappingsJson);
+        countryCount = Object.keys(mappings).length;
+        operatorCount = Object.values(mappings).reduce(
+          (count, mapping) => count + Object.keys(mapping.operators).length + Object.keys(mapping.payoutOperators || {}).length,
+          0,
+        );
+      } catch {
+        // The panel returns the saved JSON so an admin can correct invalid values.
+      }
+      const countryMappingReady = countryCount > 0 && operatorCount > 0;
+      const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+      res.json({
+        apiKey: storedApiKey ? "••••••••[DB]" : (process.env.DRIMPAY_API_KEY ? "••••••••[ENV]" : ""),
+        webhookSecret: storedWebhookSecret ? "••••••••[DB]" : (process.env.DRIMPAY_WEBHOOK_SECRET ? "••••••••[ENV]" : ""),
+        environment: storedEnvironment === "production" ? "production" : "sandbox",
+        countryMappingsJson: countryMappingsJson || "{}",
+        callbackPath: "/api/drimpay/webhook",
+        callbackUrl: `${callbackBaseUrl.replace(/\/$/, "")}/api/drimpay/webhook`,
+        configured: !!activeApiKey && !!activeWebhookSecret && countryMappingReady,
+        payinConfigured: !!activeApiKey && countryMappingReady,
+        payoutConfigured: !!activeApiKey && countryMappingReady,
+        configurationChecks: {
+          apiKey: !!activeApiKey,
+          webhookSecret: !!activeWebhookSecret,
+          countryMappings: countryMappingReady,
+        },
+        countryCount,
+        operatorCount,
+        envOverride: {
+          apiKey: !!process.env.DRIMPAY_API_KEY,
+          webhookSecret: !!process.env.DRIMPAY_WEBHOOK_SECRET,
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.post("/api/admin/drimpay/settings", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { apiKey, webhookSecret, environment, countryMappingsJson } = req.body || {};
+      if (apiKey !== undefined && apiKey !== "") {
+        const normalized = String(apiKey).trim();
+        if (normalized.length < 8 || normalized.length > 2000) {
+          return res.status(400).json({ message: "La clé API Drimpay est invalide." });
+        }
+        await storage.setSetting("drimpay_api_key", normalized);
+      }
+      if (webhookSecret !== undefined && webhookSecret !== "") {
+        const normalized = String(webhookSecret).trim();
+        if (normalized.length < 8 || normalized.length > 2000) {
+          return res.status(400).json({ message: "Le secret webhook Drimpay est invalide." });
+        }
+        await storage.setSetting("drimpay_webhook_secret", normalized);
+      }
+      if (environment !== undefined) {
+        if (!["sandbox", "production"].includes(environment)) {
+          return res.status(400).json({ message: "Environnement Drimpay invalide." });
+        }
+        await storage.setSetting("drimpay_environment", environment);
+      }
+      if (countryMappingsJson !== undefined) {
+        const serialized = String(countryMappingsJson);
+        if (serialized.length > 100_000) {
+          return res.status(400).json({ message: "La configuration des pays Drimpay est trop longue." });
+        }
+        let parsed: Record<string, any>;
+        try {
+          parsed = parseDrimpayCountryMappings(serialized);
+        } catch (error: any) {
+          return res.status(400).json({ message: error.message || "Configuration des pays Drimpay invalide." });
+        }
+        await storage.setSetting("drimpay_country_mappings", JSON.stringify(parsed));
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
 app.get("/api/admin/lipapap/settings", authMiddleware("admin"), async (_req, res) => {
     try {
       const [dbClientKey, dbSecretKey, dbPaymentUrl, dbCallbackUrl, environment, action, networkIdsJson, payoutCodesJson, payerEmail, locale, connectorName] = await Promise.all([
@@ -9917,7 +10561,7 @@ app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, re
         return res.status(503).json({ message: "Cet opérateur est temporairement indisponible" });
       }
       const provider = normalizeGatewayName(payoutOperator?.gateway) || "clapay";
-      if (!["clapay", "mbiyo", "seapay", "lipapap"].includes(provider)) {
+      if (!["clapay", "mbiyo", "seapay", "lipapap", "drimpay"].includes(provider)) {
         return res.status(400).json({ message: "Aucune passerelle de retrait active n'est configurée pour cet opérateur" });
       }
       const isBankTransfer = payoutOperator?.type === "Virement bancaire";
@@ -10006,13 +10650,25 @@ app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, re
       });
 
       const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
-      const payout = await initiateWithdrawalPayout(createdWithdrawal, provider, callbackBaseUrl);
+      const payout = await initiateWithdrawalPayout(
+        createdWithdrawal,
+        provider,
+        callbackBaseUrl,
+        provider === "drimpay"
+          ? reference => persistDrimpayPayoutReference(createdWithdrawal.id, reference)
+          : undefined,
+      );
       if (!payout.accepted) {
         if (payout.uncertain) {
           await storage.updateWithdrawalStatus(
             createdWithdrawal.id,
             "pending",
-            "Résultat de l'initiation incertain — vérification administrative requise",
+            provider === "drimpay" && payout.reference
+              ? `Résultat Drimpay incertain — ne pas relancer sans vérification (${payout.reference})`
+              : "Résultat de l'initiation incertain — vérification administrative requise",
+            provider === "drimpay" ? payout.reference : undefined,
+            provider === "drimpay" ? withdrawalFee : undefined,
+            provider === "drimpay" ? 0 : undefined,
           );
           notifyAdminWithdrawalError({
             id: createdWithdrawal.id, merchantName: merchant.name, merchantEmail: merchant.email,
@@ -10025,6 +10681,7 @@ app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, re
             gateway: provider,
             autoProcessed: false,
             message: "La demande est enregistrée et sera vérifiée par l'équipe.",
+            ...(provider === "drimpay" && payout.reference ? { providerReference: payout.reference, outcomeUnknown: true } : {}),
           });
         }
         await storage.updateWithdrawalStatus(createdWithdrawal.id, "failed", payout.message);
@@ -10033,14 +10690,16 @@ app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, re
         return res.status(502).json({ message: "Le fournisseur a refusé le retrait. Le solde a été restitué." });
       }
 
-      await storage.updateWithdrawalStatus(
-        createdWithdrawal.id,
-        "pending",
-        `En attente de confirmation chez ${provider}`,
-        payout.reference,
-        payout.fees,
-        payout.providerPayoutFee,
-      );
+      if (provider !== "drimpay") {
+        await storage.updateWithdrawalStatus(
+          createdWithdrawal.id,
+          "pending",
+          `En attente de confirmation chez ${provider}`,
+          payout.reference,
+          payout.fees,
+          payout.providerPayoutFee,
+        );
+      }
       if (payout.providerTxId) await storage.updateWithdrawalProviderTxId(createdWithdrawal.id, payout.providerTxId);
       return res.status(202).json({
         ...createdWithdrawal,
@@ -10093,29 +10752,56 @@ app.put("/api/admin/withdrawals/:id/approve", authMiddleware("admin"), async (re
       }
 
       const provider = normalizeGatewayName(req.body?.provider || withdrawal.gateway);
-      if (!["clapay", "mbiyo", "seapay", "lipapap"].includes(provider)) {
+      if (!["clapay", "mbiyo", "seapay", "lipapap", "drimpay"].includes(provider)) {
         return res.status(400).json({ message: "Choisissez une passerelle de retrait active avant l'approbation." });
       }
       const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
-      const payout = await initiateWithdrawalPayout(withdrawal, provider, callbackBaseUrl);
+      const payout = await initiateWithdrawalPayout(
+        withdrawal,
+        provider,
+        callbackBaseUrl,
+        provider === "drimpay" ? reference => persistDrimpayPayoutReference(id, reference) : undefined,
+      );
       if (!payout.accepted) {
         if (payout.uncertain) {
+          if (provider === "drimpay" && payout.reference) {
+            await storage.updateWithdrawalGateway(id, "drimpay");
+            await storage.updateWithdrawalStatus(
+              id,
+              "pending",
+              `Résultat Drimpay incertain — ne pas relancer sans vérification (${payout.reference})`,
+              payout.reference,
+              withdrawal.fees || 0,
+              0,
+            );
+            return res.status(202).json({
+              success: true,
+              pendingPayment: true,
+              outcomeUnknown: true,
+              provider,
+              providerReference: payout.reference,
+            });
+          }
           await storage.updateWithdrawalStatus(id, "pending", "Résultat de l'initiation incertain — vérification administrative requise");
           return res.status(202).json({ success: true, pendingPayment: true, outcomeUnknown: true });
         }
         return res.status(502).json({ success: false, message: payout.message });
       }
 
-      if (withdrawal.gateway !== provider) await storage.updateWithdrawalGateway(id, provider);
-      await storage.updateWithdrawalStatus(
-        id,
-        "pending",
-        `En attente de confirmation chez ${provider}${req.body?.note ? ` — ${String(req.body.note).slice(0, 200)}` : ""}`,
-        payout.reference,
-        payout.fees,
-        payout.providerPayoutFee,
-      );
-      if (payout.providerTxId) await storage.updateWithdrawalProviderTxId(id, payout.providerTxId);
+      if (provider === "drimpay") {
+        if (payout.providerTxId) await storage.updateWithdrawalProviderTxId(id, payout.providerTxId);
+      } else {
+        if (withdrawal.gateway !== provider) await storage.updateWithdrawalGateway(id, provider);
+        await storage.updateWithdrawalStatus(
+          id,
+          "pending",
+          `En attente de confirmation chez ${provider}${req.body?.note ? ` — ${String(req.body.note).slice(0, 200)}` : ""}`,
+          payout.reference,
+          payout.fees,
+          payout.providerPayoutFee,
+        );
+        if (payout.providerTxId) await storage.updateWithdrawalProviderTxId(id, payout.providerTxId);
+      }
       return res.json({
         success: true,
         provider,
@@ -10153,7 +10839,7 @@ app.get("/api/admin/withdrawals/:id/check-status", authMiddleware("admin"), asyn
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
       const provider = requestedProvider || normalizeGatewayName(w.gateway);
-      if (!["mbiyo", "seapay", "clapay", "lipapap"].includes(provider)) {
+      if (!["mbiyo", "seapay", "clapay", "lipapap", "drimpay"].includes(provider)) {
         return res.status(400).json({ message: "Choisissez une passerelle de retrait active." });
       }
       if (normalizeGatewayName(w.gateway) !== provider) {
@@ -10162,6 +10848,9 @@ app.get("/api/admin/withdrawals/:id/check-status", authMiddleware("admin"), asyn
       if (!w.providerReference) return res.status(400).json({ message: "Aucune référence fournisseur pour ce reversement" });
       if (provider === "clapay" && !/^CP/i.test(w.providerReference)) {
         return res.status(410).json({ message: "Le statut de cette ancienne opération n'est plus interrogeable." });
+      }
+      if (provider === "drimpay" && !w.providerReference.startsWith("DP-WD-")) {
+        return res.status(410).json({ message: "Cette référence ne correspond pas à un payout Drimpay récent." });
       }
 
       if (provider === "clapay") {
@@ -10182,6 +10871,12 @@ app.get("/api/admin/withdrawals/:id/check-status", authMiddleware("admin"), asyn
         const currency = SEAPAY_CURRENCY_COUNTRY[w.country] || "USD";
         const result = await seapayQuery(merchantId, w.providerReference, currency, apiKey);
         return res.json({ provider, success: result.code === 200, status: result.data?.status, data: result.data, error: result.msg });
+      }
+      if (provider === "drimpay") {
+        const config = await getDrimpayConfig();
+        if (!config) return res.status(500).json({ message: "Clé API Drimpay non configurée" });
+        const result = await getDrimpayPayoutStatus(config, w.providerTxId || w.providerReference);
+        return res.json({ provider, success: true, status: normalizeDrimpayStatus(result), data: result?.data || result });
       }
       const config = await getLipaPapConfig();
       if (!config?.payerEmail) return res.status(500).json({ message: "Configuration LipaPap incomplète" });

@@ -16,6 +16,12 @@ import {
   type LipaPapConfig,
 } from "./lipapap";
 import {
+  getDrimpayConfig,
+  getDrimpayPayinStatus,
+  getDrimpayPayoutStatus,
+  normalizeDrimpayStatus,
+} from "./drimpay";
+import {
   notifyAdminPayment,
   notifyAdminWithdrawal,
   notifyMerchantPayment,
@@ -38,7 +44,7 @@ const WITHDRAWAL_SUCCESS = new Set([
 ]);
 const WITHDRAWAL_FAILURE = new Set([
   "failed", "failure", "cancelled", "canceled", "rejected", "declined",
-  "error",
+  "error", "expired", "reversed", "refunded", "refund",
 ]);
 
 async function getConfiguredKey(envName: string, settingName: string): Promise<string | undefined> {
@@ -122,6 +128,8 @@ function referenceBelongsTo(gateway: unknown, reference: unknown): boolean {
       return value.startsWith("MB");
     case "lipapap":
       return value.startsWith("LP");
+    case "drimpay":
+      return value.startsWith("DP-PAY-") || value.startsWith("DP-WD-");
     default:
       return false;
   }
@@ -280,6 +288,26 @@ async function reconcilePayments(): Promise<void> {
             status,
           );
         }
+      } else if (gateway === "drimpay") {
+        if (!pending.providerTxId) continue;
+        const config = await getDrimpayConfig();
+        if (!config) continue;
+        const result = await getDrimpayPayinStatus(config, pending.providerTxId);
+        const status = paymentStatus(normalizeDrimpayStatus(result));
+        if (PAYMENT_SUCCESS.has(status)) {
+          await creditConfirmedPayment(
+            pending,
+            `DP-${pending.providerTxId}`,
+            pending.providerTxId,
+          );
+        } else if (PAYMENT_FAILURE.has(status)) {
+          await recordPaymentFailure(
+            pending,
+            `DP-${pending.providerTxId}`,
+            pending.providerTxId,
+            status,
+          );
+        }
       }
     } catch (error: any) {
       console.error(`[RECONCILIATION] Erreur paiement #${pending.id}:`, error?.message || error);
@@ -292,14 +320,50 @@ async function applyWithdrawalResult(withdrawal: any, status: string): Promise<v
   if (!WITHDRAWAL_SUCCESS.has(normalizedStatus) && !WITHDRAWAL_FAILURE.has(normalizedStatus)) return;
 
   const nextStatus = WITHDRAWAL_SUCCESS.has(normalizedStatus) ? "approved" : "failed";
-  const cas = await financialPool.query(
-    `UPDATE withdrawals
-        SET status = $1
-      WHERE id = $2 AND status = 'pending'
-      RETURNING id`,
-    [nextStatus, withdrawal.id],
-  );
-  if (!cas.rowCount) return;
+  const isDrimpayFailure = normalized(withdrawal.gateway) === "drimpay" && nextStatus === "failed";
+  if (isDrimpayFailure) {
+    const client = await financialPool.connect();
+    let claimed = false;
+    try {
+      await client.query("BEGIN");
+      const cas = await client.query(
+        `UPDATE withdrawals
+            SET status = 'failed'
+          WHERE id = $1 AND status = 'pending'
+          RETURNING id`,
+        [withdrawal.id],
+      );
+      if (cas.rowCount) {
+        const refund = await client.query(
+          `UPDATE merchant_countries
+              SET balance = balance + $1
+            WHERE id = $2
+            RETURNING id`,
+          [withdrawal.amount, withdrawal.merchantCountryId],
+        );
+        if (!refund.rowCount) {
+          throw new Error(`MerchantCountry introuvable pour le retrait Drimpay #${withdrawal.id}`);
+        }
+        claimed = true;
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+    if (!claimed) return;
+  } else {
+    const cas = await financialPool.query(
+      `UPDATE withdrawals
+          SET status = $1
+        WHERE id = $2 AND status = 'pending'
+        RETURNING id`,
+      [nextStatus, withdrawal.id],
+    );
+    if (!cas.rowCount) return;
+  }
 
   const reference = withdrawal.providerReference || null;
   const fees = WITHDRAWAL_SUCCESS.has(normalizedStatus) ? withdrawal.fees || 0 : 0;
@@ -312,7 +376,7 @@ async function applyWithdrawalResult(withdrawal: any, status: string): Promise<v
     fees,
   );
   const merchant = await storage.getMerchantById(withdrawal.merchantId);
-  if (nextStatus === "failed") {
+  if (nextStatus === "failed" && !isDrimpayFailure) {
     const merchantCountry = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
     if (merchantCountry) {
       await storage.incrementMerchantCountryBalance(merchantCountry.id, withdrawal.amount);
@@ -371,6 +435,12 @@ async function reconcileStaleWithdrawals(): Promise<void> {
           config.payerEmail,
         );
         await applyWithdrawalResult(withdrawal, String(result.status || result.result || ""));
+      } else if (gateway === "drimpay") {
+        if (!withdrawal.providerTxId) continue;
+        const config = await getDrimpayConfig();
+        if (!config) continue;
+        const result = await getDrimpayPayoutStatus(config, withdrawal.providerTxId);
+        await applyWithdrawalResult(withdrawal, normalizeDrimpayStatus(result));
       }
     } catch (error: any) {
       console.error(`[RECONCILIATION-WD] Erreur retrait #${withdrawal.id}:`, error?.message || error);

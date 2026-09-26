@@ -1,5 +1,6 @@
 import { Telegraf } from "telegraf";
 import type { Express, Request, Response } from "express";
+import crypto from "crypto";
 import { storage } from "./storage";
 import { pool, financialPool } from "./db";
 import {
@@ -27,6 +28,14 @@ import {
   lipapapPayoutProviderCode,
   type LipaPapConfig,
 } from "./lipapap";
+import {
+  getDrimpayConfig,
+  initiateDrimpayPayout,
+  getDrimpayPayoutStatus,
+  normalizeDrimpayStatus,
+  resolveDrimpayRoute,
+  DrimpayApiError,
+} from "./drimpay";
 import {
   WESTPAY_PAYOUT_BENEFICIARY,
 } from "./payout-constants";
@@ -2302,6 +2311,67 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
             resultMsg = `❌ LipaPap : ${result.decline_reason || result.message || resultStatus || "Échec"}`;
           }
         }
+      } else if (gateway === "drimpay") {
+        const config = await getDrimpayConfig();
+        if (!config) {
+          resultMsg = "❌ Drimpay : clé API non configurée";
+        } else if (w.accountNumber) {
+          resultMsg = "❌ Drimpay : les payouts bancaires ne sont pas documentés";
+        } else if (!String(w.phone || "").trim()) {
+          resultMsg = "❌ Drimpay : numéro de téléphone requis";
+        } else {
+          let route: ReturnType<typeof resolveDrimpayRoute> | undefined;
+          try {
+            route = resolveDrimpayRoute(config, w.country, w.operator || "", "payout");
+          } catch (error: any) {
+            resultMsg = `❌ Drimpay : ${error.message}`;
+          }
+          if (route) {
+            const reference = `DP-WD-${id}-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+            const localReference = await financialPool.query(
+              `UPDATE withdrawals
+               SET gateway = 'drimpay', provider_reference = $1
+               WHERE id = $2 AND (provider_reference IS NULL OR provider_reference = '')
+               RETURNING id`,
+              [reference, id],
+            );
+            if (!localReference.rowCount) {
+              resultMsg = `⚠️ Drimpay : retrait déjà associé à une référence fournisseur. Ne le relancez pas.`;
+            } else {
+              try {
+                const result = await initiateDrimpayPayout(config, {
+                  amount: w.amount - (w.fees || 0),
+                  currency: route.currency,
+                  countryCode: route.countryCode,
+                  operator: route.operatorCode,
+                  phone: botPrependDialCode(w.phone || "", w.country),
+                  orderId: reference,
+                  webhookUrl: `${appUrl}/api/drimpay/webhook`,
+                });
+                const status = normalizeDrimpayStatus(result.raw);
+                await storage.updateWithdrawalProviderTxId(id, result.reference);
+                if (["failed", "failure", "declined", "rejected", "error", "cancelled", "canceled"].includes(status)) {
+                  resultMsg = `⚠️ Drimpay a retourné ${status}. Réf : \`${reference}\` — vérifiez le statut avant toute autre action.`;
+                } else {
+                  resultMsg = `✅ Déclenché chez *Drimpay*\nRéf locale : \`${reference}\`\nRéf fournisseur : \`${result.reference}\`\nStatut : ${status || "en attente"}`;
+                }
+              } catch (error: any) {
+                const statusCode = error instanceof DrimpayApiError ? error.statusCode : undefined;
+                const uncertain = !statusCode || statusCode === 408 || statusCode === 409 || statusCode === 429 || statusCode >= 500;
+                if (uncertain) {
+                  resultMsg = `⚠️ Résultat Drimpay incertain. Ne relancez pas ce retrait. Réf locale : \`${reference}\`. Vérifiez cette référence dans le tableau Drimpay.`;
+                } else {
+                  await financialPool.query(
+                    `UPDATE withdrawals SET provider_reference = NULL
+                     WHERE id = $1 AND provider_reference = $2 AND provider_tx_id IS NULL`,
+                    [id, reference],
+                  );
+                  resultMsg = `❌ Drimpay : ${error.message || "demande refusée"}`;
+                }
+              }
+            }
+          }
+        }
       } else if (gateway === "clapay") {
         const token = process.env.CLAPAY_API_KEY || await storage.getSetting("clapay_api_key");
         const countryCode = clapayCountryCode(w.country);
@@ -2337,12 +2407,12 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         resultMsg = "❌ Retrait non déclenché : le prestataire historique n'est plus disponible.";
       }
 
-      const triggerSuccess = resultMsg.startsWith("✅");
+      const triggerSuccess = resultMsg.startsWith("✅") || resultMsg.startsWith("⚠️");
       await ctx.reply(`🚀 *Retrait #${id} — Déclenchement*\n\n${resultMsg}`, { parse_mode: "Markdown" });
       if (triggerSuccess) {
         await ctx.editMessageReplyMarkup({
           inline_keyboard: [
-            [{ text: `🚀 Déclenché par ${admin}`, callback_data: "wd:noop" }],
+            [{ text: resultMsg.startsWith("⚠️") ? `⚠️ À vérifier par ${admin}` : `🚀 Déclenché par ${admin}`, callback_data: "wd:noop" }],
             [{ text: "🔍 Vérifier fournisseur", callback_data: `wd:check:${id}` }],
           ],
         }).catch(() => {});
@@ -2401,6 +2471,20 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         const ps = String(result.status || result.result || "inconnu");
         statusMsg = `Fournisseur : *LipaPap*\nStatut fournisseur : *${ps}*\nRéf : \`${w.providerReference}\``;
         statusMsg += `\n\`\`\`\n${JSON.stringify(result, null, 2).slice(0, 400)}\n\`\`\``;
+      } else if (gateway === "drimpay") {
+        if (!w.providerTxId) {
+          statusMsg = `Fournisseur : *Drimpay*\nStatut : référence fournisseur absente.\nRéf locale : \`${w.providerReference}\`\nNe relancez pas le payout; vérifiez cette référence dans le tableau Drimpay.`;
+        } else {
+          const config = await getDrimpayConfig();
+          if (!config) {
+            statusMsg = "Fournisseur : *Drimpay*\nStatut : clé API non configurée.";
+          } else {
+            const result = await getDrimpayPayoutStatus(config, w.providerTxId);
+            const ps = normalizeDrimpayStatus(result);
+            statusMsg = `Fournisseur : *Drimpay*\nStatut fournisseur : *${ps || "inconnu"}*\nRéf locale : \`${w.providerReference}\`\nRéf fournisseur : \`${w.providerTxId}\``;
+            statusMsg += `\n\`\`\`\n${JSON.stringify(result?.data || result, null, 2).slice(0, 400)}\n\`\`\``;
+          }
+        }
       } else if (gateway === "clapay") {
         const token = process.env.CLAPAY_API_KEY || await storage.getSetting("clapay_api_key");
         if (!token) {
