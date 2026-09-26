@@ -184,7 +184,7 @@ export default function Bank2PaymentPage() {
   const countryParam = params.get("country") || "";
   const redirectParam = params.get("redirect") || "";
   const referenceParam = params.get("ref") || "";
-  const completeParam = params.get("omnipay_status") === "complete";
+  const completeParam = params.get("payment_status") === "complete";
 
   const [screen, setScreen] = useState<Screen>(completeParam ? "pending" : paymentLinkUniqueId ? "countries" : "operators");
   const [merchant, setMerchant] = useState<MerchantInfo | null>(null);
@@ -197,9 +197,6 @@ export default function Bank2PaymentPage() {
   const [phone, setPhone] = useState(params.get("phone") || params.get("payerPhone") || "");
   const payerName = params.get("name") || params.get("payerName") || "";
   const [otp, setOtp] = useState("");
-  const [sendavaOtp, setSendavaOtp] = useState("");
-  const [sendavaOtpRequired, setSendavaOtpRequired] = useState(false);
-  const [sendavaProxyToken, setSendavaProxyToken] = useState<string | null>(null);
   const [paymentId, setPaymentId] = useState<number | null>(null);
   const [reference, setReference] = useState(referenceParam);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
@@ -242,7 +239,7 @@ export default function Bank2PaymentPage() {
     if (pollingRef.current) clearInterval(pollingRef.current);
     pollingRef.current = setInterval(async () => {
       try {
-        const response = await fetch(`/api/omnipay/payment/${id}/status`);
+        const response = await fetch(`/api/payment/${id}/status`);
         const data = await response.json();
         if (data.status === "confirmed") {
           if (pollingRef.current) clearInterval(pollingRef.current);
@@ -272,7 +269,7 @@ export default function Bank2PaymentPage() {
           if (!response.ok) throw new Error(data.message || "Paiement introuvable");
           setAmount(data.amount);
           setCountry(data.country);
-          setReference(data.omnipayReference || referenceParam);
+          setReference(data.providerReference || referenceParam);
           setPaymentId(data.paymentId || null);
           setMerchant({
             name: data.merchantName || "RobotPay",
@@ -280,10 +277,10 @@ export default function Bank2PaymentPage() {
             countries: data.country ? [data.country] : [],
           });
           if (data.redirectUrl) redirectRef.current = data.redirectUrl;
-          if (["confirmed", "omnipay_confirmed", "lipapap_confirmed"].includes(data.status)) {
+          if (["confirmed", "provider_confirmed", "lipapap_confirmed"].includes(data.status)) {
             setConfirmedAt(new Date());
             setScreen("success");
-          } else if (["failed", "omnipay_failed", "lipapap_failed", "omnipay_error", "lipapap_error"].includes(data.status)) {
+          } else if (["failed", "provider_failed", "lipapap_failed", "provider_error", "lipapap_error"].includes(data.status)) {
             setError("Le paiement n’a pas pu être confirmé. Veuillez réessayer.");
             setScreen("failed");
           } else {
@@ -413,43 +410,12 @@ export default function Bank2PaymentPage() {
       if (!response.ok) throw new Error(data.message || "Échec de l’initiation du paiement");
 
       setPaymentId(data.paymentId);
-      setReference(data.omnipayReference || data.reference || "");
+      setReference(data.providerReference || data.reference || "");
       setPaymentUrl(data.paymentUrl || null);
-      if (data.proxyToken) setSendavaProxyToken(data.proxyToken);
-
-      if (data.sendavapay && data.requiresOtp) {
-        setSendavaOtpRequired(true);
-        setScreen("otp");
-      } else {
-        setScreen("pending");
-        if (data.paymentId) startPolling(data.paymentId);
-      }
+      setScreen("pending");
+      if (data.paymentId) startPolling(data.paymentId);
     } catch (caught: any) {
       setError(sanitizePaymentMessage(caught.message, "Une erreur est survenue."));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const submitSendavaOtp = async () => {
-    if (!sendavaOtpRequired || sendavaOtp.trim().length < 4) return;
-    setSubmitting(true);
-    setError("");
-    try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (sendavaProxyToken) headers["X-Sp-Proxy-Token"] = sendavaProxyToken;
-      const response = await fetch("/api/sendavapay/proxy/v1/submit-otp", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ otp: sendavaOtp.trim() }),
-      });
-      const data = await response.json();
-      if (!response.ok || !data.success) throw new Error(data.message || "Code OTP invalide");
-      setSendavaOtpRequired(false);
-      setScreen("pending");
-      if (paymentId) startPolling(paymentId);
-    } catch (caught: any) {
-      setError(sanitizePaymentMessage(caught.message, "Code OTP invalide"));
     } finally {
       setSubmitting(false);
     }
@@ -459,8 +425,6 @@ export default function Bank2PaymentPage() {
     if (pollingRef.current) clearInterval(pollingRef.current);
     setError("");
     setOtp("");
-    setSendavaOtp("");
-    setSendavaOtpRequired(false);
     setPaymentUrl(null);
     setScreen("phone");
   };
@@ -653,33 +617,6 @@ export default function Bank2PaymentPage() {
                     {submitting ? <Loader2 className="bank2-spin" size={20} /> : <>Suivant <ChevronRight size={18} /></>}
                   </button>
                 </div>
-              </div>
-            )}
-
-            {screen === "otp" && (
-              <div className="bank2-content bank2-state">
-                <ShieldCheck className="bank2-shield bank2-pulse" size={82} />
-                <h2>Confirmation du paiement</h2>
-                <p>Saisissez le code OTP reçu sur votre téléphone.</p>
-                <input
-                  className="bank2-otp-input"
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={8}
-                  value={sendavaOtp}
-                  onChange={(event) => setSendavaOtp(event.target.value.replace(/\D/g, ""))}
-                  placeholder="••••••"
-                  data-testid="bank2-sendava-otp"
-                />
-                {error && <p className="bank2-inline-error">{error}</p>}
-                <button
-                  type="button"
-                  className="bank2-button primary wide"
-                  onClick={submitSendavaOtp}
-                  disabled={submitting || sendavaOtp.length < 4}
-                >
-                  {submitting ? <Loader2 className="bank2-spin" size={20} /> : "Confirmer"}
-                </button>
               </div>
             )}
 

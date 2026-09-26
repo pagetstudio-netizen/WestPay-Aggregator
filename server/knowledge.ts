@@ -160,7 +160,7 @@ const WESTPAY_KNOWLEDGE: Array<{ category: string; title: string; content: strin
   {
     category: "platform",
     title: "How to contact support",
-    content: "WestPay technical support is available via Telegram: @Atfchalvt, @geeorbotpay, @pankeyrobotpay, @astapay. For urgent issues (payment failures, blocked withdrawals), always include your transaction reference (OP-XXXX or TR-XXXX).",
+    content: "WestPay technical support is available via Telegram: @Atfchalvt, @geeorbotpay, @pankeyrobotpay, @astapay. For urgent issues (payment failures, blocked withdrawals), always include your transaction reference.",
   },
 
   // ── PAYMENTS / PAY-IN ──
@@ -172,12 +172,12 @@ const WESTPAY_KNOWLEDGE: Array<{ category: string; title: string; content: strin
   {
     category: "payments",
     title: "Payment confirmation timing",
-    content: "Payments confirm within seconds to a few minutes after the customer validates on their phone. If the payment has been pending for more than 5 minutes, the customer may not have received the USSD prompt, or there may be a network issue. Share the OP-XXXX reference with support.",
+    content: "Payments confirm within seconds to a few minutes after the customer validates on their phone. If the payment has been pending for more than 5 minutes, the customer may not have received the prompt, or there may be a network issue. Share the payment reference with support.",
   },
   {
     category: "payments",
     title: "Payment transaction references",
-    content: "Every WestPay transaction has a unique reference: OP-XXXX for pay-in payments via OmniPay, TR-XXXX for merchant-initiated transfers, WP for internal references. Always provide this reference when contacting support about a specific transaction.",
+    content: "Every WestPay transaction has a unique provider reference. Always provide this reference when contacting support about a specific transaction.",
   },
   {
     category: "payments",
@@ -187,7 +187,7 @@ const WESTPAY_KNOWLEDGE: Array<{ category: string; title: string; content: strin
   {
     category: "payments",
     title: "Payment not received by customer (USSD not sent)",
-    content: "If a customer says they did not receive a USSD push: verify the phone number is correct and active on the operator. Some operators delay USSD during peak hours. The customer can retry after a few minutes. Share the OP-XXXX reference with support for server-side investigation.",
+    content: "If a customer says they did not receive a payment prompt: verify the phone number is correct and active on the operator. Some operators delay requests during peak hours. The customer can retry after a few minutes. Share the payment reference with support for server-side investigation.",
   },
   {
     category: "payments",
@@ -234,7 +234,7 @@ const WESTPAY_KNOWLEDGE: Array<{ category: string; title: string; content: strin
   {
     category: "withdrawals",
     title: "Transfers to customers",
-    content: "Merchants can also send money directly to customer phone numbers using the 'Transfers' tab in the dashboard. These transfers use the OmniPay gateway and have reference format TR-XXXX. They are deducted from the merchant's balance.",
+    content: "Merchants can request supported payouts to a customer phone number using the available payout flow. Availability depends on the country and operator configuration; the amount is deducted from the merchant's balance only when the payout is processed.",
   },
 
   // ── API INTEGRATION ──
@@ -251,7 +251,7 @@ const WESTPAY_KNOWLEDGE: Array<{ category: string; title: string; content: strin
   {
     category: "api",
     title: "Payment initiation API endpoint",
-    content: "POST /api/payment/initiate — Initiates a payment. Required fields: amount (number), country, phone (customer's mobile number), operator, merchantSlug. Optional: customerName, redirectUrl. Returns: paymentId, reference (OP-XXXX), status, and for Wave: payment_url.",
+    content: "POST /api/payment/initiate — Initiates a payment. Required fields: amount (number), country, phone (customer's mobile number), operator, merchantSlug. Optional: customerName, redirectUrl. Returns: paymentId, providerReference, status, and when supported: providerPaymentUrl. Poll GET /api/payment/:paymentId/status for status updates; redirect URLs use the payment_status query parameter.",
   },
   {
     category: "api",
@@ -371,12 +371,12 @@ const WESTPAY_KNOWLEDGE: Array<{ category: string; title: string; content: strin
   {
     category: "troubleshooting",
     title: "Payment stuck in pending",
-    content: "If a payment is stuck in 'pending' for more than 10 minutes: (1) The customer may not have validated the USSD prompt — ask them to check their phone. (2) There may be an operator network delay. (3) For Wave, the customer must click the payment URL. Share the OP-XXXX reference with @Atfchalvt for investigation.",
+    content: "If a payment is stuck in 'pending' for more than 10 minutes: (1) The customer may not have validated the payment prompt — ask them to check their phone. (2) There may be an operator network delay. (3) If a providerPaymentUrl was returned, the customer must open it to complete the payment. Share the payment reference with @Atfchalvt for investigation.",
   },
   {
     category: "troubleshooting",
     title: "Customer paid but merchant balance not updated",
-    content: "If a customer says they paid but the merchant balance hasn't updated: (1) Get the exact OP-XXXX reference. (2) Verify the customer's mobile money account was actually debited. (3) Check if a webhook was received. (4) Escalate to @Atfchalvt with the reference, amount, country, and time of payment.",
+    content: "If a customer says they paid but the merchant balance hasn't updated: (1) Get the exact provider reference. (2) Verify the customer's mobile money account was actually debited. (3) Check if a webhook was received. (4) Escalate to @Atfchalvt with the reference, amount, country, and time of payment.",
   },
   {
     category: "troubleshooting",

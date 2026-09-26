@@ -1,7 +1,7 @@
 # RobotPay - Private Mobile Money Payment Aggregator Platform
 
 ## Overview
-WestPay is a private Mobile Money payment aggregation platform with admin and merchant dashboards. No public registration - admin creates all merchant accounts. Payments processed via OmniPay API v2.0, Mbiyo (payin + payout), SendavaPay, and SeaPay — routed per operator/country via the `gateway` field on withdrawal_operators.
+WestPay is a private Mobile Money payment aggregation platform with admin and merchant dashboards. No public registration - admin creates all merchant accounts. Payments are routed per operator/country via the `gateway` field on `withdrawal_operators`, using the active ClaPay, Mbiyo, SeaPay and LipaPap connectors, with SMS and OxaPay crypto flows where applicable.
 
 ## SeaPay Integration (Pakistan, Philippines, India)
 - SDK module: `server/seapay.ts` (seapayPayin/Payout/Balance/Query, SEAPAY_CURRENCY_COUNTRY, buildSeapaySign/verifySeapaySign — MD5 signature)
@@ -14,14 +14,14 @@ WestPay is a private Mobile Money payment aggregation platform with admin and me
   - India: single generic "Virement bancaire (IFSC)" operator — SeaPay India payouts require a free-form IFSC bank code entered per-transaction (`payee_bank` param), not a fixed operator list. Current withdrawal form only has a phone field; a dedicated IFSC input still needs to be added for India withdrawals to be fully functional.
 - Payin flow (`/api/payment/initiate`), payout/approve flow (`/api/admin/withdrawals/:id/approve`), and payout callback (`/api/seapay/payout-callback`, MD5-verified) are implemented
 - Admin tools `/api/admin/withdrawals/:id/{check-status,sync-status,retry}` and `/api/admin/transactions/:id/{check-status,sync-status,trigger}` also support "seapay" as a provider (query/payout/payin via SeaPay SDK)
-- No live SeaPay API keys configured yet — admin must add them via Settings once available (env var fallback to DB setting, same pattern as OmniPay/Mbiyo)
+- No live SeaPay API keys configured yet — admin must add them via Settings once available (env var fallback to DB setting, same pattern as other connectors)
 
 ## Architecture
 - **Frontend**: React + Tailwind CSS + shadcn/ui (dark theme by default)
 - **Backend**: Express.js with JWT authentication
 - **Database**: PostgreSQL with Drizzle ORM
 - **Auth**: JWT tokens stored in localStorage
-- **Payment Processing**: OmniPay API v2.0 (exclusive) - automated USSD push payments and transfers
+- **Payment Processing**: Mobile-money pay-ins and payouts are routed through the configured active connector for each country/operator.
 
 ## Key URLs
 - `/` - Restricted access page (public)
@@ -44,34 +44,22 @@ Les comptes de démonstration sont suspendus. Contactez l'admin pour créer un n
 - `/api/admin/*` - Admin endpoints (JWT required)
 - `/api/merchant/*` - Merchant endpoints (JWT required)
 - `/api/docs/access` - PIN-protected docs access
-- `/api/payment/initiate` - Create OmniPay payment (USSD push to customer)
+- `/api/payment/initiate` - Create a mobile-money payment through the configured connector
 - `/api/merchant/webhook` - GET/PUT merchant webhook config
 - `/api/merchant/webhook/test` - POST test webhook notification
 - `/api/merchant/webhook/logs` - GET webhook send logs
-- `/api/merchant/transfer` - POST merchant transfer via OmniPay
+- `/api/merchant/transfer` - POST a supported merchant transfer
 - `/api/admin/webhook-logs` - GET all webhook logs (admin)
 - `/api/admin/merchant/:id/webhook` - PUT merchant webhook (admin)
-- `/api/admin/omnipay/settings` - GET/POST OmniPay API key config
-- `/api/admin/omnipay/balance` - GET OmniPay account balance
-- `/api/admin/merchant/:id/country/:countryId/omnipay` - PUT toggle OmniPay per country
-- `/api/omnipay/callback` - POST OmniPay callback (public, signature-verified)
-- `/api/omnipay/payment/:paymentId/status` - GET poll OmniPay payment status
+- `/api/payment/:paymentId/status` - GET the payment status
 - `/sms/receive` - SMS webhook (legacy, kept for backwards compatibility)
 
-## OmniPay Integration (Exclusive Payment System)
-- OmniPay is the sole payment processor - no manual SMS flow
-- Admin configures OmniPay API key and callback key in "OmniPay" tab
-- OmniPay enabled by default on all new merchant countries
-- Payment flow: USSD push sent to customer phone automatically
-- Customer validates on phone, OmniPay sends callback to `/api/omnipay/callback`
-- System verifies HMAC-SHA3-512 signature, credits merchant balance, creates transaction
-- Wave operator: redirects customer to payment_url for validation; return_url uses `https://checkout1.westpay.cfd/pay?ref={reference}&omnipay_status=complete` (no country/amount/redirect params to avoid URL complexity issues with OmniPay operators)
-- Merchants can transfer money to customers via OmniPay ("Transfers" tab)
-- Transactions tagged with provider field: "omnipay"
-- OmniPay references prefixed: OP- (payments), TR- (transfers), WP (internal refs)
-- Service module: `server/omnipay.ts`
-- API keys stored as environment secrets: OMNIPAY_API_KEY, OMNIPAY_CALLBACK_KEY (DB fallback)
-- Callback URL: https://westpay.cfd/api/omnipay/callback
+## Payment connector model
+- New merchant-country configurations use `gatewayEnabled` and route through ClaPay by default.
+- Active mobile-money connectors are ClaPay, Mbiyo, SeaPay and LipaPap; SMS reconciliation remains available where configured.
+- OxaPay handles crypto payments separately.
+- Payment records use neutral fields: `providerReference`, `providerTxId`, and `providerPaymentUrl`.
+- Polling uses `GET /api/payment/:paymentId/status`; hosted-payment returns use the `payment_status` query parameter.
 
 ## API Management System
 - Each merchant has unique API keys per country (format: PREFIX-[40char hex])
@@ -93,13 +81,14 @@ Les comptes de démonstration sont suspendus. Contactez l'admin pour créer un n
 ## Database Tables
 admins, merchants, merchant_countries, transactions, sms_logs, numbers, settings, login_logs, merchant_pins, api_logs, pending_payments, webhook_logs, payment_links, wallet_transfers, wallet_transfer_countries, withdrawals, withdrawal_operators, stats_baselines, telegram_activation_codes, crypto_aggregators, crypto_aggregator_countries, crypto_aggregator_merchants, crypto_transactions
 
-### Key Column Additions (OmniPay)
-- `merchant_countries.omnipay_enabled` - boolean, enables OmniPay per country (default: true)
-- `transactions.provider` - "sms" or "omnipay"
-- `transactions.omnipay_tx_id` - OmniPay transaction ID
-- `pending_payments.omnipay_reference` - WestPay-generated reference for OmniPay
-- `pending_payments.omnipay_tx_id` - OmniPay transaction ID
-- `pending_payments.omnipay_payment_url` - Wave payment URL
+### Payment data fields
+- `merchant_countries.gateway_enabled` - boolean enabling payment collection for a country
+- `transactions.provider` - connector or ingestion source identifier
+- `transactions.provider_tx_id` - external transaction identifier
+- `transactions.provider_reference` - external/provider reference
+- `pending_payments.provider_reference` - provider reference for the pending payment
+- `pending_payments.provider_tx_id` - external transaction identifier
+- `pending_payments.provider_payment_url` - hosted payment URL when supported
 
 ## OxaPay Crypto Aggregator (Tasks #3 + #4 — COMPLETED)
 - **GLOBAL crypto** — no country restriction; admin activates per merchant only
@@ -134,7 +123,7 @@ admins, merchants, merchant_countries, transactions, sms_logs, numbers, settings
 ## Replit setup
 - Install dependencies with `npm install`, then start the preview with `npm run dev` on port 5000.
 - The server requires the existing PostgreSQL databases before it can initialize routes and the frontend: `AUTH_DATABASE_URL` (auth/config database), `FINANCIAL_DATABASE_URL` (financial database), and `SESSION_SECRET`.
-- Optional provider credentials (OmniPay, Mbiyo, SendavaPay, SeaPay, OxaPay, Telegram, and AI services) can be added later through Replit Secrets or the admin settings where supported.
+- Optional provider credentials (ClaPay, Mbiyo, SeaPay, LipaPap, OxaPay, Telegram, and AI services) can be added later through Replit Secrets or the admin settings where supported.
 - If the database variables are missing, the server remains listening on port 5000, serves the development frontend for preview, exposes `/api/healthz-boot`, and keeps application API routes blocked until configuration is complete.
 
 ## Déploiement Plesk
@@ -144,9 +133,9 @@ admins, merchants, merchant_countries, transactions, sms_logs, numbers, settings
 - **Workflow Replit (dev)** : `npm run dev` → `NODE_ENV=development node --import tsx/esm server/index.ts`
 - Le bot Telegram utilise le **webhook** en production (Plesk) et tente le **polling** en dev (Replit) sans supprimer le webhook de prod
 
-## OmniPay Payment Flow
-1. Customer enters phone number and name on payment page
-2. WestPay calls OmniPay API to send USSD push to customer
-3. Customer validates payment on their phone (or clicks Wave payment link)
-4. OmniPay sends callback to `/api/omnipay/callback`
-5. WestPay verifies signature, credits merchant, triggers webhook
+## Mobile-money payment flow
+1. Customer enters phone number, operator and name on the payment page.
+2. WestPay routes the request to the configured active connector.
+3. The customer validates the payment on their phone or opens the returned hosted-payment URL.
+4. The connector callback or status flow is verified before the payment is confirmed.
+5. WestPay credits the merchant and sends the configured webhook notification.

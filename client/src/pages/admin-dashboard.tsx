@@ -40,7 +40,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
 
-type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "omnipay" | "mbiyo" | "sendavapay" | "lipapap" | "seapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge" | "actionlogs";
+type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "mbiyo" | "lipapap" | "seapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge" | "actionlogs";
 
 function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: { staleTime?: number; refetchOnWindowFocus?: boolean }) {
   const { token, logout, restoreUser } = useAuth();
@@ -506,7 +506,7 @@ function OverviewPanel() {
       {/* Bénéfice net WestPay */}
       <div>
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Bénéfice net WestPay</p>
-        <p className="text-xs text-muted-foreground mb-3">Après déduction des frais fournisseur (OmniPay / Mbiyo)</p>
+        <p className="text-xs text-muted-foreground mb-3">Après déduction des frais fournisseur (ClaPay / Mbiyo)</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Bénéfice total — avec bouton de réinitialisation des frais */}
           <Card className="shadow-card hover:shadow-card-hover transition-shadow duration-200 overflow-hidden relative">
@@ -1559,10 +1559,8 @@ function MerchantsPanel() {
 }
 
 const PROVIDER_CHOICES: [string, string][] = [
-  ["sendavapay", "SendavaPay"],
-  ["mbiyo", "Mbiyo"],
-  ["omnipay", "OmniPay"],
-  ["clapay", "ClaPay"],
+    ["mbiyo", "Mbiyo"],
+    ["clapay", "ClaPay"],
   ["seapay", "SeaPay"],
 ];
 
@@ -1729,12 +1727,12 @@ function TransactionsPanel() {
       t.country?.toLowerCase().includes(term) ||
       t.merchantName?.toLowerCase().includes(term) ||
       t.payerNumber?.toLowerCase().includes(term) ||
-      t.omnipayReference?.toLowerCase().includes(term);
+      t.providerReference?.toLowerCase().includes(term);
     const matchStatus =
       statusFilter === "all" ||
       (statusFilter === "confirmed" && ["confirmed", "approved", "success", "completed"].includes(t.status)) ||
-      (statusFilter === "failed" && ["failed", "rejected", "omnipay_failed", "lipapap_failed"].includes(t.status)) ||
-      (statusFilter === "pending" && ["pending", "omnipay_pending", "lipapap_pending", "submitted"].includes(t.status));
+      (statusFilter === "failed" && ["failed", "rejected", "provider_failed", "lipapap_failed"].includes(t.status)) ||
+      (statusFilter === "pending" && ["pending", "provider_pending", "lipapap_pending", "submitted"].includes(t.status));
     const matchType =
       typeFilter === "all" ||
       t.type === typeFilter;
@@ -1748,7 +1746,7 @@ function TransactionsPanel() {
   const downloadCSV = () => {
     const header = "Type,TXID,Référence,Montant,Pays,Marchand,Numéro,Opérateur,Statut,Note,Date\n";
     const rows = filtered.map((t: any) =>
-      `${t.type || "payment"},${t.txId},${t.omnipayReference || ""},${t.amount},${t.country},${t.merchantName || t.merchantId},${t.payerNumber || ""},${t.operator || ""},${t.status},${t.errorMessage || ""},${new Date(t.createdAt).toLocaleDateString("fr-FR")}`
+      `${t.type || "payment"},${t.txId},${t.providerReference || ""},${t.amount},${t.country},${t.merchantName || t.merchantId},${t.payerNumber || ""},${t.operator || ""},${t.status},${t.errorMessage || ""},${new Date(t.createdAt).toLocaleDateString("fr-FR")}`
     ).join("\n");
     const blob = new Blob([header + rows], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -1768,9 +1766,9 @@ function TransactionsPanel() {
   const getStatusBadge = (status: string) => {
     if (["confirmed", "approved", "success", "completed"].includes(status))
       return <Badge variant="default" className="text-xs">{status === "approved" ? "Approuvé" : "Confirmé"}</Badge>;
-    if (["failed", "rejected", "omnipay_failed", "lipapap_failed"].includes(status))
+    if (["failed", "rejected", "provider_failed", "lipapap_failed"].includes(status))
       return <Badge variant="destructive" className="text-xs">{status === "rejected" ? "Rejeté" : "Échoué"}</Badge>;
-    if (["omnipay_pending", "lipapap_pending", "submitted"].includes(status))
+    if (["provider_pending", "lipapap_pending", "submitted"].includes(status))
       return <Badge className="text-xs bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400">En cours</Badge>;
     return <Badge variant="secondary" className="text-xs">En attente</Badge>;
   };
@@ -1860,8 +1858,8 @@ function TransactionsPanel() {
             <Card><CardContent className="p-6 text-center text-muted-foreground text-sm">Aucune transaction pour cette période</CardContent></Card>
           ) : (
             filtered.map((tx: any) => {
-              const isFailed = ["failed", "rejected", "omnipay_failed", "lipapap_failed"].includes(tx.status);
-              const isPendingInProgress = tx.type === "pending" || ["omnipay_pending", "lipapap_pending", "submitted"].includes(tx.status);
+              const isFailed = ["failed", "rejected", "provider_failed", "lipapap_failed"].includes(tx.status);
+              const isPendingInProgress = tx.type === "pending" || ["provider_pending", "lipapap_pending", "submitted"].includes(tx.status);
               return (
                 <Card key={tx.id} className={isFailed ? "border-destructive/40 bg-destructive/5 dark:bg-destructive/10" : isPendingInProgress ? "border-yellow-300 dark:border-yellow-700" : ""}>
                   <CardContent className="p-4">
@@ -1876,7 +1874,7 @@ function TransactionsPanel() {
                             {getTypeBadge(tx.type)}
                             <Badge variant="secondary" className="text-xs">{tx.country}</Badge>
                             {getStatusBadge(tx.status)}
-                            {tx.provider && <Badge variant="outline" className="text-xs">{getProviderName(tx.provider, tx.omnipayReference)}</Badge>}
+                            {tx.provider && <Badge variant="outline" className="text-xs">{getProviderName(tx.provider, tx.providerReference)}</Badge>}
                           </div>
                           <div className="flex items-center gap-3 flex-wrap mt-1.5">
                             <p className="text-sm font-medium text-foreground">{tx.amount?.toLocaleString("fr-FR")} F CFA</p>
@@ -1884,21 +1882,21 @@ function TransactionsPanel() {
                             {tx.payerNumber && <p className="text-xs text-muted-foreground">📞 {tx.payerNumber}</p>}
                             {tx.operator && <p className="text-xs text-muted-foreground">📱 {tx.operator}</p>}
                           </div>
-                          {tx.omnipayReference && isPendingInProgress && (
+                          {tx.providerReference && isPendingInProgress && (
                             <div className="mt-2 flex items-center gap-2 rounded-md border border-yellow-300 bg-yellow-50 dark:bg-yellow-900/20 dark:border-yellow-700 px-3 py-2">
                               <div className="flex-1 min-w-0">
-                                <p className="text-xs font-semibold text-yellow-700 dark:text-yellow-400 mb-0.5">Référence {getProviderName(tx.provider, tx.omnipayReference)}</p>
-                                <code className="text-xs font-mono text-yellow-900 dark:text-yellow-200 break-all">{tx.omnipayReference}</code>
+                                <p className="text-xs font-semibold text-yellow-700 dark:text-yellow-400 mb-0.5">Référence {getProviderName(tx.provider, tx.providerReference)}</p>
+                                <code className="text-xs font-mono text-yellow-900 dark:text-yellow-200 break-all">{tx.providerReference}</code>
                               </div>
-                              <Button size="sm" variant="outline" className="shrink-0 h-7 text-xs border-yellow-400 text-yellow-700 hover:bg-yellow-100 dark:text-yellow-300" onClick={() => copyToClipboard(tx.omnipayReference, `Référence ${getProviderName(tx.provider, tx.omnipayReference)}`)} data-testid={`button-copy-ref-${tx.id}`}>
+                              <Button size="sm" variant="outline" className="shrink-0 h-7 text-xs border-yellow-400 text-yellow-700 hover:bg-yellow-100 dark:text-yellow-300" onClick={() => copyToClipboard(tx.providerReference, `Référence ${getProviderName(tx.provider, tx.providerReference)}`)} data-testid={`button-copy-ref-${tx.id}`}>
                                 <Copy className="w-3 h-3 mr-1" />Copier
                               </Button>
                             </div>
                           )}
-                          {tx.omnipayReference && !isPendingInProgress && (
+                          {tx.providerReference && !isPendingInProgress && (
                             <div className="flex items-center gap-1 mt-1">
-                              <p className="text-xs text-muted-foreground font-mono truncate max-w-[200px]" title={tx.omnipayReference}>Réf: {tx.omnipayReference}</p>
-                              <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={() => copyToClipboard(tx.omnipayReference, `Référence ${getProviderName(tx.provider, tx.omnipayReference)}`)} title="Copier la référence" data-testid={`button-copy-ref-${tx.id}`}>
+                              <p className="text-xs text-muted-foreground font-mono truncate max-w-[200px]" title={tx.providerReference}>Réf: {tx.providerReference}</p>
+                              <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={() => copyToClipboard(tx.providerReference, `Référence ${getProviderName(tx.provider, tx.providerReference)}`)} title="Copier la référence" data-testid={`button-copy-ref-${tx.id}`}>
                                 <Copy className="w-3 h-3" />
                               </Button>
                             </div>
@@ -1912,7 +1910,7 @@ function TransactionsPanel() {
                           <p className={`text-lg font-bold ${isFailed ? "text-destructive" : "text-foreground"}`}>{tx.amount?.toLocaleString("fr-FR")}</p>
                           <p className="text-xs text-muted-foreground">F CFA</p>
                           <div className="flex gap-1 mt-1 flex-wrap justify-end">
-                            {["pending", "en cours", "approved", "confirmed", "omnipay_pending", "lipapap_pending", "submitted"].includes(tx.status) && (
+                            {["pending", "en cours", "approved", "confirmed", "provider_pending", "lipapap_pending", "submitted"].includes(tx.status) && (
                               <>
                                 <ProviderPickerButton label="Vérifier statut" icon={RefreshCw} colorClass="border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50"
                                   onPick={(provider) => checkTxStatus(tx, provider)} testId={`button-check-status-tx-${tx.id}`} />
@@ -1921,7 +1919,7 @@ function TransactionsPanel() {
                                   onPick={(provider) => syncTxStatusMutation.mutate({ tx, provider })} testId={`button-sync-status-tx-${tx.id}`} />
                               </>
                             )}
-                            {(tx.type === "pending" || ["omnipay_pending", "lipapap_pending", "submitted"].includes(tx.status)) && (
+                            {(tx.type === "pending" || ["provider_pending", "lipapap_pending", "submitted"].includes(tx.status)) && (
                               <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
                                 disabled={retryTxMutation.isPending}
                                 onPick={async (provider) => { if (await showConfirm(`Déclencher le paiement chez ${provider} ?\nUne nouvelle invite USSD sera envoyée au client.`)) retryTxMutation.mutate({ tx, provider }); }}
@@ -2048,14 +2046,14 @@ function CountriesPanel() {
     updateBalanceMutation.mutate({ id: pendingBalanceUpdate.id, balance: pendingBalanceUpdate.balance, adminPassword: balancePwInput2 });
   };
 
-  const toggleOmnipayMutation = useMutation({
-    mutationFn: async ({ merchantId, countryId, omnipayEnabled }: { merchantId: number; countryId: number; omnipayEnabled: boolean }) => {
-      const res = await fetch(`/api/admin/merchant/${merchantId}/country/${countryId}/omnipay`, {
+  const toggleGatewayMutation = useMutation({
+    mutationFn: async ({ merchantId, countryId, gatewayEnabled }: { merchantId: number; countryId: number; gatewayEnabled: boolean }) => {
+      const res = await fetch(`/api/admin/merchant/${merchantId}/country/${countryId}/gateway`, {
         method: "PUT",
         credentials: "include",
 
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ omnipayEnabled }),
+        body: JSON.stringify({ gatewayEnabled }),
       });
       if (!res.ok) throw new Error("Erreur");
       return res.json();
@@ -2228,7 +2226,7 @@ function CountriesPanel() {
                       <span className="font-semibold text-foreground">{mc.country}</span>
                       <Badge variant="secondary">{mc.merchantName || `Marchand #${mc.merchantId}`}</Badge>
                       <Badge variant={mc.active ? "default" : "destructive"}>{mc.active ? "Actif" : "Inactif"}</Badge>
-                      {mc.omnipayEnabled && <Badge variant="secondary"><Zap className="w-3 h-3 mr-1" />Paiement actif</Badge>}
+                      {mc.gatewayEnabled && <Badge variant="secondary"><Zap className="w-3 h-3 mr-1" />Paiement actif</Badge>}
                     </div>
                     <div className="flex items-center gap-2 mt-2 flex-wrap">
                       <Key className="w-3 h-3 text-muted-foreground" />
@@ -2285,14 +2283,14 @@ function CountriesPanel() {
                     )}
                     <div className="flex items-center gap-1 justify-end flex-wrap">
                       <Button
-                        variant={mc.omnipayEnabled ? "default" : "outline"}
+                        variant={mc.gatewayEnabled ? "default" : "outline"}
                         size="sm"
-                        onClick={() => toggleOmnipayMutation.mutate({ merchantId: mc.merchantId, countryId: mc.id, omnipayEnabled: !mc.omnipayEnabled })}
-                        disabled={toggleOmnipayMutation.isPending}
-                        data-testid={`button-toggle-omnipay-${mc.id}`}
+                        onClick={() => toggleGatewayMutation.mutate({ merchantId: mc.merchantId, countryId: mc.id, gatewayEnabled: !mc.gatewayEnabled })}
+                        disabled={toggleGatewayMutation.isPending}
+                        data-testid={`button-toggle-gateway-${mc.id}`}
                       >
                         <Zap className="w-3 h-3 mr-1" />
-                        {mc.omnipayEnabled ? "Paiement actif" : "Paiement inactif"}
+                        {mc.gatewayEnabled ? "Paiement actif" : "Paiement inactif"}
                       </Button>
                       {editingBalance !== mc.id && (
                         <Button
@@ -2868,174 +2866,7 @@ function ApiKeysManagementPanel() {
   );
 }
 
-function OmniPayPanel() {
-  const { token } = useAuth();
-  const { toast } = useToast();
-  const [apiKey, setApiKey] = useState("");
-  const [callbackKey, setCallbackKey] = useState("");
-  const [isInitialized, setIsInitialized] = useState(false);
-
-  const { data: omnipaySettings, isLoading: settingsLoading } = useAdminFetch("/api/admin/omnipay/settings", ["/api/admin/omnipay/settings"]);
-
-  useEffect(() => {
-    if (omnipaySettings && !isInitialized) {
-      setApiKey(omnipaySettings.apiKey || "");
-      setCallbackKey(omnipaySettings.callbackKey || "");
-      setIsInitialized(true);
-    }
-  }, [omnipaySettings, isInitialized]);
-
-  const { data: omnipayBalance, isLoading: balanceLoading, refetch: refetchBalance } = useQuery({
-    queryKey: ["/api/admin/omnipay/balance"],
-    queryFn: async () => {
-      const res = await fetch("/api/admin/omnipay/balance", {
-        credentials: "include",
-
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      });
-      if (!res.ok) return null;
-      return res.json();
-    },
-    enabled: !!omnipaySettings?.configured,
-  });
-
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch("/api/admin/omnipay/settings", {
-        method: "POST",
-        credentials: "include",
-
-        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ apiKey, callbackKey }),
-      });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/omnipay/settings"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/omnipay/balance"] });
-      toast({ title: "Configuration sauvegardee" });
-    },
-    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
-  });
-
-  const callbackUrl = "https://west-pay-aggregator-1--beryowone.replit.app/api/omnipay/callback";
-
-  if (settingsLoading) return <LoadingSkeleton />;
-
-  return (
-    <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-foreground">Configuration Paiement</h2>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Zap className="w-4 h-4" />Statut
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <span className="text-sm text-muted-foreground">Configuration</span>
-              <Badge variant={omnipaySettings?.configured ? "default" : "destructive"} data-testid="badge-omnipay-status">
-                {omnipaySettings?.configured ? "Configure" : "Non configure"}
-              </Badge>
-            </div>
-            {omnipaySettings?.configured && (
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <span className="text-sm text-muted-foreground">Solde</span>
-                <div className="flex items-center gap-2">
-                  {balanceLoading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : omnipayBalance?.balance !== undefined ? (
-                    <span className="text-sm font-bold text-foreground" data-testid="text-omnipay-balance">
-                      {Number(omnipayBalance.balance).toLocaleString("fr-FR")} F CFA
-                    </span>
-                  ) : (
-                    <span className="text-sm text-muted-foreground">Indisponible</span>
-                  )}
-                  <Button variant="ghost" size="icon" onClick={() => refetchBalance()} data-testid="button-refresh-omnipay-balance">
-                    <RefreshCw className="w-3 h-3" />
-                  </Button>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Link2 className="w-4 h-4" />URL de callback
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              Configurez cette URL comme URL de callback pour recevoir les notifications de paiement.
-            </p>
-            <div className="flex items-center gap-2">
-              <code className="text-xs bg-muted px-3 py-2 rounded-md font-mono flex-1 break-all text-foreground" data-testid="text-callback-url">
-                {callbackUrl}
-              </code>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => { copyTextToClipboard(callbackUrl, { successTitle: "URL copiée" }).catch(() => {}); }}
-                data-testid="button-copy-callback-url"
-              >
-                <Copy className="w-3 h-3" />
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Key className="w-4 h-4" />Cles API
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {omnipaySettings?.envOverride && (
-            <div className="mb-4 flex items-start gap-2 rounded-md border border-yellow-300 bg-yellow-50 dark:bg-yellow-900/20 dark:border-yellow-700 px-3 py-2 text-xs text-yellow-800 dark:text-yellow-300">
-              <span className="mt-0.5">⚠️</span>
-              <span>Une variable d'environnement <code className="font-mono font-bold">OMNIPAY_API_KEY</code> est active et prend la priorité au runtime. La clé ci-dessous est sauvegardée en base de données mais n'est pas utilisée tant que la variable d'env est définie.</span>
-            </div>
-          )}
-          <form onSubmit={(e) => { e.preventDefault(); saveMutation.mutate(); }} className="space-y-4">
-            <div className="space-y-2">
-              <Label>Cle API Westpay (apikey)</Label>
-              <Input
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="omnipay_api_key_..."
-                data-testid="input-omnipay-apikey"
-              />
-              <p className="text-xs text-muted-foreground">Cle API unique utilisee pour les paiements entrants ET les retraits (transferts).</p>
-            </div>
-            <div className="space-y-2">
-              <Label>Cle de callback / webhook (callback_key)</Label>
-              <Input
-                value={callbackKey}
-                onChange={(e) => setCallbackKey(e.target.value)}
-                placeholder="Votre cle de callback"
-                data-testid="input-omnipay-callbackkey"
-              />
-              <p className="text-xs text-muted-foreground">Cle utilisee pour verifier la signature HMAC-SHA3-512 des callbacks.</p>
-            </div>
-            <Button type="submit" disabled={saveMutation.isPending} data-testid="button-save-omnipay">
-              {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
-              Sauvegarder la configuration
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function MbiyoPanel() {
+ function MbiyoPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
   const [apiKey, setApiKey] = useState("");
@@ -3558,205 +3389,7 @@ function MbiyoManualConfirmCard({ token }: { token: string | null }) {
   );
 }
 
-function SendavaPayPanel() {
-  const { token } = useAuth();
-  const { toast } = useToast();
-  const [apiKey, setApiKey] = useState("");
-  const [webhookSecret, setWebhookSecret] = useState("");
-  const [isInitialized, setIsInitialized] = useState(false);
-
-  const { data: settings, isLoading: settingsLoading } = useAdminFetch("/api/admin/sendavapay/settings", ["/api/admin/sendavapay/settings"]);
-
-  useEffect(() => {
-    if (settings && !isInitialized) {
-      setApiKey(settings.apiKey || "");
-      setWebhookSecret(settings.webhookSecret === "configured" ? "" : (settings.webhookSecret || ""));
-      setIsInitialized(true);
-    }
-  }, [settings, isInitialized]);
-
-  const { data: balanceData, isLoading: balanceLoading, refetch: refetchBalance } = useQuery({
-    queryKey: ["/api/admin/sendavapay/balance"],
-    queryFn: async () => {
-      const res = await fetch("/api/admin/sendavapay/balance", {
-        credentials: "include",
-
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      });
-      if (!res.ok) return null;
-      return res.json();
-    },
-    enabled: !!settings?.configured,
-  });
-
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch("/api/admin/sendavapay/settings", {
-        method: "POST",
-        credentials: "include",
-
-        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ apiKey, webhookSecret }),
-      });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/sendavapay/settings"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/sendavapay/balance"] });
-      toast({ title: "Configuration SendavaPay sauvegardee" });
-    },
-    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
-  });
-
-  const callbackUrl = "https://west-pay-aggregator-1--beryowone.replit.app/api/sendavapay/callback";
-
-  if (settingsLoading) return <LoadingSkeleton />;
-
-  return (
-    <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-foreground">Configuration SendavaPay</h2>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Zap className="w-4 h-4" />Statut
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <span className="text-sm text-muted-foreground">Configuration</span>
-              <Badge variant={settings?.configured ? "default" : "destructive"} data-testid="badge-sendavapay-status">
-                {settings?.configured ? "Configure" : "Non configure"}
-              </Badge>
-            </div>
-            {settings?.configured && (
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <span className="text-sm text-muted-foreground">Solde</span>
-                <div className="flex items-center gap-2">
-                  {balanceLoading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : balanceData?.balance !== undefined ? (
-                    <span className="text-sm font-bold text-foreground" data-testid="text-sendavapay-balance">
-                      {typeof balanceData.balance === "number"
-                        ? `${Number(balanceData.balance).toLocaleString("fr-FR")} F CFA`
-                        : JSON.stringify(balanceData.balance)}
-                    </span>
-                  ) : (
-                    <span className="text-sm text-muted-foreground">Indisponible</span>
-                  )}
-                  <Button variant="ghost" size="icon" onClick={() => refetchBalance()} data-testid="button-refresh-sendavapay-balance">
-                    <RefreshCw className="w-3 h-3" />
-                  </Button>
-                </div>
-              </div>
-            )}
-            <p className="text-xs text-muted-foreground">
-              SendavaPay — collectes mobiles (TMoney, Moov, MTN, Orange, Wave). Activez par operateur dans l'onglet Pays &amp; API.
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Link2 className="w-4 h-4" />URL de callback
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              Configurez cette URL dans votre tableau de bord SendavaPay pour recevoir les notifications de paiement.
-            </p>
-            <div className="flex items-center gap-2">
-              <code className="text-xs bg-muted px-3 py-2 rounded-md font-mono flex-1 break-all text-foreground" data-testid="text-sendavapay-callback-url">
-                {callbackUrl}
-              </code>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => { copyTextToClipboard(callbackUrl, { successTitle: "URL copiée" }).catch(() => {}); }}
-                data-testid="button-copy-sendavapay-callback-url"
-              >
-                <Copy className="w-3 h-3" />
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Globe className="w-4 h-4" />Pays supportes
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-1.5">
-              {["Togo", "Benin", "Cote d'Ivoire", "Burkina Faso", "Senegal", "Mali", "Cameroun", "Niger", "Kenya", "Ghana", "Congo Brazzaville", "Gabon", "Guinee"].map(c => (
-                <Badge key={c} variant="secondary" className="text-xs">{c}</Badge>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground mt-2">
-              OTP requis pour Orange Money (CI, BF, ML, SN). Wave nécessite un QR code (CHECKOUTPAGE). Kenya : AIRTEL, SAFARICOM, MPESA en API direct (KES).
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Key className="w-4 h-4" />Cles API SendavaPay
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {settings?.envOverride && (
-            <div className="flex items-start gap-2 rounded-md border border-yellow-300 bg-yellow-50 dark:bg-yellow-900/20 dark:border-yellow-700 px-3 py-2 text-xs text-yellow-800 dark:text-yellow-300">
-              <span className="mt-0.5">⚠️</span>
-              <span>Une variable d'environnement <code className="font-mono font-bold">SENDAVAPAY_API_KEY</code> est active et prend la priorité au runtime. La clé ci-dessous est sauvegardée en base de données mais n'est pas utilisée tant que la variable d'env est définie.</span>
-            </div>
-          )}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">API Key</label>
-              <input
-                type="text"
-                value={apiKey}
-                onChange={e => setApiKey(e.target.value)}
-                placeholder="Votre cle API SendavaPay"
-                className="w-full px-3 py-2 text-sm border border-input rounded-md bg-background text-foreground outline-none focus:ring-2 focus:ring-ring"
-                data-testid="input-sendavapay-api-key"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">
-                Webhook Secret {settings?.webhookSecret === "configured" && <span className="text-xs text-green-600 font-normal ml-1">(déjà configuré)</span>}
-              </label>
-              <input
-                type="password"
-                value={webhookSecret}
-                onChange={e => setWebhookSecret(e.target.value)}
-                placeholder={settings?.webhookSecret === "configured" ? "Laisser vide pour ne pas changer" : "Votre secret webhook SendavaPay"}
-                className="w-full px-3 py-2 text-sm border border-input rounded-md bg-background text-foreground outline-none focus:ring-2 focus:ring-ring"
-                data-testid="input-sendavapay-api-secret"
-              />
-            </div>
-          </div>
-          <Button
-            onClick={() => saveMutation.mutate()}
-            disabled={saveMutation.isPending}
-            data-testid="button-save-sendavapay-settings"
-          >
-            {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-            Sauvegarder
-          </Button>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function LipaPapPanel() {
+ function LipaPapPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
   const { data: settings, isLoading } = useAdminFetch("/api/admin/lipapap/settings", ["/api/admin/lipapap/settings"]);
@@ -4692,7 +4325,7 @@ const COUNTRIES_LIST = [
   "Pakistan", "Philippines", "India", "Nigeria",
 ];
 const OPERATOR_TYPES = ["Mobile Money", "Virement bancaire", "Carte bancaire", "Cryptomonnaie", "Autre"];
-const GATEWAYS = ["OmniPay", "Mbiyo", "SendavaPay", "LipaPap", "SeaPay", "ClaPay", "Manuel"];
+const GATEWAYS = ["Mbiyo", "LipaPap", "SeaPay", "ClaPay", "Manuel"];
 
 function SortableOpRow({
   op, onEdit, onDelete, onToggle, onUploadLogo, onRemoveLogo, uploadingFor,
@@ -4811,13 +4444,13 @@ function WithdrawalOperatorsPanel() {
 
   useEffect(() => { setLocalOps(opList as WithdrawalOperator[]); }, [opList]);
 
-  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "OmniPay", omnipayCode: "", mbiyoCode: "", seapayCode: "", clapayCode: "", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false };
+  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "ClaPay", clapayCode: "", mbiyoCode: "", seapayCode: "", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false };
   const [form, setForm] = useState(emptyForm);
 
   const openCreate = () => { setEditingOp(null); setForm(emptyForm); setOpDialogOpen(true); };
   const openEdit = (op: WithdrawalOperator) => {
     setEditingOp(op);
-    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, omnipayCode: op.omnipayCode || "", mbiyoCode: op.mbiyoCode || "", seapayCode: (op as any).seapayCode || "", clapayCode: (op as any).clapayCode || "", active: op.active, maintenanceAll: op.maintenanceAll, maintenanceDeposits: op.maintenanceDeposits, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment });
+    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, clapayCode: (op as any).clapayCode || "", mbiyoCode: op.mbiyoCode || "", seapayCode: (op as any).seapayCode || "", active: op.active, maintenanceAll: op.maintenanceAll, maintenanceDeposits: op.maintenanceDeposits, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment });
     setOpDialogOpen(true);
   };
 
@@ -5003,11 +4636,11 @@ function WithdrawalOperatorsPanel() {
               </Select>
               <p className="text-xs text-muted-foreground">La passerelle sélectionnée sera utilisée pour tous les paiements et retraits via cet opérateur, pour tous les marchands de ce pays.</p>
             </div>
-            {form.gateway?.toLowerCase() === "omnipay" && (
+            {form.gateway?.toLowerCase() === "clapay" && (
               <div className="space-y-2">
-                <Label>Code opérateur OmniPay</Label>
-                <Input value={form.omnipayCode} onChange={e => setForm(f => ({ ...f, omnipayCode: e.target.value }))} placeholder="Ex: mtn, orange, moov, wave, mixx..." data-testid="input-op-omnipay-code" />
-                <p className="text-xs text-muted-foreground">Code opérateur envoyé à OmniPay. Laisser vide pour laisser OmniPay détecter automatiquement via le numéro. Requis pour Wave (<code>wave</code>) et Mixx (<code>mixx</code>).</p>
+                <Label>Code opérateur ClaPay</Label>
+                <Input value={form.clapayCode} onChange={e => setForm(f => ({ ...f, clapayCode: e.target.value }))} placeholder="Ex: MTN, ORANGE, MOOV, WAVE, MIXX..." data-testid="input-op-clapay-code" />
+                <p className="text-xs text-muted-foreground">Code opérateur envoyé à ClaPay. Laisser vide pour laisser ClaPay détecter automatiquement via le numéro. Requis pour Wave (<code>wave</code>) et Mixx (<code>mixx</code>).</p>
               </div>
             )}
             {form.gateway?.toLowerCase() === "mbiyo" && (
@@ -5141,7 +4774,7 @@ function AdminWithdrawalsPanel() {
     onSuccess: (data, vars) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawals"] });
       const msg = vars.action === "approve"
-        ? data.omnipayRef ? `Approuvé par Westpay (Réf: ${data.omnipayRef})` : "Reversement approuvé"
+        ? data.providerReference ? `Approuvé par Westpay (Réf: ${data.providerReference})` : "Reversement approuvé"
         : "Reversement rejeté (solde restitué)";
       toast({ title: msg });
       setNoteDialogOpen(false);
@@ -5276,7 +4909,7 @@ function AdminWithdrawalsPanel() {
 
   const filteredWd = allWd.filter((w) => {
     const term = searchWd.toLowerCase();
-    const matchSearch = !term || w.merchantName?.toLowerCase().includes(term) || w.phone?.includes(term) || w.country?.toLowerCase().includes(term) || (w.operator || "").toLowerCase().includes(term) || (w.omnipayRef || "").toLowerCase().includes(term);
+    const matchSearch = !term || w.merchantName?.toLowerCase().includes(term) || w.phone?.includes(term) || w.country?.toLowerCase().includes(term) || (w.operator || "").toLowerCase().includes(term) || (w.providerReference || "").toLowerCase().includes(term);
     const matchWebsite = !websiteFilterWd || (w.merchantWebsite || "").toLowerCase().includes(websiteFilterWd.toLowerCase());
     const matchStatus = statusFilterWd === "all" || w.status === statusFilterWd;
     const matchCountry = countryFilterWd === "all" || w.country === countryFilterWd;
@@ -5393,17 +5026,17 @@ function AdminWithdrawalsPanel() {
                             )}
                           </div>
                           <div className="flex gap-2 shrink-0 flex-wrap">
-                            {wd.omnipayRef && (
+                            {wd.providerReference && (
                               <ProviderPickerButton label="Vérifier statut" icon={RefreshCw} colorClass="h-8 border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50"
                                 disabled={statusLoading} onPick={(provider) => checkStatus(wd, provider)} testId={`button-check-status-${wd.id}`} />
                             )}
-                            {wd.omnipayRef && (
+                            {wd.providerReference && (
                               <ProviderPickerButton label="Approuver chez fournisseur" icon={CheckCircle} colorClass="h-8 border-teal-400 text-teal-700 dark:text-teal-300 hover:bg-teal-50"
                                 disabled={syncStatusMutation.isPending} onPick={(provider) => syncStatusMutation.mutate({ id: wd.id, provider })} testId={`button-sync-status-${wd.id}`} />
                             )}
                             <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="h-8 border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
                               disabled={retryMutation.isPending} onPick={async (provider) => { if (await showConfirm(`Déclencher le paiement de ce reversement chez ${provider} ?`)) retryMutation.mutate({ id: wd.id, provider }); }} testId={`button-retry-wd-${wd.id}`} />
-                            {wd.omnipayRef ? (
+                            {wd.providerReference ? (
                               <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-8 text-xs"
                                 onClick={() => openAction(wd, "force-validate")} data-testid={`button-force-validate-wd-${wd.id}`}>
                                 <CheckCircle className="w-3 h-3" />Valider manuellement
@@ -5517,11 +5150,11 @@ function AdminWithdrawalsPanel() {
                             <div><span className="text-muted-foreground">N° réception :</span> <span className="font-medium">{wd.phone}</span></div>
                             <div className="col-span-2"><span className="text-muted-foreground">Date :</span> {new Date(wd.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</div>
                           </div>
-                          {wd.omnipayRef && (
+                          {wd.providerReference && (
                             <div className="flex items-center gap-1.5 mt-0.5">
                               <span className="text-xs text-muted-foreground">Réf Westpay :</span>
-                              <code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded text-foreground">{wd.omnipayRef}</code>
-                              <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => { copyTextToClipboard(wd.omnipayRef!, { successTitle: "Référence copiée" }).catch(() => {}); }} title="Copier la référence" data-testid={`button-copy-ref-${wd.id}`}>
+                              <code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded text-foreground">{wd.providerReference}</code>
+                              <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => { copyTextToClipboard(wd.providerReference!, { successTitle: "Référence copiée" }).catch(() => {}); }} title="Copier la référence" data-testid={`button-copy-ref-${wd.id}`}>
                                 <Copy className="w-3 h-3" />
                               </Button>
                             </div>
@@ -5529,17 +5162,17 @@ function AdminWithdrawalsPanel() {
                           {wd.adminNote && <p className="text-xs italic text-muted-foreground">Note : {wd.adminNote}</p>}
                           {wd.status !== "approved" && wd.status !== "rejected" && (
                             <div className="flex gap-1.5 pt-1 border-t border-muted flex-wrap">
-                              {wd.omnipayRef && (
+                              {wd.providerReference && (
                                 <ProviderPickerButton label="Vérifier statut" icon={RefreshCw} colorClass="h-7 border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50"
                                   disabled={statusLoading} onPick={(provider) => checkStatus(wd, provider)} testId={`button-check-status-inline-${wd.id}`} />
                               )}
-                              {wd.omnipayRef && (
+                              {wd.providerReference && (
                                 <ProviderPickerButton label="Approuver chez fournisseur" icon={CheckCircle} colorClass="h-7 border-teal-400 text-teal-700 dark:text-teal-300 hover:bg-teal-50"
                                   disabled={syncStatusMutation.isPending} onPick={(provider) => syncStatusMutation.mutate({ id: wd.id, provider })} testId={`button-sync-status-inline-${wd.id}`} />
                               )}
                               <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="h-7 border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
                                 disabled={retryMutation.isPending} onPick={async (provider) => { if (await showConfirm(`Déclencher le paiement de ce reversement chez ${provider} ?`)) retryMutation.mutate({ id: wd.id, provider }); }} testId={`button-retry-inline-${wd.id}`} />
-                              {wd.omnipayRef ? (
+                              {wd.providerReference ? (
                                 <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-7 text-xs"
                                   onClick={() => openAction(wd, "force-validate")} data-testid={`button-force-validate-inline-${wd.id}`}>
                                   <CheckCircle className="w-3 h-3" />Valider manuellement
@@ -5558,11 +5191,11 @@ function AdminWithdrawalsPanel() {
                           )}
                           {wd.status === "approved" && (
                             <div className="flex gap-1.5 pt-1 border-t border-muted flex-wrap">
-                              {wd.omnipayRef && (
+                              {wd.providerReference && (
                                 <ProviderPickerButton label="Vérifier statut" icon={RefreshCw} colorClass="h-7 border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50"
                                   disabled={statusLoading} onPick={(provider) => checkStatus(wd, provider)} testId={`button-check-status-approved-${wd.id}`} />
                               )}
-                              {wd.omnipayRef && (
+                              {wd.providerReference && (
                                 <ProviderPickerButton label="Approuver chez fournisseur" icon={CheckCircle} colorClass="h-7 border-teal-400 text-teal-700 dark:text-teal-300 hover:bg-teal-50"
                                   disabled={syncStatusMutation.isPending} onPick={(provider) => syncStatusMutation.mutate({ id: wd.id, provider })} testId={`button-sync-status-approved-${wd.id}`} />
                               )}
@@ -5628,11 +5261,11 @@ function AdminWithdrawalsPanel() {
                 <div className="flex gap-2"><span className="text-muted-foreground w-32 shrink-0">N° réception :</span><span className="font-medium font-mono">{selectedWd.phone}</span></div>
                 <div className="flex gap-2"><span className="text-muted-foreground w-32 shrink-0">Date :</span><span>{new Date(selectedWd.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span></div>
                 {selectedWd.processedAt && <div className="flex gap-2"><span className="text-muted-foreground w-32 shrink-0">Traité le :</span><span>{new Date(selectedWd.processedAt).toLocaleString("fr-FR", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span></div>}
-                {selectedWd.omnipayRef && (
+                {selectedWd.providerReference && (
                   <div className="flex gap-2 items-center">
                     <span className="text-muted-foreground w-32 shrink-0">Réf Westpay :</span>
-                    <code className="font-mono text-xs bg-muted px-2 py-1 rounded flex-1 break-all">{selectedWd.omnipayRef}</code>
-                    <Button variant="outline" size="sm" className="h-7 text-xs shrink-0" onClick={() => { copyTextToClipboard(selectedWd.omnipayRef!, { successTitle: "Référence copiée" }).catch(() => {}); }} data-testid="button-copy-omnipayref-dialog">
+                    <code className="font-mono text-xs bg-muted px-2 py-1 rounded flex-1 break-all">{selectedWd.providerReference}</code>
+                    <Button variant="outline" size="sm" className="h-7 text-xs shrink-0" onClick={() => { copyTextToClipboard(selectedWd.providerReference!, { successTitle: "Référence copiée" }).catch(() => {}); }} data-testid="button-copy-provider-ref-dialog">
                       <Copy className="w-3 h-3 mr-1" />Copier
                     </Button>
                   </div>
@@ -5641,18 +5274,18 @@ function AdminWithdrawalsPanel() {
               </div>
               {selectedWd.status !== "rejected" && (
                 <div className="flex gap-2 pt-2 flex-wrap">
-                  {selectedWd.omnipayRef && (
+                  {selectedWd.providerReference && (
                     <ProviderPickerButton label="Vérifier statut" icon={RefreshCw} colorClass="border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50 text-xs"
                       disabled={statusLoading} onPick={(provider) => { setDetailDialogOpen(false); checkStatus(selectedWd, provider); }} testId="button-check-status-dialog" />
                   )}
-                  {selectedWd.omnipayRef && (
+                  {selectedWd.providerReference && (
                     <ProviderPickerButton label="Approuver chez fournisseur" icon={CheckCircle} colorClass="border-teal-400 text-teal-700 dark:text-teal-300 hover:bg-teal-50 text-xs"
                       disabled={syncStatusMutation.isPending} onPick={(provider) => syncStatusMutation.mutate({ id: selectedWd.id, provider })} testId="button-sync-status-dialog" />
                   )}
                   <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50 text-xs"
                     disabled={retryMutation.isPending} onPick={async (provider) => { setDetailDialogOpen(false); if (await showConfirm(`Déclencher le paiement de ce reversement chez ${provider} ?`)) retryMutation.mutate({ id: selectedWd.id, provider }); }} testId="button-retry-dialog" />
                   {selectedWd.status !== "approved" && (
-                    selectedWd.omnipayRef ? (
+                    selectedWd.providerReference ? (
                       <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 flex-1"
                         onClick={() => { setDetailDialogOpen(false); openAction(selectedWd, "force-validate"); }} data-testid="button-force-validate-dialog">
                         <CheckCircle className="w-3 h-3" />Valider manuellement
@@ -10187,9 +9820,7 @@ export default function AdminDashboard() {
     {
       label: "Passerelles",
       items: [
-        { title: "OmniPay", icon: Zap, tab: "omnipay" },
         { title: "Mbiyo", icon: Globe, tab: "mbiyo" },
-        { title: "SendavaPay", icon: Zap, tab: "sendavapay" },
         { title: "LipaPap", icon: Globe, tab: "lipapap" },
         { title: "SeaPay", icon: Globe, tab: "seapay" },
         { title: "Crypto", icon: Bitcoin, tab: "cryptoagg" },
@@ -10320,9 +9951,7 @@ export default function AdminDashboard() {
             {activeTab === "numbers" && <NumbersPanel />}
             {activeTab === "sms" && <SmsPanel />}
             {activeTab === "apikeys" && <ApiKeysManagementPanel />}
-            {activeTab === "omnipay" && <OmniPayPanel />}
             {activeTab === "mbiyo" && <MbiyoPanel />}
-            {activeTab === "sendavapay" && <SendavaPayPanel />}
             {activeTab === "lipapap" && <LipaPapPanel />}
             {activeTab === "seapay" && <SeaPayPanel />}
             {activeTab === "cryptoagg" && <CryptoAggPanel />}

@@ -626,7 +626,7 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
     const header = `TXID,${t("payer")},${t("phone")},${t("amount")},${t("country")},${t("status")},${t("provider")},${t("date")}\n`;
     const locale = lang === "fr" ? "fr-FR" : lang === "zh" ? "zh-CN" : lang === "pt" ? "pt-PT" : lang === "hi" ? "hi-IN" : "en-US";
     const rows = filtered.map((tx) =>
-      `${tx.txId},"${(tx as any).payerName || ""}",${tx.payerNumber || ""},${tx.amount},${tx.country},${tx.status},${providerLabel(tx.provider, tx.omnipayReference)},${new Date(tx.createdAt).toLocaleString(locale)}`
+      `${tx.txId},"${(tx as any).payerName || ""}",${tx.payerNumber || ""},${tx.amount},${tx.country},${tx.status},${providerLabel(tx.provider, tx.providerReference)},${new Date(tx.createdAt).toLocaleString(locale)}`
     ).join("\n");
     const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -823,7 +823,7 @@ function MerchantTransactionsPanel({ token }: { token: string | null }) {
 
                   {/* Provider — explicit name, never a generic mobile-money label */}
                   <span className="hidden sm:block text-xs font-semibold text-gray-600 bg-blue-50 px-2.5 py-1 rounded-lg text-center whitespace-nowrap">
-                    {isTransfer ? "—" : providerLabel(tx.provider, tx.omnipayReference)}
+                    {isTransfer ? "—" : providerLabel(tx.provider, tx.providerReference)}
                   </span>
 
                   {/* Status */}
@@ -1244,8 +1244,8 @@ function TransfersPanel({ token }: { token: string | null }) {
   const [lastName, setLastName] = useState("");
   const [operator, setOperator] = useState("");
 
-  const omnipayCountries = (balance as MerchantCountry[]).filter(c => c.omnipayEnabled && c.active);
-  const selectedMC = omnipayCountries.find(c => c.country === selectedCountry);
+  const gatewayCountries = (balance as MerchantCountry[]).filter(c => c.gatewayEnabled && c.active);
+  const selectedMC = gatewayCountries.find(c => c.country === selectedCountry);
 
   const transferMutation = useMutation({
     mutationFn: async (data: { country: string; msisdn: string; amount: number; firstName: string; lastName: string; operator?: string }) => {
@@ -1304,7 +1304,7 @@ function TransfersPanel({ token }: { token: string | null }) {
   const transferTxs = (transactions as Transaction[]).filter(t => t.amount < 0 || t.txId.startsWith("TR-"));
   const transferTotal = transferTxs.reduce((s, t) => s + Math.abs(t.amount), 0);
   const transferCount = transferTxs.length;
-  const activeCountriesCount = omnipayCountries.length;
+  const activeCountriesCount = gatewayCountries.length;
   const now = new Date();
   const thisMonthCount = transferTxs.filter(t => {
     const d = new Date(t.createdAt);
@@ -1387,7 +1387,7 @@ function TransfersPanel({ token }: { token: string | null }) {
                   <SelectValue placeholder={t("selectCountryPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
-                  {omnipayCountries.map(c => (
+                  {gatewayCountries.map(c => (
                     <SelectItem key={c.id} value={c.country}>
                       {c.country} - {t("balance")}: {c.balance.toLocaleString(localeForLanguage(lang))} F CFA
                     </SelectItem>

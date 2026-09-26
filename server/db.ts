@@ -258,8 +258,7 @@ export async function runAuthMigrations() {
         type text NOT NULL DEFAULT 'Mobile Money',
         country text NOT NULL,
         daily_limit integer NOT NULL DEFAULT 1000000,
-        gateway text NOT NULL DEFAULT 'OmniPay',
-        omnipay_code text,
+         gateway text NOT NULL DEFAULT 'ClaPay',
         mbiyo_code text,
         seapay_code text,
         clapay_code text,
@@ -320,6 +319,24 @@ export async function runAuthMigrations() {
       CREATE UNIQUE INDEX IF NOT EXISTS merchants_sdk_api_key_idx ON merchants(sdk_api_key) WHERE sdk_api_key IS NOT NULL;
       CREATE INDEX IF NOT EXISTS merchant_login_otps_email_idx ON merchant_login_otps(email);
     `);
+    // Provider retirement bridge: preserve operator configuration while removing
+    // the retired provider-specific columns and assignments.
+    await client.query(`
+      ALTER TABLE withdrawal_operators
+        ADD COLUMN IF NOT EXISTS clapay_code text;
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='withdrawal_operators' AND column_name='omnipay_code') THEN
+          UPDATE withdrawal_operators
+             SET clapay_code = COALESCE(clapay_code, omnipay_code)
+           WHERE omnipay_code IS NOT NULL;
+          ALTER TABLE withdrawal_operators DROP COLUMN omnipay_code;
+        END IF;
+      END $$;
+      UPDATE withdrawal_operators
+         SET gateway = 'ClaPay'
+       WHERE LOWER(COALESCE(gateway, '')) IN ('omnipay', 'sendavapay', 'sendava');
+    `);
     await client.query(`
       DELETE FROM withdrawal_operators a USING withdrawal_operators b
       WHERE a.id > b.id AND a.name = b.name AND a.country = b.country;
@@ -341,28 +358,28 @@ export async function runAuthMigrations() {
 
     await client.query(`
       INSERT INTO withdrawal_operators (name, type, country, daily_limit, gateway) VALUES
-        ('Moov Money','Mobile Money','Togo',1000000,'OmniPay'),
-        ('TMoney','Mobile Money','Togo',1000000,'OmniPay'),
-        ('MTN Mobile Money','Mobile Money','Benin',1000000,'OmniPay'),
-        ('Moov Money','Mobile Money','Benin',1000000,'OmniPay'),
-        ('Moov Money','Mobile Money','Burkina Faso',1000000,'OmniPay'),
-        ('Orange Money','Mobile Money','Burkina Faso',1000000,'OmniPay'),
+        ('Moov Money','Mobile Money','Togo',1000000,'ClaPay'),
+        ('TMoney','Mobile Money','Togo',1000000,'ClaPay'),
+        ('MTN Mobile Money','Mobile Money','Benin',1000000,'ClaPay'),
+        ('Moov Money','Mobile Money','Benin',1000000,'ClaPay'),
+        ('Moov Money','Mobile Money','Burkina Faso',1000000,'ClaPay'),
+        ('Orange Money','Mobile Money','Burkina Faso',1000000,'ClaPay'),
         ('Coris Money','Mobile Money','Burkina Faso',1000000,'Mbiyo'),
-        ('MTN Mobile Money','Mobile Money','Cote d''Ivoire',1000000,'OmniPay'),
-        ('Moov Money','Mobile Money','Cote d''Ivoire',1000000,'OmniPay'),
-        ('Orange Money','Mobile Money','Cote d''Ivoire',1000000,'OmniPay'),
-        ('Wave','Mobile Money','Cote d''Ivoire',1000000,'OmniPay'),
-        ('Mixx by Yas','Mobile Money','Senegal',1000000,'OmniPay'),
-        ('Orange Money','Mobile Money','Senegal',1000000,'OmniPay'),
-        ('Wave','Mobile Money','Senegal',1000000,'OmniPay'),
-        ('Orange Money','Mobile Money','Mali',1000000,'OmniPay'),
-        ('MTN Mobile Money','Mobile Money','Cameroun',1000000,'OmniPay'),
-        ('Orange Money','Mobile Money','Cameroun',1000000,'OmniPay'),
-        ('MTN Mobile Money','Mobile Money','Congo Brazzaville',1000000,'OmniPay'),
-        ('Airtel Money','Mobile Money','Gabon',1000000,'OmniPay'),
-        ('Moov Money','Mobile Money','Gabon',1000000,'OmniPay'),
-        ('Orange Money','Mobile Money','Congo RDC',500000,'OmniPay'),
-        ('M-Pesa','Mobile Money','Congo RDC',500000,'OmniPay'),
+        ('MTN Mobile Money','Mobile Money','Cote d''Ivoire',1000000,'ClaPay'),
+        ('Moov Money','Mobile Money','Cote d''Ivoire',1000000,'ClaPay'),
+        ('Orange Money','Mobile Money','Cote d''Ivoire',1000000,'ClaPay'),
+        ('Wave','Mobile Money','Cote d''Ivoire',1000000,'ClaPay'),
+        ('Mixx by Yas','Mobile Money','Senegal',1000000,'ClaPay'),
+        ('Orange Money','Mobile Money','Senegal',1000000,'ClaPay'),
+        ('Wave','Mobile Money','Senegal',1000000,'ClaPay'),
+        ('Orange Money','Mobile Money','Mali',1000000,'ClaPay'),
+        ('MTN Mobile Money','Mobile Money','Cameroun',1000000,'ClaPay'),
+        ('Orange Money','Mobile Money','Cameroun',1000000,'ClaPay'),
+        ('MTN Mobile Money','Mobile Money','Congo Brazzaville',1000000,'ClaPay'),
+        ('Airtel Money','Mobile Money','Gabon',1000000,'ClaPay'),
+        ('Moov Money','Mobile Money','Gabon',1000000,'ClaPay'),
+        ('Orange Money','Mobile Money','Congo RDC',500000,'ClaPay'),
+        ('M-Pesa','Mobile Money','Congo RDC',500000,'ClaPay'),
         ('MTN Mobile Money','Mobile Money','Guinee',1000000,'Mbiyo'),
         ('Orange Money','Mobile Money','Guinee',1000000,'Mbiyo'),
         ('Africell Money','Mobile Money','Gambie',1000000,'Mbiyo')
@@ -370,23 +387,8 @@ export async function runAuthMigrations() {
     `);
 
     await client.query(`
-      UPDATE withdrawal_operators SET omnipay_code = CASE
-        WHEN LOWER(name) LIKE '%mtn%' THEN 'mtn'
-        WHEN LOWER(name) LIKE '%moov%' THEN 'moov'
-        WHEN LOWER(name) LIKE '%orange%' THEN 'orange'
-        WHEN LOWER(name) LIKE '%wave%' THEN 'wave'
-        WHEN LOWER(name) LIKE '%tmoney%' OR LOWER(name) LIKE '%t-money%' THEN 'tmoney'
-        WHEN LOWER(name) LIKE '%mixx%' OR LOWER(name) LIKE '%yas%' THEN 'mixx'
-        WHEN LOWER(name) LIKE '%airtel%' THEN 'airtel'
-        WHEN LOWER(name) LIKE '%flooz%' THEN 'flooz'
-        WHEN LOWER(name) LIKE '%mpesa%' OR LOWER(name) LIKE '%m-pesa%' OR LOWER(name) LIKE '%m pesa%' THEN 'mpesa'
-        WHEN LOWER(name) LIKE '%coris%' THEN 'coris'
-        ELSE omnipay_code
-      END WHERE omnipay_code IS NULL;
       UPDATE withdrawal_operators SET gateway = 'Mbiyo'
         WHERE country IN ('Guinee', 'Gambie') AND gateway != 'Mbiyo';
-      UPDATE withdrawal_operators SET gateway = 'SendavaPay'
-        WHERE country IN ('Togo', 'Cote d''Ivoire') AND gateway = 'OmniPay';
     `);
 
     await client.query("COMMIT");
@@ -430,8 +432,8 @@ export async function runFinancialMigrations() {
         api_key text NOT NULL,
         balance integer NOT NULL DEFAULT 0,
         active boolean NOT NULL DEFAULT true,
-        omnipay_enabled boolean NOT NULL DEFAULT false,
-        payin_gateway text NOT NULL DEFAULT 'omnipay',
+        gateway_enabled boolean NOT NULL DEFAULT true,
+        payin_gateway text NOT NULL DEFAULT 'clapay',
         admin_credits_total integer NOT NULL DEFAULT 0
       );
 
@@ -445,9 +447,9 @@ export async function runFinancialMigrations() {
         payer_name text,
         status text NOT NULL DEFAULT 'confirmed',
         provider text NOT NULL DEFAULT 'sms',
-        omnipay_tx_id text,
+        provider_tx_id text,
         operator text,
-        omnipay_reference text,
+        provider_reference text,
         error_message text,
         provider_fee integer,
         merchant_country_id integer,
@@ -496,14 +498,12 @@ export async function runFinancialMigrations() {
         tx_id text,
         status text NOT NULL DEFAULT 'pending',
         redirect_url text,
-        omnipay_reference text,
-        omnipay_tx_id text,
-        omnipay_payment_url text,
-        gateway text NOT NULL DEFAULT 'omnipay',
+        provider_reference text,
+        provider_tx_id text,
+        provider_payment_url text,
+        gateway text NOT NULL DEFAULT 'clapay',
         error_message text,
         payment_token text,
-        sendava_token text,
-        sendava_payment_url text,
         expires_at timestamp NOT NULL,
         created_at timestamp DEFAULT now() NOT NULL
       );
@@ -556,10 +556,10 @@ export async function runFinancialMigrations() {
         status text NOT NULL DEFAULT 'pending',
         withdrawal_mode text NOT NULL DEFAULT 'manual',
         admin_note text,
-        omnipay_ref text,
+        provider_reference text,
         fees integer DEFAULT 0,
         provider_payout_fee integer,
-        gateway text NOT NULL DEFAULT 'omnipay',
+        gateway text NOT NULL DEFAULT 'clapay',
          provider_tx_id text,
         created_at timestamp DEFAULT now() NOT NULL,
         processed_at timestamp
@@ -672,6 +672,61 @@ export async function runFinancialMigrations() {
       await client.query(`
         ALTER TABLE payment_links
         ADD COLUMN IF NOT EXISTS bank text NOT NULL DEFAULT 'bank1';
+      `);
+      // Idempotent financial data-model bridge. Existing values are renamed in
+      // place; no financial rows are deleted.
+      await client.query(`
+        DO $$
+        BEGIN
+          IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='merchant_countries' AND column_name='omnipay_enabled') THEN
+            ALTER TABLE merchant_countries RENAME COLUMN omnipay_enabled TO gateway_enabled;
+          END IF;
+          IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='transactions' AND column_name='omnipay_tx_id') THEN
+            ALTER TABLE transactions RENAME COLUMN omnipay_tx_id TO provider_tx_id;
+          END IF;
+          IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='transactions' AND column_name='omnipay_reference') THEN
+            ALTER TABLE transactions RENAME COLUMN omnipay_reference TO provider_reference;
+          END IF;
+          IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='pending_payments' AND column_name='omnipay_reference') THEN
+            ALTER TABLE pending_payments RENAME COLUMN omnipay_reference TO provider_reference;
+          END IF;
+          IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='pending_payments' AND column_name='omnipay_tx_id') THEN
+            ALTER TABLE pending_payments RENAME COLUMN omnipay_tx_id TO provider_tx_id;
+          END IF;
+          IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='pending_payments' AND column_name='omnipay_payment_url') THEN
+            ALTER TABLE pending_payments RENAME COLUMN omnipay_payment_url TO provider_payment_url;
+          END IF;
+          IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='withdrawals' AND column_name='omnipay_ref') THEN
+            ALTER TABLE withdrawals RENAME COLUMN omnipay_ref TO provider_reference;
+          END IF;
+        END $$;
+        ALTER TABLE merchant_countries ALTER COLUMN gateway_enabled SET DEFAULT true;
+        ALTER TABLE merchant_countries ALTER COLUMN payin_gateway SET DEFAULT 'clapay';
+        ALTER TABLE pending_payments ALTER COLUMN gateway SET DEFAULT 'clapay';
+        ALTER TABLE withdrawals ALTER COLUMN gateway SET DEFAULT 'clapay';
+        UPDATE merchant_countries SET gateway_enabled = true
+          WHERE gateway_enabled = false AND LOWER(COALESCE(payin_gateway, '')) IN ('omnipay','sendavapay','sendava');
+        UPDATE merchant_countries SET payin_gateway = 'clapay'
+          WHERE LOWER(COALESCE(payin_gateway, '')) IN ('omnipay','sendavapay','sendava');
+        UPDATE pending_payments SET status = replace(status, 'omnipay_', 'gateway_')
+          WHERE status LIKE 'omnipay_%';
+        -- Never reinterpret an in-flight legacy operation as a ClaPay request.
+        -- Unsent withdrawal requests can move to ClaPay; submitted requests are
+        -- kept out of all provider pollers while retaining their references.
+        UPDATE pending_payments SET gateway = 'inactive'
+          WHERE LOWER(COALESCE(gateway, '')) IN ('omnipay','sendavapay','sendava')
+            AND LOWER(COALESCE(status, '')) NOT IN
+              ('confirmed','completed','paid','gateway_confirmed','failed','rejected','cancelled','canceled','expired','gateway_failed');
+        UPDATE pending_payments SET gateway = 'inactive'
+          WHERE LOWER(COALESCE(gateway, '')) = 'clapay'
+            AND LOWER(COALESCE(status, '')) IN ('pending','submitted','gateway_pending')
+            AND COALESCE(provider_reference, '') !~* '^CP';
+        UPDATE withdrawals SET gateway = 'inactive'
+          WHERE LOWER(COALESCE(gateway, '')) IN ('omnipay','sendavapay','sendava')
+            AND status = 'pending' AND provider_reference IS NOT NULL;
+        UPDATE withdrawals SET gateway = 'clapay'
+          WHERE LOWER(COALESCE(gateway, '')) IN ('omnipay','sendavapay','sendava')
+            AND status = 'pending' AND provider_reference IS NULL;
       `);
       await client.query(`
         ALTER TABLE withdrawals

@@ -60,8 +60,8 @@ export function serveStatic(app: Express) {
     }
 
     // Bank 1 ne doit pas charger le shell SPA sur /pay sans paramètres.
-    // Les liens réels portent merchant/amount/country, ou ref/omnipay_status
-    // lors du retour d'un paiement Wave.
+    // Les liens réels portent merchant/amount/country, ou ref/payment_status
+    // lors du retour d'un paiement avec redirection.
     const isBareBank1Payment =
       requestHost === "checkout1.westpay.cfd" &&
       (reqPath === "/pay" || /^\/pay\/[^/]+$/.test(reqPath));

@@ -153,9 +153,8 @@ const CLAPAY_OPERATORS: Array<{ country: string; name: string; clapayCode: strin
   { country: "Ghana",             name: "Vodafone Cash",     clapayCode: "VODAFONE" },
 ];
 
-// Coris Money is a Burkina Faso payment method exposed by the public
-// operator list. Keep this idempotent so existing administrator gateway
-// choices are never overwritten on restart.
+  // Coris Money is a Burkina Faso payment method exposed by the public
+  // operator list.
 async function ensureBurkinaOperatorsExist() {
   try {
     const existing = await storage.getWithdrawalOperatorByNameAndCountry("Coris Money", "Burkina Faso");
@@ -170,7 +169,7 @@ async function ensureBurkinaOperatorsExist() {
         active: true,
       } as any);
       console.log("[SEED] Opérateur Coris Money Burkina Faso créé (Mbiyo)");
-    } else if (!(existing as any).mbiyoCode) {
+      } else if (!(existing as any).mbiyoCode) {
       const { db } = await import("./db");
       const { withdrawalOperators } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
@@ -195,7 +194,7 @@ async function ensureClapayOperatorsExist() {
           type: "Mobile Money",
           country: op.country,
           dailyLimit: 10000000,
-          gateway: "ClaPay",
+        gateway: "ClaPay",
           clapayCode: op.clapayCode,
           sortOrder: i,
           active: true,

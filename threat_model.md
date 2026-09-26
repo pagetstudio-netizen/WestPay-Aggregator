@@ -2,61 +2,58 @@
 
 ## Project Overview
 
-WestPay (internally RobotPay) is a private mobile money payment aggregation platform with admin and merchant dashboards. It processes payments via OmniPay, Mbiyo, SendavaPay, SeaPay, ClapaPay, and OxaPay (crypto). There is no public registration — the admin creates all merchant accounts. The backend is Express.js with JWT authentication (httpOnly cookies + Bearer header). The database is PostgreSQL with Drizzle ORM. The frontend is React + Tailwind. Deployed on Plesk in production; development runs on Replit.
+WestPay is a private mobile-money aggregation platform with admin and merchant dashboards. Active payment connectors are ClaPay, Mbiyo, SeaPay and LipaPap, with SMS reconciliation and OxaPay crypto payments. There is no public registration. The backend is Express.js with JWT authentication, PostgreSQL/Drizzle storage, and a React frontend.
 
 ## Assets
 
-- **Admin credentials and session tokens** — Admin account password and JWT. Compromise gives full platform control: create/suspend merchants, approve withdrawals, view all transactions.
-- **Merchant credentials and API keys** — Per-merchant email/password login, JWT sessions, and per-country API keys. Compromise allows initiating payments and transfers against a merchant's balance.
-- **Payment gateway API keys** — OmniPay, Mbiyo, SendavaPay, SeaPay, OxaPay, ClapaPay API keys stored as environment variables (with DB fallback). Compromise allows direct calls to payment providers, potentially initiating charges or payouts.
-- **Transaction and balance data** — Merchant account balances, transaction history, withdrawal requests, and customer phone numbers. Contains PII and financial data.
-- **Application secrets** — JWT signing secret (`SESSION_SECRET`/`JWT_SECRET`), webhook HMAC secrets per merchant, TOTP seeds.
-- **Admin URL slug** — The secret URL path for the admin login page. Currently exposed in committed log files.
+- **Admin credentials and session tokens** — compromise gives full platform control.
+- **Merchant credentials and API keys** — compromise allows payment initiation and supported payouts.
+- **Connector API keys** — ClaPay, Mbiyo, SeaPay, LipaPap and OxaPay credentials are stored in environment variables or the settings store. Compromise can initiate charges or payouts.
+- **Transaction and balance data** — contains financial records and customer PII.
+- **Application secrets** — JWT signing secret, merchant webhook secrets and TOTP seeds.
 
 ## Trust Boundaries
 
-- **Public internet → WestPay API** — Payment initiation, callback receipt, public lookup endpoints. The server must validate all inputs and verify signatures on callbacks.
-- **Browser → WestPay API (authenticated)** — Admin and merchant dashboards. JWT must be verified on every request. Admin role is additionally geo-restricted.
-- **WestPay server → Payment providers** — Outbound calls with API keys. The server trusts provider responses but verifies inbound callbacks with HMAC.
-- **Payment providers → WestPay callbacks** — Inbound webhook notifications. Must be signature-verified before crediting merchants. Idempotency checks prevent double-crediting.
-- **SendavaPay CORS proxy** — Browser-facing proxy routes that forward requests to SendavaPay using WestPay's API key. Currently unauthenticated — should be restricted to legitimate payment sessions.
+- Public internet → WestPay API: validate inputs and rate-limit public payment/status endpoints.
+- Browser → authenticated API: verify JWT, role, suspension and geographic restrictions.
+- WestPay → payment connectors: protect credentials and validate provider responses.
+- Connectors → callbacks: verify signatures before any financial state change and enforce idempotency.
 
 ## Scan Anchors
 
-- **Production entry points:** `server/routes.ts` (10,297 lines, all HTTP routes), `server/index.ts` (startup)
-- **Highest-risk areas:** Callback handlers (omnipay/mbiyo/seapay/oxapay/sendavapay), withdrawal approval flow (~line 8055), payment initiation (~line 4003), SendavaPay proxy routes (~line 5593)
-- **Public surfaces:** `/api/payment/*`, `/api/public/*`, `/api/omnipay/callback`, `/api/mbiyo/callback`, `/api/seapay/callback`, `/api/oxapay/callback`, `/api/sendavapay/callback`, `/api/sendavapay/proxy/*`
-- **Authenticated surfaces:** `/api/admin/*` (admin JWT + geo-restriction), `/api/merchant/*` (merchant JWT or API key)
-- **Dev-only:** `script/create-test-account.ts`, `scripts/check-telegram.ts`, `scripts/cleanup-test-data.ts` — not production reachable
+- Production entry points: `server/routes.ts` and `server/index.ts`.
+- Highest-risk areas: ClaPay, Mbiyo, SeaPay, LipaPap and OxaPay callbacks; withdrawal approval; payment initiation; public status lookups.
+- Public callbacks: `/api/clapay/callback`, `/api/clapay/payout-callback`, `/api/mbiyo/callback`, `/api/mbiyo/payout-callback`, `/api/seapay/callback`, `/api/seapay/payout-callback`, `/api/lipapap/callback`, and `/api/oxapay/callback`.
+- Authenticated surfaces: `/api/admin/*` and `/api/merchant/*`.
 
 ## Threat Categories
 
 ### Spoofing
 
-JWT tokens are verified on every request using a strong secret (`SESSION_SECRET`). Admin tokens are additionally revocable via `tokenInvalidatedAt`. The admin login page is hidden behind a secret URL slug — but this slug is now exposed in committed log files, weakening the obscurity layer. Payment callbacks from external providers are verified with HMAC signatures (SHA3-512 for OmniPay, SHA512 for OxaPay, SHA256 for Mbiyo/SendavaPay, MD5 for SeaPay per vendor mandate).
+JWT tokens are verified on every request and admin sessions are revocable. External callback signatures must be verified using each active connector's configured signature mechanism before processing.
 
-**Required guarantees:** JWT secret must be a strong random value set via environment variable. The admin URL slug should be rotated since it was committed to the repository. SeaPay callback signature must be verified before any state change; the current implementation does verify it but must remain fail-closed.
+**Required guarantees:** JWT secrets must be strong and supplied through environment configuration. Every callback must fail closed when its verification secret is missing or invalid.
 
 ### Tampering
 
-Payment amounts are computed server-side using stored pending-payment records rather than client-supplied values. Withdrawal and wallet transfer endpoints scope operations to the authenticated merchant's own data. SeaPay's callback handler lacks an atomic idempotency check — simultaneous duplicate callbacks can double-credit a merchant, which is a tamper risk via callback replay.
+Amounts are computed from stored pending-payment records rather than trusted client values. Merchant operations are scoped to the authenticated merchant. Callback handlers must use atomic pending-state transitions to prevent replay and duplicate credits.
 
-**Required guarantees:** All callback handlers must use atomic CAS-style database updates (`WHERE status='pending' RETURNING id`) rather than read-check-write patterns. The SeaPay callback must be updated to match the idempotency pattern used by OmniPay and OxaPay.
+**Required guarantees:** Callback handlers must use CAS-style updates such as `WHERE status='pending' RETURNING id`; never use read-check-write for financial confirmation.
 
 ### Information Disclosure
 
-Merchant email addresses appear in startup log output. Internal payment gateway routing codes (OmniPay operator codes, Mbiyo codes, SeaPay codes) are exposed via `/api/merchant/withdrawal-operators/:country` without authentication. The admin URL slug is committed in a log file in the repository.
+Merchant emails, secrets, phone numbers and internal routing codes must not appear in logs or unauthenticated responses. The merchant operator-list route must retain its intended authentication requirements.
 
-**Required guarantees:** Auth middleware must be applied to `/api/merchant/withdrawal-operators/:country`. Application logs must not contain merchant email addresses in plaintext. The committed log file must be purged from git history.
+**Required guarantees:** Do not log credentials or full PII. Keep admin URL secrets out of committed files and logs.
 
 ### Denial of Service
 
-The SendavaPay proxy routes are publicly accessible and use WestPay's API key. An attacker can flood SendavaPay with requests using the platform key, exhausting rate limits or triggering account suspension. The `/api/docs/access` PIN endpoint is rate-limited per-IP but not globally, making the 1,000,000-PIN keyspace exhaustible via IP rotation.
+Public payment initiation and status endpoints require request-rate limits. The documentation PIN endpoint is rate-limited per IP and should also have a global protection against distributed guessing.
 
-**Required guarantees:** SendavaPay proxy routes must require authentication or validate that the `orderId`/`ref` belongs to an active WestPay payment session. The docs PIN must have higher entropy or a global rate limit.
+**Required guarantees:** Retain rate limits on payment initiation, callbacks and status polling. Use high-entropy documentation credentials and global throttling.
 
 ### Elevation of Privilege
 
-Admin routes are protected by `authMiddleware("admin")` which checks role, geo-restriction, and account existence. Merchant routes check role and account suspension. No path to privilege escalation was found in the authenticated code paths. The SendavaPay proxy routes allow unauthenticated callers to use the platform's API key for calls to SendavaPay's API, which constitutes privilege abuse without authentication bypass per se.
+Admin routes require admin authentication and geographic checks. Merchant dashboard routes require merchant authentication and suspension checks; API-key routes must scope every operation to the matching merchant and country.
 
-**Required guarantees:** All routes under `/api/merchant/` must have authentication middleware applied, including `/api/merchant/withdrawal-operators/:country`. SendavaPay proxy routes must validate the caller has an active payment session.
+**Required guarantees:** Every `/api/merchant/` route must have the appropriate authentication middleware, including operator listing and payout operations. Never accept a merchant or country identifier without ownership validation.

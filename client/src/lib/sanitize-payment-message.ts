@@ -1,5 +1,7 @@
+// Keep provider implementation details out of buyer-facing errors without
+// hard-coding a list of provider brands.
 const PAYMENT_PROVIDER_PATTERN =
-  /\b(?:clapay|nowallet|mbiyopay|mbiyo|sendavapay|sendava\s*pay|seapay|sea\s*pay|omnipay|omni\s*pay|oxapay|oxa\s*pay)\b/i;
+  /\b(?:provider|gateway|upstream|credential|api\s*key|signature)\b/i;
 
 export function sanitizePaymentMessage(
   value: unknown,

@@ -143,11 +143,11 @@ export interface IStorage {
   createWebhookLog(log: InsertWebhookLog): Promise<WebhookLog>;
   getWebhookLogs(merchantId?: number): Promise<WebhookLog[]>;
 
-  updateMerchantCountryOmnipay(id: number, omnipayEnabled: boolean): Promise<void>;
+  updateMerchantCountryGateway(id: number, gatewayEnabled: boolean): Promise<void>;
   updateMerchantCountryPayinGateway(id: number, payinGateway: string): Promise<void>;
-  getPendingPaymentByOmnipayReference(reference: string): Promise<PendingPayment | undefined>;
-  getPendingPaymentByOmnipayTxId(omnipayTxId: string): Promise<PendingPayment | undefined>;
-  updatePendingPaymentOmnipayTxId(id: number, omnipayTxId: string): Promise<void>;
+  getPendingPaymentByProviderReference(reference: string): Promise<PendingPayment | undefined>;
+  getPendingPaymentByProviderTxId(providerTxId: string): Promise<PendingPayment | undefined>;
+  updatePendingPaymentProviderTxId(id: number, providerTxId: string): Promise<void>;
   updatePendingPaymentOtpToken(id: number, otpToken: string): Promise<void>;
   decrementMerchantCountryBalance(id: number, amount: number): Promise<void>;
 
@@ -185,9 +185,9 @@ export interface IStorage {
   getWithdrawals(merchantId?: number): Promise<(Withdrawal & { merchantName: string; merchantWebsite?: string | null })[]>;
   getPendingWithdrawals(): Promise<(Withdrawal & { merchantName: string })[]>;
   getWithdrawalById(id: number): Promise<Withdrawal | undefined>;
-  getWithdrawalByOmnipayRef(ref: string): Promise<Withdrawal | undefined>;
+  getWithdrawalByProviderReference(ref: string): Promise<Withdrawal | undefined>;
   getWithdrawalByProviderTxId(providerTxId: string): Promise<Withdrawal | undefined>;
-  updateWithdrawalStatus(id: number, status: string, adminNote?: string, omnipayRef?: string, fees?: number, providerPayoutFee?: number): Promise<void>;
+  updateWithdrawalStatus(id: number, status: string, adminNote?: string, providerReference?: string, fees?: number, providerPayoutFee?: number): Promise<void>;
   updateWithdrawalGateway(id: number, gateway: string): Promise<void>;
   updateWithdrawalProviderTxId(id: number, providerTxId: string | null): Promise<void>;
   applyWithdrawal(id: number): Promise<void>;
@@ -451,8 +451,8 @@ export class DatabaseStorage implements IStorage {
   async updateMerchantCountryActive(id: number, active: boolean): Promise<void> {
     await financialDb.update(merchantCountries).set({ active }).where(eq(merchantCountries.id, id));
   }
-  async updateMerchantCountryOmnipay(id: number, omnipayEnabled: boolean): Promise<void> {
-    await financialDb.update(merchantCountries).set({ omnipayEnabled }).where(eq(merchantCountries.id, id));
+  async updateMerchantCountryGateway(id: number, gatewayEnabled: boolean): Promise<void> {
+    await financialDb.update(merchantCountries).set({ gatewayEnabled }).where(eq(merchantCountries.id, id));
   }
   async updateMerchantCountryPayinGateway(id: number, payinGateway: string): Promise<void> {
     await financialDb.update(merchantCountries).set({ payinGateway }).where(eq(merchantCountries.id, id));
@@ -646,7 +646,7 @@ export class DatabaseStorage implements IStorage {
         prevMonth: sql<number>`coalesce(sum(case when processed_at >= ${prevIso}::timestamp and processed_at < ${prevEndIso}::timestamp then fee else 0 end), 0)`,
       }).from(walletTransfers).where(eq(walletTransfers.status, "approved")),
       financialDb.select({ count: sql<number>`count(*)`, total: sql<number>`coalesce(sum(amount), 0)` })
-        .from(transactions).where(and(eq(transactions.provider, "omnipay"), sql`amount > 0`, sql`tx_id NOT LIKE 'TR-%'`, inArray(transactions.status, ["confirmed","success","completed"]))),
+        .from(transactions).where(and(sql`provider NOT IN ('sms', 'manual')`, sql`amount > 0`, sql`tx_id NOT LIKE 'TR-%'`, inArray(transactions.status, ["confirmed","success","completed"]))),
       financialDb.select({ count: sql<number>`count(*)`, total: sql<number>`coalesce(sum(total_revenue), 0)` }).from(paymentLinks),
       financialDb.select({ count: sql<number>`count(*)`, total: sql<number>`coalesce(sum(amount), 0)` }).from(withdrawals).where(eq(withdrawals.status, "approved")),
     ]);
@@ -768,22 +768,19 @@ export class DatabaseStorage implements IStorage {
     if (merchantId) return financialDb.select().from(pendingPayments).where(eq(pendingPayments.merchantId, merchantId)).orderBy(desc(pendingPayments.createdAt));
     return financialDb.select().from(pendingPayments).orderBy(desc(pendingPayments.createdAt));
   }
-  async getPendingPaymentByOmnipayReference(reference: string): Promise<PendingPayment | undefined> {
-    const [p] = await financialDb.select().from(pendingPayments).where(eq(pendingPayments.omnipayReference, reference));
+  async getPendingPaymentByProviderReference(reference: string): Promise<PendingPayment | undefined> {
+    const [p] = await financialDb.select().from(pendingPayments).where(eq(pendingPayments.providerReference, reference));
     return p;
   }
-  async getPendingPaymentByOmnipayTxId(omnipayTxId: string): Promise<PendingPayment | undefined> {
-    const [p] = await financialDb.select().from(pendingPayments).where(eq(pendingPayments.omnipayTxId, omnipayTxId));
+  async getPendingPaymentByProviderTxId(providerTxId: string): Promise<PendingPayment | undefined> {
+    const [p] = await financialDb.select().from(pendingPayments).where(eq(pendingPayments.providerTxId, providerTxId));
     return p;
   }
-  async updatePendingPaymentOmnipayTxId(id: number, omnipayTxId: string): Promise<void> {
-    await financialDb.update(pendingPayments).set({ omnipayTxId }).where(eq(pendingPayments.id, id));
+  async updatePendingPaymentProviderTxId(id: number, providerTxId: string): Promise<void> {
+    await financialDb.update(pendingPayments).set({ providerTxId }).where(eq(pendingPayments.id, id));
   }
-  // Stores the SendavaPay OTP token server-side in omnipayPaymentUrl.
-  // omnipayPaymentUrl is null for SendavaPay payments; reusing it avoids a schema migration.
-  // The proxy submit-otp route reads this value instead of accepting it from the client.
   async updatePendingPaymentOtpToken(id: number, otpToken: string): Promise<void> {
-    await financialDb.update(pendingPayments).set({ omnipayPaymentUrl: otpToken }).where(eq(pendingPayments.id, id));
+    await financialDb.update(pendingPayments).set({ providerPaymentUrl: otpToken }).where(eq(pendingPayments.id, id));
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -957,17 +954,17 @@ export class DatabaseStorage implements IStorage {
     const [w] = await financialDb.select().from(withdrawals).where(eq(withdrawals.id, id));
     return w;
   }
-  async getWithdrawalByOmnipayRef(ref: string): Promise<Withdrawal | undefined> {
-    const [w] = await financialDb.select().from(withdrawals).where(eq(withdrawals.omnipayRef, ref));
+  async getWithdrawalByProviderReference(ref: string): Promise<Withdrawal | undefined> {
+    const [w] = await financialDb.select().from(withdrawals).where(eq(withdrawals.providerReference, ref));
     return w;
   }
   async getWithdrawalByProviderTxId(providerTxId: string): Promise<Withdrawal | undefined> {
     const [w] = await financialDb.select().from(withdrawals).where(eq(withdrawals.providerTxId, providerTxId));
     return w;
   }
-  async updateWithdrawalStatus(id: number, status: string, adminNote?: string, omnipayRef?: string, fees?: number, providerPayoutFee?: number): Promise<void> {
+  async updateWithdrawalStatus(id: number, status: string, adminNote?: string, providerReference?: string, fees?: number, providerPayoutFee?: number): Promise<void> {
     const data: any = { status, adminNote: adminNote || null, processedAt: new Date() };
-    if (omnipayRef)                       data.omnipayRef = omnipayRef;
+    if (providerReference)                data.providerReference = providerReference;
     if (fees !== undefined)               data.fees = fees;
     if (providerPayoutFee !== undefined)  data.providerPayoutFee = providerPayoutFee;
     await financialDb.update(withdrawals).set(data).where(eq(withdrawals.id, id));

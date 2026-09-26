@@ -937,7 +937,7 @@ Content-Type: application/json`} />
     "apiKey": "TGO-a1b2c3...",
     "balance": 125000,
     "active": true,
-    "omnipayEnabled": true
+    "gatewayEnabled": true
   },
   {
     "id": 2,
@@ -946,7 +946,7 @@ Content-Type: application/json`} />
     "apiKey": "BEN-x9y8z7...",
     "balance": 45000,
     "active": true,
-    "omnipayEnabled": false
+    "gatewayEnabled": false
   }
 ]`} />
 

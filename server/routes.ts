@@ -17,17 +17,6 @@ import crypto from "crypto";
 import { sendMerchantOtpEmail } from "./email";
 import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminPaymentError, notifyAdminWithdrawal, notifyAdminWithdrawalError, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, notifyAdminMerchantCreated, notifyAdminAdminCreated, getGeoInfo, notifyAdminMerchantLogin, notifyAdminIpBlocked, notifyAdminBruteForce, notifyAdminDeviceBlocked, notifyAdminNewDevice, notifyAdminOtp, notifyAdminVpn, notifyAdminCountryBlocked, notifyAdminLocationJump, notifyAdminNewMerchantIp, broadcastToMerchants, sendTelegramMessage } from "./telegram-bot";
 import {
-  initiatePayment as omnipayInitiatePayment,
-  initiateTransfer as omnipayInitiateTransfer,
-  getTransactionStatus as omnipayGetStatus,
-  getBalance as omnipayGetBalance,
-  verifyCallbackSignature as omnipayVerifySignature,
-  generateReference as omnipayGenerateRef,
-  OMNIPAY_STATUS,
-  OMNIPAY_ERRORS,
-  type OmniPayCallbackPayload,
-} from "./omnipay";
-import {
   createInvoice as oxapayCreateInvoice,
   createWhiteLabel as oxapayCreateWhiteLabel,
   getStatus as oxapayGetStatus,
@@ -58,25 +47,7 @@ import {
   seapayGenerateRef,
   SEAPAY_CURRENCY_COUNTRY,
 } from "./seapay";
-import {
-  createPayment as sendavaCreatePayment,
-  getOperators as sendavaGetOperators,
-  initiatePayment as sendavaInitiatePayment,
-  getPaymentStatus as sendavaGetPaymentStatus,
-  verifyPayment as sendavaVerifyPayment,
-  initiateWithdraw as sendavaInitiateWithdraw,
-  getBalance as sendavaGetBalance,
-  getTransactions as sendavaGetTransactions,
-  configureWebhook as sendavaConfigureWebhook,
-  generateReference as sendavaGenerateRef,
-  verifyWebhookSignature as sendavaVerifySignature,
-  getWithdrawalStatus as sendavaGetWithdrawalStatus,
-  toSendavaOperator,
-  SENDAVAPAY_COUNTRY_CODES,
-  SENDAVAPAY_CURRENCY_MAP,
-  type SendavaWebhookPayload,
-} from "./sendavapay";
-import { pollSendavaWithdrawalBackground } from "./reconciliation";
+import { runReconciliation } from "./reconciliation";
 import {
   clapayInitiatePayin,
   clapayInitiatePayout,
@@ -120,11 +91,11 @@ const BANK1_CHECKOUT_URL = "https://checkout1.westpay.cfd";
 
 function providerAwarePendingStatus(gateway: unknown, status: string | null | undefined): string | null | undefined {
   if (gateway !== "lipapap" || !status) return status;
-  if (status === "omnipay_pending") return "lipapap_pending";
-  if (status === "omnipay_confirmed") return "lipapap_confirmed";
-  if (status === "omnipay_failed") return "lipapap_failed";
-  if (status === "omnipay_error") return "lipapap_error";
-  if (status.startsWith("omnipay_status_")) return status.replace(/^omnipay_/, "lipapap_");
+  if (status === "gateway_pending") return "lipapap_pending";
+  if (status === "gateway_confirmed") return "lipapap_confirmed";
+  if (status === "gateway_failed") return "lipapap_failed";
+  if (status === "gateway_error") return "lipapap_error";
+  if (status.startsWith("gateway_status_")) return status.replace(/^gateway_/, "lipapap_");
   return status;
 }
 
@@ -334,32 +305,12 @@ async function getLipaPapConfiguredValue(envName: string, dbKey: string): Promis
   return dbValue || cleanConfiguredSecret(process.env[envName]);
 }
 
-async function getOmnipayApiKey(): Promise<string | undefined> {
-  return getConfiguredSecret(["OMNIPAY_API_KEY"], ["omnipay_api_key"]);
-}
-
-async function getOmnipayPayoutApiKey(): Promise<string | undefined> {
-  return await getConfiguredSecret(["OMNIPAY_PAYOUT_API_KEY"], ["omnipay_payout_api_key"]) || await getOmnipayApiKey();
-}
-
-async function getOmnipayCallbackKey(): Promise<string | undefined> {
-  return getConfiguredSecret(["OMNIPAY_CALLBACK_KEY"], ["omnipay_callback_key"]);
-}
-
 async function getMbiyoApiKey(): Promise<string | undefined> {
   return getConfiguredSecret(["MBIYO_API_KEY"], ["mbiyo_api_key"]);
 }
 
 async function getMbiyoWebhookSecret(): Promise<string | undefined> {
   return getConfiguredSecret(["MBIYO_WEBHOOK_SECRET"], ["mbiyo_webhook_secret"]);
-}
-
-async function getSendavaApiKey(): Promise<string | undefined> {
-  return getConfiguredSecret(["SENDAVA_API_KEY", "SENDAVAPAY_API_KEY"], ["sendavapay_api_key"]);
-}
-
-async function getSendavaWebhookSecret(): Promise<string | undefined> {
-  return getConfiguredSecret(["SENDAVA_WEBHOOK_SECRET", "SENDAVAPAY_WEBHOOK_SECRET"], ["sendavapay_webhook_secret"]);
 }
 
 async function getClapayApiKey(): Promise<string | undefined> {
@@ -512,9 +463,6 @@ async function getSeapayApiSecret(country: string): Promise<string | undefined> 
 function toMerchantSafeMessage(msg: string | null | undefined): string {
   if (!msg) return "";
   return msg
-    .replace(/sendava\s*pay/gi, "le service de paiement")
-    .replace(/sendava/gi, "le service de paiement")
-    .replace(/omnipay/gi, "le service de paiement")
     .replace(/mbiyo/gi, "le service de paiement")
     .replace(/r[ée]conciliation/gi, "vérification")
     .replace(/polling/gi, "vérification")
@@ -544,21 +492,8 @@ function calcWithdrawalFee(amount: number, country?: string | null): number {
   return Math.floor(amount * getWithdrawalFeeRate(country));
 }
 
-function toOmnipayOperatorCode(operatorName: string | null | undefined): string | undefined {
-  if (!operatorName) return undefined;
-  const n = operatorName.toLowerCase();
-  if (n.includes("wave")) return "wave";
-  if (n.includes("mixx") || n.includes("yas")) return "mixx";
-  // MTN, Moov, Orange, TMoney etc. are auto-detected by OmniPay via phone number — do not send operator
-  return undefined;
-}
-
-const OMNIPAY_MANDATORY_OPERATORS = ["wave", "mixx"];
-
 const SUPPORTED_PAYMENT_GATEWAYS = new Set([
-  "omnipay",
   "mbiyo",
-  "sendavapay",
   "seapay",
   "clapay",
   "lipapap",
@@ -566,19 +501,16 @@ const SUPPORTED_PAYMENT_GATEWAYS = new Set([
 ]);
 
 function normalizeGatewayName(value: unknown): string {
-  return typeof value === "string"
+  const normalized = typeof value === "string"
     ? value.trim().toLowerCase().replace(/[\s_-]+/g, "")
     : "";
+  return normalized === "lipa" ? "lipapap" : normalized;
 }
 
 /**
  * Résout le gateway du payin.
  *
  * `merchant_countries.payin_gateway` est la configuration actuelle du pays.
- * Les anciennes lignes ont toutefois toutes la valeur par défaut `omnipay` et
- * le paiement historique utilisait `withdrawal_operators.gateway`. Dans ce
- * cas précis, on conserve la compatibilité avec l'opérateur afin de ne pas
- * basculer silencieusement les paiements existants vers OmniPay.
  */
 function resolvePayinGateway(
   countryGateway: unknown,
@@ -587,7 +519,7 @@ function resolvePayinGateway(
   const normalizedCountryGateway = normalizeGatewayName(countryGateway);
   const normalizedOperatorGateway = normalizeGatewayName(operatorGateway);
 
-  if (normalizedCountryGateway && normalizedCountryGateway !== "omnipay") {
+  if (normalizedCountryGateway) {
     return {
       gateway: normalizedCountryGateway,
       countryGateway: normalizedCountryGateway,
@@ -596,8 +528,8 @@ function resolvePayinGateway(
   }
 
   return {
-    gateway: normalizedOperatorGateway || normalizedCountryGateway || "omnipay",
-    countryGateway: normalizedCountryGateway || "omnipay",
+    gateway: normalizedCountryGateway || normalizedOperatorGateway || "clapay",
+    countryGateway: normalizedCountryGateway || "clapay",
     operatorGateway: normalizedOperatorGateway,
   };
 }
@@ -668,18 +600,6 @@ function prependDialCode(phone: string, country: string): string {
   const TRUNK_PREFIX_COUNTRIES = new Set(["Congo RDC", "Congo Brazzaville", "Gabon"]);
   const local = (TRUNK_PREFIX_COUNTRIES.has(country) && cleaned.startsWith("0")) ? cleaned.slice(1) : cleaned;
   return `${dialCode}${local}`;
-}
-async function resolveOmnipayOperatorCode(operatorName: string | null | undefined, country: string | null | undefined): Promise<string | undefined> {
-  if (!operatorName) return undefined;
-  if (country) {
-    try {
-      const op = await storage.getWithdrawalOperatorByNameAndCountry(operatorName, country);
-      if (op?.omnipayCode && OMNIPAY_MANDATORY_OPERATORS.includes(op.omnipayCode.toLowerCase())) {
-        return op.omnipayCode.toLowerCase();
-      }
-    } catch {}
-  }
-  return toOmnipayOperatorCode(operatorName);
 }
 
 function generateSecureApiKey(country: string): string {
@@ -1002,7 +922,7 @@ function sanitizeAdmin(a: Record<string, any>) {
 }
 
 const INTERNAL_PAYMENT_PROVIDER_PATTERN =
-  /\b(?:clapay|nowallet|mbiyopay|mbiyo|sendavapay|sendava\s*pay|seapay|sea\s*pay|omnipay|omni\s*pay|oxapay|oxa\s*pay)\b/i;
+  /\b(?:clapay|nowallet|mbiyopay|mbiyo|seapay|sea\s*pay|oxapay|oxa\s*pay)\b/i;
 
 function sanitizePublicPaymentMessage(
   value: unknown,
@@ -1964,14 +1884,166 @@ export async function registerRoutes(
   const verifyTxRateLimit   = makeRateLimit({ max: 10, windowMs: 60 * 1000, label: "verify_tx", autoBlock: true });
   // report-failure : max 10 req/min — signalement d'échec de paiement
   const reportFailureRateLimit = makeRateLimit({ max: 10, windowMs: 60 * 1000, label: "report_failure" });
-  // sendavapay-proxy : max 15 req/min par IP — payer-facing CORS proxy
-  const sendavaProxyRateLimit = makeRateLimit({ max: 15, windowMs: 60 * 1000, label: "sendavapay_proxy" });
-  // omnipay-status : max 60 req/min par IP — polling de statut (payer-facing); limite l'énumération des IDs séquentiels
-  const omnipayStatusRateLimit = makeRateLimit({ max: 60, windowMs: 60 * 1000, label: "omnipay_status" });
+  // Payment status polling: limits enumeration of payment IDs.
+  const paymentStatusRateLimit = makeRateLimit({ max: 60, windowMs: 60 * 1000, label: "payment_status" });
   // payment-by-ref : max 30 req/min par IP — lookup de paiement par référence; limite l'énumération
   const paymentByRefRateLimit = makeRateLimit({ max: 30, windowMs: 60 * 1000, label: "payment_by_ref" });
   // crypto-status : max 60 req/min par IP — polling de statut crypto (payer-facing)
   const cryptoStatusRateLimit = makeRateLimit({ max: 60, windowMs: 60 * 1000, label: "crypto_status" });
+  const getCurrencyZone = async (country: string): Promise<string | null> => {
+    const configuredCountry = await storage.getWalletTransferCountryByName(country);
+    return configuredCountry?.currencyZone ?? null;
+  };
+  type WithdrawalPayoutResult =
+    | { accepted: true; reference: string; providerTxId: string | null; fees: number; providerPayoutFee: number }
+    | { accepted: false; message: string; uncertain: boolean };
+  const initiateWithdrawalPayout = async (
+    withdrawal: any,
+    requestedProvider: string,
+    callbackBaseUrl: string,
+  ): Promise<WithdrawalPayoutResult> => {
+    const provider = normalizeGatewayName(requestedProvider);
+    const fees = Number(withdrawal.fees) || 0;
+    const netAmount = Math.max(0, Number(withdrawal.amount) - fees);
+    try {
+      if (provider === "clapay") {
+        const token = await getClapayApiKey();
+        if (!token) return { accepted: false, message: "Clé API ClaPay non configurée", uncertain: false };
+        const reference = clapayGenerateRef();
+        const countryCode = clapayCountryCode(withdrawal.country);
+        const operator = withdrawal.operator
+          ? await storage.getWithdrawalOperatorByNameAndCountry(withdrawal.operator, withdrawal.country)
+          : null;
+        const serviceName = (operator as any)?.clapayCode || operator?.name || withdrawal.operator || undefined;
+        const result = await clapayInitiatePayout(token, {
+          transaction_id: reference,
+          amount: netAmount,
+          country_code: countryCode,
+          operators_code: serviceName ? [serviceName] : [],
+          method: "CASHIN",
+          tunnel: "API",
+          callback_url: `${callbackBaseUrl}/api/clapay/payout-callback`,
+          return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&payment_status=complete`,
+          additional_infos: {
+            customer_phone: clapayLocalPhone(withdrawal.phone || "", countryCode),
+            customer_firstname: WESTPAY_PAYOUT_FIRST_NAME,
+            customer_lastname: WESTPAY_PAYOUT_LAST_NAME,
+          },
+        });
+        if (!result.success) {
+          return { accepted: false, message: result.message || "Payout ClaPay refusé", uncertain: false };
+        }
+        return {
+          accepted: true,
+          reference,
+          providerTxId: result.data?.signature ? String(result.data.signature) : null,
+          fees,
+          providerPayoutFee: fees,
+        };
+      }
+
+      if (provider === "lipapap") {
+        const config = await getLipaPapConfig();
+        const providerCode = config
+          ? lipapapPayoutProviderCode(withdrawal.country, withdrawal.operator || "", config.payoutProviderCodes)
+          : undefined;
+        if (!config?.payerEmail || !providerCode) {
+          return { accepted: false, message: `Configuration LipaPap incomplète pour ${withdrawal.country}/${withdrawal.operator || "(vide)"}`, uncertain: false };
+        }
+        const reference = `LP-WD-${withdrawal.id}-${Date.now().toString(36).toUpperCase()}`;
+        const result = await initiateLipaPapPayout(config, {
+          orderId: reference,
+          amount: netAmount,
+          currency: lipapapCurrency(withdrawal.country),
+          beneficiaryName: withdrawal.recipientName || WESTPAY_PAYOUT_BENEFICIARY,
+          accountNumber: withdrawal.accountNumber || prependDialCode(withdrawal.phone, withdrawal.country),
+          payerEmail: config.payerEmail,
+          providerCode,
+          payerPhone: withdrawal.accountNumber ? undefined : prependDialCode(withdrawal.phone, withdrawal.country),
+        });
+        const status = String(result.status || result.result || "").toUpperCase();
+        if (!["ACCEPTED", "PROCESSING", "PENDING", "SUCCESS", "SETTLED"].includes(status)) {
+          return { accepted: false, message: result.decline_reason || result.message || "Payout LipaPap refusé", uncertain: false };
+        }
+        return {
+          accepted: true,
+          reference,
+          providerTxId: result.trans_id || result.TransactionID ? String(result.trans_id || result.TransactionID) : null,
+          fees,
+          providerPayoutFee: 0,
+        };
+      }
+
+      if (provider === "mbiyo") {
+        const apiKey = await getMbiyoApiKey();
+        if (!apiKey) return { accepted: false, message: "Clé API Mbiyo non configurée", uncertain: false };
+        const reference = mbiyoGenerateRef();
+        const operator = withdrawal.operator
+          ? await storage.getWithdrawalOperatorByNameAndCountry(withdrawal.operator, withdrawal.country)
+          : null;
+        const result = await mbiyoInitiatePayout({
+          apiKey,
+          amount: netAmount,
+          currency: mbiyoCurrency(withdrawal.country),
+          orderId: reference,
+          callbackUrl: `${callbackBaseUrl}/api/mbiyo/payout-callback`,
+          network: operator?.mbiyoCode || mbiyoNetwork(withdrawal.operator || ""),
+          phoneNumber: prependDialCode(withdrawal.phone || withdrawal.accountNumber || "", withdrawal.country),
+          countryCode: mbiyoCountryCode(withdrawal.country),
+          beneficiary: WESTPAY_PAYOUT_BENEFICIARY,
+        });
+        if (!((result.status === "success" || result.status === "pending") && result.data)) {
+          return { accepted: false, message: result.message || "Payout Mbiyo refusé", uncertain: false };
+        }
+        const providerFee = Math.round(parseFloat(String(result.data.fee || fees)) || fees);
+        return {
+          accepted: true,
+          reference,
+          providerTxId: result.data.transaction_id ? String(result.data.transaction_id) : null,
+          fees: providerFee,
+          providerPayoutFee: providerFee,
+        };
+      }
+
+      if (provider === "seapay") {
+        const [merchantId, apiSecret] = await Promise.all([
+          getSeapayMerchantId(withdrawal.country),
+          getSeapayApiSecret(withdrawal.country),
+        ]);
+        if (!merchantId || !apiSecret) return { accepted: false, message: "Configuration SeaPay incomplète", uncertain: false };
+        const reference = seapayGenerateRef();
+        const operator = withdrawal.operator
+          ? await storage.getWithdrawalOperatorByNameAndCountry(withdrawal.operator, withdrawal.country)
+          : null;
+        const channelCode = operator?.seapayCode || undefined;
+        const isBankTransfer = operator?.type === "Virement bancaire";
+        const result = await seapayPayout({
+          merchantId,
+          currency: SEAPAY_CURRENCY_COUNTRY[withdrawal.country] || "USD",
+          amount: netAmount,
+          orderId: reference,
+          notifyUrl: `${callbackBaseUrl}/api/seapay/payout-callback`,
+          bankCode: isBankTransfer ? channelCode : undefined,
+          walletCode: !isBankTransfer ? channelCode : undefined,
+          channelCode,
+          account: withdrawal.accountNumber || withdrawal.phone,
+          accountName: withdrawal.recipientName || WESTPAY_PAYOUT_BENEFICIARY,
+        }, apiSecret);
+        if (result.code !== 200 || !result.data) {
+          return { accepted: false, message: result.msg || "Payout SeaPay refusé", uncertain: false };
+        }
+        return { accepted: true, reference, providerTxId: result.data.trade_no ? String(result.data.trade_no) : null, fees, providerPayoutFee: fees };
+      }
+
+      return { accepted: false, message: "Passerelle de retrait invalide", uncertain: false };
+    } catch (error: any) {
+      return {
+        accepted: false,
+        message: safeErrMsg(error),
+        uncertain: true,
+      };
+    }
+  };
 
   // ── Per-account rate limiter for docs/access (defeats IP rotation) ────────
   // Tracks failed PIN attempts per merchant email globally (not per IP).
@@ -3051,6 +3123,27 @@ export async function registerRoutes(
     }
   });
 
+  app.put("/api/admin/merchant/:merchantId/country/:countryId/gateway", authMiddleware("admin"), async (req, res) => {
+    try {
+      const merchantId = Number(req.params.merchantId);
+      const countryId = Number(req.params.countryId);
+      if (!Number.isInteger(merchantId) || !Number.isInteger(countryId)) {
+        return res.status(400).json({ message: "Identifiants invalides" });
+      }
+      if (typeof req.body?.gatewayEnabled !== "boolean") {
+        return res.status(400).json({ message: "gatewayEnabled doit être un booléen" });
+      }
+      const merchantCountry = await storage.getMerchantCountryById(countryId);
+      if (!merchantCountry || merchantCountry.merchantId !== merchantId) {
+        return res.status(404).json({ message: "Pays introuvable pour ce marchand" });
+      }
+      await storage.updateMerchantCountryGateway(countryId, req.body.gatewayEnabled);
+      return res.json({ success: true, gatewayEnabled: req.body.gatewayEnabled });
+    } catch (err: any) {
+      return res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
   app.post("/api/admin/create-merchant", authMiddleware("admin"), createMerchantRateLimit, async (req, res) => {
     try {
       const { name, email, slug, password, pin, website, totpCode } = req.body;
@@ -3234,7 +3327,7 @@ export async function registerRoutes(
       const { merchantId, country } = req.body;
       if (!merchantId || !country) return res.status(400).json({ message: "Marchand et pays requis" });
       const apiKey = generateSecureApiKey(country);
-      const mc = await storage.addMerchantCountry({ merchantId, country, apiKey, balance: 0, active: true, omnipayEnabled: true });
+      const mc = await storage.addMerchantCountry({ merchantId, country, apiKey, balance: 0, active: true, gatewayEnabled: true });
 
       await storage.createApiLog({
         merchantId,
@@ -3260,7 +3353,7 @@ export async function registerRoutes(
       for (const country of countries) {
         try {
           const apiKey = generateSecureApiKey(country);
-          const mc = await storage.addMerchantCountry({ merchantId, country, apiKey, balance: 0, active: true, omnipayEnabled: true });
+          const mc = await storage.addMerchantCountry({ merchantId, country, apiKey, balance: 0, active: true, gatewayEnabled: true });
           results.push(mc);
         } catch (e: any) {
           errors.push({ country, error: e.message });
@@ -3428,7 +3521,7 @@ export async function registerRoutes(
         payerNumber: t.payerNumber,
         operator: t.operator,
         provider: "westpay",
-        omnipayReference: t.omnipayReference,
+        providerReference: t.providerReference,
         errorMessage: t.errorMessage,
         createdAt: t.createdAt,
       }));
@@ -3437,7 +3530,7 @@ export async function registerRoutes(
         id: `wd-${w.id}`,
         rowId: w.id,
         type: "withdrawal" as const,
-        txId: w.omnipayRef || `WD-${w.id}`,
+        txId: w.providerReference || `WD-${w.id}`,
         amount: w.amount,
         status: w.status,
         country: w.country,
@@ -3446,7 +3539,7 @@ export async function registerRoutes(
         payerNumber: w.phone,
         operator: w.operator,
         provider: "westpay",
-        omnipayReference: w.omnipayRef,
+        providerReference: w.providerReference,
         errorMessage: w.adminNote,
         createdAt: w.createdAt,
       }));
@@ -3464,7 +3557,7 @@ export async function registerRoutes(
         payerNumber: null,
         operator: null,
         provider: null,
-        omnipayReference: null,
+        providerReference: null,
         errorMessage: t.adminNote,
         createdAt: t.createdAt,
       }));
@@ -3472,7 +3565,7 @@ export async function registerRoutes(
       // Seuls les paiements vraiment EN COURS sont affichés ici.
       // Les confirmés et échoués apparaissent déjà via la table transactions → pas de doublon.
       const pendingItems = pendingPays
-        .filter(p => ["omnipay_pending", "lipapap_pending", "submitted", "pending"].includes(p.status))
+        .filter(p => ["gateway_pending", "lipapap_pending", "submitted", "pending"].includes(p.status))
         .map(p => ({
           id: `pp-${p.id}`,
           rowId: p.id,
@@ -3486,7 +3579,7 @@ export async function registerRoutes(
           payerNumber: p.payerPhone,
           operator: p.paymentMethod,
           provider: "westpay",
-          omnipayReference: p.omnipayReference,
+          providerReference: p.providerReference,
           errorMessage: (p as any).errorMessage || null,
           createdAt: p.createdAt,
         }));
@@ -3800,8 +3893,8 @@ export async function registerRoutes(
         errorMessage: t.errorMessage
           ? sanitizePublicPaymentMessage(t.errorMessage)
           : t.errorMessage,
-        omnipayTxId: undefined,
-        omnipayReference: t.omnipayReference ? `WP-${t.id}` : undefined,
+        providerTxId: undefined,
+        providerReference: t.providerReference ? `WP-${t.id}` : undefined,
         gateway: undefined,
       }));
       res.json(sanitized);
@@ -4011,7 +4104,7 @@ export async function registerRoutes(
     const merchantCountry = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
     if (!merchantCountry) throw new Error(`MerchantCountry introuvable pour le paiement #${pending.id}`);
 
-    const txId = `LP-${providerTxId || pending.omnipayReference}`;
+      const txId = `LP-${providerTxId || pending.providerReference}`;
     const credit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
     const client = await financialPool.connect();
     let inserted = false;
@@ -4020,7 +4113,7 @@ export async function registerRoutes(
       const insert = await client.query(
         `INSERT INTO transactions
           (merchant_id, country, tx_id, amount, payer_number, payer_name, status, provider,
-           omnipay_tx_id, operator, omnipay_reference, error_message, provider_fee)
+           provider_tx_id, operator, provider_reference, error_message, provider_fee)
          VALUES ($1,$2,$3,$4,$5,$6,'confirmed','lipapap',$7,$8,$9,NULL,0)
          ON CONFLICT (tx_id) DO NOTHING RETURNING id`,
         [
@@ -4032,7 +4125,7 @@ export async function registerRoutes(
           pending.payerName || null,
           providerTxId || null,
           pending.paymentMethod || null,
-          pending.omnipayReference || null,
+          pending.providerReference || null,
         ],
       );
       inserted = Boolean(insert.rowCount);
@@ -4041,7 +4134,7 @@ export async function registerRoutes(
       }
       await client.query(
         `UPDATE pending_payments SET status = 'lipapap_confirmed'
-         WHERE id = $1 AND status NOT IN ('lipapap_confirmed','omnipay_confirmed','confirmed','lipapap_error','omnipay_error')`,
+         WHERE id = $1 AND status NOT IN ('lipapap_confirmed','gateway_confirmed','confirmed','lipapap_error','gateway_error')`,
         [pending.id],
       );
       await client.query("COMMIT");
@@ -4567,6 +4660,40 @@ export async function registerRoutes(
     }
   });
 
+  // Statut public local uniquement : aucune interrogation de fournisseur.
+  app.get("/api/payment/:paymentId/status", paymentStatusRateLimit, async (req, res) => {
+    try {
+      const id = Number(req.params.paymentId);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "Identifiant de paiement invalide" });
+
+      const pending = await storage.getPendingPaymentById(id);
+      if (!pending) return res.status(404).json({ message: "Paiement introuvable" });
+
+      const status = String(pending.status || "").toLowerCase();
+      if (status === "confirmed" || status === "completed" || status === "paid" || status.endsWith("_confirmed")) {
+        return res.json({ status: "confirmed", paymentId: pending.id });
+      }
+      if (
+        status === "failed" || status === "error" || status.endsWith("_failed") ||
+        status.endsWith("_error") || status === "gateway_stopped"
+      ) {
+        return res.json({ status: "failed", paymentId: pending.id });
+      }
+
+      const gateway = normalizeGatewayName(pending.gateway);
+      const reference = String(pending.providerReference || "");
+      // Les lignes héritées réaffectées à ClaPay ne doivent jamais être
+      // interprétées comme des transactions ClaPay.
+      if (!SUPPORTED_PAYMENT_GATEWAYS.has(gateway) || (gateway === "clapay" && !/^CP/i.test(reference))) {
+        return res.json({ status: "failed", paymentId: pending.id });
+      }
+
+      return res.json({ status: "pending", paymentId: pending.id });
+    } catch (err: any) {
+      return res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
   // ── Signalement d'échec côté frontend (paiement initié mais USSD/OTP raté) ──
   app.post("/api/payment/report-failure", reportFailureRateLimit, async (req, res) => {
     try {
@@ -4581,7 +4708,7 @@ export async function registerRoutes(
       if (!pending) return res.status(404).json({ message: "Paiement introuvable" });
 
       // Ne pas écraser un statut déjà finalisé (confirmed/failed)
-      if (!["pending", "omnipay_pending", "lipapap_pending", "submitted"].includes(pending.status)) {
+      if (!["pending", "gateway_pending", "lipapap_pending", "submitted"].includes(pending.status)) {
         return res.json({ ok: true });
       }
 
@@ -4677,8 +4804,7 @@ export async function registerRoutes(
       );
       const gatewayLower = payinGateway.gateway;
       const useMbiyo = gatewayLower === "mbiyo";
-      const useSendava = gatewayLower === "sendavapay" || gatewayLower === "sendava";
-      const useSeapay = gatewayLower === "seapay";
+            const useSeapay = gatewayLower === "seapay";
       const useClapay = gatewayLower === "clapay";
       const useLipaPap = gatewayLower === "lipapap" || gatewayLower === "lipa";
 
@@ -4813,8 +4939,8 @@ export async function registerRoutes(
             storage.createTransaction({
               merchantId: merchant.id, country, txId: result.trans_id || reference,
               amount: parsedAmount, payerNumber: msisdn || null, payerName: payerName || null,
-              status: "failed", provider: "lipapap", omnipayTxId: result.trans_id || null,
-              operator: paymentMethod || networkCode || null, omnipayReference: reference,
+              status: "failed", provider: "lipapap", providerTxId: result.trans_id || null,
+              operator: paymentMethod || networkCode || null, providerReference: reference,
               errorMessage: errorMsg, providerFee: 0,
             }).catch(() => {});
             return res.status(400).json({ message: "Paiement non abouti. Veuillez reessayer." });
@@ -4834,9 +4960,9 @@ export async function registerRoutes(
             txId: null,
             status: "lipapap_pending",
             redirectUrl: redirectUrl || null,
-            omnipayReference: reference,
-              omnipayTxId: providerReference,
-            omnipayPaymentUrl: result.redirect_url || null,
+            providerReference: reference,
+              providerTxId: providerReference,
+            providerPaymentUrl: result.redirect_url || null,
             gateway: "lipapap",
             expiresAt,
           });
@@ -4852,7 +4978,7 @@ export async function registerRoutes(
             gateway: "lipapap",
             provider: "LipaPap",
             reference,
-            omnipayReference: reference,
+            providerReference: reference,
             paymentUrl: result.redirect_url || null,
             polling: true,
             fees: 0,
@@ -4872,226 +4998,8 @@ export async function registerRoutes(
           }).catch(() => {});
           return res.status(502).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
         }
-      } else if (useSendava) {
-        const sendavaApiKey = await getSendavaApiKey();
-        if (!sendavaApiKey) {
-          console.error(
-            `[PAYMENT CONFIG] Clé absente pour gateway=sendavapay pays=${country} opérateur=${paymentMethod}`,
-          );
-          notifyAdminPaymentError({
-            merchantName: merchant.name,
-            merchantId: merchant.id,
-            country,
-            amount: parsedAmount,
-            payerNumber: msisdn,
-            operator: paymentMethod,
-            gateway: "sendavapay",
-            stage: "lecture de la clé API",
-            error: "SENDAVA_API_KEY/sendavapay_api_key absent ou vide",
-          }).catch(() => {});
-          return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
-        }
-
-        const reference = sendavaGenerateRef();
-        const countryCode = SENDAVAPAY_COUNTRY_CODES[country] || "";
-        const currency = SENDAVAPAY_CURRENCY_MAP[countryCode] || "XOF";
-        const webhookUrl = `${callbackBaseUrl}/api/sendavapay/callback`;
-
-        try {
-          // Étape 1 (backend) : créer le paiement → obtenir paymentToken + reference
-          const returnRef = reference;
-          const sendavaReturnUrl = redirectUrl
-            ? `${BANK1_CHECKOUT_URL}/api/payment/sendavapay/return?ref=${encodeURIComponent(returnRef)}&redirect=${encodeURIComponent(redirectUrl)}`
-            : `${BANK1_CHECKOUT_URL}/api/payment/sendavapay/return?ref=${encodeURIComponent(returnRef)}`;
-          const sendavaResult = await sendavaCreatePayment(sendavaApiKey, {
-            amount: parsedAmount,
-            currency,
-            payerCountry: countryCode,
-            customerName: payerName || undefined,
-            customerPhone: msisdn ? ("+" + msisdn.replace(/^\+/, "")) : undefined,
-            description: `Paiement WestPay - ${merchantSlug}`,
-            webhookUrl,
-            externalReference: reference,
-            metadata: { merchantSlug, country, returnUrl: sendavaReturnUrl },
-          });
-
-          if (!sendavaResult.success || !sendavaResult.data?.paymentToken) {
-            const rawError = sendavaResult.message || (sendavaResult as any).error || "Erreur de paiement. Veuillez reessayer.";
-            const userMsg = "Service de paiement temporairement indisponible. Veuillez reessayer dans quelques instants.";
-            console.error(`[SENDAVAPAY] Erreur interne API: ${rawError}`);
-            notifyAdminPaymentError({
-              merchantName: merchant.name,
-              merchantId: merchant.id,
-              country,
-              amount: parsedAmount,
-              payerNumber: msisdn,
-              operator: paymentMethod,
-              gateway: "sendavapay",
-              stage: "réponse API de création du paiement",
-              error: rawError,
-            }).catch(() => {});
-            storage.createTransaction({
-              merchantId: merchant.id,
-              country,
-              txId: reference,
-              amount: parsedAmount,
-              payerNumber: msisdn || null,
-              payerName: payerName || null,
-              status: "failed",
-              provider: "sendavapay",
-              omnipayTxId: null,
-              operator: paymentMethod || null,
-              omnipayReference: reference,
-              errorMessage: rawError,
-            }).catch(() => {});
-            return res.status(400).json({ message: userMsg });
-          }
-
-          const spReference = sendavaResult.data.reference;
-          const paymentToken = sendavaResult.data.paymentToken;
-          const payerPhoneE164 = msisdn.startsWith("+") ? msisdn : `+${msisdn}`;
-
-          // ── Étape 2 (serveur) : résoudre l'opérateur ────────────────────
-          // Résolution serveur — identique à la logique du frontend (supprimée).
-          const normStr = (s: string) => s.toLowerCase().replace(/[\s\-_]+/g, "");
-          const resolveOpId = (ops: any[], name: string): string | null => {
-            const low = name.toLowerCase().trim();
-            const normLow = normStr(low);
-            const exact = ops.find((o: any) => normStr(o.name) === normLow);
-            if (exact) return exact.id;
-            const contained = ops.find((o: any) => {
-              const on = normStr(o.name);
-              return normLow.includes(on) || on.includes(normLow);
-            });
-            if (contained) return contained.id;
-            const BRAND_MAP: Record<string, string> = {
-              "tmoney": "tmoney", "moov money": "moov", "moov": "moov",
-              "mtn mobile money": "mtn", "mtn money": "mtn", "mtn": "mtn",
-              "orange money": "orange", "orange": "orange",
-              "wave": "wave", "mixx by yas": "mixx", "mixx": "mixx",
-              "free money": "free", "free": "free",
-              "coris money": "coris", "coris": "coris",
-              "airtel money": "airtel", "airtel": "airtel",
-              "m-pesa": "mpesa", "mpesa": "mpesa",
-              "vodacom": "vodacom",
-              "africell money": "africell", "africell": "africell",
-              "celtiis": "celtiis",
-            };
-            const brand = BRAND_MAP[low];
-            if (brand) {
-              const branded = ops.find((o: any) => normStr(o.name).includes(brand) || normStr(o.id ?? "").includes(brand));
-              if (branded) return branded.id;
-            }
-            for (const kw of ["mtn","orange","moov","wave","mixx","airtel","vodacom","mpesa","tmoney","coris","free","africell","celtiis"]) {
-              if (normLow.includes(kw)) {
-                const found = ops.find((o: any) => normStr(o.name).includes(kw) || normStr(o.id ?? "").includes(kw));
-                if (found) return found.id;
-              }
-            }
-            return ops[0]?.id ?? null;
-          };
-
-          let operatorId: string | null = null;
-          try {
-            const opsResult = await sendavaGetOperators(sendavaApiKey, countryCode);
-            const ops: any[] = Array.isArray(opsResult.data) ? opsResult.data : [];
-            operatorId = resolveOpId(ops, paymentMethod);
-            console.log(`[SENDAVAPAY] Liste des opérateurs chargée (${ops.length})`);
-          } catch (opsErr: any) {
-            console.error("[SENDAVAPAY] Erreur récupération opérateurs:", opsErr.message);
-            // Continuer sans operatorId — le push pourrait quand même fonctionner
-          }
-
-          // Generate a high-entropy, expiry-bound proxy token for payer-facing proxy routes.
-          // Stored in omnipayTxId so the DB lookup is O(1) without a schema change.
-          const spProxyToken = crypto.randomBytes(32).toString("hex");
-
-          // Stocker le paiement en attente
-          const pending = await storage.createPendingPayment({
-            merchantId: merchant.id,
-            country,
-            amount: parsedAmount,
-            payerPhone: payerPhone || null,
-            payerName: payerName || null,
-            paymentMethod,
-            txId: null,
-            status: "omnipay_pending",
-            redirectUrl: redirectUrl || null,
-            omnipayReference: spReference,
-            omnipayTxId: spProxyToken,
-            omnipayPaymentUrl: null,
-            gateway: "sendavapay",
-            expiresAt,
-          });
-
-          await storage.createApiLog({
-            merchantId: merchant.id,
-            action: "sendavapay_payment_created",
-            ip: req.ip || "",
-            description: `Paiement SendavaPay créé - Ref: ${spReference} - Montant: ${parsedAmount} ${currency} - Opérateur: ${operatorId ?? "inconnu"}`,
-          });
-
-          // ── Étape 3 (serveur) : déclencher le push USSD ─────────────────
-          if (!operatorId) {
-            // Pas d'opérateur trouvé → polling, le webhook confirmera
-            console.warn("[SENDAVAPAY] Opérateur introuvable — passage en polling");
-            return res.json({ success: true, paymentId: pending.id, sendavapay: true, gateway: "sendavapay", provider: "SendavaPay", reference: spReference, omnipayReference: spReference, proxyToken: spProxyToken, polling: true, fees: 0 });
-          }
-
-          try {
-            const initResult = await sendavaInitiatePayment(sendavaApiKey, {
-              paymentToken,
-              payerName: payerName || "Client",
-              payerPhone: payerPhoneE164,
-              payerCountry: countryCode,
-              operatorId,
-            });
-            console.log(`[SENDAVAPAY] initiate-payment: success=${initResult.success} code=${initResult.code ?? "-"} redirect=${!!initResult.requiresRedirect} otp=${!!initResult.requiresOtp}`);
-
-            if (!initResult.success) {
-              // SERVER_ERROR ou PAYMENT_IN_PROGRESS → polling (le webhook arrivera)
-              if (initResult.code === "SERVER_ERROR" || initResult.code === "PAYMENT_IN_PROGRESS") {
-                return res.json({ success: true, paymentId: pending.id, sendavapay: true, gateway: "sendavapay", provider: "SendavaPay", reference: spReference, omnipayReference: spReference, proxyToken: spProxyToken, polling: true, fees: 0 });
-              }
-              const errMsg = initResult.error || initResult.message || "Erreur initiation paiement";
-              console.error(`[SENDAVAPAY] initiate-payment erreur: ${errMsg}`);
-              return res.status(400).json({ message: errMsg });
-            }
-
-            if (initResult.requiresRedirect && initResult.redirectUrl) {
-              return res.json({ success: true, paymentId: pending.id, sendavapay: true, gateway: "sendavapay", provider: "SendavaPay", reference: spReference, omnipayReference: spReference, proxyToken: spProxyToken, paymentUrl: initResult.redirectUrl, fees: 0 });
-            }
-            if (initResult.requiresOtp) {
-              // Store the OTP token server-side so the proxy submit-otp route can use it
-              // without accepting it from the (untrusted) client.
-              if (initResult.otpToken) {
-                await storage.updatePendingPaymentOtpToken(pending.id, initResult.otpToken);
-              }
-              return res.json({ success: true, paymentId: pending.id, sendavapay: true, gateway: "sendavapay", provider: "SendavaPay", reference: spReference, omnipayReference: spReference, proxyToken: spProxyToken, requiresOtp: true, fees: 0 });
-            }
-            // Succès normal : push USSD envoyé → polling
-            return res.json({ success: true, paymentId: pending.id, sendavapay: true, gateway: "sendavapay", provider: "SendavaPay", reference: spReference, omnipayReference: spReference, proxyToken: spProxyToken, polling: true, fees: 0 });
-          } catch (initErr: any) {
-            console.error("[SENDAVAPAY] Erreur initiation paiement:", initErr.message);
-            // Timeout ou erreur réseau → polling quand même (le webhook peut confirmer)
-            return res.json({ success: true, paymentId: pending.id, sendavapay: true, omnipayReference: spReference, proxyToken: spProxyToken, polling: true, fees: 0 });
-          }
-        } catch (sendavaErr: any) {
-          console.error("[SENDAVAPAY] Erreur création paiement:", sendavaErr.message);
-          notifyAdminPaymentError({
-            merchantName: merchant.name,
-            merchantId: merchant.id,
-            country,
-            amount: parsedAmount,
-            payerNumber: msisdn,
-            operator: paymentMethod,
-            gateway: "sendavapay",
-            stage: "appel API de création du paiement",
-            error: sendavaErr,
-          }).catch(() => {});
-          return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
-        }
-      } else if (useMbiyo) {
+      } else
+      if (useMbiyo) {
         const mbiyoApiKey = await getMbiyoApiKey();
         if (!mbiyoApiKey) {
           console.error(
@@ -5116,7 +5024,7 @@ export async function registerRoutes(
         const currency = mbiyoCurrency(country);
         const network = operatorRecord?.mbiyoCode || mbiyoNetwork(operator || paymentMethod);
         const callbackUrl = `${callbackBaseUrl}/api/mbiyo/callback`;
-        const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
+        const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&payment_status=complete`;
 
         try {
           const mbiyoResult = await mbiyoInitiatePayin({
@@ -5153,9 +5061,9 @@ export async function registerRoutes(
               payerName: payerName || null,
               status: "failed",
               provider: "mbiyo",
-              omnipayTxId: null,
+              providerTxId: null,
               operator: operator || network || null,
-              omnipayReference: reference,
+              providerReference: reference,
               errorMessage: errorMsg,
             }).catch(() => {});
             return res.status(400).json({ message: errorMsg });
@@ -5170,11 +5078,11 @@ export async function registerRoutes(
             payerName: payerName || null,
             paymentMethod,
             txId: null,
-            status: "omnipay_pending",
+            status: "gateway_pending",
             redirectUrl: redirectUrl || null,
-            omnipayReference: reference,
-            omnipayTxId: mbiyoResult.data.transaction_id,
-            omnipayPaymentUrl: paymentUrl,
+            providerReference: reference,
+            providerTxId: mbiyoResult.data.transaction_id,
+            providerPaymentUrl: paymentUrl,
             gateway: "mbiyo",
             expiresAt,
           });
@@ -5192,7 +5100,7 @@ export async function registerRoutes(
             gateway: "mbiyo",
             provider: "MbiyoPay",
             reference,
-            omnipayReference: reference,
+            providerReference: reference,
             paymentUrl: paymentUrl || (network === "wave" ? returnUrl : null),
             fees: mbiyoResult.data.fee || 0,
           });
@@ -5234,8 +5142,8 @@ export async function registerRoutes(
         const currency = SEAPAY_CURRENCY_COUNTRY[country] || "USD";
         const callbackUrl = `${callbackBaseUrl}/api/seapay/callback`;
         const returnUrl = redirectUrl
-          ? `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`
-          : `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
+          ? `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&payment_status=complete`
+          : `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&payment_status=complete`;
         const channelCode = operatorRecord?.seapayCode || undefined;
 
         try {
@@ -5269,8 +5177,8 @@ export async function registerRoutes(
               txId: reference, amount: parsedAmount,
               payerNumber: msisdn || null, payerName: payerName || null,
               status: "failed", provider: "seapay",
-              omnipayTxId: null, operator: paymentMethod || null,
-              omnipayReference: reference, errorMessage: errorMsg,
+              providerTxId: null, operator: paymentMethod || null,
+              providerReference: reference, errorMessage: errorMsg,
             }).catch(() => {});
             return res.status(400).json({ message: "Paiement non abouti. Veuillez reessayer." });
           }
@@ -5283,11 +5191,11 @@ export async function registerRoutes(
             payerName: payerName || null,
             paymentMethod,
             txId: null,
-            status: "omnipay_pending",
+            status: "gateway_pending",
             redirectUrl: redirectUrl || null,
-            omnipayReference: reference,
-            omnipayTxId: spResult.data.trade_no || null,
-            omnipayPaymentUrl: paymentUrl,
+            providerReference: reference,
+            providerTxId: spResult.data.trade_no || null,
+            providerPaymentUrl: paymentUrl,
             gateway: "seapay",
             expiresAt,
           });
@@ -5306,7 +5214,7 @@ export async function registerRoutes(
             gateway: "seapay",
             provider: "SeaPay",
             reference,
-            omnipayReference: reference,
+            providerReference: reference,
             paymentUrl,
             fees: 0,
           });
@@ -5409,8 +5317,8 @@ export async function registerRoutes(
               txId: reference, amount: parsedAmount,
               payerNumber: msisdn || null, payerName: payerName || null,
               status: "failed", provider: "clapay",
-              omnipayTxId: null, operator: paymentMethod || null,
-              omnipayReference: reference, errorMessage: errorMsg,
+              providerTxId: null, operator: paymentMethod || null,
+              providerReference: reference, errorMessage: errorMsg,
             }).catch(() => {});
             return res.status(400).json({ message: "Paiement non abouti. Veuillez reessayer." });
           }
@@ -5425,11 +5333,11 @@ export async function registerRoutes(
             payerName: payerName || null,
             paymentMethod,
             txId: null,
-            status: "omnipay_pending",
+            status: "gateway_pending",
             redirectUrl: redirectUrl || null,
-            omnipayReference: reference,
-            omnipayTxId: cpTxId,
-            omnipayPaymentUrl: paymentUrl,
+            providerReference: reference,
+            providerTxId: cpTxId,
+            providerPaymentUrl: paymentUrl,
             gateway: "clapay",
             expiresAt,
           });
@@ -5448,7 +5356,7 @@ export async function registerRoutes(
             gateway: "clapay",
             provider: "ClaPay",
             reference,
-            omnipayReference: reference,
+            providerReference: reference,
             paymentUrl,
             fees: 0,
           });
@@ -5468,4630 +5376,8 @@ export async function registerRoutes(
           return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
         }
       } else {
-        const omnipayApiKey = await getOmnipayApiKey();
-        if (!omnipayApiKey) {
-          console.error(
-            `[PAYMENT CONFIG] Clé absente pour gateway=omnipay pays=${country} opérateur=${paymentMethod}`,
-          );
-          notifyAdminPaymentError({
-            merchantName: merchant.name,
-            merchantId: merchant.id,
-            country,
-            amount: parsedAmount,
-            payerNumber: msisdn,
-            operator: paymentMethod,
-            gateway: "omnipay",
-            stage: "lecture de la clé API",
-            error: "OMNIPAY_API_KEY/omnipay_api_key absent ou vide",
-          }).catch(() => {});
-          return res.status(500).json({ message: "Systeme de paiement non configure. Contactez l'administrateur." });
-        }
-
-        const reference = omnipayGenerateRef();
-        const nameParts = (payerName || "Client WestPay").split(" ");
-        const fName = firstName || nameParts[0] || "Client";
-        const lName = lastName || nameParts.slice(1).join(" ") || "WestPay";
-        const omnipayOperator = toOmnipayOperatorCode(operator) || (paymentMethod.toLowerCase().includes("wave") ? "wave" : paymentMethod.toLowerCase().includes("mixx") || paymentMethod.toLowerCase().includes("yas") ? "mixx" : undefined);
-        const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
-        const autoOtp = otp || String(Math.floor(1000 + Math.random() * 9000));
-
-        try {
-          const omnipayResult = await omnipayInitiatePayment({
-            apikey: omnipayApiKey,
-            msisdn,
-            amount: parsedAmount,
-            reference,
-            first_name: fName,
-            last_name: lName,
-            otp: autoOtp,
-            operator: omnipayOperator,
-            return_url: omnipayOperator === "wave" ? returnUrl : undefined,
-          });
-
-          if (omnipayResult.success !== 1) {
-            const errorMsg = OMNIPAY_ERRORS[omnipayResult.code || 0] || omnipayResult.message || "Erreur de paiement";
-            notifyAdminPaymentError({
-              merchantName: merchant.name,
-              merchantId: merchant.id,
-              country,
-              amount: parsedAmount,
-              payerNumber: msisdn,
-              operator: paymentMethod,
-              gateway: "omnipay",
-              stage: "réponse API d'initiation du paiement",
-              error: `Code ${omnipayResult.code ?? "inconnu"} — ${errorMsg}`,
-            }).catch(() => {});
-            storage.createTransaction({
-              merchantId: merchant.id,
-              country,
-              txId: reference,
-              amount: parsedAmount,
-              payerNumber: msisdn || null,
-              payerName: payerName || null,
-              status: "failed",
-              provider: "omnipay",
-              omnipayTxId: null,
-              operator: operator || omnipayOperator || null,
-              omnipayReference: reference,
-              errorMessage: errorMsg,
-            }).catch(() => {});
-            return res.status(400).json({ message: errorMsg, paymentError: true, code: omnipayResult.code });
-          }
-
-          const pending = await storage.createPendingPayment({
-            merchantId: merchant.id,
-            country,
-            amount: parsedAmount,
-            payerPhone: payerPhone || null,
-            payerName: payerName || null,
-            paymentMethod,
-            txId: null,
-            status: "omnipay_pending",
-            redirectUrl: redirectUrl || null,
-            omnipayReference: reference,
-            omnipayTxId: omnipayResult.id ? String(omnipayResult.id) : null,
-            omnipayPaymentUrl: omnipayResult.payment_url || null,
-            gateway: "omnipay",
-            expiresAt,
-          });
-
-          await storage.createApiLog({
-            merchantId: merchant.id,
-            action: "omnipay_payment_initiated",
-            ip: req.ip || "",
-            description: `Paiement OmniPay initie - Ref: ${reference} - Montant: ${parsedAmount} - Tel: ${msisdn}`,
-          });
-
-          res.json({
-            success: true,
-            paymentId: pending.id,
-            gateway: "omnipay",
-            provider: "OmniPay",
-            reference,
-            omnipayReference: reference,
-            paymentUrl: omnipayResult.payment_url || null,
-            fees: omnipayResult.fees || 0,
-          });
-        } catch (omnipayErr: any) {
-          console.error("[OMNIPAY] Erreur initiation:", omnipayErr.message);
-          notifyAdminPaymentError({
-            merchantName: merchant.name,
-            merchantId: merchant.id,
-            country,
-            amount: parsedAmount,
-            payerNumber: msisdn,
-            operator: paymentMethod,
-            gateway: "omnipay",
-            stage: "appel API d'initiation du paiement",
-            error: omnipayErr,
-          }).catch(() => {});
-          return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
-        }
+        return res.status(400).json({ success: false, message: "Passerelle de paiement non disponible pour ce pays." });
       }
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.post("/api/payment/validate", validateRateLimit, async (req, res) => {
-    try {
-      const { paymentId, txId } = req.body;
-      if (!paymentId || !txId) {
-        return res.status(400).json({ success: false, message: "ID de paiement et ID de transaction requis" });
-      }
-
-      // Per-paymentId attempt limiter (defeats distributed per-IP rate limit bypass)
-      const pidKey = String(parseInt(paymentId) || 0);
-      const now = Date.now();
-      const pidEntry = validatePaymentIdStore.get(pidKey) || { count: 0, firstReq: now };
-      if (now - pidEntry.firstReq > VALIDATE_PER_ID_WINDOW) { pidEntry.count = 0; pidEntry.firstReq = now; }
-      pidEntry.count++;
-      validatePaymentIdStore.set(pidKey, pidEntry);
-      if (pidEntry.count > VALIDATE_PER_ID_MAX) {
-        return res.status(429).json({ success: false, message: "Trop de tentatives pour ce paiement. Réessayez plus tard." });
-      }
-
-      const pending = await storage.getPendingPaymentById(parseInt(paymentId));
-      if (!pending) {
-        return res.status(404).json({ success: false, message: "Paiement introuvable ou expire" });
-      }
-
-      if (pending.status !== "pending") {
-        return res.status(400).json({ success: false, message: "Ce paiement a deja ete traite" });
-      }
-
-      if (new Date(pending.expiresAt) < new Date()) {
-        await storage.updatePendingPaymentStatus(pending.id, "expired");
-        return res.status(400).json({ success: false, message: "Ce paiement a expire. Veuillez recommencer." });
-      }
-
-      const encryptedTxId = crypto.createHash("sha256").update(txId.trim()).digest("hex").substring(0, 16).toUpperCase();
-
-      await storage.updatePendingPaymentTxId(pending.id, txId.trim());
-      await storage.updatePendingPaymentStatus(pending.id, "submitted");
-
-      const merchant = await storage.getMerchantById(pending.merchantId);
-
-      await storage.createApiLog({
-        merchantId: pending.merchantId,
-        action: "payment_submitted",
-        ip: req.ip || "",
-        description: `Paiement #${pending.id} soumis - TX: ${txId.trim()} - Montant: ${pending.amount} F CFA - ${pending.paymentMethod}`,
-      });
-
-      res.json({
-        success: true,
-        message: "Votre paiement a ete enregistre avec succes.",
-        redirectUrl: pending.redirectUrl,
-        amount: pending.amount,
-        txId: txId.trim(),
-      });
-    } catch (err: any) {
-      res.status(500).json({ success: false, message: err.message });
-    }
-  });
-
-  // ─── Récupérer un paiement en attente par référence OmniPay (public) ──────
-
-  app.get("/api/payment/by-ref/:reference", paymentByRefRateLimit, async (req, res) => {
-    try {
-      const { reference } = req.params;
-      const pending = await storage.getPendingPaymentByOmnipayReference(reference);
-      if (!pending) return res.status(404).json({ message: "Paiement introuvable" });
-      const merchant = await storage.getMerchantById(pending.merchantId);
-      // merchantSlug omitted — not needed post-payment and reduces data exposure
-      res.json({
-        paymentId: pending.id,
-        merchantName: merchant?.name || "",
-        amount: pending.amount,
-        country: pending.country,
-        redirectUrl: pending.redirectUrl || null,
-        status: providerAwarePendingStatus(pending.gateway, pending.status),
-        gateway: pending.gateway,
-        omnipayReference: pending.omnipayReference,
-      });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // ==================== VERIFY TRANSACTION (public) ====================
-  app.post("/api/verify-transaction", verifyTxRateLimit, async (req, res) => {
-    try {
-      const { txId, merchantSlug, payerPhone, amount } = req.body;
-      if (!txId || !merchantSlug) {
-        return res.status(400).json({ verified: false, message: "ID de transaction et marchand requis" });
-      }
-
-      const merchant = await storage.getMerchantBySlug(merchantSlug);
-      if (!merchant) {
-        return res.status(404).json({ verified: false, message: "Marchand introuvable" });
-      }
-
-      const transaction = await storage.getTransactionByTxId(txId);
-      if (!transaction) {
-        return res.json({
-          verified: false,
-          message: "Transaction non trouvee. Si vous venez d'envoyer le paiement, veuillez patienter quelques instants et reessayer. Le traitement peut prendre jusqu'a 2 minutes.",
-        });
-      }
-
-      if (transaction.merchantId !== merchant.id) {
-        return res.json({
-          verified: false,
-          message: "Cette transaction n'appartient pas a ce marchand.",
-        });
-      }
-
-      if (amount && typeof amount === "number" && transaction.amount !== amount) {
-        return res.json({
-          verified: false,
-          message: `Le montant de la transaction (${transaction.amount} F CFA) ne correspond pas au montant attendu (${amount} F CFA).`,
-        });
-      }
-
-      const logDescription = payerPhone
-        ? `Transaction ${txId} verifiee - Montant: ${transaction.amount} F CFA - Numero: ${payerPhone}`
-        : `Transaction ${txId} verifiee - Montant: ${transaction.amount} F CFA`;
-
-      await storage.createApiLog({
-        merchantId: merchant.id,
-        action: "transaction_verified",
-        ip: req.ip || "",
-        description: logDescription,
-      });
-
-      res.json({
-        verified: true,
-        transaction: {
-          txId: transaction.txId,
-          amount: transaction.amount,
-          country: transaction.country,
-          status: transaction.status,
-          createdAt: transaction.createdAt,
-        },
-        message: "Transaction verifiee avec succes. Le montant a ete credite sur le compte du marchand.",
-      });
-    } catch (err: any) {
-      res.status(500).json({ verified: false, message: err.message });
-    }
-  });
-
-  setInterval(async () => {
-    try {
-      const cleaned = await storage.cleanupExpiredPayments();
-      if (cleaned > 0) console.log(`[Cleanup] ${cleaned} paiement(s) expire(s) supprime(s)`);
-    } catch (err) {}
-  }, 60 * 1000);
-
-  // ==================== OMNIPAY ROUTES ====================
-
-  app.post("/api/omnipay/callback", async (req, res) => {
-    try {
-      const payload = req.body as OmniPayCallbackPayload;
-      console.log(`[OMNIPAY CALLBACK] Recu: action=${payload.action} ref=${payload.reference} status=${payload.status}`);
-
-      if (!payload.reference) {
-        return res.status(400).json({ message: "Reference manquante" });
-      }
-
-      const callbackKey = await getOmnipayCallbackKey();
-      // SÉCURITÉ : rejet fail-closed — si la clé n'est pas configurée, on refuse tout webhook
-      if (!callbackKey) {
-        console.error("[OMNIPAY CALLBACK] SÉCURITÉ: Clé de callback non configurée — webhook rejeté. Configurez omnipay_callback_key dans les paramètres admin.");
-        return res.status(503).json({ message: "Webhook non sécurisé — configurez la clé de callback OmniPay dans les paramètres admin" });
-      }
-      if (!payload.signature) {
-        console.error("[OMNIPAY CALLBACK] Signature manquante");
-        return res.status(401).json({ message: "Signature manquante" });
-      }
-      const isValid = omnipayVerifySignature(callbackKey, payload);
-      if (!isValid) {
-        console.error("[OMNIPAY CALLBACK] Signature invalide");
-        return res.status(401).json({ message: "Signature invalide" });
-      }
-
-      const pending = await storage.getPendingPaymentByOmnipayReference(payload.reference);
-      if (!pending) {
-        const withdrawal = await storage.getWithdrawalByOmnipayRef(payload.reference);
-        if (withdrawal) {
-          console.log(`[OMNIPAY CALLBACK] Retrait ref=${payload.reference} statut OmniPay=${payload.status} statut local=${withdrawal.status}`);
-
-          if (withdrawal.status === "approved" || withdrawal.status === "rejected" || withdrawal.status === "failed") {
-            return res.json({ status: "already_processed" });
-          }
-
-          const wdStatusNum = parseInt(payload.status);
-          const wdMerchant = await storage.getMerchantById(withdrawal.merchantId);
-
-          if (wdStatusNum === OMNIPAY_STATUS.SUCCESS) {
-            const wdFees = payload.fees ? parseInt(payload.fees) : undefined;
-            await storage.updateWithdrawalStatus(
-              withdrawal.id,
-              "approved",
-              `Retrait confirmé${wdFees !== undefined ? ` - Frais: ${wdFees} F` : ""}`,
-              payload.reference,
-              wdFees,
-              wdFees,
-            );
-            notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees || 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: withdrawal.withdrawalMode }).catch(() => {});
-            notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees || 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
-            console.log(`[OMNIPAY CALLBACK] Retrait #${withdrawal.id} approuvé - ref=${payload.reference}`);
-            return res.json({ status: "approved" });
-
-          } else if (wdStatusNum === OMNIPAY_STATUS.FAILED) {
-            await storage.updateWithdrawalStatus(
-              withdrawal.id,
-              "failed",
-              `Retrait échoué: ${payload.message || "Echec opérateur"}`,
-              payload.reference,
-            );
-            await storage.incrementMerchantCountryBalance(withdrawal.merchantCountryId, withdrawal.amount);
-            notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed", mode: withdrawal.withdrawalMode }).catch(() => {});
-            notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed" }).catch(() => {});
-            console.log(`[OMNIPAY CALLBACK] Retrait #${withdrawal.id} échoué - ref=${payload.reference} - ${payload.message}`);
-            return res.json({ status: "failed" });
-
-          } else {
-            console.log(`[OMNIPAY CALLBACK] Retrait #${withdrawal.id} toujours en cours (OmniPay status=${wdStatusNum})`);
-            return res.json({ status: "pending", providerStatus: wdStatusNum });
-          }
-        }
-        const txByRef = await storage.getTransactionByTxId(payload.reference);
-        if (txByRef) {
-          console.log(`[OMNIPAY CALLBACK] Transfert connu ref=${payload.reference}`);
-          return res.json({ status: "acknowledged" });
-        }
-        console.log(`[OMNIPAY CALLBACK] Reference inconnue: ${payload.reference}`);
-        return res.json({ status: "unknown" });
-      }
-
-      if (pending.status === "confirmed" || pending.status === "omnipay_confirmed") {
-        return res.json({ status: "already_processed" });
-      }
-
-      const statusNum = parseInt(payload.status);
-
-      if (statusNum === OMNIPAY_STATUS.SUCCESS) {
-        const merchant = await storage.getMerchantById(pending.merchantId);
-        const merchantCountry = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
-
-        if (!merchantCountry) {
-          console.error(`[OMNIPAY CALLBACK] Pays ${pending.country} introuvable pour marchand #${pending.merchantId}`);
-          await storage.updatePendingPaymentStatus(pending.id, "omnipay_error");
-          return res.status(500).json({ message: "Configuration marchand/pays introuvable" });
-        }
-
-        // ── IDEMPOTENCE ATOMIQUE : Compare-And-Swap sur le statut ─────────────
-        // On ne passe à "omnipay_confirmed" QUE si le statut est encore "pending".
-        // Si deux callbacks arrivent simultanément, un seul UPDATE réussira.
-        const casResult = await financialPool.query(
-          `UPDATE pending_payments SET status = 'omnipay_confirmed'
-           WHERE id = $1 AND status NOT IN ('confirmed','omnipay_confirmed','omnipay_error')
-           RETURNING id`,
-          [pending.id]
-        );
-        if (!casResult.rowCount || casResult.rowCount === 0) {
-          console.log(`[OMNIPAY CALLBACK] Déjà traité (CAS) ref=${payload.reference}`);
-          return res.json({ status: "already_processed" });
-        }
-
-        {
-          const txId = `OP-${payload.id || payload.reference}`;
-
-          const existingTx = await storage.getTransactionByTxId(txId);
-          if (!existingTx) {
-            const payerFullName = [payload.first_name, payload.last_name].filter(Boolean).join(" ") || pending.payerName || null;
-            const merchantCredit1 = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
-            await storage.createTransaction({
-              merchantId: pending.merchantId,
-              country: pending.country,
-              txId,
-              amount: pending.amount,
-              payerNumber: payload.msisdn || pending.payerPhone || null,
-              payerName: payerFullName,
-              status: "confirmed",
-              provider: "omnipay",
-              omnipayTxId: payload.id || null,
-              omnipayReference: pending.omnipayReference || payload.reference || null,
-              providerFee: payload.fees != null ? parseInt(String(payload.fees)) || 0 : 0,
-            });
-
-            await storage.incrementMerchantCountryBalance(merchantCountry.id, merchantCredit1);
-
-            console.log(`[OMNIPAY CALLBACK] Paiement confirme: ${txId} - Brut: ${pending.amount} - Net marchand: ${merchantCredit1} - Marchand #${pending.merchantId}`);
-
-            await storage.createApiLog({
-              merchantId: pending.merchantId,
-              action: "omnipay_payment_confirmed",
-              ip: req.ip || "",
-              description: `Paiement OmniPay confirme - Ref: ${payload.reference} - TX: ${txId} - Montant: ${pending.amount} - Frais: ${payload.fees || 0}`,
-            });
-
-            if (merchant?.webhookUrl) {
-              notifyConfirmedPaymentWebhook(pending.merchantId, {
-                event: "payment.confirmed",
-                txId,
-                amount: pending.amount,
-                currency: payload.currency || "XOF",
-                payer: payload.msisdn || pending.payerPhone || "",
-                country: pending.country,
-                merchantSlug: merchant.slug,
-                provider: "omnipay",
-                omnipayReference: payload.reference,
-                timestamp: new Date().toISOString(),
-              }).catch(err => console.error("[WEBHOOK] Erreur async:", err));
-            }
-
-            notifyMerchantPayment(pending.merchantId, {
-              txId,
-              amount: pending.amount,
-              payerNumber: payload.msisdn || pending.payerPhone,
-              country: pending.country,
-              provider: "omnipay",
-            }).catch(() => {});
-
-            notifyAdminPayment({
-              txId,
-              merchantName: merchant?.name || `#${pending.merchantId}`,
-              payerNumber: payload.msisdn || pending.payerPhone,
-              country: pending.country,
-              amount: pending.amount,
-              provider: "omnipay",
-              status: "confirmed",
-            }).catch(() => {});
-          }
-        }
-
-        res.json({ status: "confirmed" });
-      } else if (statusNum === OMNIPAY_STATUS.FAILED) {
-        await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
-
-        const failedRef = payload.reference || pending.omnipayReference || `FAIL-${Date.now()}-${pending.id}`;
-        const failErrorMsg = payload.message || "Paiement refusé par l'opérateur";
-        storage.createTransaction({
-          merchantId: pending.merchantId,
-          country: pending.country,
-          txId: failedRef,
-          amount: pending.amount,
-          payerNumber: payload.msisdn || pending.payerPhone || null,
-          payerName: pending.payerName || null,
-          status: "failed",
-          provider: "omnipay",
-          omnipayTxId: payload.id ? String(payload.id) : null,
-          operator: null,
-          omnipayReference: failedRef,
-          errorMessage: failErrorMsg,
-        }).catch(() => {});
-
-        await storage.createApiLog({
-          merchantId: pending.merchantId,
-          action: "omnipay_payment_failed",
-          ip: req.ip || "",
-          description: `Paiement OmniPay echoue - Ref: ${payload.reference} - Message: ${payload.message}`,
-        });
-
-        console.log(`[OMNIPAY CALLBACK] Paiement echoue: ${payload.reference} - ${payload.message}`);
-        res.json({ status: "failed" });
-      } else {
-        await storage.updatePendingPaymentStatus(pending.id, `omnipay_status_${statusNum}`);
-        res.json({ status: "pending", providerStatus: statusNum });
-      }
-    } catch (err: any) {
-      console.error("[OMNIPAY CALLBACK] Erreur:", err.message);
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.get("/api/omnipay/payment/:paymentId/status", omnipayStatusRateLimit, async (req, res) => {
-    try {
-      const pending = await storage.getPendingPaymentById(parseInt(req.params.paymentId));
-      if (!pending) return res.status(404).json({ message: "Paiement non trouve" });
-
-      const providerStatus = providerAwarePendingStatus(pending.gateway, pending.status);
-      if (providerStatus === "lipapap_confirmed" || providerStatus === "omnipay_confirmed") {
-        return res.json({ status: "confirmed", paymentId: pending.id });
-      }
-      if (providerStatus === "lipapap_failed" || providerStatus === "lipapap_error" || providerStatus === "omnipay_failed" || providerStatus === "omnipay_error") {
-        return res.json({ status: "failed", paymentId: pending.id });
-      }
-
-      if (pending.omnipayReference) {
-        if (pending.gateway === "lipapap") {
-          const lipaConfig = await getLipaPapConfig();
-          if (!lipaConfig) return res.status(503).json({ message: "LipaPap non configure" });
-          const providerTxId = pending.omnipayTxId || pending.omnipayReference;
-          const statusResult = await getLipaPapTransactionStatus(lipaConfig, providerTxId);
-          const status = String(statusResult.status || statusResult.result || "").toUpperCase();
-          if (status === "SETTLED" || String(statusResult.result || "").toUpperCase() === "SUCCESS") {
-            await settleLipaPapPayment(pending, String(statusResult.trans_id || statusResult.transaction_id || providerTxId));
-            return res.json({ status: "confirmed", paymentId: pending.id });
-          }
-          if (["DECLINED", "FAILED", "ERROR", "REFUND", "REVERSAL", "VOID"].includes(status)) {
-            await storage.updatePendingPaymentStatus(pending.id, "lipapap_failed");
-            return res.json({ status: "failed", paymentId: pending.id, providerStatus: status });
-          }
-          return res.json({
-            status: "pending",
-            paymentId: pending.id,
-            providerStatus: status || "PENDING",
-            providerMessage: statusResult.message || statusResult.decline_reason || undefined,
-          });
-        }
-        if (pending.gateway === "mbiyo" && pending.omnipayTxId) {
-          const mbiyoApiKey = await getMbiyoApiKey();
-          if (mbiyoApiKey) {
-            try {
-              const statusResult = await mbiyoGetStatus(mbiyoApiKey, pending.omnipayTxId);
-              if (statusResult.status === "success" && statusResult.data) {
-                const s = statusResult.data.status;
-                const isSuccess = s === "successful";
-                const isFailure = s === "failed" || s === "cancelled";
-
-                if (isSuccess) {
-                  const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
-                  const merchant = await storage.getMerchantById(pending.merchantId);
-                  if (mc) {
-                    const credit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
-                    await storage.incrementMerchantCountryBalance(mc.id, credit);
-                    await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
-                    const txRef = statusResult.data.transaction_id || pending.omnipayReference;
-                    const existingTx = await storage.getTransactionByTxId(txRef);
-                    if (!existingTx) {
-                      await storage.createTransaction({
-                        merchantId: pending.merchantId,
-                        country: pending.country,
-                        txId: txRef,
-                        amount: pending.amount,
-                        payerNumber: pending.payerPhone || null,
-                        payerName: pending.payerName || null,
-                        status: "confirmed",
-                        provider: "mbiyo",
-                        omnipayTxId: statusResult.data.transaction_id || null,
-                        operator: pending.paymentMethod || null,
-                        omnipayReference: pending.omnipayReference,
-                        errorMessage: null,
-                        providerFee: statusResult.data.fee != null ? parseInt(String(statusResult.data.fee)) || 0 : 0,
-                      });
-                    }
-                    console.log(`[POLL MBIYO] Paiement credite via polling — ref=${pending.omnipayReference} montant=${pending.amount} credit=${credit} marchand=#${pending.merchantId}`);
-                    notifyConfirmedPaymentWebhook(pending.merchantId, {
-                      event: "payment.confirmed",
-                      txId: txRef,
-                      amount: pending.amount,
-                      currency: pending.country,
-                      payer: pending.payerPhone || "",
-                      payerNumber: pending.payerPhone,
-                      payerName: pending.payerName,
-                      country: pending.country,
-                      status: "confirmed",
-                      reference: pending.omnipayReference,
-                      provider: "mbiyo",
-                    }).catch((err) => console.error("[WEBHOOK] Erreur async:", err));
-                    notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "mbiyo" }).catch(() => {});
-                    notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "mbiyo", status: "confirmed" }).catch(() => {});
-                  } else {
-                    console.error(`[POLL MBIYO] MerchantCountry introuvable pour merchantId=${pending.merchantId} country="${pending.country}"`);
-                  }
-                  return res.json({ status: "confirmed", paymentId: pending.id });
-                }
-
-                if (isFailure) {
-                  await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
-                  const mbFailRef = pending.omnipayReference || `FAIL-MB-${pending.id}`;
-                  const mbExistingFail = await storage.getTransactionByTxId(mbFailRef);
-                  if (!mbExistingFail) {
-                    storage.createTransaction({
-                      merchantId: pending.merchantId,
-                      country: pending.country,
-                      txId: mbFailRef,
-                      amount: pending.amount,
-                      payerNumber: pending.payerPhone || null,
-                      payerName: pending.payerName || null,
-                      status: "failed",
-                      provider: "mbiyo",
-                      omnipayTxId: null,
-                      operator: pending.paymentMethod || null,
-                      omnipayReference: pending.omnipayReference,
-                      errorMessage: `Paiement ${s} par Mbiyo`,
-                      providerFee: 0,
-                    }).catch(() => {});
-                  }
-                  return res.json({ status: "failed", paymentId: pending.id });
-                }
-
-                return res.json({ status: "pending", paymentId: pending.id });
-              }
-            } catch {}
-          }
-        } else if (pending.gateway === "sendavapay") {
-          const sendavaKey = await getSendavaApiKey();
-          if (sendavaKey) {
-            try {
-              const statusResult = await sendavaGetPaymentStatus(sendavaKey, pending.omnipayReference);
-              const spStatus = (statusResult.data?.status || "").toLowerCase();
-              const spSuccess = ["completed", "paid", "successful", "success", "approved"].includes(spStatus);
-              const spFailed = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(spStatus);
-
-              if (spSuccess) {
-                const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
-                const merchant = await storage.getMerchantById(pending.merchantId);
-                if (mc) {
-                  const credit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
-                  const westpayFee = pending.amount - credit;
-                  await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
-                  const txRef = `SP-${pending.omnipayReference}`;
-                  const existingTx = await storage.getTransactionByTxId(txRef);
-                  if (!existingTx) {
-                    await storage.incrementMerchantCountryBalance(mc.id, credit);
-                    await storage.createTransaction({
-                      merchantId: pending.merchantId,
-                      country: pending.country,
-                      txId: txRef,
-                      amount: pending.amount,
-                      payerNumber: pending.payerPhone || null,
-                      payerName: pending.payerName || null,
-                      status: "confirmed",
-                      provider: "sendavapay",
-                      omnipayTxId: null,
-                      operator: pending.paymentMethod || null,
-                      omnipayReference: pending.omnipayReference,
-                      errorMessage: null,
-                      providerFee: westpayFee,
-                    });
-                    console.log(`[POLL SENDAVAPAY] Paiement credite via polling — ref=${pending.omnipayReference} montant=${pending.amount} frais=${westpayFee} credit=${credit}`);
-                    notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "sendavapay" }).catch(() => {});
-                    notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "sendavapay", status: "confirmed" }).catch(() => {});
-                  }
-                }
-                return res.json({ status: "confirmed", paymentId: pending.id });
-              }
-
-              if (spFailed) {
-                await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
-                const failTxId = `SP-${pending.omnipayReference}`;
-                const existingFail = await storage.getTransactionByTxId(failTxId);
-                if (!existingFail) {
-                  storage.createTransaction({
-                    merchantId: pending.merchantId,
-                    country: pending.country,
-                    txId: failTxId,
-                    amount: pending.amount,
-                    payerNumber: pending.payerPhone || null,
-                    payerName: pending.payerName || null,
-                    status: "failed",
-                    provider: "sendavapay",
-                    omnipayTxId: null,
-                    operator: pending.paymentMethod || null,
-                    omnipayReference: pending.omnipayReference,
-                    errorMessage: `Paiement ${spStatus}`,
-                    providerFee: 0,
-                  }).catch(() => {});
-                }
-                return res.json({ status: "failed", paymentId: pending.id });
-              }
-
-              return res.json({ status: "pending", paymentId: pending.id });
-            } catch {}
-          }
-        } else if (pending.gateway === "clapay") {
-          const cpToken = await getClapayApiKey();
-          // omnipayTxId contient la signature NoWallet (clé pour /check/status/payment)
-          // fallback sur omnipayReference si la signature n'a pas été stockée
-          const clapaySignature = pending.omnipayTxId || pending.omnipayReference;
-          if (cpToken && clapaySignature) {
-            try {
-              const cpStatus = await clapayGetTransactionStatus(cpToken, clapaySignature);
-              const s = (cpStatus.status || "").toUpperCase();
-              const cpSuccess = ["SUCCESSFUL", "SUCCESS", "COMPLETED", "PAID", "APPROVED"].includes(s);
-              const cpFailed = ["FAILED", "FAILURE", "CANCELLED", "CANCELED", "REJECTED", "EXPIRED"].includes(s);
-
-              if (cpSuccess) {
-                const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
-                const merchant = await storage.getMerchantById(pending.merchantId);
-                if (mc) {
-                  const credit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
-                  const westpayFee = pending.amount - credit;
-                  await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
-                  const txRef = `CP-${pending.omnipayReference}`;
-                  const existingTx = await storage.getTransactionByTxId(txRef);
-                  if (!existingTx) {
-                    await storage.incrementMerchantCountryBalance(mc.id, credit);
-                    await storage.createTransaction({
-                      merchantId: pending.merchantId,
-                      country: pending.country,
-                      txId: txRef,
-                      amount: pending.amount,
-                      payerNumber: pending.payerPhone || null,
-                      payerName: pending.payerName || null,
-                      status: "confirmed",
-                      provider: "clapay",
-                      omnipayTxId: null,
-                      operator: pending.paymentMethod || null,
-                      omnipayReference: pending.omnipayReference,
-                      errorMessage: null,
-                      providerFee: westpayFee,
-                    });
-                    notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "clapay" }).catch(() => {});
-                    notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "clapay", status: "confirmed" }).catch(() => {});
-                  }
-                }
-                return res.json({ status: "confirmed", paymentId: pending.id });
-              }
-              if (cpFailed) {
-                await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
-                return res.json({ status: "failed", paymentId: pending.id });
-              }
-              return res.json({ status: "pending", paymentId: pending.id });
-            } catch {}
-          }
-        } else {
-          const omnipayApiKey = await getOmnipayApiKey();
-          if (omnipayApiKey) {
-            try {
-              const statusResult = await omnipayGetStatus(omnipayApiKey, pending.omnipayReference);
-              if (statusResult.success === 1) {
-                return res.json({ status: "pending", paymentId: pending.id, providerStatus: statusResult.status });
-              }
-            } catch {}
-          }
-        }
-      }
-
-      res.json({ status: "pending", paymentId: pending.id });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.get("/api/admin/omnipay/settings", authMiddleware("admin"), async (_req, res) => {
-    try {
-      // Pour l'affichage admin, lire la DB directement (l'env var est une surcharge runtime, pas affichée)
-      const dbApiKey = await storage.getSetting("omnipay_api_key");
-      const dbCallbackKey = await storage.getSetting("omnipay_callback_key");
-      const dbPayoutApiKey = await storage.getSetting("omnipay_payout_api_key");
-      const envOverride = !!process.env.OMNIPAY_API_KEY;
-      const activeApiKey = await getOmnipayApiKey(); // clé réellement utilisée (env > db)
-      res.json({
-        apiKey: dbApiKey || "",
-        callbackKey: dbCallbackKey || "",
-        payoutApiKey: dbPayoutApiKey || "",
-        configured: !!activeApiKey,
-        envOverride,
-      });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.post("/api/admin/omnipay/settings", authMiddleware("admin"), async (req, res) => {
-    try {
-      const { apiKey, callbackKey, payoutApiKey } = req.body;
-      if (apiKey !== undefined) await storage.setSetting("omnipay_api_key", apiKey);
-      if (callbackKey !== undefined) await storage.setSetting("omnipay_callback_key", callbackKey);
-      if (payoutApiKey !== undefined) await storage.setSetting("omnipay_payout_api_key", payoutApiKey);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // ==================== MBIYO ROUTES ====================
-
-  app.post("/api/mbiyo/callback", async (req, res) => {
-    try {
-      const rawBody = (req.rawBody as Buffer)?.toString() || JSON.stringify(req.body);
-      const signature = (
-        req.headers["x-signature"] ||
-        req.headers["signature"] ||
-        req.headers["x-mbiyo-signature"] ||
-        req.headers["x-webhook-signature"] ||
-        ""
-      ) as string;
-      const webhookSecret = await getMbiyoWebhookSecret();
-
-      console.log(`[MBIYO CALLBACK] Headers: ${JSON.stringify(req.headers)}`);
-      console.log(`[MBIYO CALLBACK] Body: ${rawBody}`);
-
-      // SÉCURITÉ : rejet fail-closed — secret obligatoire
-      if (!webhookSecret) {
-        console.error("[MBIYO CALLBACK] SÉCURITÉ: Secret webhook Mbiyo non configuré — webhook rejeté. Configurez mbiyo_webhook_secret dans les paramètres admin.");
-        return res.status(503).json({ message: "Webhook Mbiyo non sécurisé — configurez le secret dans les paramètres admin" });
-      }
-      if (!signature) {
-        console.error("[MBIYO CALLBACK] Signature manquante dans les headers");
-        return res.status(401).json({ message: "Signature manquante" });
-      }
-      const expected = crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
-      console.log(`[MBIYO CALLBACK] Signature recue: ${signature} — attendue: ${expected}`);
-      const isValid = mbiyoVerifySignature(webhookSecret, signature, rawBody);
-      if (!isValid) {
-        console.error(`[MBIYO CALLBACK] Signature invalide — recue: ${signature} — attendue: ${expected}`);
-        return res.status(401).json({ message: "Signature invalide" });
-      }
-
-      const payload = req.body as MbiyoWebhookPayload;
-      console.log(`[MBIYO CALLBACK] Recu: order_id=${payload.order_id} status=${payload.status}`);
-
-      if (!payload.order_id) {
-        return res.status(400).json({ message: "order_id manquant" });
-      }
-
-      const pending = await storage.getPendingPaymentByOmnipayReference(payload.order_id);
-      if (!pending) {
-        console.warn(`[MBIYO CALLBACK] Paiement non trouve: ${payload.order_id}`);
-        return res.status(200).json({ received: true });
-      }
-
-      if (pending.status === "omnipay_confirmed" || pending.status === "omnipay_failed") {
-        return res.json({ status: "already_processed" });
-      }
-
-      const statusLower = (payload.status || "").toLowerCase();
-      const isSuccess = ["successful", "success", "paid", "completed"].includes(statusLower);
-      const isFailure = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(statusLower);
-
-      if (isSuccess) {
-        // CAS atomique — protège contre les doubles callbacks simultanés
-        const mbiyoCas = await financialPool.query(
-          `UPDATE pending_payments SET status = 'omnipay_confirmed'
-           WHERE id = $1 AND status NOT IN ('omnipay_confirmed','confirmed','omnipay_error')
-           RETURNING id`,
-          [pending.id]
-        );
-        if (!mbiyoCas.rowCount || mbiyoCas.rowCount === 0) {
-          console.log(`[MBIYO CALLBACK] Déjà traité (CAS) order_id=${payload.order_id}`);
-          return res.json({ status: "already_processed" });
-        }
-
-        const merchant = await storage.getMerchantById(pending.merchantId);
-        const credit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
-
-        const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
-        if (!mc) {
-          console.error(`[MBIYO CALLBACK] CRITIQUE: MerchantCountry introuvable pour merchantId=${pending.merchantId} country="${pending.country}" — solde non credite, callback rejete pour retry`);
-          return res.status(500).json({ message: "MerchantCountry introuvable — réessayez" });
-        }
-
-        await storage.incrementMerchantCountryBalance(mc.id, credit);
-
-        const txRef = payload.transaction_id || payload.order_id;
-        const tx = await storage.createTransaction({
-          merchantId: pending.merchantId,
-          country: pending.country,
-          txId: txRef,
-          amount: pending.amount,
-          payerNumber: pending.payerPhone || null,
-          payerName: pending.payerName || null,
-          status: "confirmed",
-          provider: "mbiyo",
-          omnipayTxId: payload.transaction_id || null,
-          operator: pending.paymentMethod || null,
-          omnipayReference: payload.order_id,
-          errorMessage: null,
-          providerFee: payload.fee != null ? parseInt(String(payload.fee)) || 0 : 0,
-        });
-
-        console.log(`[MBIYO CALLBACK] Paiement confirme: ${payload.order_id}`);
-        res.json({ status: "confirmed" });
-
-        setImmediate(async () => {
-          try {
-            if (merchant?.webhookUrl) {
-              try {
-                const fetch = (await import("node-fetch")).default;
-                const webhookPayload = {
-                  event: "payment.confirmed",
-                  txId: tx.txId,
-                  amount: tx.amount,
-                  country: tx.country,
-                  payerNumber: tx.payerNumber,
-                  payerName: tx.payerName,
-                  status: "confirmed",
-                  reference: payload.order_id,
-                  provider: "mbiyo",
-                };
-                const hmac = crypto.createHmac("sha256", merchant.webhookSecret || "").update(JSON.stringify(webhookPayload)).digest("hex");
-                await fetch(merchant.webhookUrl, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json", "X-Signature": hmac },
-                  body: JSON.stringify(webhookPayload),
-                });
-              } catch {}
-            }
-            if (merchant) {
-              notifyMerchantPayment(pending.merchantId, { txId: tx.txId || txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "mbiyo" }).catch(() => {});
-              notifyAdminPayment({ txId: tx.txId || txRef, merchantName: merchant.name, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "mbiyo", status: "confirmed" }).catch(() => {});
-            }
-          } catch {}
-        });
-        return;
-      } else if (isFailure) {
-        await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
-        storage.createTransaction({
-          merchantId: pending.merchantId,
-          country: pending.country,
-          txId: payload.order_id,
-          amount: pending.amount,
-          payerNumber: pending.payerPhone || null,
-          payerName: pending.payerName || null,
-          status: "failed",
-          provider: "mbiyo",
-          omnipayTxId: payload.transaction_id || null,
-          operator: pending.paymentMethod || null,
-          omnipayReference: payload.order_id,
-          errorMessage: "Paiement refusé ou annulé",
-        }).catch(() => {});
-        console.log(`[MBIYO CALLBACK] Paiement echoue: ${payload.order_id}`);
-        return res.json({ status: "failed" });
-      }
-
-      res.json({ received: true });
-    } catch (err: any) {
-      console.error("[MBIYO CALLBACK] Erreur:", err.message);
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.post("/api/mbiyo/payout-callback", async (req, res) => {
-    try {
-      const rawBody = (req.rawBody as Buffer)?.toString() || JSON.stringify(req.body);
-      const signature = (
-        req.headers["x-signature"] ||
-        req.headers["signature"] ||
-        req.headers["x-mbiyo-signature"] ||
-        req.headers["x-webhook-signature"] ||
-        ""
-      ) as string;
-      const webhookSecret = await getMbiyoWebhookSecret();
-
-      console.log(`[MBIYO PAYOUT CALLBACK] Headers: ${JSON.stringify(req.headers)}`);
-      console.log(`[MBIYO PAYOUT CALLBACK] Body: ${rawBody}`);
-
-      // SÉCURITÉ : rejet fail-closed — secret obligatoire
-      if (!webhookSecret) {
-        console.error("[MBIYO PAYOUT CALLBACK] SÉCURITÉ: Secret webhook Mbiyo non configuré — webhook rejeté. Configurez mbiyo_webhook_secret dans les paramètres admin.");
-        return res.status(503).json({ message: "Webhook Mbiyo Payout non sécurisé — configurez le secret dans les paramètres admin" });
-      }
-      if (!signature) {
-        console.error("[MBIYO PAYOUT CALLBACK] Signature manquante dans les headers");
-        return res.status(401).json({ message: "Signature manquante" });
-      }
-      const expected = crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
-      console.log(`[MBIYO PAYOUT CALLBACK] Signature recue: ${signature} — attendue: ${expected}`);
-      const isValid = mbiyoVerifySignature(webhookSecret, signature, rawBody);
-      if (!isValid) {
-        console.error(`[MBIYO PAYOUT CALLBACK] Signature invalide — recue: ${signature} — attendue: ${expected}`);
-        return res.status(401).json({ message: "Signature invalide" });
-      }
-
-      const payload = req.body as MbiyoPayoutWebhookPayload;
-      console.log(`[MBIYO PAYOUT CALLBACK] Recu: event=${payload.event} order_id=${payload.order_id} status=${payload.status}`);
-
-      if (!payload.order_id) {
-        return res.status(400).json({ message: "order_id manquant" });
-      }
-
-      const withdrawal = await storage.getWithdrawalByOmnipayRef(payload.order_id);
-      if (!withdrawal) {
-        console.warn(`[MBIYO PAYOUT CALLBACK] Retrait non trouve: ${payload.order_id}`);
-        return res.status(200).json({ received: true });
-      }
-
-      if (withdrawal.status === "approved" || withdrawal.status === "rejected") {
-        return res.json({ status: "already_processed" });
-      }
-
-      const wdFees = Math.round(parseFloat(String(payload.fee || 0)) || 0);
-      const wdStatusLower = (payload.status || "").toLowerCase();
-      const wdIsSuccess = ["successful", "success", "paid", "completed"].includes(wdStatusLower);
-      const wdIsFailure = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(wdStatusLower);
-
-      // ── Protection anti-race-condition : mise à jour atomique ─────────────────
-      // Si deux callbacks Mbiyo arrivent simultanément, un seul peut passer cette
-      // clause WHERE status = 'pending'. L'autre recevra 0 lignes et sera ignoré.
-      if (wdIsSuccess || wdIsFailure) {
-        const newStatus = wdIsSuccess ? "approved" : "failed";
-        const locked = await financialPool.query(
-          `UPDATE withdrawals SET status = $1 WHERE id = $2 AND status = 'pending' RETURNING id`,
-          [newStatus, withdrawal.id]
-        );
-        if (locked.rowCount === 0) {
-          console.log(`[MBIYO PAYOUT CALLBACK] Retrait #${withdrawal.id} déjà traité (race condition évitée)`);
-          return res.json({ status: "already_processed" });
-        }
-        // Le verrou est acquis — continuer le traitement normalement
-        // (updateWithdrawalStatus mettra à jour les champs supplémentaires)
-      }
-
-      const wdMerchant = await storage.getMerchantById(withdrawal.merchantId);
-
-      // Reconciliation : retrait marqué failed chez nous mais confirmé par Mbiyo
-      if (withdrawal.status === "failed" && wdIsSuccess) {
-        const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
-        if (mc) await storage.decrementMerchantCountryBalance(mc.id, withdrawal.amount);
-        await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Retrait confirmé`, payload.order_id, wdFees, wdFees);
-        console.log(`[MBIYO PAYOUT CALLBACK] Reconciliation retrait #${withdrawal.id} — redebit balance ${withdrawal.amount}`);
-        res.json({ status: "reconciled" });
-        setImmediate(() => {
-          notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: withdrawal.withdrawalMode }).catch(() => {});
-          notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
-        });
-        return;
-      }
-
-      if (withdrawal.status === "failed") {
-        return res.json({ status: "already_processed" });
-      }
-
-      if (wdIsSuccess) {
-        await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Transfert Mbiyo confirme`, payload.order_id, wdFees, wdFees);
-        console.log(`[MBIYO PAYOUT CALLBACK] Retrait #${withdrawal.id} approuve - ref=${payload.order_id}`);
-        res.json({ status: "approved" });
-        setImmediate(() => {
-          notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: withdrawal.withdrawalMode }).catch(() => {});
-          notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
-        });
-        return;
-      } else if (wdIsFailure) {
-        await storage.updateWithdrawalStatus(withdrawal.id, "failed", `Transfert Mbiyo echoue - statut: ${payload.status}`, payload.order_id);
-        const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
-        if (mc) await storage.incrementMerchantCountryBalance(mc.id, withdrawal.amount);
-        console.log(`[MBIYO PAYOUT CALLBACK] Retrait #${withdrawal.id} echoue - ref=${payload.order_id}`);
-        res.json({ status: "failed" });
-        setImmediate(() => {
-          notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed", mode: withdrawal.withdrawalMode }).catch(() => {});
-          notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed" }).catch(() => {});
-        });
-        return;
-      }
-
-      res.json({ received: true });
-    } catch (err: any) {
-      console.error("[MBIYO PAYOUT CALLBACK] Erreur:", err.message);
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.get("/api/admin/mbiyo/settings", authMiddleware("admin"), async (_req, res) => {
-    try {
-      const dbApiKey = await storage.getSetting("mbiyo_api_key");
-      const dbWebhookSecret = await storage.getSetting("mbiyo_webhook_secret");
-      const envOverride = !!process.env.MBIYO_API_KEY;
-      const activeApiKey = await getMbiyoApiKey();
-      res.json({
-        apiKey: dbApiKey || "",
-        webhookSecret: dbWebhookSecret || "",
-        configured: !!activeApiKey,
-        envOverride,
-      });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.post("/api/admin/mbiyo/settings", authMiddleware("admin"), async (req, res) => {
-    try {
-      const { apiKey, webhookSecret } = req.body;
-      if (apiKey !== undefined) await storage.setSetting("mbiyo_api_key", apiKey);
-      if (webhookSecret !== undefined) await storage.setSetting("mbiyo_webhook_secret", webhookSecret);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // ==================== SEAPAY ADMIN SETTINGS (par pays) ====================
-
-  app.get("/api/admin/seapay/settings", authMiddleware("admin"), async (_req, res) => {
-    try {
-      const countriesList = ["Pakistan", "Philippines", "India", "Nigeria"];
-      const countries: Record<string, any> = {};
-      const envOverrides: Record<string, boolean> = {};
-      const envVarNames: Record<string, { merchantId: string; apiKey: string; apiSecret: string; legacyMerchantId?: string; legacyApiKey?: string; legacyApiSecret?: string }> = {};
-      for (const c of countriesList) {
-        const [mid, ak, as_] = await Promise.all([
-          getSeapayMerchantId(c),
-          getSeapayApiKey(c),
-          getSeapayApiSecret(c),
-        ]);
-        const envPrefix = seapayCountryEnvPrefix(c);
-        // Uniquement les variables pays-spécifiques (ex: SEAPAY_PAKISTAN_MERCHANT_ID)
-        const midFromEnv = !!process.env[`${envPrefix}_MERCHANT_ID`];
-        const akFromEnv  = !!process.env[`${envPrefix}_API_KEY`];
-        const asFromEnv  = !!process.env[`${envPrefix}_API_SECRET`];
-        countries[c] = {
-          // Ne pas renvoyer les valeurs réelles des clés au navigateur pour la sécurité
-          // — on indique juste si chaque champ est renseigné
-          merchantId: mid ? (midFromEnv ? "••••••••[ENV]" : "••••••••[DB]") : "",
-          apiKey:     ak  ? (akFromEnv  ? "••••••••[ENV]" : "••••••••[DB]") : "",
-          apiSecret:  as_ ? (asFromEnv  ? "••••••••[ENV]" : "••••••••[DB]") : "",
-          hasMerchantId: !!mid,
-          hasApiKey:     !!ak,
-          hasApiSecret:  !!as_,
-          midFromEnv,
-          akFromEnv,
-          asFromEnv,
-          configured: !!(mid && ak),
-        };
-        envOverrides[c] = midFromEnv || akFromEnv || asFromEnv;
-        // Noms exacts des variables d'environnement attendues (une par pays)
-        envVarNames[c] = {
-          merchantId: `${envPrefix}_MERCHANT_ID`,
-          apiKey:     `${envPrefix}_API_KEY`,
-          apiSecret:  `${envPrefix}_API_SECRET`,
-        };
-      }
-      // Rétrocompatibilité — indique si au moins un pays est configuré
-      const configured = countriesList.some(c => countries[c].configured);
-      res.json({ countries, envOverrides, envVarNames, configured });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.post("/api/admin/seapay/settings", authMiddleware("admin"), async (req, res) => {
-    try {
-      const { country, merchantId, apiKey, apiSecret } = req.body;
-      if (!country) return res.status(400).json({ message: "Pays requis (country)" });
-      const slug = seapayCountrySlug(country);
-      if (merchantId !== undefined) await storage.setSetting(`seapay_merchant_id_${slug}`, merchantId);
-      if (apiKey    !== undefined) await storage.setSetting(`seapay_api_key_${slug}`, apiKey);
-      if (apiSecret !== undefined) await storage.setSetting(`seapay_api_secret_${slug}`, apiSecret);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.get("/api/admin/seapay/balance", authMiddleware("admin"), async (req, res) => {
-    try {
-      const { currency } = req.query;
-      const currStr = String(currency || "PKR").toUpperCase();
-      const balanceCountry = SEAPAY_COUNTRY_FROM_CURRENCY[currStr] || "Pakistan";
-      const [merchantId, apiSecret] = await Promise.all([getSeapayMerchantId(balanceCountry), getSeapayApiSecret(balanceCountry)]);
-      if (!merchantId || !apiSecret) {
-        return res.status(400).json({ message: `SeaPay non configuré pour ${balanceCountry}` });
-      }
-      const result = await seapayGetBalance(merchantId, currStr, apiSecret);
-      res.json(result);
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // ==================== SENDAVAPAY ROUTES ====================
-
-  // ── Proxy routes (évite les blocages CORS depuis le navigateur) ──────────
-
-  // 1. Liste des opérateurs disponibles pour un pays
-  app.get("/api/sendavapay/proxy/services/:countryCode", authMiddleware("merchant"), async (req, res) => {
-    try {
-      const { countryCode } = req.params;
-      const sendavaApiKey = await getSendavaApiKey();
-      const authHeaders: Record<string, string> = sendavaApiKey
-        ? { "Authorization": `Bearer ${sendavaApiKey}` }
-        : {};
-      const upstream = await fetch(`https://sendavapay.com/api/soleaspay/services/${encodeURIComponent(countryCode)}`, {
-        headers: authHeaders,
-      });
-      const data = await upstream.json();
-      res.status(upstream.status).json(data);
-    } catch (err: any) {
-      console.error("[SENDAVAPAY PROXY] /services erreur:", err.message);
-      res.status(502).json({ success: false, message: "Erreur service opérateurs" });
-    }
-  });
-
-  // 2. Initier le paiement USSD push
-  app.post("/api/sendavapay/proxy/pay/:ref", authMiddleware("merchant"), async (req, res) => {
-    try {
-      const { ref } = req.params;
-      const sendavaApiKey = await getSendavaApiKey();
-      const authHeaders: Record<string, string> = sendavaApiKey
-        ? { "Authorization": `Bearer ${sendavaApiKey}` }
-        : {};
-      const upstream = await fetch(`https://sendavapay.com/api/pay-api/${encodeURIComponent(String(ref))}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders },
-        body: JSON.stringify(req.body),
-      });
-      const data = await upstream.json();
-      res.status(upstream.status).json(data);
-    } catch (err: any) {
-      console.error("[SENDAVAPAY PROXY] /pay erreur:", err.message);
-      res.status(502).json({ success: false, message: "Erreur initiation paiement" });
-    }
-  });
-
-  // 3. Vérifier l'OTP
-  app.post("/api/sendavapay/proxy/pay/:ref/verify", authMiddleware("merchant"), async (req, res) => {
-    try {
-      const { ref } = req.params;
-      const sendavaApiKey = await getSendavaApiKey();
-      const authHeaders: Record<string, string> = sendavaApiKey
-        ? { "Authorization": `Bearer ${sendavaApiKey}` }
-        : {};
-      const upstream = await fetch(`https://sendavapay.com/api/pay-api/${encodeURIComponent(String(ref))}/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders },
-        body: JSON.stringify(req.body),
-      });
-      const data = await upstream.json();
-      res.status(upstream.status).json(data);
-    } catch (err: any) {
-      console.error("[SENDAVAPAY PROXY] /verify erreur:", err.message);
-      res.status(502).json({ success: false, message: "Erreur vérification OTP" });
-    }
-  });
-
-  // ==================== SENDAVAPAY SDK v1 PROXY (anti-CORS) ====================
-  // Le navigateur ne peut pas appeler sendavapay.com directement (CORS bloqué par Cloudflare).
-  // Ces routes proxifient les 3 endpoints SDK v1 côté serveur.
-  //
-  // SECURITY: All three payer-facing routes require a high-entropy proxy token issued by the
-  // server when the pending payment was created and stored in omnipayTxId.  The token is
-  // bound to a specific pending payment, expires with the payment, and is invalidated once
-  // the payment reaches a terminal state — preventing API-key abuse and USSD spam.
-
-  // Helper : fetch avec timeout pour les proxies SendavaPay
-  const fetchWithTimeout = (url: string, options: RequestInit = {}, timeoutMs = 15000) => {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    return fetch(url, { ...options, signal: ctrl.signal }).finally(() => clearTimeout(timer));
-  };
-
-  // Helper: validate the SendavaPay proxy token sent by the payer's browser.
-  // Returns the matching PendingPayment on success, or sends an error response and returns null.
-  const SENDAVA_TERMINAL_STATUSES = new Set(["confirmed", "omnipay_confirmed", "failed", "omnipay_failed", "omnipay_error", "expired"]);
-  async function validateSendavaProxyToken(req: Request, res: Response): Promise<import("@shared/schema").PendingPayment | null> {
-    const proxyToken = req.headers["x-sp-proxy-token"] as string | undefined;
-    if (!proxyToken || typeof proxyToken !== "string" || proxyToken.length !== 64) {
-      res.status(401).json({ success: false, message: "Token d'accès manquant ou invalide" });
-      return null;
-    }
-    // Constant-time-safe lookup: token is 256-bit random, brute-force not viable.
-    const pending = await storage.getPendingPaymentByOmnipayTxId(proxyToken);
-    if (!pending || pending.gateway !== "sendavapay") {
-      console.warn("[SENDAVAPAY PROXY v1] Token invalide ou gateway incorrect");
-      res.status(401).json({ success: false, message: "Token d'accès invalide" });
-      return null;
-    }
-    // Enforce expiry
-    if (pending.expiresAt && new Date() > new Date(pending.expiresAt)) {
-      res.status(401).json({ success: false, message: "Session de paiement expirée" });
-      return null;
-    }
-    // Reject terminal payments — token is single-use per payment lifecycle
-    if (SENDAVA_TERMINAL_STATUSES.has(pending.status)) {
-      res.status(401).json({ success: false, message: "Paiement déjà traité ou expiré" });
-      return null;
-    }
-    return pending;
-  }
-
-  // NOTE: v1/operators and v1/initiate-payment proxy routes have been removed.
-  // The server already handles operator resolution and USSD initiation server-side
-  // in /api/payment/initiate — the browser never needs to call these directly.
-  // Removing them eliminates the API-quota-abuse and USSD-spam attack vectors entirely.
-
-  // Soumettre l'OTP (SDK v1) — seul endpoint payer-facing nécessaire.
-  // SECURITY design:
-  //  - Requires the server-issued proxy token (X-Sp-Proxy-Token header, 256-bit random,
-  //    stored in omnipayTxId, bound to a single pending SendavaPay payment).
-  //  - The upstream OTP token (otpToken) is NOT accepted from the client; instead it is
-  //    read from omnipayPaymentUrl where the server stored it when OTP was required.
-  //    This prevents a token holder from driving arbitrary OTP flows against our API key.
-  //  - Only the user-entered OTP code (otp) is accepted from the client.
-  //  - The upstream request body is constructed entirely server-side.
-  app.post("/api/sendavapay/proxy/v1/submit-otp", sendavaProxyRateLimit, async (req, res) => {
-    try {
-      const pendingPayment = await validateSendavaProxyToken(req, res);
-      if (!pendingPayment) return;
-
-      // Retrieve the SendavaPay OTP token stored server-side when OTP was triggered.
-      const storedOtpToken = pendingPayment.omnipayPaymentUrl;
-      if (!storedOtpToken) {
-        console.warn(`[SENDAVAPAY PROXY v1] /submit-otp — aucun otpToken stocké pour payment #${pendingPayment.id}`);
-        return res.status(400).json({ success: false, message: "Aucun OTP en attente pour ce paiement" });
-      }
-
-      // Accept only the user-entered OTP code from the client — nothing else is forwarded.
-      const { otp } = req.body as { otp?: string };
-      if (!otp?.trim()) {
-        return res.status(400).json({ success: false, message: "Code OTP requis" });
-      }
-
-      const sendavaApiKey = await getSendavaApiKey();
-      const authHeaders: Record<string, string> = sendavaApiKey
-        ? { "Authorization": `Bearer ${sendavaApiKey}` }
-        : {};
-
-      // Construct the upstream body entirely from server-side data.
-      const upstream = await fetchWithTimeout(
-        "https://sendavapay.com/api/sdk/v1/submit-otp",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders },
-          body: JSON.stringify({ otpToken: storedOtpToken, otp: otp.trim() }),
-        }
-      );
-      const data = await upstream.json();
-      res.status(upstream.status).json(data);
-    } catch (err: any) {
-      const msg = err.name === "AbortError" ? "Timeout OTP SendavaPay (15s)" : err.message;
-      console.error("[SENDAVAPAY PROXY v1] /submit-otp erreur:", msg);
-      res.status(502).json({ success: false, message: "Service de paiement indisponible. Réessayez." });
-    }
-  });
-
-  // ==================== LIPAPAP CALLBACK ====================
-  app.post("/api/lipapap/callback", async (req, res) => {
-    try {
-      const body = req.body as Record<string, any>;
-      const orderId = String(body.order_id || "");
-      if (!orderId) return res.status(400).json({ message: "order_id requis" });
-
-      const config = await getLipaPapConfig();
-      if (!config) return res.status(503).json({ message: "LipaPap non configure" });
-      if (!verifyLipaPapResponseHash(body, config.secretKey, body.hash)) {
-        console.error(`[LIPAPAP CALLBACK] Signature invalide — ref=${orderId}`);
-        return res.status(403).json({ message: "Signature invalide" });
-      }
-
-      const status = String(body.status || body.result || "").toUpperCase();
-      const providerTxId = String(body.trans_id || body.TransactionID || body.CheckoutRequestID || orderId);
-      const withdrawal = await storage.getWithdrawalByOmnipayRef(orderId);
-      if (withdrawal?.gateway === "lipapap") {
-        if (["SUCCESS", "SETTLED", "APPROVED"].includes(status) || String(body.result || "").toUpperCase() === "SUCCESS") {
-          if (withdrawal.status === "pending") {
-            await storage.updateWithdrawalStatus(
-              withdrawal.id,
-              "approved",
-              `Payout LipaPap confirmé - TxID: ${providerTxId}`,
-              orderId,
-              withdrawal.fees || 0,
-              withdrawal.providerPayoutFee || 0,
-            );
-            notifyAdminWithdrawal({ id: withdrawal.id, merchantName: `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: withdrawal.fees || 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: withdrawal.withdrawalMode }).catch(() => {});
-            notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: withdrawal.fees || 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
-          }
-        } else if (["FAILED", "DECLINED", "REFUND", "REVERSAL", "VOID"].includes(status)) {
-          if (withdrawal.status === "pending") {
-            await storage.updateWithdrawalStatus(
-              withdrawal.id,
-              "failed",
-              `Payout LipaPap échoué: ${body.decline_reason || body.message || status}`,
-              orderId,
-            );
-            await storage.incrementMerchantCountryBalance(withdrawal.merchantCountryId, withdrawal.amount);
-            notifyAdminWithdrawal({ id: withdrawal.id, merchantName: `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed", mode: withdrawal.withdrawalMode }).catch(() => {});
-            notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed" }).catch(() => {});
-          }
-        }
-        return res.status(200).send("ok");
-      }
-
-      const pending = await storage.getPendingPaymentByOmnipayReference(orderId);
-      if (!pending || pending.gateway !== "lipapap") return res.status(404).json({ message: "Paiement introuvable" });
-
-      if (status === "SETTLED" || String(body.result || "").toUpperCase() === "SUCCESS") {
-        await settleLipaPapPayment(pending, providerTxId);
-        console.log(`[LIPAPAP CALLBACK] Paiement confirmé — ref=${orderId}`);
-      } else if (["DECLINED", "FAILED", "ERROR", "REFUND", "REVERSAL", "VOID"].includes(status)) {
-        await storage.updatePendingPaymentStatus(pending.id, "lipapap_failed");
-        console.log(`[LIPAPAP CALLBACK] Paiement échoué — ref=${orderId} status=${status}`);
-      }
-      return res.status(200).send("ok");
-    } catch (error: any) {
-      console.error("[LIPAPAP CALLBACK] Erreur:", error.message);
-      return res.status(500).json({ message: "Erreur callback LipaPap" });
-    }
-  });
-
-  // ==================== SEAPAY CALLBACK ====================
-  app.post("/api/seapay/callback", async (req, res) => {
-    try {
-      const body = req.body as Record<string, any>;
-      console.log(`[SEAPAY CALLBACK] Body: ${JSON.stringify(body)}`);
-
-      const orderId = body.order_id || body.out_trade_no || "";
-      if (!orderId) { return res.status(200).send("ok"); }
-
-      // Trouver le pays depuis l'ordre pour utiliser la bonne cle API
-      const pendingForCountry = await storage.getPendingPaymentByOmnipayReference(orderId);
-      const callbackCountry = pendingForCountry?.country || "";
-      const cbCountry = SEAPAY_COUNTRY_FROM_CURRENCY[SEAPAY_CURRENCY_COUNTRY[callbackCountry] || ""] || callbackCountry;
-      const apiKey = await getSeapayApiKey(cbCountry);
-      if (!apiKey) {
-        console.error("[SEAPAY CALLBACK] API Key non configurée pour le pays:", cbCountry);
-        return res.status(200).send("ok");
-      }
-
-      const receivedSign = body.sign || "";
-      if (!verifySeapaySign(body, apiKey, receivedSign)) {
-        console.error("[SEAPAY CALLBACK] Signature invalide");
-        return res.status(200).send("ok");
-      }
-      const status  = (body.status || "").toLowerCase();
-      const tradeNo = body.trade_no || "";
-      const amount  = parseInt(body.amount || "0", 10);
-
-      const pending = pendingForCountry;
-      if (!pending) {
-        console.warn(`[SEAPAY CALLBACK] Paiement en attente introuvable: ${orderId}`);
-        return res.status(200).send("ok");
-      }
-
-      if (status === "success" || status === "paid" || status === "completed") {
-        // Transaction atomique : CAS + création transaction + crédit solde net en une seule unité
-        // Si une étape échoue, tout est rollback → le callback peut être rejoué sans risque de double-crédit
-        const txId = `SP-${orderId}`;
-
-        // Charger le marchand avant la transaction pour calculer le crédit net (frais appliqués)
-        const merchant = await storage.getMerchantById(pending.merchantId);
-        const merchantCredit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
-        const providerFee = pending.amount - merchantCredit;
-
-        let creditedMcId: number | null = null;
-        const seapayTxClient = await financialPool.connect();
-        try {
-          await seapayTxClient.query("BEGIN");
-
-          // CAS — bloque les callbacks simultanés
-          const casResult = await seapayTxClient.query(
-            `UPDATE pending_payments SET status = 'omnipay_confirmed'
-             WHERE id = $1 AND status NOT IN ('omnipay_confirmed','confirmed','omnipay_error')
-             RETURNING id`,
-            [pending.id]
-          );
-          if (!casResult.rowCount || casResult.rowCount === 0) {
-            await seapayTxClient.query("ROLLBACK");
-            console.log(`[SEAPAY CALLBACK] Déjà traité (CAS) ref=${orderId}`);
-            return res.status(200).send("ok");
-          }
-
-          // Résoudre le merchant_country dans la même transaction
-          const mcRow = await seapayTxClient.query(
-            `SELECT id FROM merchant_countries WHERE merchant_id = $1 AND LOWER(country) = LOWER($2) LIMIT 1`,
-            [pending.merchantId, pending.country.trim()]
-          );
-          if (!mcRow.rows.length) {
-            await seapayTxClient.query("ROLLBACK");
-            console.error(`[SEAPAY CALLBACK] CRITIQUE: MerchantCountry introuvable pour merchantId=${pending.merchantId} country="${pending.country}" — rollback, callback sera rejoué`);
-            return res.status(500).send("error");
-          }
-          creditedMcId = mcRow.rows[0].id as number;
-
-          // Insérer la transaction avec frais — RETURNING id détecte si l'insertion a réussi ou non.
-          // ON CONFLICT DO NOTHING : si la ligne existe déjà (retry après panne partielle), rowCount = 0
-          // → le crédit a déjà été appliqué lors de la tentative précédente, on ne crédite pas à nouveau.
-          const txInsert = await seapayTxClient.query(
-            `INSERT INTO transactions
-               (merchant_id, country, tx_id, amount, payer_number, payer_name, status, provider, omnipay_tx_id, operator, omnipay_reference, error_message, provider_fee)
-             VALUES ($1,$2,$3,$4,$5,$6,'confirmed','seapay',$7,$8,$9,NULL,$10)
-             ON CONFLICT (tx_id) DO NOTHING
-             RETURNING id`,
-            [pending.merchantId, pending.country, txId, pending.amount,
-             pending.payerPhone || null, pending.payerName || null,
-             tradeNo || null, pending.paymentMethod || null, orderId, providerFee]
-          );
-
-          if (txInsert.rowCount && txInsert.rowCount > 0) {
-            // Nouvelle insertion : créditer le solde marchand avec le montant net (après frais plateforme)
-            await seapayTxClient.query(
-              `UPDATE merchant_countries SET balance = balance + $1 WHERE id = $2`,
-              [merchantCredit, creditedMcId]
-            );
-          } else {
-            // La ligne existait déjà — la tentative précédente a déjà crédité le solde. On ne crédite pas à nouveau.
-            console.warn(`[SEAPAY CALLBACK] Transaction ${txId} existait déjà — crédit ignoré pour éviter le doublon`);
-          }
-
-          // Statut final (idempotent)
-          await seapayTxClient.query(
-            `UPDATE pending_payments SET status = 'confirmed' WHERE id = $1`,
-            [pending.id]
-          );
-
-          await seapayTxClient.query("COMMIT");
-        } catch (seapayTxErr: any) {
-          await seapayTxClient.query("ROLLBACK").catch(() => {});
-          throw seapayTxErr;
-        } finally {
-          seapayTxClient.release();
-        }
-
-        // Webhook marchand (hors transaction — effets secondaires non critiques)
-        notifyConfirmedPaymentWebhook(pending.merchantId, {
-          event: "payment.confirmed",
-          txId,
-          amount: pending.amount,
-          currency: pending.country,
-          payer: pending.payerPhone || "",
-          country: pending.country,
-          merchantSlug: merchant?.slug || "",
-          provider: "seapay",
-          timestamp: new Date().toISOString(),
-        }).catch((err) => console.error("[WEBHOOK] Erreur async:", err));
-
-        console.log(`[SEAPAY CALLBACK] Paiement confirmé: ${orderId} — ${pending.amount} (${pending.country})`);
-      } else if (status === "failed" || status === "expired" || status === "cancelled") {
-        await storage.updatePendingPaymentStatus(pending.id, "failed");
-        console.log(`[SEAPAY CALLBACK] Paiement échoué: ${orderId} — status: ${status}`);
-      }
-
-      return res.status(200).send("ok");
-    } catch (err: any) {
-      console.error("[SEAPAY CALLBACK] Erreur:", err.message);
-      return res.status(200).send("ok");
-    }
-  });
-
-  // ==================== SEAPAY PAYOUT CALLBACK (reversements) ====================
-  app.post("/api/seapay/payout-callback", async (req, res) => {
-    try {
-      const body = req.body as Record<string, any>;
-      console.log(`[SEAPAY PAYOUT CALLBACK] Body: ${JSON.stringify(body)}`);
-
-      const orderId = body.order_id || body.out_trade_no || "";
-      const status = (body.status || "").toLowerCase();
-      if (!orderId) return res.status(200).send("ok");
-
-      const withdrawal = await storage.getWithdrawalByOmnipayRef(orderId);
-
-      // Utiliser le bon secret API selon le pays du retrait
-      const payoutCountry = withdrawal?.country || "";
-      const apiSecret = await getSeapayApiSecret(payoutCountry);
-      if (!apiSecret) {
-        console.error("[SEAPAY PAYOUT CALLBACK] Secret API non configuré pour le pays:", payoutCountry);
-        return res.status(200).send("ok");
-      }
-      const receivedSign = body.sign || "";
-      if (!verifySeapaySign(body, apiSecret, receivedSign)) {
-        console.error("[SEAPAY PAYOUT CALLBACK] Signature invalide");
-        return res.status(200).send("ok");
-      }
-      if (!withdrawal) {
-        console.warn(`[SEAPAY PAYOUT CALLBACK] Retrait non trouve: ${orderId}`);
-        return res.status(200).send("ok");
-      }
-      if (withdrawal.status === "approved" || withdrawal.status === "rejected" || withdrawal.status === "failed") {
-        return res.json({ status: "already_processed" });
-      }
-
-      const isSuccess = ["success", "paid", "completed"].includes(status);
-      const isFailure = ["failed", "expired", "cancelled"].includes(status);
-      if (!isSuccess && !isFailure) return res.json({ status: "pending" });
-
-      const locked = await financialPool.query(
-        `UPDATE withdrawals SET status = $1 WHERE id = $2 AND status = 'pending' RETURNING id`,
-        [isSuccess ? "approved" : "failed", withdrawal.id]
-      );
-      if (locked.rowCount === 0) return res.json({ status: "already_processed" });
-
-      const wdMerchant = await storage.getMerchantById(withdrawal.merchantId);
-      if (isSuccess) {
-        await storage.updateWithdrawalStatus(withdrawal.id, "approved", "Transfert SeaPay confirme", orderId, withdrawal.fees || 0, withdrawal.fees || 0);
-        console.log(`[SEAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} approuve - ref=${orderId}`);
-      } else {
-        await storage.updateWithdrawalStatus(withdrawal.id, "failed", `Transfert SeaPay echoue - statut: ${status}`, orderId);
-        const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
-        if (mc) await storage.incrementMerchantCountryBalance(mc.id, withdrawal.amount);
-        console.log(`[SEAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} echoue - ref=${orderId}`);
-      }
-      res.json({ status: isSuccess ? "approved" : "failed" });
-      setImmediate(() => {
-        notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: withdrawal.fees || 0, phone: withdrawal.phone, operator: withdrawal.operator, status: isSuccess ? "approved" : "failed", mode: withdrawal.withdrawalMode }).catch(() => {});
-        notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: withdrawal.fees || 0, phone: withdrawal.phone, operator: withdrawal.operator, status: isSuccess ? "approved" : "failed" }).catch(() => {});
-      });
-    } catch (err: any) {
-      console.error("[SEAPAY PAYOUT CALLBACK] Erreur:", err.message);
-      res.status(200).send("ok");
-    }
-  });
-
-  // ==================== CLAPAY CALLBACKS ====================
-
-  app.post("/api/clapay/callback", async (req, res) => {
-    try {
-      const nowalletSig = (req.headers["nowallet-signature"] || "") as string;
-      const rawBody = (req.rawBody as Buffer)?.toString() || JSON.stringify(req.body);
-      const payload = req.body as ClapayWebhookPayload;
-
-      console.log(`[CLAPAY CALLBACK] Status: ${payload.status} — TxId: ${payload.transaction_id} — Ref: ${payload.reference || payload.external_reference}`);
-
-      const [webhookSecret, webhookUniqueKey] = await Promise.all([getClapayWebhookSecret(), getClapayWebhookUniqueKey()]);
-      if (webhookSecret && webhookUniqueKey && nowalletSig) {
-        const valid = verifyClapaySignature(nowalletSig, rawBody, webhookSecret, webhookUniqueKey);
-        if (!valid) {
-          console.warn("[CLAPAY CALLBACK] Signature invalide — requête rejetée");
-          return res.status(401).json({ message: "Signature invalide" });
-        }
-      }
-
-      // v3 : transaction_id = notre référence marchande (envoyée dans transaction_id à l'init)
-      const reference = payload.transaction_id || payload.reference || payload.external_reference || payload.signature;
-      if (!reference) return res.status(400).json({ message: "reference manquante" });
-
-      const statusUpper = (payload.status || "").toUpperCase();
-      const isSuccess = ["SUCCESSFUL", "SUCCESS", "COMPLETED", "PAID", "APPROVED"].includes(statusUpper);
-      const isFailed  = ["FAILED", "FAILURE", "CANCELLED", "CANCELED", "REJECTED", "EXPIRED"].includes(statusUpper);
-
-      const pending = await storage.getPendingPaymentByOmnipayReference(reference);
-      if (!pending || pending.gateway !== "clapay") {
-        console.log(`[CLAPAY CALLBACK] Paiement non trouvé pour ref=${reference}`);
-        return res.json({ received: true });
-      }
-      if (isSuccess) {
-        // ── CAS atomique — même protection que le callback OmniPay ──────────
-        // Un seul UPDATE réussira si deux callbacks arrivent simultanément.
-        const cpCas = await financialPool.query(
-          `UPDATE pending_payments SET status = 'omnipay_confirmed'
-           WHERE id = $1 AND status NOT IN ('omnipay_confirmed','confirmed','omnipay_error')
-           RETURNING id`,
-          [pending.id]
-        );
-        if (!cpCas.rowCount || cpCas.rowCount === 0) {
-          console.log(`[CLAPAY CALLBACK] Déjà traité (CAS) ref=${reference}`);
-          return res.json({ received: true, alreadyConfirmed: true });
-        }
-
-        const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
-        const merchant = await storage.getMerchantById(pending.merchantId);
-        if (!mc) return res.json({ received: true });
-
-        const credit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
-        const westpayFee = pending.amount - credit;
-        const txRef = `CP-${reference}`;
-        const existingTx = await storage.getTransactionByTxId(txRef);
-        if (!existingTx) {
-          await storage.incrementMerchantCountryBalance(mc.id, credit);
-          await storage.createTransaction({
-            merchantId: pending.merchantId,
-            country: pending.country,
-            txId: txRef,
-            amount: pending.amount,
-            payerNumber: pending.payerPhone || payload.transaction_phone_number || null,
-            payerName: pending.payerName || null,
-            status: "confirmed",
-            provider: "clapay",
-            omnipayTxId: payload.signature || payload.transaction_id || null,
-            operator: pending.paymentMethod || payload.transaction_service_name || null,
-            omnipayReference: reference,
-            errorMessage: null,
-            providerFee: westpayFee,
-          });
-          notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "clapay" }).catch(() => {});
-          notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "clapay", status: "confirmed" }).catch(() => {});
-        }
-        if (pending.redirectUrl) {
-          try {
-            const webhookMerchant = await storage.getMerchantById(pending.merchantId);
-            if (webhookMerchant?.webhookUrl) {
-              const { triggerWebhook } = await import("./routes");
-              triggerWebhook && triggerWebhook(webhookMerchant, { txId: txRef, amount: pending.amount, payerPhone: pending.payerPhone, country: pending.country }).catch(() => {});
-            }
-          } catch {}
-        }
-        console.log(`[CLAPAY CALLBACK] Paiement confirmé — ref=${reference} montant=${pending.amount} crédit=${credit}`);
-      } else if (isFailed) {
-        await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
-        const failTxRef = `CP-${reference}`;
-        const existFail = await storage.getTransactionByTxId(failTxRef);
-        if (!existFail) {
-          storage.createTransaction({
-            merchantId: pending.merchantId,
-            country: pending.country,
-            txId: failTxRef,
-            amount: pending.amount,
-            payerNumber: pending.payerPhone || null,
-            payerName: pending.payerName || null,
-            status: "failed",
-            provider: "clapay",
-            omnipayTxId: payload.signature || payload.transaction_id || null,
-            operator: pending.paymentMethod || null,
-            omnipayReference: reference,
-            errorMessage: `Paiement ${statusUpper}`,
-            providerFee: 0,
-          }).catch(() => {});
-        }
-        console.log(`[CLAPAY CALLBACK] Paiement échoué — ref=${reference}`);
-      }
-
-      res.json({ received: true });
-    } catch (err: any) {
-      console.error("[CLAPAY CALLBACK] Erreur:", err.message);
-      res.status(200).json({ received: true });
-    }
-  });
-
-  app.post("/api/clapay/payout-callback", async (req, res) => {
-    try {
-      const nowalletSig = (req.headers["nowallet-signature"] || "") as string;
-      const rawBody = (req.rawBody as Buffer)?.toString() || JSON.stringify(req.body);
-      const payload = req.body as ClapayWebhookPayload;
-
-      console.log(`[CLAPAY PAYOUT CALLBACK] Status: ${payload.status} — Ref: ${payload.reference || payload.external_reference}`);
-
-      const [webhookSecret, webhookUniqueKey] = await Promise.all([getClapayWebhookSecret(), getClapayWebhookUniqueKey()]);
-      if (webhookSecret && webhookUniqueKey && nowalletSig) {
-        if (!verifyClapaySignature(nowalletSig, rawBody, webhookSecret, webhookUniqueKey)) {
-          console.warn("[CLAPAY PAYOUT CALLBACK] Signature invalide");
-          return res.status(401).json({ message: "Signature invalide" });
-        }
-      }
-
-      // v3 : transaction_id = notre référence marchande du retrait
-      const orderId = payload.transaction_id || payload.reference || payload.external_reference || payload.order_id || "";
-      let withdrawal = orderId ? await storage.getWithdrawalByOmnipayRef(orderId) : undefined;
-      // Certains callbacks ClaPay renvoient la signature comme identifiant
-      // principal au lieu de notre transaction_id.
-      if (!withdrawal && payload.signature) {
-        withdrawal = await storage.getWithdrawalByProviderTxId(payload.signature);
-      }
-      if (!withdrawal) return res.json({ received: true });
-      if (payload.signature) {
-        await storage.updateWithdrawalProviderTxId(withdrawal.id, payload.signature);
-      }
-
-      const statusUpper = (payload.status || "").toUpperCase();
-      const isSuccess = ["SUCCESSFUL", "SUCCESS", "COMPLETED", "PAID", "APPROVED"].includes(statusUpper);
-      const isFailure = ["FAILED", "FAILURE", "CANCELLED", "CANCELED", "REJECTED", "EXPIRED"].includes(statusUpper);
-      if (isSuccess) {
-        if (withdrawal.status !== "approved") {
-          await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Approuvé par ClaPay — ref=${orderId}`, orderId);
-        }
-        console.log(`[CLAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} approuvé`);
-      } else if (isFailure) {
-        if (withdrawal.status === "pending") {
-          await storage.updateWithdrawalStatus(withdrawal.id, "failed", `Rejeté par ClaPay — statut ${statusUpper}`, orderId);
-          const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
-          if (mc) await storage.incrementMerchantCountryBalance(mc.id, withdrawal.amount);
-        }
-        console.log(`[CLAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} échoué`);
-      } else {
-        // Un callback intermédiaire (PENDING/PROCESSING) ne doit jamais
-        // transformer un retrait encore en cours en échec local.
-        console.log(`[CLAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} encore en cours — statut ${statusUpper}`);
-        return res.json({ received: true, status: "pending" });
-      }
-      res.json({ received: true });
-    } catch (err: any) {
-      console.error("[CLAPAY PAYOUT CALLBACK] Erreur:", err.message);
-      res.status(200).json({ received: true });
-    }
-  });
-
-  app.post("/api/sendavapay/callback", async (req, res) => {
-    try {
-      const rawBody = (req.rawBody as Buffer)?.toString() || JSON.stringify(req.body);
-      const signature = (req.headers["x-sendavapay-signature"] || "") as string;
-
-      // Log only non-sensitive metadata — never log raw headers (contain auth credentials) or raw body (contains PII).
-      console.log(`[SENDAVAPAY CALLBACK] Reçu — signature présente: ${!!signature}`);
-
-      const webhookSecret = await getSendavaWebhookSecret();
-      if (!webhookSecret) {
-        // Fail-closed: reject all callbacks until the webhook secret is configured in admin settings.
-        console.error("[SENDAVAPAY CALLBACK] Secret webhook non configuré — callback rejeté. Configurez sendavapay_webhook_secret dans les paramètres admin.");
-        return res.status(503).json({ message: "Webhook non configuré — configurez le secret SendavaPay dans les paramètres admin." });
-      } else if (!signature) {
-        // Secret is configured but the request carries no signature header — reject.
-        console.error("[SENDAVAPAY CALLBACK] Signature absente alors que le secret est configuré — callback rejeté.");
-        return res.status(401).json({ message: "Signature manquante" });
-      } else {
-        // Secret présent : vérifier la signature (préfixe sha256= ou sans)
-        const isValid =
-          sendavaVerifySignature(webhookSecret, signature, rawBody) ||
-          sendavaVerifySignature(webhookSecret, `sha256=${signature}`, rawBody) ||
-          sendavaVerifySignature(webhookSecret, signature.replace(/^sha256=/, ""), rawBody);
-        if (!isValid) {
-          console.error(`[SENDAVAPAY CALLBACK] Signature invalide — header: ${signature}`);
-          return res.status(401).json({ message: "Signature invalide" });
-        }
-      }
-
-      const payload = req.body as SendavaWebhookPayload;
-      // SendavaPay can send reference OR externalReference depending on event type
-      const reference = payload.reference || payload.externalReference;
-      console.log(`[SENDAVAPAY CALLBACK] Recu: event=${payload.event} ref=${payload.reference} extRef=${payload.externalReference} status=${payload.status}`);
-
-      if (!reference) {
-        return res.status(400).json({ message: "reference manquante" });
-      }
-
-      const statusLower = (payload.status || "").toLowerCase();
-      const eventLower = (payload.event || "").toLowerCase();
-      // Handle both pay-in and payout/withdrawal event types + "success" status
-      const isSuccess =
-        statusLower === "completed" ||
-        statusLower === "success" ||
-        eventLower === "payment.completed" ||
-        eventLower === "payout.completed" ||
-        eventLower === "withdrawal.completed" ||
-        eventLower === "transfer.completed";
-      const isFailure = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(statusLower);
-
-      const pending = await storage.getPendingPaymentByOmnipayReference(reference);
-      if (!pending) {
-        // Pas un paiement entrant — vérifier si c'est une notification de retrait
-        // Try with SendavaPay's reference first, then our externalReference as fallback
-        let withdrawal = await storage.getWithdrawalByOmnipayRef(reference);
-        if (!withdrawal && payload.reference && payload.externalReference) {
-          withdrawal = await storage.getWithdrawalByOmnipayRef(payload.externalReference);
-        }
-        if (!withdrawal && payload.reference) {
-          withdrawal = await storage.getWithdrawalByOmnipayRef(payload.reference);
-        }
-        if (!withdrawal) {
-          console.warn(`[SENDAVAPAY CALLBACK] Référence introuvable (ni paiement ni retrait): ref=${payload.reference} extRef=${payload.externalReference}`);
-          return res.status(200).json({ received: true });
-        }
-
-        // Notification de retrait — transaction atomique : CAS + mise à jour complète statut + remboursement solde
-        // Tout est dans une seule transaction → si une étape échoue, ROLLBACK → callback rejouable sans double-crédit ni statut terminal orphelin
-        if (!isSuccess && !isFailure) {
-          return res.json({ status: "pending" });
-        }
-
-        const wdFees = withdrawal.fees || 0;
-        const wdNote = isSuccess
-          ? `Retrait confirmé automatiquement`
-          : `Retrait refusé (${payload.status || "échec"})`;
-        const wdFinalStatus = isSuccess ? "approved" : "failed";
-
-        const wdTxClient = await financialPool.connect();
-        try {
-          await wdTxClient.query("BEGIN");
-
-          // CAS — bloque les callbacks simultanés ; rollback si déjà traité
-          const wdCas = await wdTxClient.query(
-            `UPDATE withdrawals SET status = $1 WHERE id = $2 AND status = 'pending' RETURNING id`,
-            [wdFinalStatus, withdrawal.id]
-          );
-          if (!wdCas.rowCount || wdCas.rowCount === 0) {
-            await wdTxClient.query("ROLLBACK");
-            return res.json({ status: "already_processed" });
-          }
-
-          // Écriture atomique des métadonnées (référence fournisseur, frais, note, horodatage)
-          if (isSuccess) {
-            await wdTxClient.query(
-              `UPDATE withdrawals
-               SET admin_note=$1, omnipay_ref=$2, fees=$3, provider_payout_fee=$4, processed_at=NOW()
-               WHERE id=$5`,
-              [wdNote, reference, wdFees, wdFees, withdrawal.id]
-            );
-          } else {
-            await wdTxClient.query(
-              `UPDATE withdrawals
-               SET admin_note=$1, omnipay_ref=$2, processed_at=NOW()
-               WHERE id=$3`,
-              [wdNote, reference, withdrawal.id]
-            );
-            // Remboursement atomique : si cette mise à jour échoue, le ROLLBACK remet tout à "pending"
-            await wdTxClient.query(
-              `UPDATE merchant_countries SET balance = balance + $1
-               WHERE merchant_id = $2 AND LOWER(country) = LOWER($3)`,
-              [withdrawal.amount, withdrawal.merchantId, withdrawal.country.trim()]
-            );
-          }
-
-          await wdTxClient.query("COMMIT");
-        } catch (wdTxErr: any) {
-          await wdTxClient.query("ROLLBACK").catch(() => {});
-          throw wdTxErr;
-        } finally {
-          wdTxClient.release();
-        }
-
-        // Notifications hors transaction (effets secondaires non critiques)
-        const wdMerchant = await storage.getMerchantById(withdrawal.merchantId);
-
-        if (isSuccess) {
-          notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: "auto" }).catch(() => {});
-          notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
-          console.log(`[SENDAVAPAY CALLBACK] Retrait #${withdrawal.id} approuvé — ref=${reference}`);
-          return res.json({ status: "withdrawal_confirmed" });
-        } else {
-          notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed", mode: "auto" }).catch(() => {});
-          notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed" }).catch(() => {});
-          console.log(`[SENDAVAPAY CALLBACK] Retrait #${withdrawal.id} échoué — ref=${reference} status=${payload.status}`);
-          return res.json({ status: "withdrawal_failed" });
-        }
-
-        return res.json({ status: "pending" });
-      }
-
-      if (isSuccess) {
-        // CAS atomique — protège contre les doubles callbacks simultanés
-        const spCas = await financialPool.query(
-          `UPDATE pending_payments SET status = 'omnipay_confirmed'
-           WHERE id = $1 AND status NOT IN ('omnipay_confirmed','confirmed','omnipay_error')
-           RETURNING id`,
-          [pending.id]
-        );
-        if (!spCas.rowCount || spCas.rowCount === 0) {
-          console.log(`[SENDAVAPAY CALLBACK] Déjà traité (CAS) ref=${reference}`);
-          return res.json({ status: "already_processed" });
-        }
-
-        const merchant = await storage.getMerchantById(pending.merchantId);
-        const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
-
-        if (!mc) {
-          console.error(`[SENDAVAPAY CALLBACK] MerchantCountry introuvable pour marchand #${pending.merchantId} pays ${pending.country}`);
-          await storage.updatePendingPaymentStatus(pending.id, "omnipay_error");
-          return res.status(500).json({ message: "Configuration marchand/pays introuvable" });
-        }
-
-        const txId = `SP-${reference}`;
-        const existingTx = await storage.getTransactionByTxId(txId);
-        if (!existingTx) {
-          const credit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
-          const westpayFee = pending.amount - credit;
-          await storage.createTransaction({
-            merchantId: pending.merchantId,
-            country: pending.country,
-            txId,
-            amount: pending.amount,
-            payerNumber: payload.customerPhone || pending.payerPhone || null,
-            payerName: pending.payerName || null,
-            status: "confirmed",
-            provider: "sendavapay",
-            omnipayTxId: null,
-            omnipayReference: pending.omnipayReference || reference,
-            providerFee: westpayFee,
-          });
-          await storage.incrementMerchantCountryBalance(mc.id, credit);
-          console.log(`[SENDAVAPAY CALLBACK] Paiement confirme: ${txId} - Brut: ${pending.amount} - Frais WestPay: ${westpayFee} - Net marchand: ${credit}`);
-
-          notifyConfirmedPaymentWebhook(pending.merchantId, {
-            event: "payment.confirmed",
-            txId,
-            amount: pending.amount,
-            currency: pending.country,
-            payer: payload.customerPhone || pending.payerPhone,
-            country: pending.country,
-            merchantSlug: merchant?.slug || "",
-            provider: "sendavapay",
-            timestamp: new Date().toISOString(),
-          }).catch(() => {});
-
-          notifyMerchantPayment(pending.merchantId, { txId, amount: pending.amount, payerNumber: payload.customerPhone || pending.payerPhone, country: pending.country, provider: "sendavapay" }).catch(() => {});
-          notifyAdminPayment({ txId, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: payload.customerPhone || pending.payerPhone, country: pending.country, amount: pending.amount, provider: "sendavapay", status: "confirmed" }).catch(() => {});
-        }
-
-        return res.json({ status: "confirmed" });
-
-      } else if (isFailure) {
-        await storage.updatePendingPaymentStatus(pending.id, "omnipay_failed");
-        const failTxId = `SP-${reference}`;
-        const existingFailTx = await storage.getTransactionByTxId(failTxId);
-        if (!existingFailTx) {
-          storage.createTransaction({
-            merchantId: pending.merchantId,
-            country: pending.country,
-            txId: failTxId,
-            amount: pending.amount,
-            payerNumber: payload.customerPhone || pending.payerPhone || null,
-            payerName: pending.payerName || null,
-            status: "failed",
-            provider: "sendavapay",
-            omnipayTxId: null,
-            omnipayReference: pending.omnipayReference || reference,
-            errorMessage: `Paiement ${payload.status || "refusé"}`,
-            providerFee: 0,
-          }).catch(() => {});
-        }
-        console.log(`[SENDAVAPAY CALLBACK] Paiement echoue: ref=${reference} status=${payload.status}`);
-        return res.json({ status: "failed" });
-
-      } else {
-        console.log(`[SENDAVAPAY CALLBACK] Paiement en cours: ref=${reference} status=${payload.status}`);
-        return res.json({ status: "pending" });
-      }
-    } catch (err: any) {
-      console.error("[SENDAVAPAY CALLBACK] Erreur:", err.message);
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.get("/api/payment/sendavapay/return", async (req, res) => {
-    try {
-      const { ref, redirect, sendava_status } = req.query as Record<string, string>;
-      const status = sendava_status || "complete";
-      if (redirect) {
-        const safe = /^https?:\/\//i.test(redirect) ? redirect : `https://${redirect}`;
-        try {
-          const u = new URL(safe);
-          if (ref) u.searchParams.set("ref", ref);
-          u.searchParams.set("sendava_status", status);
-          return res.redirect(u.toString());
-        } catch {}
-      }
-      const target = ref
-        ? `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(ref)}&sendava_status=${status}`
-        : `${BANK1_CHECKOUT_URL}/`;
-      res.redirect(target);
-    } catch (err: any) {
-      res.redirect("/");
-    }
-  });
-
-  app.get("/api/admin/sendavapay/settings", authMiddleware("admin"), async (_req, res) => {
-    try {
-      const dbApiKey = await storage.getSetting("sendavapay_api_key");
-      const dbWebhookSecret = await storage.getSetting("sendavapay_webhook_secret");
-      const envOverride = !!process.env.SENDAVAPAY_API_KEY;
-      const activeApiKey = await getSendavaApiKey();
-      res.json({
-        apiKey: dbApiKey || "",
-        webhookSecret: dbWebhookSecret ? "configured" : "",
-        configured: !!activeApiKey,
-        envOverride,
-        callbackUrl: `${process.env.APP_URL || "http://Westpay.cfd"}/api/sendavapay/callback`,
-      });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.post("/api/admin/sendavapay/settings", authMiddleware("admin"), async (req, res) => {
-    try {
-      const { apiKey, webhookSecret } = req.body;
-      if (apiKey !== undefined) await storage.setSetting("sendavapay_api_key", apiKey);
-      if (webhookSecret !== undefined && webhookSecret !== "") await storage.setSetting("sendavapay_webhook_secret", webhookSecret);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.get("/api/admin/sendavapay/balance", authMiddleware("admin"), async (req, res) => {
-    try {
-      const apiKey = await getSendavaApiKey();
-      if (!apiKey) return res.status(400).json({ message: "Service de paiement non configure." });
-      const countryCode = (req.query.country as string) || undefined;
-      const result = await sendavaGetBalance(apiKey, countryCode);
-      res.json({ success: result.success, data: result.data, message: result.message });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.get("/api/admin/sendavapay/transactions", authMiddleware("admin"), async (_req, res) => {
-    try {
-      const apiKey = await getSendavaApiKey();
-      if (!apiKey) return res.status(400).json({ message: "Service de paiement non configure." });
-      const result = await sendavaGetTransactions(apiKey);
-      res.json({ success: result.success, data: result.data, message: result.message });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.post("/api/admin/sendavapay/configure-webhook", authMiddleware("admin"), async (_req, res) => {
-    try {
-      const apiKey = await getSendavaApiKey();
-      if (!apiKey) return res.status(400).json({ message: "Service de paiement non configure." });
-      const result = await sendavaConfigureWebhook(apiKey, `${process.env.APP_URL || "http://Westpay.cfd"}/api/sendavapay/callback`);
-      if (result.success && result.data?.webhookSecret) {
-        await storage.setSetting("sendavapay_webhook_secret", result.data.webhookSecret);
-      }
-      res.json({ success: result.success, data: result.data, message: result.message });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // ==================== LIPAPAP ADMIN SETTINGS ====================
-
-  app.get("/api/admin/lipapap/settings", authMiddleware("admin"), async (_req, res) => {
-    try {
-      const [dbClientKey, dbSecretKey, dbPaymentUrl, dbCallbackUrl, environment, action, networkIdsJson, payoutCodesJson, payerEmail, locale, connectorName] = await Promise.all([
-        storage.getSetting("lipapap_client_key"),
-        storage.getSetting("lipapap_secret_key"),
-        storage.getSetting("lipapap_payment_url"),
-        storage.getSetting("lipapap_callback_url"),
-        storage.getSetting("lipapap_environment"),
-        storage.getSetting("lipapap_action"),
-        storage.getSetting("lipapap_network_ids"),
-        storage.getSetting("lipapap_payout_codes"),
-        storage.getSetting("lipapap_payer_email"),
-        storage.getSetting("lipapap_locale"),
-        storage.getSetting("lipapap_connector_name"),
-      ]);
-      const clientKey = cleanConfiguredSecret(dbClientKey) || cleanConfiguredSecret(process.env.LIPAPAP_CLIENT_KEY);
-      const secretKey = cleanConfiguredSecret(dbSecretKey) || cleanConfiguredSecret(process.env.LIPAPAP_SECRET_KEY);
-      const paymentUrl = cleanConfiguredSecret(dbPaymentUrl) || cleanConfiguredSecret(process.env.LIPAPAP_PAYMENT_URL);
-      const callbackUrl = cleanConfiguredSecret(dbCallbackUrl);
-      const payerEmailValue = cleanConfiguredSecret(payerEmail) || cleanConfiguredSecret(process.env.LIPAPAP_PAYER_EMAIL);
-      let networkMappingCount = 0;
-      let payoutCodeCount = 0;
-      try {
-        const parsed = networkIdsJson ? JSON.parse(networkIdsJson) : LIPAPAP_DEFAULT_NETWORK_IDS;
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          networkMappingCount = Object.entries(parsed).filter(([, value]) =>
-            (typeof value === "string" || typeof value === "number") && String(value).trim() !== "",
-          ).length;
-        }
-      } catch {
-        // Invalid saved JSON is reported as missing until corrected in the panel.
-      }
-      try {
-        const parsed = payoutCodesJson ? JSON.parse(payoutCodesJson) : {};
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          payoutCodeCount = Object.values(parsed).reduce((count, value) => {
-            if (!value || typeof value !== "object" || Array.isArray(value)) return count;
-            return count + Object.entries(value).filter(([, code]) => typeof code === "string" && code.trim() !== "").length;
-          }, 0);
-        }
-      } catch {
-        // Invalid saved JSON is reported as missing until corrected in the panel.
-      }
-      const configurationChecks = {
-        clientKey: !!clientKey,
-        secretKey: !!secretKey,
-        paymentUrl: !!paymentUrl,
-        callbackUrl: !!callbackUrl,
-        payerEmail: !!payerEmailValue,
-        networkMappings: networkMappingCount > 0,
-        payoutProviderCodes: payoutCodeCount > 0,
-      };
-      const payinConfigured = configurationChecks.clientKey &&
-        configurationChecks.secretKey &&
-        configurationChecks.paymentUrl &&
-        configurationChecks.callbackUrl &&
-        configurationChecks.networkMappings;
-      const payoutConfigured = payinConfigured &&
-        configurationChecks.payerEmail &&
-        configurationChecks.payoutProviderCodes;
-      res.json({
-        clientKey: dbClientKey ? "••••••••[DB]" : (process.env.LIPAPAP_CLIENT_KEY ? "••••••••[ENV]" : ""),
-        secretKey: dbSecretKey ? "••••••••[DB]" : (process.env.LIPAPAP_SECRET_KEY ? "••••••••[ENV]" : ""),
-        paymentUrl: paymentUrl || "",
-        payerEmail: payerEmailValue || "",
-        environment: environment === "production" ? "production" : "sandbox",
-        action: action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMO",
-        locale: locale || "",
-        connectorName: connectorName || "",
-        networkIdsJson: networkIdsJson || JSON.stringify(LIPAPAP_DEFAULT_NETWORK_IDS),
-        payoutCodesJson: payoutCodesJson || "{}",
-        configured: payinConfigured && payoutConfigured,
-        payinConfigured,
-        payoutConfigured,
-        configurationChecks,
-        networkMappingCount,
-        payoutCodeCount,
-        envOverride: {
-          clientKey: !!process.env.LIPAPAP_CLIENT_KEY,
-          secretKey: !!process.env.LIPAPAP_SECRET_KEY,
-          paymentUrl: !!process.env.LIPAPAP_PAYMENT_URL,
-        },
-        callbackUrl: callbackUrl || "",
-        payoutSupported: payoutConfigured,
-        payoutMessage: payoutConfigured
-          ? "MOMOPAYOUT utilise uniquement les provider_code enregistrés dans ce panneau."
-          : "Configurez les provider_code payout dans ce panneau avant d’utiliser les retraits LipaPap.",
-      });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.get("/api/admin/lipapap/networks", authMiddleware("admin"), async (_req, res) => {
-    const { LIPAPAP_NETWORKS } = await import("./lipapap");
-    res.json(LIPAPAP_NETWORKS);
-  });
-
-  app.post("/api/admin/lipapap/settings", authMiddleware("admin"), async (req, res) => {
-    try {
-      const { clientKey, secretKey, paymentUrl, callbackUrl, payerEmail, environment, action, networkIdsJson, payoutCodesJson, locale, connectorName } = req.body || {};
-      if (clientKey !== undefined && clientKey !== "") await storage.setSetting("lipapap_client_key", String(clientKey).trim());
-      if (secretKey !== undefined && secretKey !== "") await storage.setSetting("lipapap_secret_key", String(secretKey).trim());
-      if (payerEmail !== undefined && payerEmail !== "") {
-        const normalizedEmail = String(payerEmail).trim().toLowerCase();
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-          return res.status(400).json({ message: "LIPAPAP_PAYER_EMAIL doit être une adresse email valide." });
-        }
-        await storage.setSetting("lipapap_payer_email", normalizedEmail);
-      }
-      if (paymentUrl !== undefined && paymentUrl !== "") {
-        try {
-          const parsedUrl = new URL(String(paymentUrl).trim());
-          if (parsedUrl.protocol !== "https:") throw new Error("HTTPS requis");
-        } catch {
-          return res.status(400).json({ message: "PAYMENT_URL doit être une URL HTTPS valide." });
-        }
-        await storage.setSetting("lipapap_payment_url", String(paymentUrl).trim());
-      }
-      if (callbackUrl !== undefined && callbackUrl !== "") {
-        try {
-          const parsedUrl = new URL(String(callbackUrl).trim());
-          if (parsedUrl.protocol !== "https:") throw new Error("HTTPS requis");
-        } catch {
-          return res.status(400).json({ message: "L’URL callback doit être une URL HTTPS valide." });
-        }
-        await storage.setSetting("lipapap_callback_url", String(callbackUrl).trim());
-      }
-      if (environment !== undefined) {
-        if (!["sandbox", "production"].includes(environment)) return res.status(400).json({ message: "Environnement invalide." });
-        await storage.setSetting("lipapap_environment", environment);
-      }
-      if (action !== undefined) {
-        if (!["MOMO", "MOMOAPM", "C2B_SIMULATE"].includes(action)) return res.status(400).json({ message: "Action LipaPap invalide." });
-        const effectiveEnvironment = environment || await storage.getSetting("lipapap_environment") || "sandbox";
-        if (action === "C2B_SIMULATE" && effectiveEnvironment !== "sandbox") {
-          return res.status(400).json({ message: "C2B_SIMULATE est autorisé uniquement en Sandbox." });
-        }
-        await storage.setSetting("lipapap_action", action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMO");
-      }
-      if (locale !== undefined) {
-        const normalizedLocale = String(locale).trim();
-        if (!normalizedLocale || normalizedLocale.length > 32) {
-          return res.status(400).json({ message: "La locale LipaPap est invalide." });
-        }
-        await storage.setSetting("lipapap_locale", normalizedLocale);
-      }
-      if (connectorName !== undefined) {
-        const normalizedConnectorName = String(connectorName).trim();
-        if (!normalizedConnectorName || normalizedConnectorName.length > 64) {
-          return res.status(400).json({ message: "Le connector_name LipaPap est invalide." });
-        }
-        await storage.setSetting("lipapap_connector_name", normalizedConnectorName);
-      }
-      if (networkIdsJson !== undefined) {
-        let parsed: unknown;
-        try { parsed = JSON.parse(String(networkIdsJson)); } catch { return res.status(400).json({ message: "Les IDs réseaux doivent être un JSON valide." }); }
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          return res.status(400).json({ message: "Les IDs réseaux doivent être un objet JSON." });
-        }
-        await storage.setSetting("lipapap_network_ids", JSON.stringify(parsed));
-      }
-      if (payoutCodesJson !== undefined) {
-        let parsed: unknown;
-        try { parsed = JSON.parse(String(payoutCodesJson)); } catch { return res.status(400).json({ message: "Les provider_code payout doivent être un JSON valide." }); }
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          return res.status(400).json({ message: "Les provider_code payout doivent être un objet JSON par pays." });
-        }
-        for (const [country, operators] of Object.entries(parsed)) {
-          if (!country.trim() || !operators || typeof operators !== "object" || Array.isArray(operators)) {
-            return res.status(400).json({ message: "Chaque pays doit contenir un objet opérateur/provider_code." });
-          }
-          for (const [operator, code] of Object.entries(operators)) {
-            if (!operator.trim() || typeof code !== "string" || !code.trim()) {
-              return res.status(400).json({ message: "Chaque opérateur payout doit avoir un provider_code non vide." });
-            }
-          }
-        }
-        await storage.setSetting("lipapap_payout_codes", JSON.stringify(parsed));
-      }
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // ==================== CLAPAY ADMIN SETTINGS ====================
-
-  app.get("/api/admin/clapay/settings", authMiddleware("admin"), async (_req, res) => {
-    try {
-      const [dbApiKey, dbWebhookSecret, dbWebhookUniqueKey] = await Promise.all([
-        storage.getSetting("clapay_api_key"),
-        storage.getSetting("clapay_webhook_secret"),
-        storage.getSetting("clapay_webhook_unique_key"),
-      ]);
-      const activeKey = await getClapayApiKey();
-      const envOverride = !!process.env.CLAPAY_API_KEY;
-      res.json({
-        apiKey: dbApiKey ? "••••••••[DB]" : "",
-        webhookSecret: dbWebhookSecret ? "••••••••[DB]" : "",
-        webhookUniqueKey: dbWebhookUniqueKey ? "••••••••[DB]" : "",
-        configured: !!activeKey,
-        envOverride,
-        callbackUrl: `${process.env.APP_URL || "https://westpay.cfd"}/api/clapay/callback`,
-        payoutCallbackUrl: `${process.env.APP_URL || "https://westpay.cfd"}/api/clapay/payout-callback`,
-      });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.post("/api/admin/clapay/settings", authMiddleware("admin"), async (req, res) => {
-    try {
-      const { apiKey, webhookSecret, webhookUniqueKey } = req.body;
-      if (apiKey !== undefined && apiKey !== "") await storage.setSetting("clapay_api_key", apiKey);
-      if (webhookSecret !== undefined && webhookSecret !== "") await storage.setSetting("clapay_webhook_secret", webhookSecret);
-      if (webhookUniqueKey !== undefined && webhookUniqueKey !== "") await storage.setSetting("clapay_webhook_unique_key", webhookUniqueKey);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.get("/api/admin/clapay/balance", authMiddleware("admin"), async (_req, res) => {
-    try {
-      const token = await getClapayApiKey();
-      if (!token) return res.status(400).json({ message: "Clé API ClaPay non configurée" });
-      const result = await clapayGetBalance(token);
-      res.json(result);
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.post("/api/admin/mbiyo/confirm-payment", authMiddleware("admin"), async (req, res) => {
-    try {
-      const { reference, txId } = req.body;
-      if (!reference) return res.status(400).json({ message: "reference requis" });
-
-      const pending = await storage.getPendingPaymentByOmnipayReference(reference);
-      if (!pending) return res.status(404).json({ message: `Paiement introuvable pour la référence: ${reference}` });
-
-      if (pending.status === "omnipay_confirmed") {
-        return res.status(400).json({ message: "Ce paiement est déjà confirmé" });
-      }
-
-      await storage.updatePendingPaymentStatus(pending.id, "omnipay_confirmed");
-
-      const merchant = await storage.getMerchantById(pending.merchantId);
-      const credit = calcMerchantCredit(pending.amount, pending.country);
-
-      const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
-      if (mc) {
-        await storage.incrementMerchantCountryBalance(mc.id, credit);
-      }
-
-      const tx = await storage.createTransaction({
-        merchantId: pending.merchantId,
-        country: pending.country,
-        txId: txId || reference,
-        amount: pending.amount,
-        payerNumber: pending.payerPhone || null,
-        payerName: pending.payerName || null,
-        status: "confirmed",
-        provider: "mbiyo",
-        omnipayTxId: txId || null,
-        operator: pending.paymentMethod || null,
-        omnipayReference: reference,
-        errorMessage: null,
-      });
-
-      if (merchant) {
-        notifyConfirmedPaymentWebhook(pending.merchantId, {
-          event: "payment.confirmed",
-          txId: tx.txId || "",
-          amount: pending.amount,
-          currency: pending.country,
-          payer: pending.payerPhone || "",
-          payerNumber: pending.payerPhone || null,
-          country: pending.country,
-          merchantSlug: merchant.slug,
-          provider: "mbiyo",
-          reference,
-          status: "confirmed",
-          timestamp: new Date().toISOString(),
-        }).catch((err) => console.error("[WEBHOOK] Erreur async:", err));
-        notifyMerchantPayment(pending.merchantId, { txId: tx.txId || "", amount: pending.amount, payerNumber: pending.payerPhone || null, country: pending.country, provider: "mbiyo" }).catch(() => {});
-        notifyAdminPayment(merchant, pending.amount, pending.payerPhone || "", tx.txId || "", "Mbiyo (Manuel)").catch(() => {});
-      }
-
-      console.log(`[MBIYO ADMIN] Paiement confirmé manuellement: ${reference} — Crédit: ${credit} — Marchand: ${merchant?.name}`);
-      res.json({ success: true, credit, txId: tx.txId, merchantName: merchant?.name });
-    } catch (err: any) {
-      console.error("[MBIYO ADMIN] Erreur confirmation manuelle:", err.message);
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // Révoquer les sessions d'un admin ou d'un marchand
-  app.post("/api/admin/revoke-sessions", authMiddleware("admin"), async (req, res) => {
-    try {
-      const { targetType, targetId } = req.body;
-      if (!targetType || !targetId) {
-        return res.status(400).json({ message: "targetType et targetId requis" });
-      }
-      if (targetType === "admin") {
-        await storage.revokeAdminTokens(parseInt(targetId));
-        storage.createSecurityLog({
-          eventType: "session_revoked",
-          ip: extractIp(req),
-          userEmail: (req as any).user?.email || "admin",
-          action: "admin_session_revoked",
-          details: `Sessions admin id=${targetId} révoquées manuellement`,
-        }).catch(() => {});
-      } else if (targetType === "merchant") {
-        await storage.revokeMerchantTokens(parseInt(targetId));
-        storage.createSecurityLog({
-          eventType: "session_revoked",
-          ip: extractIp(req),
-          userEmail: (req as any).user?.email || "admin",
-          action: "merchant_session_revoked",
-          details: `Sessions marchand id=${targetId} révoquées manuellement`,
-        }).catch(() => {});
-      } else {
-        return res.status(400).json({ message: "targetType invalide (admin|merchant)" });
-      }
-      res.json({ success: true, message: `Sessions ${targetType} id=${targetId} révoquées` });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // Update merchant country payin gateway
-  app.patch("/api/admin/merchant-countries/:id/gateway", authMiddleware("admin"), async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const { payinGateway } = req.body;
-      if (!["omnipay", "mbiyo", "sendavapay", "seapay", "clapay", "oxapay"].includes(payinGateway)) {
-        return res.status(400).json({ message: "Methode de paiement invalide." });
-      }
-      await storage.updateMerchantCountryPayinGateway(id, payinGateway);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.get("/api/admin/omnipay/balance", authMiddleware("admin"), async (_req, res) => {
-    try {
-      const apiKey = await getOmnipayApiKey();
-      if (!apiKey) return res.status(400).json({ message: "Cle API non configuree" });
-      const result = await omnipayGetBalance(apiKey);
-      if (result.success !== 1) {
-        return res.status(400).json({ message: OMNIPAY_ERRORS[result.code || 0] || result.message || "Erreur" });
-      }
-      res.json({ balance: result.balance });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.put("/api/admin/merchant/:id/country/:countryId/omnipay", authMiddleware("admin"), async (req, res) => {
-    try {
-      const merchantId = parseInt(req.params.id as string);
-      const { omnipayEnabled } = req.body;
-      const countryId = parseInt(req.params.countryId as string);
-      // Ownership verification: ensure the country record belongs to the specified merchant
-      const mc = await storage.getMerchantCountryById(countryId);
-      if (!mc || mc.merchantId !== merchantId) {
-        return res.status(404).json({ message: "Pays introuvable pour ce marchand" });
-      }
-      await storage.updateMerchantCountryOmnipay(countryId, !!omnipayEnabled);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.post("/api/merchant/transfer", apiKeyAuthMiddleware, async (req, res) => {
-    try {
-      const merchantId = (req as any).user.id;
-      const { msisdn, amount, firstName, lastName, operator } = req.body;
-      const country = normalizeCountry(req.body.country || "");
-
-      if (!country || !msisdn || !amount || !firstName || !lastName) {
-        return res.status(400).json({ message: "Pays, numero, montant, prenom et nom requis" });
-      }
-
-      const parsedAmount = parseInt(amount);
-      if (isNaN(parsedAmount) || parsedAmount <= 0) {
-        return res.status(400).json({ message: "Le montant doit etre un nombre positif" });
-      }
-
-      const merchantCountry = await storage.findMerchantCountryBySimAndCountry(merchantId, country);
-      if (!merchantCountry) {
-        const availableMCs = await storage.getMerchantCountries(merchantId);
-        const available = availableMCs.filter(c => c.active).map(c => c.country);
-        return res.status(400).json({
-          message: `Pays "${country}" non configure sur ce compte. Pays disponibles : ${available.join(", ") || "aucun"}`,
-        });
-      }
-      if (!merchantCountry.active) {
-        return res.status(400).json({ message: `Le pays "${country}" est desactive sur ce compte marchand` });
-      }
-
-      if (!merchantCountry.omnipayEnabled) {
-        return res.status(400).json({ message: "Paiement non active pour ce pays" });
-      }
-
-      if (merchantCountry.balance < parsedAmount) {
-        return res.status(400).json({ message: "Solde insuffisant" });
-      }
-
-      const omnipayApiKey = await getOmnipayApiKey();
-      if (!omnipayApiKey) {
-        return res.status(500).json({ message: "Systeme de paiement non configure" });
-      }
-
-      const reference = omnipayGenerateRef();
-      const msisdnFull = prependDialCode(msisdn, country);
-
-      const result = await omnipayInitiateTransfer({
-        apikey: omnipayApiKey,
-        msisdn: msisdnFull,
-        amount: parsedAmount,
-        reference,
-        first_name: firstName,
-        last_name: lastName,
-        operator: operator || undefined,
-      });
-
-      if (result.success !== 1) {
-        const errorMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Erreur de paiement";
-        return res.status(400).json({ message: errorMsg });
-      }
-
-      await storage.decrementMerchantCountryBalance(merchantCountry.id, parsedAmount);
-
-      const txId = `TR-${result.id || reference}`;
-      await storage.createTransaction({
-        merchantId,
-        country,
-        txId,
-        amount: -parsedAmount,
-        payerNumber: msisdn,
-        status: "confirmed",
-        provider: "omnipay",
-        omnipayTxId: result.id ? String(result.id) : null,
-      });
-
-      await storage.createApiLog({
-        merchantId,
-        action: "omnipay_transfer",
-        ip: req.ip || "",
-        description: `Transfert OmniPay: ${parsedAmount} vers ${msisdn} - Ref: ${reference} - Frais: ${result.fees || 0}`,
-      });
-
-      res.json({
-        success: true,
-        reference,
-        omnipayId: result.id,
-        fees: result.fees || 0,
-        amount: parsedAmount,
-      });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // ==================== SMS RECEIVE (for Android SMS Forwarder) ====================
-
-  function normalizePhone(phone: string): string {
-    let cleaned = phone.replace(/[\s\-\(\)]/g, "").trim();
-    if (cleaned.startsWith("00")) {
-      cleaned = "+" + cleaned.substring(2);
-    }
-    return cleaned;
-  }
-
-  function parseSmsContent(smsText: string): { txId: string | null; amount: number | null; payerNumber: string | null; errors: string[] } {
-    const errors: string[] = [];
-    let txId: string | null = null;
-    let amount: number | null = null;
-    let payerNumber: string | null = null;
-
-    const txPatterns = [
-      /(?:Transaction\s*ID|Trans\.?\s*ID|TXN?\s*ID|TX\s*N°)\s*[:\s]?\s*([A-Za-z0-9\-\.]{5,})/i,
-      /(?:Ref(?:erence)?|N°)\s*[:\s]?\s*([A-Za-z0-9\-\.]{5,})/i,
-      /(?:ID)\s*[:\s]\s*([A-Za-z0-9\-\.]{5,})/i,
-      /\b(TX[A-Za-z0-9\-]{4,})\b/i,
-      /\b(TM\d{6,})\b/i,
-      /\b(MM\d{6,})\b/i,
-      /\b(OM\d{6,})\b/i,
-      /\b([A-Z]{2,4}\d{8,})\b/,
-      /\b(\d{12,})\b/,
-    ];
-
-    for (const pattern of txPatterns) {
-      const match = smsText.match(pattern);
-      if (match && match[1]) {
-        txId = match[1].trim();
-        break;
-      }
-    }
-
-    const amountPatterns = [
-      /([\d\s.,]+)\s*(?:F\s*CFA|FCFA|XOF|CFA)/i,
-      /(?:montant|amount|recu|received|envoye|sent)\s*[:\s]?\s*([\d\s.,]+)/i,
-      /(?:GHS|NGN|XOF)\s*([\d\s.,]+)/i,
-      /([\d.,]+)\s*(?:cedis?|naira)/i,
-    ];
-
-    for (const pattern of amountPatterns) {
-      const match = smsText.match(pattern);
-      if (match && match[1]) {
-        const cleaned = match[1].replace(/[\s]/g, "").replace(/,/g, ".");
-        const parts = cleaned.split(".");
-        let numStr: string;
-        if (parts.length > 1) {
-          const lastPart = parts[parts.length - 1];
-          if (lastPart.length <= 2) {
-            numStr = parts.slice(0, -1).join("") + "." + lastPart;
-          } else {
-            numStr = parts.join("");
-          }
-        } else {
-          numStr = cleaned;
-        }
-        const parsed = parseFloat(numStr);
-        if (!isNaN(parsed) && parsed > 0) {
-          amount = Math.round(parsed);
-          break;
-        }
-      }
-    }
-
-    const phonePatterns = [
-      /(?:de|from|par|numero)\s*[:\s]?\s*(\+?\d[\d\s\-]{8,15})/i,
-      /(\+\d{10,15})/,
-    ];
-
-    for (const pattern of phonePatterns) {
-      const match = smsText.match(pattern);
-      if (match && match[1]) {
-        payerNumber = normalizePhone(match[1]);
-        break;
-      }
-    }
-
-    if (!txId) errors.push("ID de transaction non trouve dans le SMS");
-    if (!amount) errors.push("Montant non trouve dans le SMS");
-
-    return { txId, amount, payerNumber, errors };
-  }
-
-  async function reconcilePendingPayments(txId: string, merchantId: number, amount: number) {
-    try {
-      const pendingPayments = await storage.getPendingPaymentsByTxId(txId);
-      for (const pp of pendingPayments) {
-        if (pp.merchantId === merchantId && pp.amount === amount) {
-          await storage.updatePendingPaymentStatus(pp.id, "confirmed");
-          console.log(`[SMS] Paiement en attente #${pp.id} confirme (TX: ${txId})`);
-        }
-      }
-    } catch (err) {
-      console.error(`[SMS] Erreur reconciliation paiement en attente:`, err);
-    }
-  }
-
-  app.post("/sms/receive", async (req, res) => {
-    try {
-      const { from_sim, sms_text, received_at } = req.body;
-
-      if (!from_sim || !sms_text) {
-        console.log("[SMS] Requete invalide - donnees manquantes:", { from_sim: !!from_sim, sms_text: !!sms_text });
-        return res.status(400).json({ message: "Donnees SMS manquantes (from_sim et sms_text requis)" });
-      }
-
-      const normalizedSim = normalizePhone(from_sim);
-      console.log(`[SMS] Recu de ${normalizedSim}: ${sms_text.substring(0, 100)}...`);
-
-      const { txId, amount, payerNumber, errors } = parseSmsContent(sms_text);
-
-      if (errors.length > 0 || !txId || !amount) {
-        const errorMsg = errors.join("; ");
-        console.log(`[SMS] Parsing partiel - Erreurs: ${errorMsg}`);
-
-        await storage.createSmsLog({
-          fromSim: normalizedSim,
-          smsText: sms_text,
-          parsed: false,
-          errorMessage: errorMsg || "Parsing incomplet",
-          parsedAmount: amount,
-          parsedTxId: txId,
-          parsedPayer: payerNumber,
-        });
-
-        return res.json({
-          status: "logged",
-          message: "SMS enregistre mais non traite - parsing incomplet",
-          errors,
-          parsed: { txId, amount, payerNumber },
-        });
-      }
-
-      const existingTx = await storage.getTransactionByTxId(txId);
-      if (existingTx) {
-        console.log(`[SMS] Transaction dupliquee: ${txId}`);
-        await storage.createSmsLog({
-          fromSim: normalizedSim,
-          smsText: sms_text,
-          parsed: false,
-          errorMessage: `Transaction dupliquee: ${txId}`,
-          parsedAmount: amount,
-          parsedTxId: txId,
-          parsedPayer: payerNumber,
-        });
-        return res.json({ status: "duplicate", txId, message: "Cette transaction a deja ete enregistree" });
-      }
-
-      const simNumber = await storage.getNumberByPhone(normalizedSim);
-
-      if (!simNumber) {
-        const allNumbers = await storage.getNumbers();
-        const found = allNumbers.find(n => {
-          const norm = normalizePhone(n.phoneNumber);
-          return norm === normalizedSim || norm.endsWith(normalizedSim.slice(-8)) || normalizedSim.endsWith(norm.slice(-8));
-        });
-
-        if (!found) {
-          console.log(`[SMS] Numero SIM non reconnu: ${normalizedSim}`);
-          await storage.createSmsLog({
-            fromSim: normalizedSim,
-            smsText: sms_text,
-            parsed: false,
-            errorMessage: `Numero SIM non reconnu: ${normalizedSim}`,
-            parsedAmount: amount,
-            parsedTxId: txId,
-            parsedPayer: payerNumber,
-          });
-          return res.json({ status: "unmatched", message: "Numero SIM non associe a un marchand", txId, amount });
-        }
-
-        if (!found.merchantId) {
-          console.log(`[SMS] Numero ${normalizedSim} trouve mais non associe a un marchand`);
-          await storage.createSmsLog({
-            fromSim: normalizedSim,
-            smsText: sms_text,
-            parsed: false,
-            errorMessage: `Numero trouve (${found.phoneNumber}) mais non associe a un marchand`,
-            parsedAmount: amount,
-            parsedTxId: txId,
-            parsedPayer: payerNumber,
-          });
-          return res.json({ status: "unmatched", message: "Numero non associe a un marchand", txId, amount });
-        }
-
-        const merchantCountry = await storage.findMerchantCountryBySimAndCountry(found.merchantId, found.country);
-
-        if (!merchantCountry || !merchantCountry.active) {
-          console.log(`[SMS] Pays ${found.country} non actif pour le marchand #${found.merchantId}`);
-          await storage.createSmsLog({
-            fromSim: normalizedSim,
-            smsText: sms_text,
-            parsed: false,
-            errorMessage: `Pays ${found.country} inactif pour le marchand`,
-            parsedAmount: amount,
-            parsedTxId: txId,
-            parsedPayer: payerNumber,
-          });
-          return res.json({ status: "inactive", message: "Le pays n'est pas actif pour ce marchand" });
-        }
-
-        const smsM2 = await storage.getMerchantById(found.merchantId);
-        const merchantCredit2 = calcMerchantCreditForMerchant(amount, found.country, smsM2);
-        await storage.createTransaction({
-          merchantId: found.merchantId,
-          country: found.country,
-          txId,
-          amount,
-          payerNumber: payerNumber || null,
-          status: "confirmed",
-        });
-
-        await storage.incrementMerchantCountryBalance(merchantCountry.id, merchantCredit2);
-
-        await storage.createSmsLog({
-          fromSim: normalizedSim,
-          smsText: sms_text,
-          parsed: true,
-          parsedAmount: amount,
-          parsedTxId: txId,
-          parsedPayer: payerNumber,
-        });
-
-        await storage.createApiLog({
-          merchantId: found.merchantId,
-          action: "sms_payment_confirmed",
-          ip: "",
-          description: `Paiement confirme par SMS - TX: ${txId} - Montant: ${amount} F CFA - De: ${payerNumber || "inconnu"} - SIM: ${normalizedSim}`,
-        });
-
-        await reconcilePendingPayments(txId, found.merchantId, amount);
-
-        const foundMerchant = await storage.getMerchantById(found.merchantId);
-        notifyConfirmedPaymentWebhook(found.merchantId, {
-          event: "payment.confirmed",
-          txId,
-          amount,
-          currency: "XOF",
-          payer: payerNumber || "",
-          country: found.country,
-          merchantSlug: foundMerchant?.slug || "",
-          provider: "sms",
-          timestamp: new Date().toISOString(),
-        }).catch(err => console.error("[WEBHOOK] Erreur async:", err));
-
-        notifyMerchantPayment(found.merchantId, {
-          txId,
-          amount,
-          payerNumber,
-          country: found.country,
-          provider: "sms",
-        }).catch(() => {});
-
-        notifyAdminPayment({
-          txId,
-          merchantName: foundMerchant?.name || `#${found.merchantId}`,
-          payerNumber,
-          country: found.country,
-          amount,
-          provider: "sms",
-          status: "confirmed",
-        }).catch(() => {});
-
-        console.log(`[SMS] Transaction confirmee: TX=${txId}, Montant=${amount}, Marchand=#${found.merchantId}, Pays=${found.country}`);
-        return res.json({ status: "processed", txId, amount, country: found.country });
-      }
-
-      if (!simNumber.merchantId) {
-        console.log(`[SMS] Numero ${normalizedSim} non associe a un marchand`);
-        await storage.createSmsLog({
-          fromSim: normalizedSim,
-          smsText: sms_text,
-          parsed: false,
-          errorMessage: `Numero non associe a un marchand`,
-          parsedAmount: amount,
-          parsedTxId: txId,
-          parsedPayer: payerNumber,
-        });
-        return res.json({ status: "unmatched", message: "Numero non associe a un marchand", txId, amount });
-      }
-
-      const merchantCountry = await storage.findMerchantCountryBySimAndCountry(
-        simNumber.merchantId,
-        simNumber.country
-      );
-
-      if (!merchantCountry || !merchantCountry.active) {
-        console.log(`[SMS] Pays ${simNumber.country} non actif pour le marchand #${simNumber.merchantId}`);
-        await storage.createSmsLog({
-          fromSim: normalizedSim,
-          smsText: sms_text,
-          parsed: false,
-          errorMessage: `Pays ${simNumber.country} inactif pour le marchand`,
-          parsedAmount: amount,
-          parsedTxId: txId,
-          parsedPayer: payerNumber,
-        });
-        return res.json({ status: "inactive", message: "Le pays n'est pas actif pour ce marchand" });
-      }
-
-      const smsM3 = await storage.getMerchantById(simNumber.merchantId);
-      const merchantCredit3 = calcMerchantCreditForMerchant(amount, simNumber.country, smsM3);
-      await storage.createTransaction({
-        merchantId: simNumber.merchantId,
-        country: simNumber.country,
-        txId,
-        amount,
-        payerNumber: payerNumber || null,
-        status: "confirmed",
-      });
-
-      await storage.incrementMerchantCountryBalance(merchantCountry.id, merchantCredit3);
-
-      await storage.createSmsLog({
-        fromSim: normalizedSim,
-        smsText: sms_text,
-        parsed: true,
-        parsedAmount: amount,
-        parsedTxId: txId,
-        parsedPayer: payerNumber,
-      });
-
-      await storage.createApiLog({
-        merchantId: simNumber.merchantId,
-        action: "sms_payment_confirmed",
-        ip: "",
-        description: `Paiement confirme par SMS - TX: ${txId} - Montant: ${amount} F CFA - De: ${payerNumber || "inconnu"} - SIM: ${normalizedSim}`,
-      });
-
-      await reconcilePendingPayments(txId, simNumber.merchantId, amount);
-
-      const simMerchant = await storage.getMerchantById(simNumber.merchantId);
-      notifyConfirmedPaymentWebhook(simNumber.merchantId, {
-        event: "payment.confirmed",
-        txId,
-        amount,
-        currency: "XOF",
-        payer: payerNumber || "",
-        country: simNumber.country,
-        merchantSlug: simMerchant?.slug || "",
-        provider: "sms",
-        timestamp: new Date().toISOString(),
-      }).catch(err => console.error("[WEBHOOK] Erreur async:", err));
-
-      notifyMerchantPayment(simNumber.merchantId, {
-        txId,
-        amount,
-        payerNumber,
-        country: simNumber.country,
-        provider: "sms",
-      }).catch(() => {});
-
-      notifyAdminPayment({
-        txId,
-        merchantName: simMerchant?.name || `#${simNumber.merchantId}`,
-        payerNumber,
-        country: simNumber.country,
-        amount,
-        provider: "sms",
-        status: "confirmed",
-      }).catch(() => {});
-
-      console.log(`[SMS] Transaction confirmee: TX=${txId}, Montant=${amount}, Marchand=#${simNumber.merchantId}, Pays=${simNumber.country}`);
-      return res.json({ status: "processed", txId, amount, country: simNumber.country });
-    } catch (err: any) {
-      console.error("[SMS] Erreur serveur:", err.message);
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // ─── PAYMENT LINKS (admin) ───────────────────────────────────────────────
-
-  app.get("/api/admin/payment-links", authMiddleware("admin"), async (_req, res) => {
-    try {
-      const links = await storage.getAllPaymentLinks();
-      res.json(links);
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.put("/api/admin/payment-links/:id/toggle", authMiddleware("admin"), async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      const link = await storage.getPaymentLinkById(id);
-      if (!link) return res.status(404).json({ message: "Lien introuvable" });
-      const updated = await storage.updatePaymentLink(id, { active: !link.active });
-      await storage.createApiLog({ merchantId: link.merchantId, action: "admin_toggle_payment_link", ip: req.ip || "", description: `Admin: lien #${id} ${updated.active ? "activé" : "désactivé"}` });
-      res.json(updated);
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.delete("/api/admin/payment-links/:id", authMiddleware("admin"), async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      const link = await storage.getPaymentLinkById(id);
-      if (!link) return res.status(404).json({ message: "Lien introuvable" });
-      await storage.deletePaymentLink(id);
-      await storage.createApiLog({ merchantId: link.merchantId, action: "admin_delete_payment_link", ip: req.ip || "", description: `Admin: lien #${id} "${link.name}" supprimé` });
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // ─── PAYMENT LINKS (merchant) ────────────────────────────────────────────
-
-  app.get("/api/merchant/payment-links", authMiddleware("merchant"), async (req, res) => {
-    try {
-      const merchantId = (req as any).user.id;
-      const links = await storage.getPaymentLinks(merchantId);
-      res.json(links);
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.post("/api/merchant/payment-links", authMiddleware("merchant"), async (req, res) => {
-    try {
-      const merchantId = (req as any).user.id;
-      const { name, description, amountType, amount, redirectUrl, expiresAt, paymentLimit, active, countries, confirmationMessage, collectBillingAddress, showShareButton, notificationEmail, bank: requestedBank } = req.body;
-      if (!name || !amountType) return res.status(400).json({ message: "name et amountType requis" });
-      if (amountType === "fixed" && !amount) return res.status(400).json({ message: "amount requis pour un lien fixe" });
-      if (requestedBank !== undefined && !["bank1", "bank2"].includes(String(requestedBank))) {
-        return res.status(400).json({ message: "Banque de paiement invalide" });
-      }
-      const uniqueId = Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
-      const link = await storage.createPaymentLink({
-        merchantId: merchantId,
-        uniqueId,
-        name,
-        bank: requestedBank === "bank2" ? "bank2" : "bank1",
-        description: description || null,
-        amountType,
-        amount: amount ? Number(amount) : null,
-        redirectUrl: redirectUrl || null,
-        expiresAt: expiresAt ? new Date(expiresAt) : null,
-        paymentLimit: paymentLimit ? Number(paymentLimit) : null,
-        active: active !== false,
-        countries: Array.isArray(countries) && countries.length > 0 ? countries : null,
-        confirmationMessage: confirmationMessage || null,
-        collectBillingAddress: collectBillingAddress === true,
-        showShareButton: showShareButton !== false,
-        notificationEmail: notificationEmail || null,
-      });
-      res.json(link);
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.put("/api/merchant/payment-links/:id", authMiddleware("merchant"), async (req, res) => {
-    try {
-      const merchantId = (req as any).user.id;
-      const id = Number(req.params.id);
-      const existing = await storage.getPaymentLinkById(id);
-      if (!existing || existing.merchantId !== merchantId) return res.status(404).json({ message: "Lien introuvable" });
-      const { name, description, amountType, amount, redirectUrl, expiresAt, paymentLimit, active, countries, confirmationMessage, collectBillingAddress, showShareButton, notificationEmail, bank: requestedBank } = req.body;
-      if (requestedBank !== undefined && !["bank1", "bank2"].includes(String(requestedBank))) {
-        return res.status(400).json({ message: "Banque de paiement invalide" });
-      }
-      const updated = await storage.updatePaymentLink(id, {
-        ...(name !== undefined && { name }),
-        ...(requestedBank !== undefined && { bank: requestedBank }),
-        ...(description !== undefined && { description: description || null }),
-        ...(amountType !== undefined && { amountType }),
-        ...(amount !== undefined && { amount: amount ? Number(amount) : null }),
-        ...(redirectUrl !== undefined && { redirectUrl: redirectUrl || null }),
-        ...(expiresAt !== undefined && { expiresAt: expiresAt ? new Date(expiresAt) : null }),
-        ...(paymentLimit !== undefined && { paymentLimit: paymentLimit ? Number(paymentLimit) : null }),
-        ...(active !== undefined && { active }),
-        ...(countries !== undefined && { countries: Array.isArray(countries) && countries.length > 0 ? countries : null }),
-        ...(confirmationMessage !== undefined && { confirmationMessage: confirmationMessage || null }),
-        ...(collectBillingAddress !== undefined && { collectBillingAddress: collectBillingAddress === true }),
-        ...(showShareButton !== undefined && { showShareButton: showShareButton !== false }),
-        ...(notificationEmail !== undefined && { notificationEmail: notificationEmail || null }),
-      });
-      res.json(updated);
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.delete("/api/merchant/payment-links/:id", authMiddleware("merchant"), async (req, res) => {
-    try {
-      const merchantId = (req as any).user.id;
-      const id = Number(req.params.id);
-      const existing = await storage.getPaymentLinkById(id);
-      if (!existing || existing.merchantId !== merchantId) return res.status(404).json({ message: "Lien introuvable" });
-      await storage.deletePaymentLink(id);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // ─── PAYMENT LINK PUBLIC PAGE ─────────────────────────────────────────────
-
-  app.get("/api/payment-link/:uniqueId", async (req, res) => {
-    try {
-      const link = await storage.getPaymentLinkByUniqueId(req.params.uniqueId);
-      if (!link || !link.active) return res.status(404).json({ message: "Lien de paiement introuvable ou inactif" });
-      if (link.expiresAt && new Date() > link.expiresAt) return res.status(410).json({ message: "Ce lien de paiement a expiré" });
-      if (link.paymentLimit && link.paymentCount >= link.paymentLimit) return res.status(410).json({ message: "Ce lien a atteint sa limite de paiements" });
-
-      // Les liens Bank 1 utilisent désormais link.westpay.cfd. On bloque
-      // uniquement les anciens liens Bank 1 sur le domaine principal.
-      // Les anciens liens Bank 2 restent volontairement autorisés afin de
-      // conserver leur redirection vers payment.bank2.westpay.cfd.
-      const requestHost = (req.hostname || "").toLowerCase();
-      const isLegacyBank1Host = requestHost === "westpay.cfd" || requestHost === "www.westpay.cfd";
-      if (isLegacyBank1Host && link.bank !== "bank2") {
-        return res.status(404).json({ message: "Ce lien de paiement n'est plus disponible à cette adresse." });
-      }
-
-      const merchant = await storage.getMerchantById(link.merchantId);
-      if (!merchant || merchant.suspended) return res.status(404).json({ message: "Marchand introuvable" });
-      const countries = await storage.getMerchantCountries(merchant.id);
-      const activeCountries = countries.filter(c => c.active).map(c => c.country);
-      const configuredCountries = Array.isArray(link.countries) && link.countries.length > 0 ? link.countries : null;
-      const allowedCountries = link.bank === "bank2" && configuredCountries
-        ? activeCountries.filter(country => configuredCountries.includes(country))
-        : activeCountries;
-      if (link.bank === "bank2" && allowedCountries.length === 0) {
-        return res.status(409).json({ message: "Aucun pays actif n'est disponible pour ce lien de paiement." });
-      }
-      res.json({ link, merchantName: merchant.name, merchantSlug: merchant.slug, countries: allowedCountries });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // ==================== SUPPORT CONTACTS (public) ====================
-  app.get("/api/public/wallet-transfer-fee", async (_req, res) => {
-    try {
-      const feeType = await storage.getSetting("wallet_transfer_fee_type");
-      const feeValue = await storage.getSetting("wallet_transfer_fee_value");
-      res.json({
-        feeType: feeType || "percentage",
-        feeValue: parseFloat(feeValue || "4.5"),
-      });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.get("/api/public/platform-flags", async (_req, res) => {
-    try {
-      const [withdrawalsDisabled, minAmountRaw, walletTransfersDisabled] = await Promise.all([
-        storage.getSetting("withdrawals_disabled"),
-        storage.getSetting("withdrawal_min_amount"),
-        storage.getSetting("wallet_transfers_disabled"),
-      ]);
-      const withdrawalMinAmount = minAmountRaw ? parseInt(minAmountRaw) || 200 : 200;
-      res.json({
-        withdrawalsDisabled: withdrawalsDisabled === "true",
-        withdrawalMinAmount,
-        walletTransfersDisabled: walletTransfersDisabled === "true",
-      });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.put("/api/admin/platform-flags", authMiddleware("admin"), async (req, res) => {
-    try {
-      const { withdrawalsDisabled, withdrawalMinAmount, walletTransfersDisabled } = req.body;
-      if (withdrawalsDisabled !== undefined) {
-        await storage.setSetting("withdrawals_disabled", withdrawalsDisabled ? "true" : "false");
-      }
-      if (walletTransfersDisabled !== undefined) {
-        await storage.setSetting("wallet_transfers_disabled", walletTransfersDisabled ? "true" : "false");
-      }
-      if (withdrawalMinAmount !== undefined) {
-        const parsed = parseInt(withdrawalMinAmount);
-        if (!isNaN(parsed) && parsed >= 1) {
-          await storage.setSetting("withdrawal_min_amount", String(parsed));
-        }
-      }
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.get("/api/public/support-contacts", async (_req, res) => {
-    try {
-      const [tg1, tg2, tg3, tg4] = await Promise.all([
-        storage.getSetting("support_telegram_1"),
-        storage.getSetting("support_telegram_2"),
-        storage.getSetting("support_telegram_3"),
-        storage.getSetting("support_telegram_4"),
-      ]);
-      res.json({
-        telegram1: tg1 || "@Atfchalvt",
-        telegram2: tg2 || "@geeorbotpay",
-        telegram3: tg3 || "@pankeyrobotpay",
-        telegram4: tg4 || "@astapay",
-      });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // ==================== SUPPORT / AIDE ====================
-  // Rate-limit : 5 messages/5min par IP (anti-spam Telegram)
-  const supportHelpRateLimit = makeRateLimit({ max: 5, windowMs: 5 * 60 * 1000, label: "support_help" });
-  app.post("/api/support/help", supportHelpRateLimit, async (req, res) => {
-    try {
-      const { name, whatsapp, message, merchantName, merchantSlug } = req.body;
-      if (!name || !message) {
-        return res.status(400).json({ message: "Nom et message sont requis" });
-      }
-      // Sanitize : limiter la taille des champs pour éviter le spam / les injections Telegram Markdown
-      const safeName    = String(name).slice(0, 80).replace(/[*_`[\]]/g, "");
-      const safeWa      = String(whatsapp || "").slice(0, 20).replace(/[^0-9+\s]/g, "");
-      const safeMsg     = String(message).slice(0, 500).replace(/[*_`[\]]/g, "");
-      const safeMerch   = merchantName ? String(merchantName).slice(0, 60).replace(/[*_`[\]]/g, "") : null;
-      const safeSlug    = merchantSlug ? String(merchantSlug).slice(0, 40).replace(/[^a-z0-9-]/g, "") : null;
-
-      const now = new Date();
-      const date = now.toLocaleDateString("fr-FR");
-      const time = now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-      const merchantInfo = safeMerch ? `🏪 *Marchand :* ${safeMerch}${safeSlug ? ` (${safeSlug})` : ""}` : "🏪 *Marchand :* Inconnu";
-      const text = `🆘 *Nouvelle demande d'aide — Page de paiement*\n\n${merchantInfo}\n\n👤 *Nom :* ${safeName}\n📱 *WhatsApp :* ${safeWa || "Non renseigné"}\n💬 *Message :*\n${safeMsg}\n\n📅 *Date :* ${date}  🕐 *Heure :* ${time}`;
-      const { notifyAdminGroup } = await import("./telegram-bot");
-      await notifyAdminGroup(text);
-      res.json({ success: true });
-    } catch (err: any) {
-      console.error("[SUPPORT] Erreur envoi aide:", err.message);
-      res.status(500).json({ message: "Erreur lors de l'envoi" });
-    }
-  });
-
-  // ==================== SUPPORT CONTACTS (admin) ====================
-  app.get("/api/wallet-transfer-countries", async (_req, res) => {
-    try {
-      const countries = await storage.getWalletTransferCountries(true);
-      res.json(countries);
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.get("/api/admin/wallet-transfer-countries", authMiddleware("admin"), async (_req, res) => {
-    try {
-      const countries = await storage.getWalletTransferCountries(false);
-      res.json(countries);
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.post("/api/admin/wallet-transfer-countries", authMiddleware("admin"), async (req, res) => {
-    try {
-      const { country, currencyZone } = req.body;
-      if (!country?.trim() || !["XOF", "XAF", "CDF", "GNF", "GMD"].includes(currencyZone)) {
-        return res.status(400).json({ message: "Pays et zone monetaire requis (XOF, XAF, CDF, GNF ou GMD)" });
-      }
-      const existing = await storage.getWalletTransferCountryByName(country.trim());
-      if (existing) return res.status(409).json({ message: "Ce pays existe deja" });
-      const created = await storage.createWalletTransferCountry({ country: country.trim(), currencyZone, active: true });
-      res.json(created);
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.patch("/api/admin/wallet-transfer-countries/:id/toggle", authMiddleware("admin"), async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const { active } = req.body;
-      await storage.toggleWalletTransferCountry(id, !!active);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.delete("/api/admin/wallet-transfer-countries/:id", authMiddleware("admin"), async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      await storage.deleteWalletTransferCountry(id);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  const getCurrencyZone = async (country: string): Promise<string | null> => {
-    const wtc = await storage.getWalletTransferCountryByName(country);
-    return wtc?.active ? wtc.currencyZone : null;
-  };
-
-  app.get("/api/merchant/wallet-transfers", authMiddleware("merchant"), async (req, res) => {
-    try {
-      const merchantId = (req as any).user.id;
-      const transfers = await storage.getWalletTransfers(merchantId);
-      res.json(transfers);
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.post("/api/merchant/wallet-transfers", authMiddleware("merchant"), async (req, res) => {
-    try {
-      const merchantId = (req as any).user.id;
-      const { fromCountryId, toCountryId, amount } = req.body;
-      if (!fromCountryId || !toCountryId || !amount) {
-        return res.status(400).json({ message: "Champs manquants" });
-      }
-      const parsedAmount = parseInt(amount);
-      if (isNaN(parsedAmount) || parsedAmount <= 0) {
-        return res.status(400).json({ message: "Montant invalide" });
-      }
-      const fromMC = await storage.getMerchantCountryById(parseInt(fromCountryId));
-      const toMC = await storage.getMerchantCountryById(parseInt(toCountryId));
-      if (!fromMC || fromMC.merchantId !== merchantId) {
-        return res.status(400).json({ message: "Pays source invalide" });
-      }
-      if (!toMC || toMC.merchantId !== merchantId) {
-        return res.status(400).json({ message: "Pays destination invalide" });
-      }
-      if (fromMC.id === toMC.id) {
-        return res.status(400).json({ message: "Pays source et destination identiques" });
-      }
-      // Bloquer Niger et Kenya : devise propre, pas d'échange inter-pays autorisé
-      if (NO_WALLET_TRANSFER_COUNTRIES.has(fromMC.country)) {
-        return res.status(400).json({ message: `Les transferts inter-pays ne sont pas autorisés depuis le ${fromMC.country}. Les fonds reçus au ${fromMC.country} doivent être retirés localement.` });
-      }
-      if (NO_WALLET_TRANSFER_COUNTRIES.has(toMC.country)) {
-        return res.status(400).json({ message: `Les transferts inter-pays ne sont pas autorisés vers le ${toMC.country}.` });
-      }
-      const fromZone = await getCurrencyZone(fromMC.country);
-      const toZone = await getCurrencyZone(toMC.country);
-      if (!fromZone || !toZone || fromZone !== toZone) {
-        return res.status(400).json({ message: "Les deux pays doivent etre dans la meme zone monetaire (XOF ou XAF)" });
-      }
-      // Vérifier si les virements inter-wallets sont globalement désactivés
-      const walletTransfersDisabledFlag = await storage.getSetting("wallet_transfers_disabled");
-      if (walletTransfersDisabledFlag === "true") {
-        return res.status(403).json({
-          code: "WALLET_EXCHANGE_UNAVAILABLE",
-          message: "Wallet exchange is unavailable",
-        });
-      }
-
-      const wtMerchantForFee = await storage.getMerchantById(merchantId);
-      const feeTypeSetting = await storage.getSetting("wallet_transfer_fee_type");
-      const feeValueSetting = await storage.getSetting("wallet_transfer_fee_value");
-      const feeType = feeTypeSetting || "percentage";
-      const feeValue = parseFloat(feeValueSetting || "4.5");
-      let fee = 0;
-      if (!wtMerchantForFee?.feeExempt) {
-        if (feeType === "percentage") {
-          fee = Math.round((parsedAmount * feeValue) / 100);
-        } else {
-          fee = Math.round(feeValue);
-        }
-      }
-      const totalNeeded = parsedAmount + fee;
-      if (fromMC.balance < totalNeeded) {
-        return res.status(400).json({ message: `Solde insuffisant. Vous avez ${fromMC.balance.toLocaleString("fr-FR")} ${fromZone}, vous avez besoin de ${totalNeeded.toLocaleString("fr-FR")} ${fromZone} (montant + frais)` });
-      }
-
-      // ── DÉBIT ATOMIQUE transfert (élimine la race condition) ──────────────────
-      const transferDebited = await storage.decrementMerchantCountryBalanceAtomic(fromMC.id, totalNeeded);
-      if (!transferDebited) {
-        return res.status(400).json({ message: "Solde insuffisant (vérification atomique échouée)" });
-      }
-
-      const transfer = await storage.createWalletTransfer({
-        merchantId,
-        fromCountryId: fromMC.id,
-        toCountryId: toMC.id,
-        fromCountry: fromMC.country,
-        toCountry: toMC.country,
-        currency: fromZone,
-        amount: parsedAmount,
-        fee,
-        netAmount: parsedAmount,
-        status: "pending",
-      });
-
-      notifyAdminWalletTransfer({ id: transfer.id, merchantName: wtMerchantForFee?.name || `#${merchantId}`, fromCountry: fromMC.country, toCountry: toMC.country, amount: parsedAmount, fee, currency: fromZone, status: "pending" }).catch(() => {});
-
-      res.json(transfer);
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.get("/api/admin/wallet-transfers", authMiddleware("admin"), async (req, res) => {
-    try {
-      const transfers = await storage.getWalletTransfers();
-      res.json(transfers);
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.put("/api/admin/wallet-transfers/:id/approve", authMiddleware("admin"), async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const transfer = await storage.getWalletTransferById(id);
-      if (!transfer) return res.status(404).json({ message: "Transfert introuvable" });
-      if (transfer.status !== "pending") return res.status(400).json({ message: "Ce transfert n'est plus en attente" });
-      await storage.applyWalletTransfer(id);
-      await storage.updateWalletTransferStatus(id, "approved", req.body.note || null);
-      const wtApprMerchant = await storage.getMerchantById(transfer.merchantId);
-      notifyAdminWalletTransfer({ id, merchantName: wtApprMerchant?.name || `#${transfer.merchantId}`, fromCountry: transfer.fromCountry, toCountry: transfer.toCountry, amount: transfer.amount, fee: transfer.fee, currency: transfer.currency, status: "approved" }).catch(() => {});
-      notifyMerchantWalletTransfer(transfer.merchantId, { id, fromCountry: transfer.fromCountry, toCountry: transfer.toCountry, amount: transfer.amount, fee: transfer.fee, currency: transfer.currency, status: "approved" }).catch(() => {});
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.put("/api/admin/wallet-transfers/:id/reject", authMiddleware("admin"), async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const transfer = await storage.getWalletTransferById(id);
-      if (!transfer) return res.status(404).json({ message: "Transfert introuvable" });
-      if (transfer.status !== "pending") return res.status(400).json({ message: "Ce transfert n'est plus en attente" });
-      await storage.reimbursWalletTransfer(id);
-      await storage.updateWalletTransferStatus(id, "rejected", req.body.note || null);
-      const wtRejMerchant = await storage.getMerchantById(transfer.merchantId);
-      notifyAdminWalletTransfer({ id, merchantName: wtRejMerchant?.name || `#${transfer.merchantId}`, fromCountry: transfer.fromCountry, toCountry: transfer.toCountry, amount: transfer.amount, fee: transfer.fee, currency: transfer.currency, status: "rejected" }).catch(() => {});
-      notifyMerchantWalletTransfer(transfer.merchantId, { id, fromCountry: transfer.fromCountry, toCountry: transfer.toCountry, amount: transfer.amount, fee: transfer.fee, currency: transfer.currency, status: "rejected" }).catch(() => {});
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.get("/api/admin/wallet-transfer-fee", authMiddleware("admin"), async (_req, res) => {
-    try {
-      const feeType = await storage.getSetting("wallet_transfer_fee_type");
-      const feeValue = await storage.getSetting("wallet_transfer_fee_value");
-      res.json({
-        feeType: feeType || "percentage",
-        feeValue: feeValue || "4.5",
-      });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.post("/api/admin/wallet-transfer-fee", authMiddleware("admin"), async (req, res) => {
-    try {
-      const { feeType, feeValue } = req.body;
-      if (!["percentage", "fixed"].includes(feeType)) return res.status(400).json({ message: "Type de frais invalide" });
-      const v = parseFloat(feeValue);
-      if (isNaN(v) || v < 0) return res.status(400).json({ message: "Valeur de frais invalide" });
-      await storage.setSetting("wallet_transfer_fee_type", feeType);
-      await storage.setSetting("wallet_transfer_fee_value", String(v));
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // ── Taux de frais payin/payout globaux ────────────────────────────────────────
-  app.get("/api/admin/fee-settings", authMiddleware("admin"), async (_req, res) => {
-    try {
-      res.json(getFeeSnapshot());
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.post("/api/admin/fee-settings", authMiddleware("admin"), async (req, res) => {
-    try {
-      const { payinRate, payoutRate, countryOverrides } = req.body;
-      const payin  = parseFloat(payinRate);
-      const payout = parseFloat(payoutRate);
-      if (isNaN(payin)  || payin  < 0 || payin  > 100) return res.status(400).json({ message: "Taux payin invalide (0–100)" });
-      if (isNaN(payout) || payout < 0 || payout > 100) return res.status(400).json({ message: "Taux payout invalide (0–100)" });
-      if (typeof countryOverrides !== "object" || Array.isArray(countryOverrides)) {
-        return res.status(400).json({ message: "countryOverrides invalide" });
-      }
-      // Valider chaque override pays
-      for (const [country, rates] of Object.entries(countryOverrides as any)) {
-        const r = rates as any;
-        if (typeof r?.payin !== "number" || typeof r?.payout !== "number" || r.payin < 0 || r.payout < 0) {
-          return res.status(400).json({ message: `Override invalide pour ${country}` });
-        }
-      }
-      await saveFeeConfig(payin, payout, countryOverrides as any);
-      res.json({ success: true, ...getFeeSnapshot() });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // ==================== AI KEYS (OpenAI / Groq / Gemini) ====================
-
-  app.get("/api/admin/ai-keys", authMiddleware("admin"), async (_req, res) => {
-    try {
-      const [openai, groq, gemini] = await Promise.all([
-        storage.getSetting("ai_key_openai"),
-        storage.getSetting("ai_key_groq"),
-        storage.getSetting("ai_key_gemini"),
-      ]);
-      const mask = (k: string | null) => k && k.length > 8 ? k.slice(0, 6) + "..." + k.slice(-4) : null;
-      res.json({
-        openai: mask(openai),
-        groq: mask(groq),
-        gemini: mask(gemini),
-        openaiConfigured: !!(openai && openai.length > 5) || !!(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.length > 10),
-        groqConfigured: !!(groq && groq.length > 5) || !!(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY.length > 10),
-        geminiConfigured: !!(gemini && gemini.length > 5) || !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.length > 10),
-      });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.post("/api/admin/ai-keys", authMiddleware("admin"), async (req, res) => {
-    try {
-      const { openai, groq, gemini } = req.body;
-      if (openai !== undefined) await storage.setSetting("ai_key_openai", openai);
-      if (groq !== undefined) await storage.setSetting("ai_key_groq", groq);
-      if (gemini !== undefined) await storage.setSetting("ai_key_gemini", gemini);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // ── Test a specific AI provider ───────────────────────────────────────────
-  app.post("/api/admin/ai-keys/test", authMiddleware("admin"), async (req, res) => {
-    const { provider } = req.body;
-    if (!["openai", "groq", "gemini"].includes(provider)) {
-      return res.status(400).json({ success: false, message: "Provider invalide" });
-    }
-    const getKey = async (p: string) => {
-      const envMap: Record<string, string | undefined> = {
-        openai: process.env.OPENAI_API_KEY,
-        groq: process.env.GROQ_API_KEY,
-        gemini: process.env.GEMINI_API_KEY,
-      };
-      const dbKeyMap: Record<string, string> = {
-        openai: "ai_key_openai",
-        groq: "ai_key_groq",
-        gemini: "ai_key_gemini",
-      };
-      const envKey = envMap[p];
-      if (envKey && envKey.length > 10) return envKey;
-      const dbKey = await storage.getSetting(dbKeyMap[p]).catch(() => null);
-      return dbKey && dbKey.length > 5 ? dbKey : null;
-    };
-    try {
-      const apiKey = await getKey(provider);
-      if (!apiKey) return res.json({ success: false, message: "Aucune clé configurée pour ce provider", source: null });
-      const envSources: Record<string, string | undefined> = {
-        openai: process.env.OPENAI_API_KEY,
-        groq: process.env.GROQ_API_KEY,
-        gemini: process.env.GEMINI_API_KEY,
-      };
-      const source = (envSources[provider] && envSources[provider]!.length > 10) ? "env" : "db";
-      if (provider === "openai") {
-        const r = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify({ model: "gpt-4o-mini", max_tokens: 5, messages: [{ role: "user", content: "Hi" }] }),
-        });
-        if (!r.ok) { const t = await r.text(); return res.json({ success: false, message: `OpenAI: ${r.status} — ${t.slice(0, 120)}`, source }); }
-        const d = await r.json() as any;
-        return res.json({ success: true, message: `OpenAI OK — modèle: ${d.model || "gpt-4o-mini"}`, source });
-      }
-      if (provider === "groq") {
-        const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify({ model: "llama-3.1-8b-instant", max_tokens: 5, messages: [{ role: "user", content: "Hi" }] }),
-        });
-        if (!r.ok) { const t = await r.text(); return res.json({ success: false, message: `Groq: ${r.status} — ${t.slice(0, 120)}`, source }); }
-        return res.json({ success: true, message: "Groq OK — llama-3.1-8b-instant", source });
-      }
-      if (provider === "gemini") {
-        const r = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Hi" }] }], generationConfig: { maxOutputTokens: 5 } }),
-          }
-        );
-        if (!r.ok) { const t = await r.text(); return res.json({ success: false, message: `Gemini: ${r.status} — ${t.slice(0, 120)}`, source }); }
-        return res.json({ success: true, message: "Gemini OK — gemini-1.5-flash", source });
-      }
-    } catch (err: any) {
-      res.status(500).json({ success: false, message: err.message });
-    }
-  });
-
-  app.post("/api/admin/support-contacts", authMiddleware("admin"), async (req, res) => {
-    try {
-      const { telegram1, telegram2, telegram3, telegram4 } = req.body;
-      if (telegram1 !== undefined) await storage.setSetting("support_telegram_1", telegram1);
-      if (telegram2 !== undefined) await storage.setSetting("support_telegram_2", telegram2);
-      if (telegram3 !== undefined) await storage.setSetting("support_telegram_3", telegram3);
-      if (telegram4 !== undefined) await storage.setSetting("support_telegram_4", telegram4);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // ─── Reversements (Withdrawals) ──────────────────────────────────────────
-
-  app.get("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, res) => {
-    try {
-      const merchantId = (req as any).user.id;
-      const list = await storage.getWithdrawals(merchantId);
-      // Never expose the internal provider error stored in adminNote.
-      // Also repair the public status of legacy records whose note already
-      // proves that the provider rejected the withdrawal.
-      const sanitized = list.map((withdrawal: any) => {
-        const status = normalizeMerchantWithdrawalStatus(withdrawal.status, withdrawal.adminNote);
-        return {
-          ...withdrawal,
-          status,
-          adminNote: merchantWithdrawalNote(status),
-        };
-      });
-      res.json(sanitized);
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, res) => {
-    try {
-      const merchantId = (req as any).user.id;
-
-      // ── Rate limiting par IP ──────────────────────────────────────────────────
-      const clientIp = extractIp(req);
-      const rlCheck = checkWithdrawalRateLimit(clientIp);
-      if (!rlCheck.allowed) {
-        console.warn(`[WITHDRAWAL RATE LIMIT] IP [redacted] bloquée — trop de tentatives. Retry dans ${rlCheck.retryAfterSec}s`);
-        res.setHeader("Retry-After", String(rlCheck.retryAfterSec));
-        return res.status(429).json({
-          message: `Trop de demandes de retrait. Veuillez réessayer dans ${Math.ceil(rlCheck.retryAfterSec / 60)} minute(s).`,
-          retryAfterSec: rlCheck.retryAfterSec,
-        });
-      }
-
-      // ── Validation des entrées ────────────────────────────────────────────────
-        const { merchantCountryId, amount, phone, accountNumber, operator, recipientName } = req.body;
-        if (!merchantCountryId || !amount || (!phone && !accountNumber)) return res.status(400).json({ message: "Champs requis manquants" });
-
-      // Validation stricte du numéro de téléphone (chiffres + indicatifs internationaux)
-      const phoneClean = String(phone).trim();
-        const accountNumberClean = String(accountNumber || "").replace(/[\s\-().]/g, "");
-        if (phone && !/^\+?[0-9\s\-().]{6,20}$/.test(phoneClean)) {
-        return res.status(400).json({ message: "Numéro de téléphone invalide" });
-      }
-        if (accountNumber && !/^[0-9]{6,34}$/.test(accountNumberClean)) {
-          return res.status(400).json({ message: "Numéro de compte bancaire invalide" });
-        }
-      // Validation du montant : entier positif raisonnable
-      const parsedAmount = Number(amount);
-      if (!Number.isInteger(parsedAmount) || parsedAmount <= 0 || parsedAmount > 50_000_000) {
-        return res.status(400).json({ message: "Montant invalide (doit être un entier positif, max 50 000 000)" });
-      }
-      // merchantCountryId doit être un entier
-      if (!Number.isInteger(Number(merchantCountryId)) || Number(merchantCountryId) <= 0) {
-        return res.status(400).json({ message: "merchantCountryId invalide" });
-      }
-
-      // ── Vérification désactivation payout par marchand ───────────────────────
-      const merchantRecord = await storage.getMerchantById(merchantId);
-      if (merchantRecord?.withdrawalsDisabled) {
-        return res.status(404).json({ message: MERCHANT_PAYMENT_DISABLED_MESSAGE });
-      }
-
-      const withdrawalsDisabledFlag = await storage.getSetting("withdrawals_disabled");
-      if (withdrawalsDisabledFlag === "true") {
-        return res.status(503).json({ message: "Les retraits sont temporairement indisponibles. Veuillez réessayer plus tard.", withdrawalsDisabled: true });
-      }
-
-      const mc = await storage.getMerchantCountryById(Number(merchantCountryId));
-      if (!mc || mc.merchantId !== merchantId) return res.status(403).json({ message: "Wallet introuvable" });
-      if (parsedAmount <= 0) return res.status(400).json({ message: "Montant invalide" });
-      if (mc.balance < parsedAmount) return res.status(400).json({ message: "Solde insuffisant" });
-      const merchant = await storage.getMerchantById(merchantId);
-      if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
-
-      const payoutOpRecord = operator ? await storage.getWithdrawalOperatorByNameAndCountry(operator, mc.country) : null;
-      const payoutGatewayLower = normalizeGatewayName(payoutOpRecord?.gateway);
-      const useMbiyoPayout = payoutGatewayLower === "mbiyo";
-      const useSendavaPayout = payoutGatewayLower === "sendavapay";
-      const useClapayPayout = payoutGatewayLower === "clapay";
-      const useLipaPapPayout = payoutGatewayLower === "lipapap" || payoutGatewayLower === "lipa";
-        const isBankTransfer = payoutOpRecord?.type === "Virement bancaire";
-        if (isBankTransfer && !accountNumberClean) {
-          return res.status(400).json({ message: "Le numéro de compte bancaire est requis pour ce mode de retrait." });
-        }
-        if (!isBankTransfer && !phoneClean) {
-          return res.status(400).json({ message: "Le numéro de téléphone est requis pour ce mode de retrait." });
-        }
-        const destinationValue = isBankTransfer ? accountNumberClean : phoneClean;
-
-      const minAmountRaw = await storage.getSetting("withdrawal_min_amount");
-      const withdrawalMinAmount = minAmountRaw ? parseInt(minAmountRaw) || 200 : 200;
-      if ((useMbiyoPayout || useSendavaPayout || useClapayPayout) && amount < withdrawalMinAmount) {
-        return res.status(400).json({ message: `Le montant minimum de retrait est de ${withdrawalMinAmount} FCFA.` });
-      }
-
-      // ── ANTI-DOUBLON (vérification avant lock) ────────────────────────────────
-      const recentDuplicate = await financialPool.query(
-        `SELECT id, status, created_at FROM withdrawals
-         WHERE merchant_id = $1 AND phone = $2 AND amount = $3 AND country = $4
-           AND status IN ('pending', 'approved')
-           AND created_at > NOW() - INTERVAL '2 hours'
-         ORDER BY created_at DESC LIMIT 1`,
-          [merchantId, destinationValue, parsedAmount, mc.country]
-      );
-      if (recentDuplicate.rowCount && recentDuplicate.rowCount > 0) {
-        const dup = recentDuplicate.rows[0];
-        const dupDate = new Date(dup.created_at).toLocaleString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-        return res.status(409).json({
-          message: `Un retrait identique (${parsedAmount} FCFA → ${phoneClean}) est déjà ${dup.status === "approved" ? "approuvé" : "en cours"} depuis ${dupDate}. Attendez 2 heures avant de réessayer.`,
-          duplicateId: dup.id,
-        });
-      }
-
-      // ── VÉRIFICATION SÉCURITÉ : dépôts reçus vs retraits effectués ──────────────
-      const totalDeposits = await storage.getTotalConfirmedDepositsForMC(merchantId, mc.country);
-      const adminCredits = (mc as any).adminCreditsTotal ?? 0;
-      const totalAllowed = totalDeposits + adminCredits;
-      const totalAlreadyWithdrawn = await storage.getTotalApprovedWithdrawalsForMC(mc.id);
-      if (totalAllowed === 0) {
-        return res.status(400).json({
-          message: "Sécurité: Aucun dépôt confirmé sur ce compte. Vous ne pouvez pas effectuer de retrait.",
-          securityBlock: true,
-        });
-      }
-      if ((totalAlreadyWithdrawn + parsedAmount) > totalAllowed) {
-        return res.status(400).json({
-          message: `Sécurité: Le total de vos retraits (${(totalAlreadyWithdrawn + parsedAmount).toLocaleString("fr-FR")} F) dépasse vos dépôts confirmés (${totalAllowed.toLocaleString("fr-FR")} F). Retrait bloqué pour anomalie de solde.`,
-          securityBlock: true,
-          totalDeposits,
-          adminCredits,
-          totalAllowed,
-          totalAlreadyWithdrawn,
-          requested: parsedAmount,
-        });
-      }
-
-      // ── DÉBIT ATOMIQUE ─────────────────────────────────────────────────────────
-      const debited = await storage.decrementMerchantCountryBalanceAtomic(mc.id, parsedAmount);
-      if (!debited) {
-        return res.status(400).json({ message: "Solde insuffisant (vérification atomique échouée)" });
-      }
-
-      const w = await storage.createWithdrawal({
-        merchantId,
-        merchantCountryId: mc.id,
-        country: mc.country,
-        amount: parsedAmount,
-          phone: destinationValue,
-          accountNumber: isBankTransfer ? accountNumberClean : null,
-        recipientName: recipientName || null,
-        operator: operator || null,
-        status: "pending",
-        withdrawalMode: "auto",
-        adminNote: null,
-        gateway: useMbiyoPayout ? "mbiyo" : useSendavaPayout ? "sendavapay" : useClapayPayout ? "clapay" : useLipaPapPayout ? "lipapap" : "omnipay",
-      });
-
-      const wdRawIp = (req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "").split(",")[0].trim();
-      getGeoInfo(wdRawIp).then(wdGeo => {
-        notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, merchantEmail: merchant.email, merchantId, country: mc.country, amount, fees: 0, phone: destinationValue, accountNumber: isBankTransfer ? accountNumberClean : null, operator: operator || null, status: "pending", mode: "auto", ip: wdGeo.ip || wdRawIp, geo: wdGeo }).catch(() => {});
-      }).catch(() => {
-        notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, merchantEmail: merchant.email, merchantId, country: mc.country, amount, fees: 0, phone: destinationValue, accountNumber: isBankTransfer ? accountNumberClean : null, operator: operator || null, status: "pending", mode: "auto", ip: wdRawIp }).catch(() => {});
-      });
-
-      const withdrawalFee = merchant.customFeeRate != null
-        ? Math.floor(amount * merchant.customFeeRate / 100)
-        : merchant.feeExempt ? 0 : calcWithdrawalFee(amount, mc.country);
-      const netAmount = amount - withdrawalFee;
-      const reference = mbiyoGenerateRef();
-
-      if (useMbiyoPayout) {
-        const mbiyoApiKey = await getMbiyoApiKey();
-        if (!mbiyoApiKey) {
-          console.error(
-            `[WITHDRAWAL CONFIG] Clé absente pour gateway=mbiyo pays=${mc.country} opérateur=${operator || "(vide)"}`,
-          );
-          notifyAdminWithdrawalError({
-            id: w.id,
-            merchantName: merchant.name,
-            merchantEmail: merchant.email,
-            merchantId,
-            country: mc.country,
-            amount: parsedAmount,
-            phone: destinationValue,
-            accountNumber: isBankTransfer ? accountNumberClean : null,
-            operator,
-            gateway: "mbiyo",
-            stage: "lecture de la clé API",
-            error: "MBIYO_API_KEY/mbiyo_api_key absent ou vide",
-          }).catch(() => {});
-          await storage.updateWithdrawalStatus(w.id, "failed", "Cle API Mbiyo non configuree", reference);
-          await storage.incrementMerchantCountryBalance(mc.id, amount);
-          return res.status(500).json({ message: "Service de retrait non configure. Contactez l'administrateur." });
-        }
-        try {
-          const msisdnFull = prependDialCode(phone, mc.country);
-          const countryCode = mbiyoCountryCode(mc.country);
-          const currency = mbiyoCurrency(mc.country);
-          const network = payoutOpRecord?.mbiyoCode || mbiyoNetwork(operator || "");
-          const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
-          const callbackUrl = `${callbackBaseUrl}/api/mbiyo/payout-callback`;
-          console.log("[WITHDRAWAL MBIYO] Requête préparée");
-
-          const result = await mbiyoInitiatePayout({
-            apiKey: mbiyoApiKey,
-            amount: w.amount - (w.fees || 0),
-            currency,
-            orderId: reference,
-            callbackUrl,
-            network,
-            phoneNumber: msisdnFull,
-            countryCode,
-            beneficiary: WESTPAY_PAYOUT_BENEFICIARY,
-          });
-
-          const payoutInitOk = (result.status === "success" || result.status === "pending") && result.data;
-          if (payoutInitOk) {
-            const mbiyoRef = result.data!.transaction_id || reference;
-            const mbiyoFee = Math.round(parseFloat(String(result.data!.fee || 0)) || withdrawalFee);
-            await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - TxID: ${mbiyoRef}`, reference, mbiyoFee, mbiyoFee);
-            console.log(`[WITHDRAWAL MBIYO] Initié (statut: ${result.status}) - TxID: ${mbiyoRef} ref=${reference}`);
-            return res.json({ ...w, status: "pending", omnipayRef: reference, fees: mbiyoFee, netAmount, autoProcessed: true, gateway: "mbiyo" });
-          } else {
-            const errMsg = result.message || "Echec du transfert";
-            console.warn(`[WITHDRAWAL MBIYO] Echec: ${errMsg} — tentative fallback OmniPay...`);
-            notifyAdminWithdrawalError({
-              id: w.id,
-              merchantName: merchant.name,
-              merchantEmail: merchant.email,
-              merchantId,
-              country: mc.country,
-              amount: parsedAmount,
-              phone: phoneClean,
-              operator,
-              gateway: "mbiyo",
-              stage: "réponse API d'initiation du retrait (fallback OmniPay tenté)",
-              error: errMsg,
-            }).catch(() => {});
-            // Fallback OmniPay
-            const fallbackApiKey = await getOmnipayPayoutApiKey();
-            if (fallbackApiKey) {
-              try {
-                const omnipayOperatorCode = await resolveOmnipayOperatorCode(operator, mc.country);
-                const msisdnFullFb = prependDialCode(phone, mc.country);
-                const fallbackRef = reference + "F";
-                const fallbackResult = await omnipayInitiateTransfer({
-                  apikey: fallbackApiKey,
-                  msisdn: msisdnFullFb,
-                  amount: netAmount,
-                  reference: fallbackRef,
-                  first_name: WESTPAY_PAYOUT_FIRST_NAME,
-                  last_name: WESTPAY_PAYOUT_LAST_NAME,
-                  operator: omnipayOperatorCode,
-                });
-                if (fallbackResult.success === 1) {
-                  const omnipayRef = fallbackResult.reference || fallbackRef;
-                  const fbProviderFee = fallbackResult.fees || 0;
-                  await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - Frais prévus: ${withdrawalFee} F`, omnipayRef, withdrawalFee, fbProviderFee);
-                  console.log(`[WITHDRAWAL FALLBACK] Basculé sur OmniPay ref=${omnipayRef}`);
-                  return res.json({ ...w, status: "pending", omnipayRef, fees: withdrawalFee, netAmount, autoProcessed: true, gateway: "omnipay" });
-                }
-              } catch (fbErr: any) {
-                console.error(`[WITHDRAWAL FALLBACK] OmniPay fallback échoué: ${fbErr.message}`);
-              }
-            }
-            // Les deux ont échoué
-            await storage.updateWithdrawalStatus(w.id, "failed", `Retrait non abouti: ${errMsg}`, reference);
-            notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
-            notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone: destinationValue, accountNumber: isBankTransfer ? accountNumberClean : null, operator: operator || null, status: "failed" }).catch(() => {});
-            await storage.incrementMerchantCountryBalance(mc.id, amount);
-            return res.status(400).json({ message: "Retrait non abouti. Votre solde a été restitué." });
-          }
-        } catch (mbiyoErr: any) {
-          const errDetail = mbiyoErr?.cause?.message || mbiyoErr?.message || "unknown";
-          const isTimeout = errDetail.includes("abort") || errDetail.includes("timeout") || errDetail.includes("UND_ERR");
-          const techMsg = isTimeout ? "Timeout connexion passerelle" : `Erreur technique: ${errDetail}`;
-          console.error(`[WITHDRAWAL MBIYO] Erreur catch — retrait #${w.id} | ${techMsg} — tentative fallback OmniPay...`);
-          notifyAdminWithdrawalError({
-            id: w.id,
-            merchantName: merchant.name,
-            merchantEmail: merchant.email,
-            merchantId,
-            country: mc.country,
-            amount: parsedAmount,
-            phone: destinationValue,
-            accountNumber: isBankTransfer ? accountNumberClean : null,
-            operator,
-            gateway: "mbiyo",
-            stage: "appel API d'initiation du retrait (fallback OmniPay tenté)",
-            error: errDetail,
-          }).catch(() => {});
-          // Fallback OmniPay sur exception
-          const fallbackApiKey = await getOmnipayPayoutApiKey();
-          if (fallbackApiKey) {
-            try {
-              const omnipayOperatorCode = await resolveOmnipayOperatorCode(operator, mc.country);
-              const msisdnFullFb = prependDialCode(phone, mc.country);
-              const fallbackRef = reference + "F";
-              const fallbackResult = await omnipayInitiateTransfer({
-                apikey: fallbackApiKey,
-                msisdn: msisdnFullFb,
-                amount: netAmount,
-                reference: fallbackRef,
-                first_name: WESTPAY_PAYOUT_FIRST_NAME,
-                last_name: WESTPAY_PAYOUT_LAST_NAME,
-                operator: omnipayOperatorCode,
-              });
-              if (fallbackResult.success === 1) {
-                const omnipayRef = fallbackResult.reference || fallbackRef;
-                const fbProviderFee2 = fallbackResult.fees || 0;
-                await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - Frais prévus: ${withdrawalFee} F`, omnipayRef, withdrawalFee, fbProviderFee2);
-                console.log(`[WITHDRAWAL FALLBACK] Basculé sur OmniPay ref=${omnipayRef} (après erreur Mbiyo)`);
-                return res.json({ ...w, status: "pending", omnipayRef, fees: withdrawalFee, netAmount, autoProcessed: true, gateway: "omnipay" });
-              }
-            } catch (fbErr: any) {
-              console.error(`[WITHDRAWAL FALLBACK] OmniPay fallback échoué: ${fbErr.message}`);
-            }
-          }
-          await storage.updateWithdrawalStatus(w.id, "failed", techMsg, reference);
-          notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
-          notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
-          await storage.incrementMerchantCountryBalance(mc.id, amount);
-          return res.status(500).json({ message: "Retrait non abouti. Votre solde a été restitué." });
-        }
-      } else if (useSendavaPayout) {
-        const sendavaApiKey = await getSendavaApiKey();
-        if (!sendavaApiKey) {
-          console.error(
-            `[WITHDRAWAL CONFIG] Clé absente pour gateway=sendavapay pays=${mc.country} opérateur=${operator || "(vide)"}`,
-          );
-          notifyAdminWithdrawalError({
-            id: w.id,
-            merchantName: merchant.name,
-            merchantEmail: merchant.email,
-            merchantId,
-            country: mc.country,
-            amount: parsedAmount,
-            phone: phoneClean,
-            operator,
-            gateway: "sendavapay",
-            stage: "lecture de la clé API",
-            error: "SENDAVA_API_KEY/sendavapay_api_key absent ou vide",
-          }).catch(() => {});
-          await storage.updateWithdrawalStatus(w.id, "failed", "Service de retrait non configuré", reference);
-          await storage.incrementMerchantCountryBalance(mc.id, amount);
-          return res.status(500).json({ message: "Service de retrait non configure. Contactez l'administrateur." });
-        }
-        try {
-          const msisdnFull = "+" + prependDialCode(phone, mc.country);
-          const countryCode = SENDAVAPAY_COUNTRY_CODES[mc.country] || "";
-          const currency = SENDAVAPAY_CURRENCY_MAP[countryCode] || "XOF";
-          const sendavaOperator = toSendavaOperator(operator || "", countryCode);
-          console.log("[WITHDRAWAL SENDAVAPAY] Requête préparée");
-
-          const result = await sendavaInitiateWithdraw(sendavaApiKey, {
-            amount: netAmount,
-            phoneNumber: msisdnFull,
-            operator: sendavaOperator,
-            country: countryCode,
-            currency,
-            description: WESTPAY_PAYOUT_DESCRIPTION,
-            externalReference: reference,
-          });
-
-          const spStatusLower = (result.data?.status || "").toLowerCase();
-          const spInitOk = result.success && !["failed", "failure", "cancelled", "canceled", "rejected"].includes(spStatusLower);
-          if (spInitOk) {
-            const spRef = result.data?.reference || reference;
-            const spFee = result.data?.fee != null ? Math.round(result.data.fee || withdrawalFee) : withdrawalFee;
-            await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - Ref: ${spRef}`, spRef, spFee, spFee);
-            console.log(`[WITHDRAWAL SENDAVAPAY] Initie (statut: ${result.data?.status}) - ref=${spRef}`);
-
-            // Notifier le marchand que le retrait est en cours
-            notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: spFee, phone, operator: operator || null, status: "pending" }).catch(() => {});
-
-            // Démarrer le polling immédiat en arrière-plan (30s × 20 = 10 min)
-            pollSendavaWithdrawalBackground({
-              withdrawalId: w.id,
-              sendavaRef: spRef,
-              merchantId,
-              country: mc.country,
-              amount,
-              fees: spFee,
-              phone,
-              operator: operator || null,
-            }).catch(() => {});
-
-            return res.json({ ...w, status: "pending", omnipayRef: spRef, fees: spFee, netAmount, autoProcessed: true, gateway: "sendavapay" });
-          } else {
-            const rawErrMsg = result.message || result.data?.message || (result as any).error || "Échec du virement";
-            console.warn(`[WITHDRAWAL SENDAVAPAY] Echec: ${rawErrMsg}`);
-            notifyAdminWithdrawalError({
-              id: w.id,
-              merchantName: merchant.name,
-              merchantEmail: merchant.email,
-              merchantId,
-              country: mc.country,
-              amount: parsedAmount,
-              phone: phoneClean,
-              operator,
-              gateway: "sendavapay",
-              stage: "réponse API d'initiation du retrait",
-              error: rawErrMsg,
-            }).catch(() => {});
-            const safeErrMsg = toMerchantSafeMessage(rawErrMsg) || "Échec du virement";
-            await storage.updateWithdrawalStatus(w.id, "failed", `Retrait non abouti: ${safeErrMsg}`, reference);
-            notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
-            notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
-            await storage.incrementMerchantCountryBalance(mc.id, amount);
-            return res.status(400).json({
-              message: `Retrait refusé : ${safeErrMsg}. Votre solde a été restitué.`,
-              providerMessage: safeErrMsg,
-            });
-          }
-        } catch (spErr: any) {
-          const errDetail = spErr?.cause?.message || spErr?.message || "unknown";
-          const isTimeout = errDetail.includes("abort") || errDetail.includes("timeout") || errDetail.includes("UND_ERR");
-          const techMsg = isTimeout
-            ? "Délai d'attente dépassé (service inaccessible)"
-            : `Erreur technique : ${toMerchantSafeMessage(errDetail)}`;
-          console.error(`[WITHDRAWAL SENDAVAPAY] Erreur catch — retrait #${w.id} | ${techMsg}`);
-          notifyAdminWithdrawalError({
-            id: w.id,
-            merchantName: merchant.name,
-            merchantEmail: merchant.email,
-            merchantId,
-            country: mc.country,
-            amount: parsedAmount,
-            phone: phoneClean,
-            operator,
-            gateway: "sendavapay",
-            stage: "appel API d'initiation du retrait",
-            error: errDetail,
-          }).catch(() => {});
-          await storage.updateWithdrawalStatus(w.id, "failed", techMsg, reference);
-          notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
-          notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
-          await storage.incrementMerchantCountryBalance(mc.id, amount);
-          return res.status(500).json({
-            message: `${techMsg}. Votre solde a été restitué.`,
-            providerMessage: techMsg,
-          });
-        }
-      } else if (useClapayPayout) {
-        const cpToken = await getClapayApiKey();
-        if (!cpToken) {
-          console.error(
-            `[WITHDRAWAL CONFIG] Clé absente pour gateway=clapay pays=${mc.country} opérateur=${operator || "(vide)"}`,
-          );
-          notifyAdminWithdrawalError({
-            id: w.id,
-            merchantName: merchant.name,
-            merchantEmail: merchant.email,
-            merchantId,
-            country: mc.country,
-            amount: parsedAmount,
-            phone: phoneClean,
-            operator,
-            gateway: "clapay",
-            stage: "lecture de la clé API",
-            error: "CLAPAY_API_KEY/clapay_api_key absent ou vide",
-          }).catch(() => {});
-          await storage.updateWithdrawalStatus(w.id, "failed", "Clé API ClaPay non configurée", reference);
-          await storage.incrementMerchantCountryBalance(mc.id, amount);
-          return res.status(500).json({ message: "Service de retrait non configure. Contactez l'administrateur." });
-        }
-        try {
-          const countryCode = clapayCountryCode(mc.country);
-          const currency = clapayCurrency(mc.country);
-          const wdOpRecord = await storage.getWithdrawalOperatorByNameAndCountry(operator || "", mc.country).catch(() => null);
-          const serviceName = (wdOpRecord as any)?.clapayCode || wdOpRecord?.name || operator || undefined;
-          const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
-          const cpCallbackUrl = `${callbackBaseUrl}/api/clapay/payout-callback`;
-          const msisdnFull = "+" + prependDialCode(phone, mc.country);
-          const cpLocalPhone = clapayLocalPhone(msisdnFull, countryCode);
-          console.log(`[WITHDRAWAL CLAPAY] Virement: ${netAmount} ${currency} → ${maskPhoneForLog(cpLocalPhone)}, service: ${serviceName}, ref: ${reference}`);
-          const result = await clapayInitiatePayout(cpToken, {
-            transaction_id: reference,
-            amount: netAmount,
-            country_code: countryCode,
-            operators_code: serviceName ? [serviceName] : [],
-            method: "CASHIN",
-            tunnel: "API",
-            callback_url: cpCallbackUrl,
-           return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
-            additional_infos: {
-              customer_phone: cpLocalPhone,
-              customer_firstname: WESTPAY_PAYOUT_FIRST_NAME,
-              customer_lastname: WESTPAY_PAYOUT_LAST_NAME,
-            },
-          });
-          if (result.success) {
-             const cpProviderTxId = result.data?.signature || null;
-             await storage.updateWithdrawalStatus(w.id, "pending", `En cours ClaPay — Ref: ${reference}`, reference, 0, 0);
-             if (cpProviderTxId) await storage.updateWithdrawalProviderTxId(w.id, cpProviderTxId);
-            notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "pending" }).catch(() => {});
-             return res.json({ ...w, status: "pending", omnipayRef: reference, fees: 0, netAmount, autoProcessed: true, gateway: "clapay" });
-          } else {
-            const rawErrMsg = result.message || "Échec ClaPay";
-            notifyAdminWithdrawalError({
-              id: w.id,
-              merchantName: merchant.name,
-              merchantEmail: merchant.email,
-              merchantId,
-              country: mc.country,
-              amount: parsedAmount,
-              phone: phoneClean,
-              operator,
-              gateway: "clapay",
-              stage: "réponse API d'initiation du retrait",
-              error: rawErrMsg,
-            }).catch(() => {});
-            await storage.updateWithdrawalStatus(w.id, "failed", rawErrMsg, reference);
-            await storage.incrementMerchantCountryBalance(mc.id, amount);
-            return res.status(400).json({ message: `Retrait refusé : ${rawErrMsg}. Votre solde a été restitué.` });
-          }
-        } catch (cpErr: any) {
-          notifyAdminWithdrawalError({
-            id: w.id,
-            merchantName: merchant.name,
-            merchantEmail: merchant.email,
-            merchantId,
-            country: mc.country,
-            amount: parsedAmount,
-            phone: phoneClean,
-            operator,
-            gateway: "clapay",
-            stage: "appel API d'initiation du retrait",
-            error: cpErr,
-          }).catch(() => {});
-          await storage.updateWithdrawalStatus(w.id, "failed", `Erreur technique ClaPay`, reference);
-          await storage.incrementMerchantCountryBalance(mc.id, amount);
-          return res.status(500).json({ message: "Erreur technique lors du traitement. Votre solde a été restitué." });
-        }
-      } else if (useLipaPapPayout) {
-        let lipaConfig: LipaPapConfig | undefined;
-        try {
-          lipaConfig = await getLipaPapConfig();
-        } catch (configErr: any) {
-          console.error(`[WITHDRAWAL CONFIG] LipaPap configuration invalide: ${configErr.message}`);
-        }
-        const providerCode = lipaConfig
-          ? lipapapPayoutProviderCode(mc.country, operator || "", lipaConfig.payoutProviderCodes)
-          : undefined;
-        const payerEmail = lipaConfig?.payerEmail;
-        if (!lipaConfig || !payerEmail || !providerCode) {
-          const reason = !lipaConfig
-            ? "Identifiants LipaPap absents"
-            : !payerEmail
-              ? "Email marchand LipaPap absent"
-              : `provider_code LipaPap non documenté pour ${mc.country}/${operator || "(vide)"}`;
-          await storage.updateWithdrawalStatus(w.id, "failed", `Retrait LipaPap refusé: ${reason}`, reference);
-          await storage.incrementMerchantCountryBalance(mc.id, amount);
-          notifyAdminWithdrawalError({
-            id: w.id,
-            merchantName: merchant.name,
-            merchantEmail: merchant.email,
-            merchantId,
-            country: mc.country,
-            amount: parsedAmount,
-            phone: phoneClean,
-            operator,
-            gateway: "lipapap",
-            stage: "validation de la configuration payout",
-            error: reason,
-          }).catch(() => {});
-          return res.status(400).json({ message: `Retrait LipaPap impossible : ${reason}. Votre solde a été restitué.` });
-        }
-        try {
-          const payoutAccountNumber = isBankTransfer ? accountNumberClean : prependDialCode(phoneClean, mc.country);
-          const result = await initiateLipaPapPayout(lipaConfig, {
-            orderId: reference,
-            amount: w.amount - (w.fees || 0),
-            currency: lipapapCurrency(mc.country),
-            beneficiaryName: recipientName || "Client WestPay",
-            accountNumber: payoutAccountNumber,
-            payerEmail,
-            providerCode,
-            payerPhone: isBankTransfer ? undefined : payoutAccountNumber,
-          });
-          const resultStatus = String(result.status || result.result || "").toUpperCase();
-          const accepted = ["ACCEPTED", "PROCESSING", "PENDING", "SUCCESS", "SETTLED"].includes(resultStatus)
-            || String(result.result || "").toUpperCase() === "ACCEPTED";
-          if (!accepted) {
-            const reason = result.decline_reason || result.message || result.txMsg || `Payout LipaPap refusé (${resultStatus || "inconnu"})`;
-            await storage.updateWithdrawalStatus(w.id, "failed", reason, reference);
-            await storage.incrementMerchantCountryBalance(mc.id, amount);
-            notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
-            return res.status(400).json({ message: `Retrait refusé : ${reason}. Votre solde a été restitué.` });
-          }
-          const providerTxId = String(result.trans_id || result.TransactionID || "");
-          await storage.updateWithdrawalStatus(w.id, "pending", `En cours LipaPap - Ref: ${providerTxId || reference}`, reference, withdrawalFee, 0);
-          if (providerTxId) await storage.updateWithdrawalProviderTxId(w.id, providerTxId);
-            notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: withdrawalFee, phone: destinationValue, accountNumber: isBankTransfer ? accountNumberClean : null, operator: operator || null, status: "pending" }).catch(() => {});
-          return res.json({ ...w, status: "pending", omnipayRef: reference, fees: withdrawalFee, netAmount, autoProcessed: true, gateway: "lipapap" });
-        } catch (lipaErr: any) {
-          const reason = lipaErr?.message || "Erreur technique LipaPap";
-          await storage.updateWithdrawalStatus(w.id, "failed", reason, reference);
-          await storage.incrementMerchantCountryBalance(mc.id, amount);
-          notifyAdminWithdrawalError({
-            id: w.id,
-            merchantName: merchant.name,
-            merchantEmail: merchant.email,
-            merchantId,
-            country: mc.country,
-            amount: parsedAmount,
-            phone: destinationValue,
-            accountNumber: isBankTransfer ? accountNumberClean : null,
-            operator,
-            gateway: "lipapap",
-            stage: "appel API MOMOPAYOUT",
-            error: reason,
-          }).catch(() => {});
-          return res.status(502).json({ message: "Erreur de connexion au service de retrait. Votre solde a été restitué." });
-        }
-      } else {
-        const apiKeyToUse = await getOmnipayPayoutApiKey();
-        if (!apiKeyToUse) {
-          console.error(
-            `[WITHDRAWAL CONFIG] Clé absente pour gateway=omnipay pays=${mc.country} opérateur=${operator || "(vide)"}`,
-          );
-          notifyAdminWithdrawalError({
-            id: w.id,
-            merchantName: merchant.name,
-            merchantEmail: merchant.email,
-            merchantId,
-            country: mc.country,
-            amount: parsedAmount,
-            phone: phoneClean,
-            operator,
-            gateway: "omnipay",
-            stage: "lecture de la clé API",
-            error: "OMNIPAY_API_KEY/omnipay_payout_api_key/omnipay_api_key absent ou vide",
-          }).catch(() => {});
-          await storage.updateWithdrawalStatus(w.id, "failed", "Cle API retrait non configuree", reference);
-          await storage.incrementMerchantCountryBalance(mc.id, amount);
-          return res.status(500).json({ message: "Cle API retrait non configuree. Contactez l'administrateur." });
-        }
-        try {
-          const omnipayOperatorCode = await resolveOmnipayOperatorCode(operator, mc.country);
-          const msisdnFull = prependDialCode(phone, mc.country);
-          const result = await omnipayInitiateTransfer({
-            apikey: apiKeyToUse,
-            msisdn: msisdnFull,
-            amount: netAmount,
-            reference,
-            first_name: WESTPAY_PAYOUT_FIRST_NAME,
-            last_name: WESTPAY_PAYOUT_LAST_NAME,
-            operator: omnipayOperatorCode,
-          });
-          if (result.success === 1) {
-            const omnipayRef = result.reference || reference;
-            const omnipayProviderFee = result.fees || 0;
-            await storage.updateWithdrawalStatus(w.id, "pending", `En cours de traitement - Frais prévus: ${withdrawalFee} F`, omnipayRef, withdrawalFee, omnipayProviderFee);
-            console.log(`[WITHDRAWAL AUTO] Initié chez OmniPay ref=${omnipayRef} - en attente du callback`);
-            return res.json({ ...w, status: "pending", omnipayRef, fees: withdrawalFee, netAmount, autoProcessed: true });
-          } else {
-            const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Echec de traitement";
-            notifyAdminWithdrawalError({
-              id: w.id,
-              merchantName: merchant.name,
-              merchantEmail: merchant.email,
-              merchantId,
-              country: mc.country,
-              amount: parsedAmount,
-              phone: phoneClean,
-              operator,
-              gateway: "omnipay",
-              stage: "réponse API d'initiation du retrait",
-              error: `Code ${result.code ?? "inconnu"} — ${errMsg}`,
-            }).catch(() => {});
-            await storage.updateWithdrawalStatus(w.id, "failed", `Retrait non abouti: ${errMsg}`, reference);
-            notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
-            notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
-            await storage.incrementMerchantCountryBalance(mc.id, amount);
-            return res.status(400).json({ message: errMsg, paymentError: true, code: result.code });
-          }
-        } catch (omnipayErr: any) {
-          console.error("[WITHDRAWAL AUTO] Erreur OmniPay:", omnipayErr.message);
-          notifyAdminWithdrawalError({
-            id: w.id,
-            merchantName: merchant.name,
-            merchantEmail: merchant.email,
-            merchantId,
-            country: mc.country,
-            amount: parsedAmount,
-            phone: phoneClean,
-            operator,
-            gateway: "omnipay",
-            stage: "appel API d'initiation du retrait",
-            error: omnipayErr,
-          }).catch(() => {});
-          await storage.updateWithdrawalStatus(w.id, "failed", `Erreur technique lors du traitement`, reference);
-          notifyAdminWithdrawal({ id: w.id, merchantName: merchant.name, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed", mode: "auto" }).catch(() => {});
-          notifyMerchantWithdrawal(merchantId, { id: w.id, country: mc.country, amount, fees: 0, phone, operator: operator || null, status: "failed" }).catch(() => {});
-          await storage.incrementMerchantCountryBalance(mc.id, amount);
-          return res.status(500).json({ message: "Erreur lors du traitement du retrait. Votre solde a été restitué." });
-        }
-      }
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.get("/api/merchant/withdrawal-operators/:country", authMiddleware("merchant"), async (req, res) => {
-    try {
-      const country = req.params.country as string;
-      const ops = await storage.getWithdrawalOperators(country, true);
-      const available = ops.filter(op => !op.maintenanceAll && !op.maintenanceWithdrawals);
-      res.json(available);
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.get("/api/admin/withdrawals", authMiddleware("admin"), async (_req, res) => {
-    try {
-      const list = await storage.getWithdrawals();
-      res.json(list);
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.put("/api/admin/withdrawals/:id/approve", authMiddleware("admin"), async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      const { note } = req.body;
-      const w = await storage.getWithdrawalById(id);
-      if (!w) return res.status(404).json({ message: "Reversement introuvable" });
-      if (w.status !== "pending") return res.status(400).json({ message: "Reversement deja traite" });
-      // ── PROTECTION ANTI-DOUBLE-ENVOI ──────────────────────────────────────────
-      // Si omnipayRef est déjà rempli, ce retrait a déjà été envoyé au prestataire
-      // (flow auto). Approuver à nouveau enverrait l'argent une deuxième fois.
-      if (w.omnipayRef) return res.status(400).json({
-        message: `Ce retrait est déjà en cours de traitement chez le prestataire (réf: ${w.omnipayRef}). Attendez la confirmation automatique.`
-      });
-
-      const mc = await storage.getMerchantCountryById(w.merchantCountryId);
-      const merchant = await storage.getMerchantById(w.merchantId);
-      let omnipayRef: string | undefined;
-      let fees: number | undefined;
-      let sentToProvider = false;
-      const useMbiyoPayout = w.gateway === "mbiyo";
-      const useSeapayPayout = w.gateway === "seapay";
-      const useClapayPayoutApprove = w.gateway === "clapay";
-      const useLipaPapPayoutApprove = w.gateway === "lipapap" || w.gateway === "lipa";
-
-      if (useClapayPayoutApprove) {
-        const cpToken = await getClapayApiKey();
-        if (mc && cpToken && merchant) {
-          try {
-            const reference = clapayGenerateRef();
-            const countryCode = clapayCountryCode(w.country);
-            const currency = clapayCurrency(w.country);
-            const wdOpRecord = w.operator ? await storage.getWithdrawalOperatorByNameAndCountry(w.operator, w.country) : null;
-            const serviceName = (wdOpRecord as any)?.clapayCode || wdOpRecord?.name || w.operator || undefined;
-            const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
-            const callbackUrl = `${callbackBaseUrl}/api/clapay/payout-callback`;
-            const cpAdminLocalPhone = clapayLocalPhone(w.phone || "", countryCode);
-            console.log(`[ADMIN APPROVE WD CLAPAY] Virement: ${w.amount} ${currency} → ${maskPhoneForLog(cpAdminLocalPhone)}, service: ${serviceName}, ref: ${reference}`);
-            const result = await clapayInitiatePayout(cpToken, {
-              transaction_id: reference,
-              amount: w.amount,
-              country_code: countryCode,
-              operators_code: serviceName ? [serviceName] : [],
-              method: "CASHIN",
-              tunnel: "API",
-              callback_url: callbackUrl,
-              return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
-              additional_infos: {
-                customer_phone: cpAdminLocalPhone,
-                customer_firstname: WESTPAY_PAYOUT_FIRST_NAME,
-                customer_lastname: WESTPAY_PAYOUT_LAST_NAME,
-              },
-            });
-            if (result.success) {
-              omnipayRef = reference;
-               if (result.data?.signature) {
-                 await storage.updateWithdrawalProviderTxId(w.id, result.data.signature);
-               }
-              fees = 0;
-              sentToProvider = true;
-              console.log(`[ADMIN APPROVE WD CLAPAY] Initié - Ref: ${reference}`);
-            } else {
-              console.error(`[ADMIN APPROVE WD CLAPAY] Échec: ${result.message}`);
-            }
-          } catch (cpErr: any) {
-            console.error("[ADMIN APPROVE WD CLAPAY] Erreur:", cpErr.message);
-          }
-        } else {
-          console.error("[ADMIN APPROVE WD CLAPAY] Token ClaPay non configuré");
-        }
-      } else if (useLipaPapPayoutApprove) {
-        let lipaConfig: LipaPapConfig | undefined;
-        try {
-          lipaConfig = await getLipaPapConfig();
-        } catch (configErr: any) {
-          console.error(`[ADMIN APPROVE WD LIPAPAP] Configuration invalide: ${configErr.message}`);
-        }
-        const providerCode = lipaConfig
-          ? lipapapPayoutProviderCode(w.country, w.operator || "", lipaConfig.payoutProviderCodes)
-          : undefined;
-        const payerEmail = lipaConfig?.payerEmail;
-        if (mc && merchant && lipaConfig && payerEmail && providerCode) {
-          try {
-            const reference = `LP-WD-${w.id}-${Date.now().toString(36).toUpperCase()}`;
-            const result = await initiateLipaPapPayout(lipaConfig, {
-              orderId: reference,
-              amount: w.amount,
-              currency: lipapapCurrency(w.country),
-              beneficiaryName: (w as any).recipientName || WESTPAY_PAYOUT_BENEFICIARY,
-              accountNumber: w.accountNumber || prependDialCode(w.phone, w.country),
-              payerEmail,
-              providerCode,
-              payerPhone: w.accountNumber ? undefined : prependDialCode(w.phone, w.country),
-            });
-            const resultStatus = String(result.status || result.result || "").toUpperCase();
-            if (["ACCEPTED", "PROCESSING", "PENDING", "SUCCESS", "SETTLED"].includes(resultStatus)) {
-              omnipayRef = reference;
-              fees = w.fees || 0;
-              sentToProvider = true;
-              if (result.trans_id || result.TransactionID) {
-                await storage.updateWithdrawalProviderTxId(w.id, String(result.trans_id || result.TransactionID));
-              }
-              console.log(`[ADMIN APPROVE WD LIPAPAP] Initié - Ref: ${reference} - statut: ${resultStatus}`);
-            } else {
-              console.error(`[ADMIN APPROVE WD LIPAPAP] Echec: ${result.decline_reason || result.message || resultStatus}`);
-            }
-          } catch (lipaErr: any) {
-            console.error(`[ADMIN APPROVE WD LIPAPAP] Erreur: ${lipaErr.message}`);
-          }
-        } else {
-          console.error(`[ADMIN APPROVE WD LIPAPAP] Configuration ou provider_code incomplet (${w.country}/${w.operator || "(vide)"})`);
-        }
-      } else if (useSeapayPayout) {
-        const [spMerchantId, spApiSecret] = await Promise.all([getSeapayMerchantId(w.country), getSeapayApiSecret(w.country)]);
-        if (mc && spMerchantId && spApiSecret && merchant) {
-          try {
-            const reference = seapayGenerateRef();
-            const currency = SEAPAY_CURRENCY_COUNTRY[w.country] || "USD";
-            const wdOpRecord = w.operator ? await storage.getWithdrawalOperatorByNameAndCountry(w.operator, w.country) : null;
-            const channelCode = wdOpRecord?.seapayCode || undefined;
-            const isBankTransfer = wdOpRecord?.type === "Virement bancaire";
-            const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
-            const notifyUrl = `${callbackBaseUrl}/api/seapay/payout-callback`;
-            console.log(`[ADMIN APPROVE WD SEAPAY] Transfert: ${w.amount} ${currency} vers ${maskPhoneForLog(w.phone)}, canal: ${channelCode || "(non defini)"}, ref: ${reference}`);
-            const result = await seapayPayout({
-              merchantId: spMerchantId,
-              currency,
-              amount: w.amount,
-              orderId: reference,
-              notifyUrl,
-              bankCode: isBankTransfer ? channelCode : undefined,
-              walletCode: !isBankTransfer ? channelCode : undefined,
-              channelCode,
-              account: w.phone,
-              accountName: WESTPAY_PAYOUT_BENEFICIARY,
-            }, spApiSecret);
-            if (result.code === 200 && result.data) {
-              omnipayRef = reference;
-              fees = 0;
-              sentToProvider = true;
-              console.log(`[ADMIN APPROVE WD SEAPAY] Initié - TradeNo: ${result.data.trade_no}, Ref: ${reference} - en attente callback`);
-            } else {
-              console.error(`[ADMIN APPROVE WD SEAPAY] Echec: ${result.msg}`);
-            }
-          } catch (seapayErr: any) {
-            console.error("[ADMIN APPROVE WD SEAPAY] Erreur:", seapayErr.message);
-          }
-        } else {
-          console.error("[ADMIN APPROVE WD SEAPAY] Configuration SeaPay incomplete (merchantId/apiSecret manquant)");
-        }
-      } else if (useMbiyoPayout) {
-        const mbiyoApiKey = await getMbiyoApiKey();
-        if (mc && mbiyoApiKey && merchant) {
-          try {
-            const reference = mbiyoGenerateRef();
-            const msisdnFull = prependDialCode(w.phone, w.country);
-            const countryCode = mbiyoCountryCode(w.country);
-            const currency = mbiyoCurrency(w.country);
-            const wdOpRecord = w.operator ? await storage.getWithdrawalOperatorByNameAndCountry(w.operator, w.country) : null;
-            const network = wdOpRecord?.mbiyoCode || mbiyoNetwork(w.operator || "");
-            const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
-            const callbackUrl = `${callbackBaseUrl}/api/mbiyo/payout-callback`;
-            console.log(`[ADMIN APPROVE WD MBIYO] Transfert: ${w.amount} vers ${maskPhoneForLog(msisdnFull)}, ref: ${reference}, network: ${network}`);
-            const result = await mbiyoInitiatePayout({
-              apiKey: mbiyoApiKey,
-              amount: w.amount,
-              currency,
-              orderId: reference,
-              callbackUrl,
-              network,
-              phoneNumber: msisdnFull,
-              countryCode,
-              beneficiary: WESTPAY_PAYOUT_BENEFICIARY,
-            });
-            if ((result.status === "success" || result.status === "pending") && result.data) {
-              omnipayRef = reference;
-              fees = Math.round(parseFloat(String(result.data.fee || 0)) || 0);
-              sentToProvider = true;
-              console.log(`[ADMIN APPROVE WD MBIYO] Initié (statut: ${result.status}) - TxID: ${result.data.transaction_id}, Ref: ${reference} - en attente callback`);
-            } else {
-              console.error(`[ADMIN APPROVE WD MBIYO] Echec: ${result.message}`);
-            }
-          } catch (mbiyoErr: any) {
-            const errDetail = mbiyoErr?.cause?.message || mbiyoErr?.message || "unknown";
-            const isTimeout = errDetail.includes("abort") || errDetail.includes("timeout") || errDetail.includes("UND_ERR");
-            console.error(`[ADMIN APPROVE WD MBIYO] Erreur catch — retrait #${w.id} | ${isTimeout ? "Timeout/connexion Mbiyo" : errDetail}`);
-          }
-        }
-      } else {
-        const omnipayApiKey = await getOmnipayPayoutApiKey();
-        if (mc && mc.omnipayEnabled && omnipayApiKey && merchant) {
-          try {
-            const reference = `WD-${w.id}-${Date.now()}`;
-            const adminOmnipayCode = await resolveOmnipayOperatorCode(w.operator, w.country);
-            const wdMsisdn = prependDialCode(w.phone, w.country);
-            console.log(`[ADMIN APPROVE WD] Transfert: ${w.amount} vers ${maskPhoneForLog(wdMsisdn)}, operateur: ${adminOmnipayCode || "(auto)"}, ref: ${reference}`);
-            const result = await omnipayInitiateTransfer({
-              apikey: omnipayApiKey,
-              msisdn: wdMsisdn,
-              amount: w.amount,
-              reference,
-                first_name: WESTPAY_PAYOUT_FIRST_NAME,
-                last_name: WESTPAY_PAYOUT_LAST_NAME,
-              operator: adminOmnipayCode,
-            });
-            if (result.success === 1) {
-              omnipayRef = result.reference || reference;
-              fees = result.fees || 0;
-              sentToProvider = true;
-              console.log(`[ADMIN APPROVE WD] Initié chez OmniPay - ID: ${result.id}, Ref: ${omnipayRef} - en attente callback`);
-            } else {
-              const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Echec inconnu";
-              console.error(`[ADMIN APPROVE WD] OmniPay echec (code ${result.code}): ${errMsg}`);
-            }
-          } catch (omnipayErr: any) {
-            console.error("[ADMIN APPROVE WD] OmniPay erreur:", omnipayErr.message);
-          }
-        }
-      }
-
-      if (useLipaPapPayoutApprove && !sentToProvider) {
-        return res.status(400).json({
-          message: "Le payout LipaPap n’a pas été envoyé : vérifiez CLIENT_KEY, SECRET_KEY, l’email enregistré et le provider_code.",
-        });
-      }
-      if (sentToProvider) {
-        await storage.updateWithdrawalStatus(id, "pending", `En cours de traitement - en attente de confirmation${note ? ` - Note: ${note}` : ""}`, omnipayRef, fees, fees);
-         console.log(`[ADMIN APPROVE WD] Retrait #${id} en attente confirmation ${useLipaPapPayoutApprove ? "LipaPap" : useMbiyoPayout ? "Mbiyo" : "OmniPay"} - ref=${omnipayRef}`);
-        res.json({ success: true, omnipayRef, fees, pendingPayment: true });
-      } else {
-        await storage.updateWithdrawalStatus(id, "approved", note, omnipayRef, fees, fees);
-        notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: fees || 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "approved", mode: "manual" }).catch(() => {});
-        notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: fees || 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "approved" }).catch(() => {});
-        res.json({ success: true, omnipayRef, fees });
-      }
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  app.put("/api/admin/withdrawals/:id/reject", authMiddleware("admin"), async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      const { note } = req.body;
-      const w = await storage.getWithdrawalById(id);
-      if (!w) return res.status(404).json({ message: "Reversement introuvable" });
-      if (w.status !== "pending") return res.status(400).json({ message: "Reversement deja traite" });
-      const rejMerchant = await storage.getMerchantById(w.merchantId);
-      await storage.updateWithdrawalStatus(id, "rejected", note);
-      await storage.incrementMerchantCountryBalance(w.merchantCountryId, w.amount);
-      notifyAdminWithdrawal({ id, merchantName: rejMerchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "rejected", mode: "manual" }).catch(() => {});
-      notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "rejected" }).catch(() => {});
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
-    }
-  });
-
-  // Vérifie le statut d'un reversement directement auprès d'un fournisseur (choisi par l'admin)
-  app.get("/api/admin/withdrawals/:id/check-status", authMiddleware("admin"), async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      const provider = String(req.query.provider || "").toLowerCase();
-      const w = await storage.getWithdrawalById(id);
-      if (!w) return res.status(404).json({ message: "Reversement introuvable" });
-      const effectiveProvider = provider || w.gateway || "";
-      if (!["sendavapay", "mbiyo", "omnipay", "seapay", "clapay", "lipapap"].includes(effectiveProvider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay, SeaPay, ClaPay ou LipaPap)" });
-      }
-      if (!w.omnipayRef) return res.status(400).json({ message: "Aucune référence fournisseur pour ce reversement" });
-      // ClaPay v3 attend la signature retournée à l'initiation. La référence
-      // marchande reste conservée dans omnipayRef pour les callbacks.
-      const providerRef = effectiveProvider === "clapay"
-        ? (w.providerTxId || w.omnipayRef)
-        : w.omnipayRef;
-
-      if (effectiveProvider === "clapay") {
-        const cpToken = await getClapayApiKey();
-        if (!cpToken) return res.status(500).json({ message: "Clé API ClaPay non configurée" });
-        const result = await clapayGetTransactionStatus(cpToken, providerRef);
-        return res.json({ provider: "clapay", success: result.success, status: result.status, data: result.data, error: result.message });
-      }
-      if (effectiveProvider === "sendavapay") {
-        const sendavaApiKey = await getSendavaApiKey();
-        if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
-        const result = await sendavaGetWithdrawalStatus(sendavaApiKey, w.omnipayRef);
-        return res.json({ provider: "sendavapay", success: result.success, status: result.data?.status, data: result.data, error: result.error || result.message });
-      }
-      if (effectiveProvider === "mbiyo") {
-        const mbiyoApiKey = await getMbiyoApiKey();
-        if (!mbiyoApiKey) return res.status(500).json({ message: "Clé API Mbiyo non configurée" });
-        const result = await mbiyoGetStatus(mbiyoApiKey, w.omnipayRef);
-        return res.json({ provider: "mbiyo", success: result.status === "success", status: result.data?.status, data: result.data, error: result.message });
-      }
-      if (effectiveProvider === "lipapap") {
-        const config = await getLipaPapConfig();
-        if (!config?.payerEmail) return res.status(500).json({ message: "Email enregistré LipaPap non configuré" });
-        const result = await getLipaPapPayoutStatus(config, w.omnipayRef, config.payerEmail);
-        return res.json({ provider: "lipapap", success: true, status: result.status || result.result, data: result, error: result.decline_reason || result.message });
-      }
-      if (effectiveProvider === "seapay") {
-        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(w.country), getSeapayApiKey(w.country)]);
-        if (!spMerchantId || !spApiKey) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
-        const currency = SEAPAY_CURRENCY_COUNTRY[w.country] || "USD";
-        const result = await seapayQuery(spMerchantId, providerRef, currency, spApiKey);
-        return res.json({ provider: "seapay", success: result.code === 200, status: result.data?.status, data: result.data, error: result.msg });
-      }
-      const omnipayApiKey = await getOmnipayPayoutApiKey();
-      if (!omnipayApiKey) return res.status(500).json({ message: "Clé API OmniPay non configurée" });
-      const result = await omnipayGetStatus(omnipayApiKey, w.omnipayRef);
-      return res.json({ provider: "omnipay", success: result.success === 1, status: (result as any).status || (result as any).data?.status, data: result, error: result.message });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }
@@ -10101,54 +5387,48 @@ export async function registerRoutes(
   app.post("/api/admin/withdrawals/:id/sync-status", authMiddleware("admin"), async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const provider = String(req.body.provider || "").toLowerCase();
+      const requestedProvider = normalizeGatewayName(req.body?.provider);
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
-      const effectiveProvider = provider || w.gateway || "";
-      if (!["sendavapay", "mbiyo", "omnipay", "seapay", "clapay", "lipapap"].includes(effectiveProvider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay, SeaPay, ClaPay ou LipaPap)" });
+      if (w.status !== "pending") return res.status(409).json({ message: "Ce retrait est déjà finalisé" });
+      const effectiveProvider = requestedProvider || normalizeGatewayName(w.gateway);
+      if (!["mbiyo", "seapay", "clapay", "lipapap"].includes(effectiveProvider)) {
+        return res.status(400).json({ message: "Choisissez une passerelle de retrait active." });
       }
-      if (!w.omnipayRef) return res.status(400).json({ message: "Aucune référence fournisseur pour ce reversement" });
+      if (normalizeGatewayName(w.gateway) !== effectiveProvider) {
+        return res.status(409).json({ message: "La passerelle enregistrée ne correspond pas à ce retrait. Utilisez la relance pour le réaffecter." });
+      }
+      if (!w.providerReference) return res.status(400).json({ message: "Aucune référence fournisseur pour ce reversement" });
+      if (effectiveProvider === "clapay" && !/^CP/i.test(w.providerReference)) {
+        return res.status(410).json({ message: "Le statut de cette ancienne opération n'est plus interrogeable." });
+      }
 
       let providerStatus = "";
       let raw: any = null;
       if (effectiveProvider === "clapay") {
         const cpToken = await getClapayApiKey();
         if (!cpToken) return res.status(500).json({ message: "Clé API ClaPay non configurée" });
-        const providerRef = w.providerTxId || w.omnipayRef;
+        const providerRef = w.providerTxId || w.providerReference;
         const result = await clapayGetTransactionStatus(cpToken, providerRef);
         providerStatus = (result.status || "").toLowerCase();
         raw = result.data;
-      } else if (effectiveProvider === "sendavapay") {
-        const sendavaApiKey = await getSendavaApiKey();
-        if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
-        const result = await sendavaGetWithdrawalStatus(sendavaApiKey, w.omnipayRef);
-        providerStatus = (result.data?.status || "").toLowerCase();
-        raw = result.data;
       } else if (effectiveProvider === "mbiyo") {
-        const mbiyoApiKey = await getMbiyoApiKey();
-        if (!mbiyoApiKey) return res.status(500).json({ message: "Clé API Mbiyo non configurée" });
-        const result = await mbiyoGetStatus(mbiyoApiKey, w.omnipayRef);
-        providerStatus = (result.data?.status || result.status || "").toLowerCase();
+        const apiKey = await getMbiyoApiKey();
+        if (!apiKey) return res.status(500).json({ message: "Clé API Mbiyo non configurée" });
+        const result: any = await mbiyoGetStatus(apiKey, w.providerReference);
+        providerStatus = String(result?.data?.status || result?.status || "").toLowerCase();
+        raw = result?.data || result;
+      } else if (effectiveProvider === "seapay") {
+        const [merchantId, apiKey] = await Promise.all([getSeapayMerchantId(w.country), getSeapayApiKey(w.country)]);
+        if (!merchantId || !apiKey) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
+        const result = await seapayQuery(merchantId, w.providerReference, SEAPAY_CURRENCY_COUNTRY[w.country] || "USD", apiKey);
+        providerStatus = String(result.data?.status || "").toLowerCase();
         raw = result.data;
       } else if (effectiveProvider === "lipapap") {
         const config = await getLipaPapConfig();
-        if (!config?.payerEmail) return res.status(500).json({ message: "Email enregistré LipaPap non configuré" });
-        const result = await getLipaPapPayoutStatus(config, w.omnipayRef, config.payerEmail);
+        if (!config?.payerEmail) return res.status(500).json({ message: "Configuration LipaPap incomplète" });
+        const result = await getLipaPapPayoutStatus(config, w.providerReference, config.payerEmail);
         providerStatus = String(result.status || result.result || "").toLowerCase();
-        raw = result;
-      } else if (effectiveProvider === "seapay") {
-        const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(w.country), getSeapayApiKey(w.country)]);
-        if (!spMerchantId || !spApiKey) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
-        const currency = SEAPAY_CURRENCY_COUNTRY[w.country] || "USD";
-        const result = await seapayQuery(spMerchantId, w.omnipayRef, currency, spApiKey);
-        providerStatus = String(result.data?.status || "").toLowerCase();
-        raw = result.data;
-      } else {
-        const omnipayApiKey = await getOmnipayPayoutApiKey();
-        if (!omnipayApiKey) return res.status(500).json({ message: "Clé API OmniPay non configurée" });
-        const result = await omnipayGetStatus(omnipayApiKey, w.omnipayRef);
-        providerStatus = String((result as any).status || (result as any).data?.status || "").toLowerCase();
         raw = result;
       }
 
@@ -10157,6 +5437,11 @@ export async function registerRoutes(
       const merchant = await storage.getMerchantById(w.merchantId);
 
       if (successStatuses.includes(providerStatus)) {
+        const claimed = await financialPool.query(
+          `UPDATE withdrawals SET status = 'approved' WHERE id = $1 AND status = 'pending' RETURNING id`,
+          [id],
+        );
+        if (!claimed.rowCount) return res.status(409).json({ message: "Le retrait a été traité entre-temps" });
         await storage.updateWithdrawalStatus(id, "approved", `Confirmé chez ${effectiveProvider} par l'admin`, undefined, w.fees || undefined, w.fees || undefined);
         notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: w.fees || 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "approved", mode: "manual" }).catch(() => {});
         notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: w.fees || 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "approved" }).catch(() => {});
@@ -10164,10 +5449,13 @@ export async function registerRoutes(
         return res.json({ success: true, applied: "approved", providerStatus, data: raw });
       }
       if (failureStatuses.includes(providerStatus)) {
+        const claimed = await financialPool.query(
+          `UPDATE withdrawals SET status = 'failed' WHERE id = $1 AND status = 'pending' RETURNING id`,
+          [id],
+        );
+        if (!claimed.rowCount) return res.status(409).json({ message: "Le retrait a été traité entre-temps" });
         await storage.updateWithdrawalStatus(id, "failed", `Échec confirmé chez ${effectiveProvider} par l'admin`);
-        if (effectiveProvider === "lipapap" && w.status === "pending") {
-          await storage.incrementMerchantCountryBalance(w.merchantCountryId, w.amount);
-        }
+        await storage.incrementMerchantCountryBalance(w.merchantCountryId, w.amount);
         console.log(`[ADMIN SYNC-STATUS WD] Retrait #${id} marqué échoué suite à ${effectiveProvider} (statut: ${providerStatus})`);
         return res.json({ success: true, applied: "failed", providerStatus, data: raw });
       }
@@ -10181,11 +5469,14 @@ export async function registerRoutes(
   app.post("/api/admin/withdrawals/:id/retry", authMiddleware("admin"), async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const requestedProvider = String(req.body?.provider || "").toLowerCase();
+      const requestedProvider = normalizeGatewayName(req.body?.provider);
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
-      const provider = requestedProvider || w.gateway || "sendavapay";
-      if (provider === "lipapap" || provider === "lipa") {
+      const provider = requestedProvider || normalizeGatewayName(w.gateway) || "clapay";
+      if (w.providerReference) {
+        return res.status(409).json({ message: "Ce retrait possède déjà une référence fournisseur. Il faut d'abord le résoudre ou le rejeter avant toute nouvelle demande." });
+      }
+      if (provider === "lipapap") {
         const retryFees = w.fees || 0;
         const retryNetAmount = w.amount - retryFees;
         const lipaConfig = await getLipaPapConfig().catch(() => undefined);
@@ -10220,51 +5511,14 @@ export async function registerRoutes(
           return res.status(502).json({ success: false, message: err.message || "Erreur LipaPap" });
         }
       }
-      if (!["sendavapay", "mbiyo", "omnipay", "seapay", "clapay"].includes(provider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay, SeaPay, ClaPay ou LipaPap)" });
-      }
-      if (w.status === "pending" && w.omnipayRef && provider === w.gateway) {
-        return res.status(400).json({ message: `Ce retrait est déjà en cours de traitement chez ${provider} (réf: ${w.omnipayRef}). Attendez la confirmation ou choisissez un autre fournisseur.` });
+      if (!["mbiyo", "seapay", "clapay", "lipapap"].includes(provider)) {
+        return res.status(400).json({ message: "Choisissez une passerelle de retrait active (Mbiyo, SeaPay, ClaPay ou LipaPap)." });
       }
       const mc = await storage.getMerchantCountryById(w.merchantCountryId);
       const merchant = await storage.getMerchantById(w.merchantId);
       if (!mc || !merchant) return res.status(404).json({ message: "Marchand introuvable" });
       const fees = w.fees || 0;
       const netAmount = w.amount - fees;
-
-      if (provider === "sendavapay") {
-        const sendavaApiKey = await getSendavaApiKey();
-        if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
-        const reference = sendavaGenerateRef();
-        const msisdnFull = "+" + prependDialCode(w.phone, w.country);
-        const countryCode = SENDAVAPAY_COUNTRY_CODES[w.country] || "";
-        const currency = SENDAVAPAY_CURRENCY_MAP[countryCode] || "XOF";
-        const sendavaOperator = toSendavaOperator(w.operator || "", countryCode);
-        const result = await sendavaInitiateWithdraw(sendavaApiKey, {
-          amount: netAmount,
-          phoneNumber: msisdnFull,
-          operator: sendavaOperator,
-          country: countryCode,
-          currency,
-          description: WESTPAY_PAYOUT_DESCRIPTION,
-          externalReference: reference,
-        });
-        const spStatusLower = (result.data?.status || "").toLowerCase();
-        const spInitOk = result.success && !["failed", "failure", "cancelled", "canceled", "rejected"].includes(spStatusLower);
-        if (spInitOk) {
-          const spRef = result.data?.reference || reference;
-          const spFee = result.data?.fee != null ? Math.round(result.data.fee || fees) : fees;
-          await storage.updateWithdrawalGateway(id, "sendavapay");
-          await storage.updateWithdrawalStatus(id, "pending", `Relancé chez SendavaPay — Ref: ${spRef}`, spRef, spFee, spFee);
-          pollSendavaWithdrawalBackground({ withdrawalId: id, sendavaRef: spRef, merchantId: w.merchantId, country: w.country, amount: w.amount, fees: spFee, phone: w.phone, operator: w.operator });
-          console.log(`[ADMIN TRIGGER WD] Retrait #${id} relancé chez SendavaPay — ref=${spRef}`);
-          return res.json({ success: true, provider: "sendavapay", reference: spRef, fees: spFee });
-        }
-        const errMsg = result.error || result.message || "Échec inconnu";
-        console.error(`[ADMIN TRIGGER WD] Retrait #${id} échec relance SendavaPay: ${errMsg}`);
-        return res.status(502).json({ success: false, message: errMsg });
-      }
-
       if (provider === "mbiyo") {
         const mbiyoApiKey = await getMbiyoApiKey();
         if (!mbiyoApiKey) return res.status(500).json({ message: "Clé API Mbiyo non configurée" });
@@ -10347,7 +5601,7 @@ export async function registerRoutes(
           method: "CASHIN",
           tunnel: "API",
           callback_url: `${callbackBaseUrl}/api/clapay/payout-callback`,
-          return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`,
+          return_url: `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&payment_status=complete`,
           additional_infos: {
             customer_phone: clapayLocalPhone(w.phone || "", countryCode),
             customer_firstname: WESTPAY_PAYOUT_FIRST_NAME,
@@ -10365,33 +5619,6 @@ export async function registerRoutes(
         console.log(`[ADMIN TRIGGER WD] Retrait #${id} relancé chez ClaPay — ref=${reference}`);
         return res.json({ success: true, provider: "clapay", reference, fees });
       }
-
-      // provider === "omnipay"
-      const omnipayApiKey = await getOmnipayPayoutApiKey();
-      if (!omnipayApiKey) return res.status(500).json({ message: "Clé API OmniPay non configurée" });
-      const reference = `WD-${id}-${Date.now()}`;
-      const adminOmnipayCode = await resolveOmnipayOperatorCode(w.operator, w.country);
-      const wdMsisdn = prependDialCode(w.phone, w.country);
-      const result = await omnipayInitiateTransfer({
-        apikey: omnipayApiKey,
-        msisdn: wdMsisdn,
-        amount: netAmount,
-        reference,
-        first_name: WESTPAY_PAYOUT_FIRST_NAME,
-        last_name: WESTPAY_PAYOUT_LAST_NAME,
-        operator: adminOmnipayCode,
-      });
-      if (result.success === 1) {
-        const opRef = result.reference || reference;
-        const opFee = result.fees || fees;
-        await storage.updateWithdrawalGateway(id, "omnipay");
-        await storage.updateWithdrawalStatus(id, "pending", `Relancé chez OmniPay — Ref: ${opRef}`, opRef, opFee, opFee);
-        console.log(`[ADMIN TRIGGER WD] Retrait #${id} relancé chez OmniPay — ref=${opRef}`);
-        return res.json({ success: true, provider: "omnipay", reference: opRef, fees: opFee });
-      }
-      const errMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Échec inconnu";
-      console.error(`[ADMIN TRIGGER WD] Retrait #${id} échec relance OmniPay (code ${result.code}): ${errMsg}`);
-      return res.status(502).json({ success: false, message: errMsg });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }
@@ -10478,7 +5705,7 @@ export async function registerRoutes(
     try {
       const id = Number(req.params.id);
       const source = String(req.query.source || "payment");
-      const provider = String(req.query.provider || "").toLowerCase();
+      const provider = normalizeGatewayName(req.query.provider);
 
       let ref: string | null | undefined;
       let txCountry: string | null | undefined;
@@ -10487,40 +5714,40 @@ export async function registerRoutes(
       if (source === "pending") {
         pendingRecord = await storage.getPendingPaymentById(id);
         if (!pendingRecord) return res.status(404).json({ message: "Paiement en cours introuvable" });
-        ref = pendingRecord.omnipayReference;
+        ref = pendingRecord.providerReference;
         txCountry = pendingRecord.country;
       } else {
         const [tx] = await financialDb.select().from(transactions).where(eq(transactions.id, id));
         if (!tx) return res.status(404).json({ message: "Transaction introuvable" });
         txRecord = tx;
-        ref = txRecord.omnipayReference;
+        ref = txRecord.providerReference;
         txCountry = txRecord.country;
       }
       if (!ref) return res.status(400).json({ message: "Aucune référence fournisseur pour ce paiement" });
-      if (!["sendavapay", "mbiyo", "omnipay", "seapay", "clapay"].includes(provider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay, SeaPay ou ClaPay)" });
+      if (!["mbiyo", "seapay", "clapay", "lipapap"].includes(provider)) {
+        return res.status(400).json({ message: "Choisissez une passerelle de paiement active." });
+      }
+      const storedGateway = normalizeGatewayName(pendingRecord?.gateway || txRecord?.provider);
+      if (storedGateway && storedGateway !== provider) {
+        return res.status(409).json({ message: "La référence n'appartient pas à la passerelle sélectionnée." });
+      }
+      if (provider === "clapay" && !/^CP/i.test(ref)) {
+        return res.status(410).json({ message: "Le statut de cette ancienne opération n'est plus interrogeable." });
       }
 
       if (provider === "clapay") {
         const cpToken = await getClapayApiKey();
         if (!cpToken) return res.status(500).json({ message: "Clé API ClaPay non configurée" });
-        // ClaPay v3 vérifie la signature retournée à l'initiation, pas notre
-        // référence marchande. Les anciennes lignes utilisent le fallback.
-        const clapayRef = pendingRecord?.omnipayTxId || txRecord?.omnipayTxId || ref;
+        const clapayRef = pendingRecord?.providerTxId || txRecord?.providerTxId || ref;
         const result = await clapayGetTransactionStatus(cpToken, clapayRef);
         return res.json({ provider: "clapay", success: result.success, status: result.status, data: result.data, error: result.message });
       }
-      if (provider === "sendavapay") {
-        const sendavaApiKey = await getSendavaApiKey();
-        if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
-        const result = await sendavaGetPaymentStatus(sendavaApiKey, ref);
-        return res.json({ provider: "sendavapay", success: result.success, status: (result as any).data?.status, data: (result as any).data, error: (result as any).error || (result as any).message });
-      }
+
       if (provider === "mbiyo") {
         const mbiyoApiKey = await getMbiyoApiKey();
         if (!mbiyoApiKey) return res.status(500).json({ message: "Clé API Mbiyo non configurée" });
         const result = await mbiyoGetStatus(mbiyoApiKey, ref);
-        return res.json({ provider: "mbiyo", success: result.status === "success", status: result.data?.status, data: result.data, error: result.message });
+        return res.json({ provider: "mbiyo", success: result.status === "success", status: result.data?.status, data: result.data, error: (result as any).message });
       }
       if (provider === "seapay") {
         const [spMerchantId, spApiKey] = await Promise.all([getSeapayMerchantId(txCountry || ""), getSeapayApiKey(txCountry || "")]);
@@ -10529,10 +5756,10 @@ export async function registerRoutes(
         const result = await seapayQuery(spMerchantId, ref, currency, spApiKey);
         return res.json({ provider: "seapay", success: result.code === 200, status: result.data?.status, data: result.data, error: result.msg });
       }
-      const omnipayApiKey = await getOmnipayApiKey();
-      if (!omnipayApiKey) return res.status(500).json({ message: "Clé API OmniPay non configurée" });
-      const result = await omnipayGetStatus(omnipayApiKey, ref);
-      return res.json({ provider: "omnipay", success: result.success === 1, status: (result as any).status || (result as any).data?.status, data: result, error: result.message });
+      const config = await getLipaPapConfig();
+      if (!config) return res.status(500).json({ message: "Configuration LipaPap non disponible" });
+      const result = await getLipaPapTransactionStatus(config, pendingRecord?.providerTxId || txRecord?.providerTxId || ref);
+      return res.json({ provider: "lipapap", success: true, status: result.status || result.result, data: result });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }
@@ -10544,9 +5771,9 @@ export async function registerRoutes(
       const id = Number(req.params.id);
       if (isNaN(id)) return res.status(400).json({ message: "ID invalide" });
       const source = String(req.body.source || "payment");
-      const provider = String(req.body.provider || "").toLowerCase();
-      if (!["sendavapay", "mbiyo", "omnipay", "seapay", "clapay"].includes(provider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay, SeaPay ou ClaPay)" });
+      const provider = normalizeGatewayName(req.body.provider);
+      if (!["mbiyo", "seapay", "clapay", "lipapap"].includes(provider)) {
+        return res.status(400).json({ message: "Choisissez une passerelle de paiement active." });
       }
 
       let ref: string | null | undefined;
@@ -10557,30 +5784,32 @@ export async function registerRoutes(
       if (source === "pending") {
         pendingRecord = await storage.getPendingPaymentById(id);
         if (!pendingRecord) return res.status(404).json({ message: "Paiement en cours introuvable" });
-        ref = pendingRecord.omnipayReference;
+        ref = pendingRecord.providerReference;
         txCountry = pendingRecord.country;
       } else {
         const [tx] = await financialDb.select().from(transactions).where(eq(transactions.id, id));
         if (!tx) return res.status(404).json({ message: "Transaction introuvable" });
         txRecord = tx;
-        ref = tx.omnipayReference;
+        ref = tx.providerReference;
         txCountry = tx.country;
       }
       if (!ref) return res.status(400).json({ message: "Aucune référence fournisseur pour ce paiement" });
+      const storedGateway = normalizeGatewayName(pendingRecord?.gateway || txRecord?.provider);
+      if (storedGateway && storedGateway !== provider) {
+        return res.status(409).json({ message: "La référence n'appartient pas à la passerelle sélectionnée." });
+      }
+      if (provider === "clapay" && !/^CP/i.test(ref)) {
+        return res.status(410).json({ message: "Le statut de cette ancienne opération n'est plus interrogeable." });
+      }
 
       // ── Interroger le fournisseur ──────────────────────────────────────────
       let providerStatus = "";
       if (provider === "clapay") {
         const cpToken = await getClapayApiKey();
         if (!cpToken) return res.status(500).json({ message: "Clé API ClaPay non configurée" });
-        const clapayRef = pendingRecord?.omnipayTxId || txRecord?.omnipayTxId || ref;
+        const clapayRef = pendingRecord?.providerTxId || txRecord?.providerTxId || ref;
         const result = await clapayGetTransactionStatus(cpToken, clapayRef);
         providerStatus = (result.status || "").toLowerCase();
-      } else if (provider === "sendavapay") {
-        const sendavaApiKey = await getSendavaApiKey();
-        if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
-        const result = await sendavaGetPaymentStatus(sendavaApiKey, ref);
-        providerStatus = ((result as any).data?.status || "").toLowerCase();
       } else if (provider === "mbiyo") {
         const mbiyoApiKey = await getMbiyoApiKey();
         if (!mbiyoApiKey) return res.status(500).json({ message: "Clé API Mbiyo non configurée" });
@@ -10592,11 +5821,14 @@ export async function registerRoutes(
         const currency = SEAPAY_CURRENCY_COUNTRY[txCountry || ""] || "USD";
         const result = await seapayQuery(spMerchantId, ref, currency, spApiKey);
         providerStatus = String(result.data?.status || "").toLowerCase();
+      } else if (provider === "lipapap") {
+        const config = await getLipaPapConfig();
+        if (!config) return res.status(500).json({ message: "Configuration LipaPap non disponible" });
+        const lipaRef = pendingRecord?.providerTxId || txRecord?.providerTxId || ref;
+        const result = await getLipaPapTransactionStatus(config, lipaRef);
+        providerStatus = String(result.status || result.result || "").toLowerCase();
       } else {
-        const omnipayApiKey = await getOmnipayApiKey();
-        if (!omnipayApiKey) return res.status(500).json({ message: "Clé API OmniPay non configurée" });
-        const result = await omnipayGetStatus(omnipayApiKey, ref);
-        providerStatus = String((result as any).status || (result as any).data?.status || "").toLowerCase();
+        return res.status(400).json({ message: "Passerelle non prise en charge" });
       }
 
       const successStatuses = ["success", "successful", "completed", "complete", "confirmed", "approved", "paid"];
@@ -10609,7 +5841,7 @@ export async function registerRoutes(
           const pp = pendingRecord;
           const merchant = await storage.getMerchantById(pp.merchantId);
           const mc = await storage.findMerchantCountryBySimAndCountry(pp.merchantId, pp.country || "");
-          const providerLabel = provider === "clapay" ? "clapay" : provider === "sendavapay" ? "sendavapay" : provider === "seapay" ? "seapay" : provider === "mbiyo" ? "mbiyo" : "westpay";
+          const providerLabel = provider;
           const txRef = `SYNC-${ref}`;
           const existingTx = await storage.getTransactionByTxId(txRef);
           if (!existingTx && mc) {
@@ -10625,9 +5857,9 @@ export async function registerRoutes(
               payerName: pp.payerName || null,
               status: "confirmed",
               provider: providerLabel,
-              omnipayTxId: pendingRecord.omnipayTxId || null,
+              providerTxId: pendingRecord.providerTxId || null,
               operator: pp.paymentMethod || null,
-              omnipayReference: ref,
+              providerReference: ref,
               errorMessage: null,
               providerFee: fee,
             });
@@ -10687,7 +5919,7 @@ export async function registerRoutes(
       // ── Statut final ÉCHEC ────────────────────────────────────────────────
       if (failureStatuses.includes(providerStatus)) {
         if (source === "pending") {
-          await storage.updatePendingPaymentStatus(id, "omnipay_failed");
+          await storage.updatePendingPaymentStatus(id, "gateway_failed");
         } else {
           await financialDb.update(transactions).set({ status: "failed" }).where(eq(transactions.id, id));
         }
@@ -10706,83 +5938,18 @@ export async function registerRoutes(
   app.post("/api/admin/transactions/:id/trigger", authMiddleware("admin"), async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const provider = String(req.body?.provider || "").toLowerCase();
-      if (!["sendavapay", "mbiyo", "omnipay", "seapay"].includes(provider)) {
-        return res.status(400).json({ message: "Veuillez choisir un fournisseur valide (SendavaPay, Mbiyo, OmniPay ou SeaPay)" });
+      const provider = normalizeGatewayName(req.body?.provider);
+      if (!["mbiyo", "seapay", "clapay"].includes(provider)) {
+        return res.status(400).json({ message: "Choisissez une passerelle de paiement active (Mbiyo, SeaPay ou ClaPay)." });
       }
       const pp = await storage.getPendingPaymentById(id);
       if (!pp) return res.status(404).json({ message: "Paiement en cours introuvable" });
+      if (pp.providerReference) {
+        return res.status(409).json({ message: "Ce paiement possède déjà une référence fournisseur; vérifiez son statut avant toute relance." });
+      }
       const merchant = await storage.getMerchantById(pp.merchantId);
       if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
       const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
-
-      if (provider === "omnipay") {
-        const omnipayApiKey = await getOmnipayApiKey();
-        if (!omnipayApiKey) return res.status(500).json({ message: "Clé API OmniPay non configurée" });
-        const reference = omnipayGenerateRef();
-        const msisdn = prependDialCode(pp.payerPhone || "", pp.country);
-        const nameParts = (pp.payerName || "Client WestPay").split(" ");
-        const fName = nameParts[0] || "Client";
-        const lName = nameParts.slice(1).join(" ") || "WestPay";
-        const omnipayOperator = toOmnipayOperatorCode(pp.paymentMethod) || undefined;
-        const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
-        const autoOtp = String(Math.floor(1000 + Math.random() * 9000));
-        const result = await omnipayInitiatePayment({
-          apikey: omnipayApiKey,
-          msisdn,
-          amount: pp.amount,
-          reference,
-          first_name: fName,
-          last_name: lName,
-          otp: autoOtp,
-          operator: omnipayOperator,
-          return_url: omnipayOperator === "wave" ? returnUrl : undefined,
-        });
-        if (result.success !== 1) {
-          const errorMsg = OMNIPAY_ERRORS[result.code || 0] || result.message || "Échec inconnu";
-          return res.status(502).json({ success: false, message: errorMsg });
-        }
-        await financialDb.update(pendingPayments).set({
-          status: "omnipay_pending",
-          omnipayReference: reference,
-          omnipayTxId: result.id ? String(result.id) : null,
-          omnipayPaymentUrl: result.payment_url || null,
-          gateway: "omnipay",
-        }).where(eq(pendingPayments.id, id));
-        console.log(`[ADMIN TRIGGER TX] Paiement #${id} re-déclenché chez OmniPay — ref=${reference}`);
-        return res.json({ success: true, provider: "omnipay", reference, paymentUrl: result.payment_url });
-      }
-
-      if (provider === "sendavapay") {
-        const sendavaApiKey = await getSendavaApiKey();
-        if (!sendavaApiKey) return res.status(500).json({ message: "Clé API SendavaPay non configurée" });
-        const reference = sendavaGenerateRef();
-        const msisdnFull = "+" + prependDialCode(pp.payerPhone || "", pp.country);
-        const countryCode = SENDAVAPAY_COUNTRY_CODES[pp.country] || "";
-        const currency = SENDAVAPAY_CURRENCY_MAP[countryCode] || "XOF";
-        const sendavaOperator = toSendavaOperator(pp.paymentMethod || "", countryCode);
-        const result = await sendavaCreatePayment(sendavaApiKey, {
-          amount: pp.amount,
-          phoneNumber: msisdnFull,
-          operator: sendavaOperator,
-          country: countryCode,
-          currency,
-          description: `Paiement WestPay (relance admin) - ${merchant.name}`,
-          externalReference: reference,
-          callbackUrl: `${callbackBaseUrl}/api/sendavapay/callback`,
-        });
-        if (!result.success) {
-          return res.status(502).json({ success: false, message: (result as any).error || (result as any).message || "Échec inconnu" });
-        }
-        await financialDb.update(pendingPayments).set({
-          status: "omnipay_pending",
-          omnipayReference: reference,
-          gateway: "sendavapay",
-        }).where(eq(pendingPayments.id, id));
-        console.log(`[ADMIN TRIGGER TX] Paiement #${id} re-déclenché chez SendavaPay — ref=${reference}`);
-        return res.json({ success: true, provider: "sendavapay", reference });
-      }
-
       if (provider === "mbiyo") {
         const mbiyoApiKey = await getMbiyoApiKey();
         if (!mbiyoApiKey) return res.status(500).json({ message: "Clé API Mbiyo non configurée" });
@@ -10805,8 +5972,8 @@ export async function registerRoutes(
           return res.status(502).json({ success: false, message: result.message || "Échec inconnu" });
         }
         await financialDb.update(pendingPayments).set({
-          status: "omnipay_pending",
-          omnipayReference: reference,
+          status: "gateway_pending",
+          providerReference: reference,
           gateway: "mbiyo",
         }).where(eq(pendingPayments.id, id));
         console.log(`[ADMIN TRIGGER TX] Paiement #${id} re-déclenché chez Mbiyo — ref=${reference}`);
@@ -10820,7 +5987,7 @@ export async function registerRoutes(
         const currency = SEAPAY_CURRENCY_COUNTRY[pp.country] || "USD";
         const operatorRecord = pp.paymentMethod ? await storage.getWithdrawalOperatorByNameAndCountry(pp.paymentMethod, pp.country) : null;
         const channelCode = operatorRecord?.seapayCode || undefined;
-        const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&omnipay_status=complete`;
+        const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&payment_status=complete`;
         const result = await seapayPayin({
           merchantId: spMerchantId,
           currency,
@@ -10836,10 +6003,10 @@ export async function registerRoutes(
           return res.status(502).json({ success: false, message: result.msg || "Échec inconnu" });
         }
         await financialDb.update(pendingPayments).set({
-          status: "omnipay_pending",
-          omnipayReference: reference,
-          omnipayTxId: result.data.trade_no || null,
-          omnipayPaymentUrl: result.data.payment_url || null,
+          status: "gateway_pending",
+          providerReference: reference,
+          providerTxId: result.data.trade_no || null,
+          providerPaymentUrl: result.data.payment_url || null,
           gateway: "seapay",
         }).where(eq(pendingPayments.id, id));
         console.log(`[ADMIN TRIGGER TX] Paiement #${id} re-déclenché chez SeaPay — ref=${reference}`);
@@ -10889,10 +6056,10 @@ export async function registerRoutes(
           return res.status(502).json({ success: false, message: result.message || "Échec ClaPay" });
         }
         await financialDb.update(pendingPayments).set({
-          status: "omnipay_pending",
-          omnipayReference: reference,
-          omnipayTxId: result.data?.signature || null,
-          omnipayPaymentUrl: result.data?.payment_url || null,
+          status: "gateway_pending",
+          providerReference: reference,
+          providerTxId: result.data?.signature || null,
+          providerPaymentUrl: result.data?.payment_url || null,
           gateway: "clapay",
         }).where(eq(pendingPayments.id, id));
         console.log(`[ADMIN TRIGGER TX] Paiement #${id} re-déclenché chez ClaPay — ref=${reference}`);
@@ -11012,18 +6179,17 @@ export async function registerRoutes(
 
   app.post("/api/admin/withdrawal-operators", authMiddleware("admin"), async (req, res) => {
     try {
-      const { name, type, country, dailyLimit, gateway, omnipayCode, mbiyoCode, seapayCode, active } = req.body;
+      const { name, type, country, dailyLimit, gateway, clapayCode, mbiyoCode, seapayCode, active } = req.body;
       if (!name || !country) return res.status(400).json({ message: "Nom et pays requis" });
       const op = await storage.createWithdrawalOperator({
         name,
         type: type || "Mobile Money",
         country,
         dailyLimit: dailyLimit ? Number(dailyLimit) : 1000000,
-        gateway: typeof gateway === "string" && gateway.trim() ? gateway.trim() : "OmniPay",
-        omnipayCode: omnipayCode?.trim() || null,
+        gateway: typeof gateway === "string" && gateway.trim() ? gateway.trim() : "ClaPay",
+        clapayCode: clapayCode?.trim() || null,
         mbiyoCode: mbiyoCode?.trim() || null,
         seapayCode: seapayCode?.trim() || null,
-        clapayCode: (req.body.clapayCode || "")?.trim() || null,
         active: active !== false,
         maintenanceAll: false,
         maintenanceDeposits: false,
@@ -11040,14 +6206,14 @@ export async function registerRoutes(
   app.put("/api/admin/withdrawal-operators/:id", authMiddleware("admin"), async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const { name, type, country, dailyLimit, gateway, omnipayCode, mbiyoCode, seapayCode, logo, sortOrder, active, maintenanceAll, maintenanceDeposits, maintenanceWithdrawals, maintenancePaymentLinks, maintenanceApiPayment } = req.body;
+      const { name, type, country, dailyLimit, gateway, clapayCode, mbiyoCode, seapayCode, logo, sortOrder, active, maintenanceAll, maintenanceDeposits, maintenanceWithdrawals, maintenancePaymentLinks, maintenanceApiPayment } = req.body;
       const updated = await storage.updateWithdrawalOperator(id, {
         ...(name !== undefined && { name }),
         ...(type !== undefined && { type }),
         ...(country !== undefined && { country }),
         ...(dailyLimit !== undefined && { dailyLimit: Number(dailyLimit) }),
-        ...(gateway !== undefined && { gateway: typeof gateway === "string" && gateway.trim() ? gateway.trim() : "OmniPay" }),
-        ...(omnipayCode !== undefined && { omnipayCode: omnipayCode?.trim() || null }),
+        ...(gateway !== undefined && { gateway: typeof gateway === "string" && gateway.trim() ? gateway.trim() : "ClaPay" }),
+        ...(clapayCode !== undefined && { clapayCode: clapayCode?.trim() || null }),
         ...(mbiyoCode !== undefined && { mbiyoCode: mbiyoCode?.trim() || null }),
         ...(seapayCode !== undefined && { seapayCode: seapayCode?.trim() || null }),
         ...(req.body.clapayCode !== undefined && { clapayCode: (req.body.clapayCode || "")?.trim() || null }),
@@ -11826,9 +6992,9 @@ export async function registerRoutes(
         txId: null,
         status: "pending",
         redirectUrl: callback_url,
-        omnipayReference: internalRef,
-        omnipayTxId: null,
-        omnipayPaymentUrl: null,
+        providerReference: internalRef,
+        providerTxId: null,
+        providerPaymentUrl: null,
         gateway: "mbiyo",
         expiresAt,
       });
@@ -12025,7 +7191,7 @@ export async function registerRoutes(
         adminNote: null,
         fees,
         gateway: "mbiyo",
-        omnipayRef: internalRef,
+        providerReference: internalRef,
       });
 
       await storage.createApiLog({ merchantId: merchant.id, action: "sdk_payout_initiated", ip: req.ip || "-", description: `SDK Payout — Ref: ${internalRef} — ${amount} ${currency} vers ${metadata.phone_number} via ${metadata.network}/${metadata.country_code}` });
@@ -12077,7 +7243,7 @@ export async function registerRoutes(
     try {
       const merchant = (req as any).sdkMerchant;
       const { orderId } = req.params;
-      const pending = await storage.getPendingPaymentByOmnipayReference(orderId);
+      const pending = await storage.getPendingPaymentByProviderReference(orderId);
       if (pending && pending.merchantId === merchant.id) {
         return res.json({
           status: "success",
@@ -12109,7 +7275,7 @@ export async function registerRoutes(
           },
         });
       }
-      const withdrawal = await storage.getWithdrawalByOmnipayRef(orderId);
+      const withdrawal = await storage.getWithdrawalByProviderReference(orderId);
       if (withdrawal && withdrawal.merchantId === merchant.id) {
         return res.json({
           status: "success",
@@ -12317,5 +7483,2713 @@ export async function registerRoutes(
     } catch (err: any) { res.status(500).json({ message: safeErrMsg(err) }); }
   });
 
+
+app.post("/api/payment/validate", validateRateLimit, async (req, res) => {
+    try {
+      const { paymentId, txId } = req.body;
+      if (!paymentId || !txId) {
+        return res.status(400).json({ success: false, message: "ID de paiement et ID de transaction requis" });
+      }
+
+      // Per-paymentId attempt limiter (defeats distributed per-IP rate limit bypass)
+      const pidKey = String(parseInt(paymentId) || 0);
+      const now = Date.now();
+      const pidEntry = validatePaymentIdStore.get(pidKey) || { count: 0, firstReq: now };
+      if (now - pidEntry.firstReq > VALIDATE_PER_ID_WINDOW) { pidEntry.count = 0; pidEntry.firstReq = now; }
+      pidEntry.count++;
+      validatePaymentIdStore.set(pidKey, pidEntry);
+      if (pidEntry.count > VALIDATE_PER_ID_MAX) {
+        return res.status(429).json({ success: false, message: "Trop de tentatives pour ce paiement. Réessayez plus tard." });
+      }
+
+      const pending = await storage.getPendingPaymentById(parseInt(paymentId));
+      if (!pending) {
+        return res.status(404).json({ success: false, message: "Paiement introuvable ou expire" });
+      }
+
+      if (pending.status !== "pending") {
+        return res.status(400).json({ success: false, message: "Ce paiement a deja ete traite" });
+      }
+
+      if (new Date(pending.expiresAt) < new Date()) {
+        await storage.updatePendingPaymentStatus(pending.id, "expired");
+        return res.status(400).json({ success: false, message: "Ce paiement a expire. Veuillez recommencer." });
+      }
+
+      const encryptedTxId = crypto.createHash("sha256").update(txId.trim()).digest("hex").substring(0, 16).toUpperCase();
+
+      await storage.updatePendingPaymentTxId(pending.id, txId.trim());
+      await storage.updatePendingPaymentStatus(pending.id, "submitted");
+
+      const merchant = await storage.getMerchantById(pending.merchantId);
+
+      await storage.createApiLog({
+        merchantId: pending.merchantId,
+        action: "payment_submitted",
+        ip: req.ip || "",
+        description: `Paiement #${pending.id} soumis - TX: ${txId.trim()} - Montant: ${pending.amount} F CFA - ${pending.paymentMethod}`,
+      });
+
+      res.json({
+        success: true,
+        message: "Votre paiement a ete enregistre avec succes.",
+        redirectUrl: pending.redirectUrl,
+        amount: pending.amount,
+        txId: txId.trim(),
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+app.get("/api/payment/by-ref/:reference", paymentByRefRateLimit, async (req, res) => {
+    try {
+      const { reference } = req.params;
+      const pending = await storage.getPendingPaymentByProviderReference(reference);
+      if (!pending) return res.status(404).json({ message: "Paiement introuvable" });
+      const merchant = await storage.getMerchantById(pending.merchantId);
+      // merchantSlug omitted — not needed post-payment and reduces data exposure
+      res.json({
+        paymentId: pending.id,
+        merchantName: merchant?.name || "",
+        amount: pending.amount,
+        country: pending.country,
+        redirectUrl: pending.redirectUrl || null,
+        status: providerAwarePendingStatus(pending.gateway, pending.status),
+        gateway: pending.gateway,
+        providerReference: pending.providerReference,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.post("/api/verify-transaction", verifyTxRateLimit, async (req, res) => {
+    try {
+      const { txId, merchantSlug, payerPhone, amount } = req.body;
+      if (!txId || !merchantSlug) {
+        return res.status(400).json({ verified: false, message: "ID de transaction et marchand requis" });
+      }
+
+      const merchant = await storage.getMerchantBySlug(merchantSlug);
+      if (!merchant) {
+        return res.status(404).json({ verified: false, message: "Marchand introuvable" });
+      }
+
+      const transaction = await storage.getTransactionByTxId(txId);
+      if (!transaction) {
+        return res.json({
+          verified: false,
+          message: "Transaction non trouvee. Si vous venez d'envoyer le paiement, veuillez patienter quelques instants et reessayer. Le traitement peut prendre jusqu'a 2 minutes.",
+        });
+      }
+
+      if (transaction.merchantId !== merchant.id) {
+        return res.json({
+          verified: false,
+          message: "Cette transaction n'appartient pas a ce marchand.",
+        });
+      }
+
+      if (amount && typeof amount === "number" && transaction.amount !== amount) {
+        return res.json({
+          verified: false,
+          message: `Le montant de la transaction (${transaction.amount} F CFA) ne correspond pas au montant attendu (${amount} F CFA).`,
+        });
+      }
+
+      const logDescription = payerPhone
+        ? `Transaction ${txId} verifiee - Montant: ${transaction.amount} F CFA - Numero: ${payerPhone}`
+        : `Transaction ${txId} verifiee - Montant: ${transaction.amount} F CFA`;
+
+      await storage.createApiLog({
+        merchantId: merchant.id,
+        action: "transaction_verified",
+        ip: req.ip || "",
+        description: logDescription,
+      });
+
+      res.json({
+        verified: true,
+        transaction: {
+          txId: transaction.txId,
+          amount: transaction.amount,
+          country: transaction.country,
+          status: transaction.status,
+          createdAt: transaction.createdAt,
+        },
+        message: "Transaction verifiee avec succes. Le montant a ete credite sur le compte du marchand.",
+      });
+    } catch (err: any) {
+      res.status(500).json({ verified: false, message: err.message });
+    }
+  });
+
+app.post("/api/mbiyo/callback", async (req, res) => {
+    try {
+      const rawBody = (req.rawBody as Buffer)?.toString() || JSON.stringify(req.body);
+      const signature = (
+        req.headers["x-signature"] ||
+        req.headers["signature"] ||
+        req.headers["x-mbiyo-signature"] ||
+        req.headers["x-webhook-signature"] ||
+        ""
+      ) as string;
+      const webhookSecret = await getMbiyoWebhookSecret();
+
+      console.log(`[MBIYO CALLBACK] Headers: ${JSON.stringify(req.headers)}`);
+      console.log(`[MBIYO CALLBACK] Body: ${rawBody}`);
+
+      // SÉCURITÉ : rejet fail-closed — secret obligatoire
+      if (!webhookSecret) {
+        console.error("[MBIYO CALLBACK] SÉCURITÉ: Secret webhook Mbiyo non configuré — webhook rejeté. Configurez mbiyo_webhook_secret dans les paramètres admin.");
+        return res.status(503).json({ message: "Webhook Mbiyo non sécurisé — configurez le secret dans les paramètres admin" });
+      }
+      if (!signature) {
+        console.error("[MBIYO CALLBACK] Signature manquante dans les headers");
+        return res.status(401).json({ message: "Signature manquante" });
+      }
+      const expected = crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
+      console.log(`[MBIYO CALLBACK] Signature recue: ${signature} — attendue: ${expected}`);
+      const isValid = mbiyoVerifySignature(webhookSecret, signature, rawBody);
+      if (!isValid) {
+        console.error(`[MBIYO CALLBACK] Signature invalide — recue: ${signature} — attendue: ${expected}`);
+        return res.status(401).json({ message: "Signature invalide" });
+      }
+
+      const payload = req.body as MbiyoWebhookPayload;
+      console.log(`[MBIYO CALLBACK] Recu: order_id=${payload.order_id} status=${payload.status}`);
+
+      if (!payload.order_id) {
+        return res.status(400).json({ message: "order_id manquant" });
+      }
+
+      const pending = await storage.getPendingPaymentByProviderReference(payload.order_id);
+      if (!pending) {
+        console.warn(`[MBIYO CALLBACK] Paiement non trouve: ${payload.order_id}`);
+        return res.status(200).json({ received: true });
+      }
+
+      if (pending.status === "gateway_confirmed" || pending.status === "gateway_failed") {
+        return res.json({ status: "already_processed" });
+      }
+
+      const statusLower = (payload.status || "").toLowerCase();
+      const isSuccess = ["successful", "success", "paid", "completed"].includes(statusLower);
+      const isFailure = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(statusLower);
+
+      if (isSuccess) {
+        // CAS atomique — protège contre les doubles callbacks simultanés
+        const mbiyoCas = await financialPool.query(
+          `UPDATE pending_payments SET status = 'gateway_confirmed'
+           WHERE id = $1 AND status NOT IN ('gateway_confirmed','confirmed','gateway_error')
+           RETURNING id`,
+          [pending.id]
+        );
+        if (!mbiyoCas.rowCount || mbiyoCas.rowCount === 0) {
+          console.log(`[MBIYO CALLBACK] Déjà traité (CAS) order_id=${payload.order_id}`);
+          return res.json({ status: "already_processed" });
+        }
+
+        const merchant = await storage.getMerchantById(pending.merchantId);
+        const credit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
+
+        const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
+        if (!mc) {
+          console.error(`[MBIYO CALLBACK] CRITIQUE: MerchantCountry introuvable pour merchantId=${pending.merchantId} country="${pending.country}" — solde non credite, callback rejete pour retry`);
+          return res.status(500).json({ message: "MerchantCountry introuvable — réessayez" });
+        }
+
+        await storage.incrementMerchantCountryBalance(mc.id, credit);
+
+        const txRef = payload.transaction_id || payload.order_id;
+        const tx = await storage.createTransaction({
+          merchantId: pending.merchantId,
+          country: pending.country,
+          txId: txRef,
+          amount: pending.amount,
+          payerNumber: pending.payerPhone || null,
+          payerName: pending.payerName || null,
+          status: "confirmed",
+          provider: "mbiyo",
+          providerTxId: payload.transaction_id || null,
+          operator: pending.paymentMethod || null,
+          providerReference: payload.order_id,
+          errorMessage: null,
+          providerFee: payload.fee != null ? parseInt(String(payload.fee)) || 0 : 0,
+        });
+
+        console.log(`[MBIYO CALLBACK] Paiement confirme: ${payload.order_id}`);
+        res.json({ status: "confirmed" });
+
+        setImmediate(async () => {
+          try {
+            if (merchant?.webhookUrl) {
+              try {
+                const fetch = (await import("node-fetch")).default;
+                const webhookPayload = {
+                  event: "payment.confirmed",
+                  txId: tx.txId,
+                  amount: tx.amount,
+                  country: tx.country,
+                  payerNumber: tx.payerNumber,
+                  payerName: tx.payerName,
+                  status: "confirmed",
+                  reference: payload.order_id,
+                  provider: "mbiyo",
+                };
+                const hmac = crypto.createHmac("sha256", merchant.webhookSecret || "").update(JSON.stringify(webhookPayload)).digest("hex");
+                await fetch(merchant.webhookUrl, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", "X-Signature": hmac },
+                  body: JSON.stringify(webhookPayload),
+                });
+              } catch {}
+            }
+            if (merchant) {
+              notifyMerchantPayment(pending.merchantId, { txId: tx.txId || txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "mbiyo" }).catch(() => {});
+              notifyAdminPayment({ txId: tx.txId || txRef, merchantName: merchant.name, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "mbiyo", status: "confirmed" }).catch(() => {});
+            }
+          } catch {}
+        });
+        return;
+      } else if (isFailure) {
+        await storage.updatePendingPaymentStatus(pending.id, "gateway_failed");
+        storage.createTransaction({
+          merchantId: pending.merchantId,
+          country: pending.country,
+          txId: payload.order_id,
+          amount: pending.amount,
+          payerNumber: pending.payerPhone || null,
+          payerName: pending.payerName || null,
+          status: "failed",
+          provider: "mbiyo",
+          providerTxId: payload.transaction_id || null,
+          operator: pending.paymentMethod || null,
+          providerReference: payload.order_id,
+          errorMessage: "Paiement refusé ou annulé",
+        }).catch(() => {});
+        console.log(`[MBIYO CALLBACK] Paiement echoue: ${payload.order_id}`);
+        return res.json({ status: "failed" });
+      }
+
+      res.json({ received: true });
+    } catch (err: any) {
+      console.error("[MBIYO CALLBACK] Erreur:", err.message);
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.post("/api/mbiyo/payout-callback", async (req, res) => {
+    try {
+      const rawBody = (req.rawBody as Buffer)?.toString() || JSON.stringify(req.body);
+      const signature = (
+        req.headers["x-signature"] ||
+        req.headers["signature"] ||
+        req.headers["x-mbiyo-signature"] ||
+        req.headers["x-webhook-signature"] ||
+        ""
+      ) as string;
+      const webhookSecret = await getMbiyoWebhookSecret();
+
+      console.log(`[MBIYO PAYOUT CALLBACK] Headers: ${JSON.stringify(req.headers)}`);
+      console.log(`[MBIYO PAYOUT CALLBACK] Body: ${rawBody}`);
+
+      // SÉCURITÉ : rejet fail-closed — secret obligatoire
+      if (!webhookSecret) {
+        console.error("[MBIYO PAYOUT CALLBACK] SÉCURITÉ: Secret webhook Mbiyo non configuré — webhook rejeté. Configurez mbiyo_webhook_secret dans les paramètres admin.");
+        return res.status(503).json({ message: "Webhook Mbiyo Payout non sécurisé — configurez le secret dans les paramètres admin" });
+      }
+      if (!signature) {
+        console.error("[MBIYO PAYOUT CALLBACK] Signature manquante dans les headers");
+        return res.status(401).json({ message: "Signature manquante" });
+      }
+      const expected = crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
+      console.log(`[MBIYO PAYOUT CALLBACK] Signature recue: ${signature} — attendue: ${expected}`);
+      const isValid = mbiyoVerifySignature(webhookSecret, signature, rawBody);
+      if (!isValid) {
+        console.error(`[MBIYO PAYOUT CALLBACK] Signature invalide — recue: ${signature} — attendue: ${expected}`);
+        return res.status(401).json({ message: "Signature invalide" });
+      }
+
+      const payload = req.body as MbiyoPayoutWebhookPayload;
+      console.log(`[MBIYO PAYOUT CALLBACK] Recu: event=${payload.event} order_id=${payload.order_id} status=${payload.status}`);
+
+      if (!payload.order_id) {
+        return res.status(400).json({ message: "order_id manquant" });
+      }
+
+      const withdrawal = await storage.getWithdrawalByProviderReference(payload.order_id);
+      if (!withdrawal) {
+        console.warn(`[MBIYO PAYOUT CALLBACK] Retrait non trouve: ${payload.order_id}`);
+        return res.status(200).json({ received: true });
+      }
+
+      if (withdrawal.status === "approved" || withdrawal.status === "rejected") {
+        return res.json({ status: "already_processed" });
+      }
+
+      const wdFees = Math.round(parseFloat(String(payload.fee || 0)) || 0);
+      const wdStatusLower = (payload.status || "").toLowerCase();
+      const wdIsSuccess = ["successful", "success", "paid", "completed"].includes(wdStatusLower);
+      const wdIsFailure = ["failed", "failure", "cancelled", "canceled", "rejected"].includes(wdStatusLower);
+
+      // ── Protection anti-race-condition : mise à jour atomique ─────────────────
+      // Si deux callbacks Mbiyo arrivent simultanément, un seul peut passer cette
+      // clause WHERE status = 'pending'. L'autre recevra 0 lignes et sera ignoré.
+      if (wdIsSuccess || wdIsFailure) {
+        const newStatus = wdIsSuccess ? "approved" : "failed";
+        const locked = await financialPool.query(
+          `UPDATE withdrawals SET status = $1 WHERE id = $2 AND status = 'pending' RETURNING id`,
+          [newStatus, withdrawal.id]
+        );
+        if (locked.rowCount === 0) {
+          console.log(`[MBIYO PAYOUT CALLBACK] Retrait #${withdrawal.id} déjà traité (race condition évitée)`);
+          return res.json({ status: "already_processed" });
+        }
+        // Le verrou est acquis — continuer le traitement normalement
+        // (updateWithdrawalStatus mettra à jour les champs supplémentaires)
+      }
+
+      const wdMerchant = await storage.getMerchantById(withdrawal.merchantId);
+
+      // Reconciliation : retrait marqué failed chez nous mais confirmé par Mbiyo
+      if (withdrawal.status === "failed" && wdIsSuccess) {
+        const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
+        if (mc) await storage.decrementMerchantCountryBalance(mc.id, withdrawal.amount);
+        await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Retrait confirmé`, payload.order_id, wdFees, wdFees);
+        console.log(`[MBIYO PAYOUT CALLBACK] Reconciliation retrait #${withdrawal.id} — redebit balance ${withdrawal.amount}`);
+        res.json({ status: "reconciled" });
+        setImmediate(() => {
+          notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: withdrawal.withdrawalMode }).catch(() => {});
+          notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
+        });
+        return;
+      }
+
+      if (withdrawal.status === "failed") {
+        return res.json({ status: "already_processed" });
+      }
+
+      if (wdIsSuccess) {
+        await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Transfert Mbiyo confirme`, payload.order_id, wdFees, wdFees);
+        console.log(`[MBIYO PAYOUT CALLBACK] Retrait #${withdrawal.id} approuve - ref=${payload.order_id}`);
+        res.json({ status: "approved" });
+        setImmediate(() => {
+          notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: withdrawal.withdrawalMode }).catch(() => {});
+          notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: wdFees, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
+        });
+        return;
+      } else if (wdIsFailure) {
+        await storage.updateWithdrawalStatus(withdrawal.id, "failed", `Transfert Mbiyo echoue - statut: ${payload.status}`, payload.order_id);
+        const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
+        if (mc) await storage.incrementMerchantCountryBalance(mc.id, withdrawal.amount);
+        console.log(`[MBIYO PAYOUT CALLBACK] Retrait #${withdrawal.id} echoue - ref=${payload.order_id}`);
+        res.json({ status: "failed" });
+        setImmediate(() => {
+          notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed", mode: withdrawal.withdrawalMode }).catch(() => {});
+          notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed" }).catch(() => {});
+        });
+        return;
+      }
+
+      res.json({ received: true });
+    } catch (err: any) {
+      console.error("[MBIYO PAYOUT CALLBACK] Erreur:", err.message);
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/admin/mbiyo/settings", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const dbApiKey = await storage.getSetting("mbiyo_api_key");
+      const dbWebhookSecret = await storage.getSetting("mbiyo_webhook_secret");
+      const envOverride = !!process.env.MBIYO_API_KEY;
+      const activeApiKey = await getMbiyoApiKey();
+      res.json({
+        apiKey: dbApiKey || "",
+        webhookSecret: dbWebhookSecret || "",
+        configured: !!activeApiKey,
+        envOverride,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.post("/api/admin/mbiyo/settings", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { apiKey, webhookSecret } = req.body;
+      if (apiKey !== undefined) await storage.setSetting("mbiyo_api_key", apiKey);
+      if (webhookSecret !== undefined) await storage.setSetting("mbiyo_webhook_secret", webhookSecret);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/admin/seapay/settings", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const countriesList = ["Pakistan", "Philippines", "India", "Nigeria"];
+      const countries: Record<string, any> = {};
+      const envOverrides: Record<string, boolean> = {};
+      const envVarNames: Record<string, { merchantId: string; apiKey: string; apiSecret: string; legacyMerchantId?: string; legacyApiKey?: string; legacyApiSecret?: string }> = {};
+      for (const c of countriesList) {
+        const [mid, ak, as_] = await Promise.all([
+          getSeapayMerchantId(c),
+          getSeapayApiKey(c),
+          getSeapayApiSecret(c),
+        ]);
+        const envPrefix = seapayCountryEnvPrefix(c);
+        // Uniquement les variables pays-spécifiques (ex: SEAPAY_PAKISTAN_MERCHANT_ID)
+        const midFromEnv = !!process.env[`${envPrefix}_MERCHANT_ID`];
+        const akFromEnv  = !!process.env[`${envPrefix}_API_KEY`];
+        const asFromEnv  = !!process.env[`${envPrefix}_API_SECRET`];
+        countries[c] = {
+          // Ne pas renvoyer les valeurs réelles des clés au navigateur pour la sécurité
+          // — on indique juste si chaque champ est renseigné
+          merchantId: mid ? (midFromEnv ? "••••••••[ENV]" : "••••••••[DB]") : "",
+          apiKey:     ak  ? (akFromEnv  ? "••••••••[ENV]" : "••••••••[DB]") : "",
+          apiSecret:  as_ ? (asFromEnv  ? "••••••••[ENV]" : "••••••••[DB]") : "",
+          hasMerchantId: !!mid,
+          hasApiKey:     !!ak,
+          hasApiSecret:  !!as_,
+          midFromEnv,
+          akFromEnv,
+          asFromEnv,
+          configured: !!(mid && ak),
+        };
+        envOverrides[c] = midFromEnv || akFromEnv || asFromEnv;
+        // Noms exacts des variables d'environnement attendues (une par pays)
+        envVarNames[c] = {
+          merchantId: `${envPrefix}_MERCHANT_ID`,
+          apiKey:     `${envPrefix}_API_KEY`,
+          apiSecret:  `${envPrefix}_API_SECRET`,
+        };
+      }
+      // Rétrocompatibilité — indique si au moins un pays est configuré
+      const configured = countriesList.some(c => countries[c].configured);
+      res.json({ countries, envOverrides, envVarNames, configured });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.post("/api/admin/seapay/settings", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { country, merchantId, apiKey, apiSecret } = req.body;
+      if (!country) return res.status(400).json({ message: "Pays requis (country)" });
+      const slug = seapayCountrySlug(country);
+      if (merchantId !== undefined) await storage.setSetting(`seapay_merchant_id_${slug}`, merchantId);
+      if (apiKey    !== undefined) await storage.setSetting(`seapay_api_key_${slug}`, apiKey);
+      if (apiSecret !== undefined) await storage.setSetting(`seapay_api_secret_${slug}`, apiSecret);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/admin/seapay/balance", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { currency } = req.query;
+      const currStr = String(currency || "PKR").toUpperCase();
+      const balanceCountry = SEAPAY_COUNTRY_FROM_CURRENCY[currStr] || "Pakistan";
+      const [merchantId, apiSecret] = await Promise.all([getSeapayMerchantId(balanceCountry), getSeapayApiSecret(balanceCountry)]);
+      if (!merchantId || !apiSecret) {
+        return res.status(400).json({ message: `SeaPay non configuré pour ${balanceCountry}` });
+      }
+      const result = await seapayGetBalance(merchantId, currStr, apiSecret);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.post("/api/lipapap/callback", async (req, res) => {
+    try {
+      const body = req.body as Record<string, any>;
+      const orderId = String(body.order_id || "");
+      if (!orderId) return res.status(400).json({ message: "order_id requis" });
+
+      const config = await getLipaPapConfig();
+      if (!config) return res.status(503).json({ message: "LipaPap non configure" });
+      if (!verifyLipaPapResponseHash(body, config.secretKey, body.hash)) {
+        console.error(`[LIPAPAP CALLBACK] Signature invalide — ref=${orderId}`);
+        return res.status(403).json({ message: "Signature invalide" });
+      }
+
+      const status = String(body.status || body.result || "").toUpperCase();
+      const providerTxId = String(body.trans_id || body.TransactionID || body.CheckoutRequestID || orderId);
+      const withdrawal = await storage.getWithdrawalByProviderReference(orderId);
+      if (withdrawal?.gateway === "lipapap") {
+        if (["SUCCESS", "SETTLED", "APPROVED"].includes(status) || String(body.result || "").toUpperCase() === "SUCCESS") {
+          if (withdrawal.status === "pending") {
+            await storage.updateWithdrawalStatus(
+              withdrawal.id,
+              "approved",
+              `Payout LipaPap confirmé - TxID: ${providerTxId}`,
+              orderId,
+              withdrawal.fees || 0,
+              withdrawal.providerPayoutFee || 0,
+            );
+            notifyAdminWithdrawal({ id: withdrawal.id, merchantName: `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: withdrawal.fees || 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved", mode: withdrawal.withdrawalMode }).catch(() => {});
+            notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: withdrawal.fees || 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "approved" }).catch(() => {});
+          }
+        } else if (["FAILED", "DECLINED", "REFUND", "REVERSAL", "VOID"].includes(status)) {
+          if (withdrawal.status === "pending") {
+            await storage.updateWithdrawalStatus(
+              withdrawal.id,
+              "failed",
+              `Payout LipaPap échoué: ${body.decline_reason || body.message || status}`,
+              orderId,
+            );
+            await storage.incrementMerchantCountryBalance(withdrawal.merchantCountryId, withdrawal.amount);
+            notifyAdminWithdrawal({ id: withdrawal.id, merchantName: `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed", mode: withdrawal.withdrawalMode }).catch(() => {});
+            notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed" }).catch(() => {});
+          }
+        }
+        return res.status(200).send("ok");
+      }
+
+      const pending = await storage.getPendingPaymentByProviderReference(orderId);
+      if (!pending || pending.gateway !== "lipapap") return res.status(404).json({ message: "Paiement introuvable" });
+
+      if (status === "SETTLED" || String(body.result || "").toUpperCase() === "SUCCESS") {
+        await settleLipaPapPayment(pending, providerTxId);
+        console.log(`[LIPAPAP CALLBACK] Paiement confirmé — ref=${orderId}`);
+      } else if (["DECLINED", "FAILED", "ERROR", "REFUND", "REVERSAL", "VOID"].includes(status)) {
+        await storage.updatePendingPaymentStatus(pending.id, "lipapap_failed");
+        console.log(`[LIPAPAP CALLBACK] Paiement échoué — ref=${orderId} status=${status}`);
+      }
+      return res.status(200).send("ok");
+    } catch (error: any) {
+      console.error("[LIPAPAP CALLBACK] Erreur:", error.message);
+      return res.status(500).json({ message: "Erreur callback LipaPap" });
+    }
+  });
+
+app.post("/api/seapay/callback", async (req, res) => {
+    try {
+      const body = req.body as Record<string, any>;
+      console.log(`[SEAPAY CALLBACK] Body: ${JSON.stringify(body)}`);
+
+      const orderId = body.order_id || body.out_trade_no || "";
+      if (!orderId) { return res.status(200).send("ok"); }
+
+      // Trouver le pays depuis l'ordre pour utiliser la bonne cle API
+      const pendingForCountry = await storage.getPendingPaymentByProviderReference(orderId);
+      const callbackCountry = pendingForCountry?.country || "";
+      const cbCountry = SEAPAY_COUNTRY_FROM_CURRENCY[SEAPAY_CURRENCY_COUNTRY[callbackCountry] || ""] || callbackCountry;
+      const apiKey = await getSeapayApiKey(cbCountry);
+      if (!apiKey) {
+        console.error("[SEAPAY CALLBACK] API Key non configurée pour le pays:", cbCountry);
+        return res.status(200).send("ok");
+      }
+
+      const receivedSign = body.sign || "";
+      if (!verifySeapaySign(body, apiKey, receivedSign)) {
+        console.error("[SEAPAY CALLBACK] Signature invalide");
+        return res.status(200).send("ok");
+      }
+      const status  = (body.status || "").toLowerCase();
+      const tradeNo = body.trade_no || "";
+      const amount  = parseInt(body.amount || "0", 10);
+
+      const pending = pendingForCountry;
+      if (!pending) {
+        console.warn(`[SEAPAY CALLBACK] Paiement en attente introuvable: ${orderId}`);
+        return res.status(200).send("ok");
+      }
+
+      if (status === "success" || status === "paid" || status === "completed") {
+        // Transaction atomique : CAS + création transaction + crédit solde net en une seule unité
+        // Si une étape échoue, tout est rollback → le callback peut être rejoué sans risque de double-crédit
+        const txId = `SP-${orderId}`;
+
+        // Charger le marchand avant la transaction pour calculer le crédit net (frais appliqués)
+        const merchant = await storage.getMerchantById(pending.merchantId);
+        const merchantCredit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
+        const providerFee = pending.amount - merchantCredit;
+
+        let creditedMcId: number | null = null;
+        const seapayTxClient = await financialPool.connect();
+        try {
+          await seapayTxClient.query("BEGIN");
+
+          // CAS — bloque les callbacks simultanés
+          const casResult = await seapayTxClient.query(
+            `UPDATE pending_payments SET status = 'gateway_confirmed'
+             WHERE id = $1 AND status NOT IN ('gateway_confirmed','confirmed','gateway_error')
+             RETURNING id`,
+            [pending.id]
+          );
+          if (!casResult.rowCount || casResult.rowCount === 0) {
+            await seapayTxClient.query("ROLLBACK");
+            console.log(`[SEAPAY CALLBACK] Déjà traité (CAS) ref=${orderId}`);
+            return res.status(200).send("ok");
+          }
+
+          // Résoudre le merchant_country dans la même transaction
+          const mcRow = await seapayTxClient.query(
+            `SELECT id FROM merchant_countries WHERE merchant_id = $1 AND LOWER(country) = LOWER($2) LIMIT 1`,
+            [pending.merchantId, pending.country.trim()]
+          );
+          if (!mcRow.rows.length) {
+            await seapayTxClient.query("ROLLBACK");
+            console.error(`[SEAPAY CALLBACK] CRITIQUE: MerchantCountry introuvable pour merchantId=${pending.merchantId} country="${pending.country}" — rollback, callback sera rejoué`);
+            return res.status(500).send("error");
+          }
+          creditedMcId = mcRow.rows[0].id as number;
+
+          // Insérer la transaction avec frais — RETURNING id détecte si l'insertion a réussi ou non.
+          // ON CONFLICT DO NOTHING : si la ligne existe déjà (retry après panne partielle), rowCount = 0
+          // → le crédit a déjà été appliqué lors de la tentative précédente, on ne crédite pas à nouveau.
+          const txInsert = await seapayTxClient.query(
+            `INSERT INTO transactions
+               (merchant_id, country, tx_id, amount, payer_number, payer_name, status, provider, provider_tx_id, operator, provider_reference, error_message, provider_fee)
+             VALUES ($1,$2,$3,$4,$5,$6,'confirmed','seapay',$7,$8,$9,NULL,$10)
+             ON CONFLICT (tx_id) DO NOTHING
+             RETURNING id`,
+            [pending.merchantId, pending.country, txId, pending.amount,
+             pending.payerPhone || null, pending.payerName || null,
+             tradeNo || null, pending.paymentMethod || null, orderId, providerFee]
+          );
+
+          if (txInsert.rowCount && txInsert.rowCount > 0) {
+            // Nouvelle insertion : créditer le solde marchand avec le montant net (après frais plateforme)
+            await seapayTxClient.query(
+              `UPDATE merchant_countries SET balance = balance + $1 WHERE id = $2`,
+              [merchantCredit, creditedMcId]
+            );
+          } else {
+            // La ligne existait déjà — la tentative précédente a déjà crédité le solde. On ne crédite pas à nouveau.
+            console.warn(`[SEAPAY CALLBACK] Transaction ${txId} existait déjà — crédit ignoré pour éviter le doublon`);
+          }
+
+          // Statut final (idempotent)
+          await seapayTxClient.query(
+            `UPDATE pending_payments SET status = 'confirmed' WHERE id = $1`,
+            [pending.id]
+          );
+
+          await seapayTxClient.query("COMMIT");
+        } catch (seapayTxErr: any) {
+          await seapayTxClient.query("ROLLBACK").catch(() => {});
+          throw seapayTxErr;
+        } finally {
+          seapayTxClient.release();
+        }
+
+        // Webhook marchand (hors transaction — effets secondaires non critiques)
+        notifyConfirmedPaymentWebhook(pending.merchantId, {
+          event: "payment.confirmed",
+          txId,
+          amount: pending.amount,
+          currency: pending.country,
+          payer: pending.payerPhone || "",
+          country: pending.country,
+          merchantSlug: merchant?.slug || "",
+          provider: "seapay",
+          timestamp: new Date().toISOString(),
+        }).catch((err) => console.error("[WEBHOOK] Erreur async:", err));
+
+        console.log(`[SEAPAY CALLBACK] Paiement confirmé: ${orderId} — ${pending.amount} (${pending.country})`);
+      } else if (status === "failed" || status === "expired" || status === "cancelled") {
+        await storage.updatePendingPaymentStatus(pending.id, "failed");
+        console.log(`[SEAPAY CALLBACK] Paiement échoué: ${orderId} — status: ${status}`);
+      }
+
+      return res.status(200).send("ok");
+    } catch (err: any) {
+      console.error("[SEAPAY CALLBACK] Erreur:", err.message);
+      return res.status(200).send("ok");
+    }
+  });
+
+app.post("/api/seapay/payout-callback", async (req, res) => {
+    try {
+      const body = req.body as Record<string, any>;
+      console.log(`[SEAPAY PAYOUT CALLBACK] Body: ${JSON.stringify(body)}`);
+
+      const orderId = body.order_id || body.out_trade_no || "";
+      const status = (body.status || "").toLowerCase();
+      if (!orderId) return res.status(200).send("ok");
+
+      const withdrawal = await storage.getWithdrawalByProviderReference(orderId);
+
+      // Utiliser le bon secret API selon le pays du retrait
+      const payoutCountry = withdrawal?.country || "";
+      const apiSecret = await getSeapayApiSecret(payoutCountry);
+      if (!apiSecret) {
+        console.error("[SEAPAY PAYOUT CALLBACK] Secret API non configuré pour le pays:", payoutCountry);
+        return res.status(200).send("ok");
+      }
+      const receivedSign = body.sign || "";
+      if (!verifySeapaySign(body, apiSecret, receivedSign)) {
+        console.error("[SEAPAY PAYOUT CALLBACK] Signature invalide");
+        return res.status(200).send("ok");
+      }
+      if (!withdrawal) {
+        console.warn(`[SEAPAY PAYOUT CALLBACK] Retrait non trouve: ${orderId}`);
+        return res.status(200).send("ok");
+      }
+      if (withdrawal.status === "approved" || withdrawal.status === "rejected" || withdrawal.status === "failed") {
+        return res.json({ status: "already_processed" });
+      }
+
+      const isSuccess = ["success", "paid", "completed"].includes(status);
+      const isFailure = ["failed", "expired", "cancelled"].includes(status);
+      if (!isSuccess && !isFailure) return res.json({ status: "pending" });
+
+      const locked = await financialPool.query(
+        `UPDATE withdrawals SET status = $1 WHERE id = $2 AND status = 'pending' RETURNING id`,
+        [isSuccess ? "approved" : "failed", withdrawal.id]
+      );
+      if (locked.rowCount === 0) return res.json({ status: "already_processed" });
+
+      const wdMerchant = await storage.getMerchantById(withdrawal.merchantId);
+      if (isSuccess) {
+        await storage.updateWithdrawalStatus(withdrawal.id, "approved", "Transfert SeaPay confirme", orderId, withdrawal.fees || 0, withdrawal.fees || 0);
+        console.log(`[SEAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} approuve - ref=${orderId}`);
+      } else {
+        await storage.updateWithdrawalStatus(withdrawal.id, "failed", `Transfert SeaPay echoue - statut: ${status}`, orderId);
+        const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
+        if (mc) await storage.incrementMerchantCountryBalance(mc.id, withdrawal.amount);
+        console.log(`[SEAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} echoue - ref=${orderId}`);
+      }
+      res.json({ status: isSuccess ? "approved" : "failed" });
+      setImmediate(() => {
+        notifyAdminWithdrawal({ id: withdrawal.id, merchantName: wdMerchant?.name || `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: withdrawal.fees || 0, phone: withdrawal.phone, operator: withdrawal.operator, status: isSuccess ? "approved" : "failed", mode: withdrawal.withdrawalMode }).catch(() => {});
+        notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: withdrawal.fees || 0, phone: withdrawal.phone, operator: withdrawal.operator, status: isSuccess ? "approved" : "failed" }).catch(() => {});
+      });
+    } catch (err: any) {
+      console.error("[SEAPAY PAYOUT CALLBACK] Erreur:", err.message);
+      res.status(200).send("ok");
+    }
+  });
+
+app.post("/api/clapay/callback", async (req, res) => {
+    try {
+      const nowalletSig = (req.headers["nowallet-signature"] || "") as string;
+      const rawBody = (req.rawBody as Buffer)?.toString() || JSON.stringify(req.body);
+      const payload = req.body as ClapayWebhookPayload;
+
+      console.log(`[CLAPAY CALLBACK] Status: ${payload.status} — TxId: ${payload.transaction_id} — Ref: ${payload.reference || payload.external_reference}`);
+
+      const [webhookSecret, webhookUniqueKey] = await Promise.all([getClapayWebhookSecret(), getClapayWebhookUniqueKey()]);
+      if (webhookSecret && webhookUniqueKey && nowalletSig) {
+        const valid = verifyClapaySignature(nowalletSig, rawBody, webhookSecret, webhookUniqueKey);
+        if (!valid) {
+          console.warn("[CLAPAY CALLBACK] Signature invalide — requête rejetée");
+          return res.status(401).json({ message: "Signature invalide" });
+        }
+      }
+
+      // v3 : transaction_id = notre référence marchande (envoyée dans transaction_id à l'init)
+      const reference = payload.transaction_id || payload.reference || payload.external_reference || payload.signature;
+      if (!reference) return res.status(400).json({ message: "reference manquante" });
+
+      const statusUpper = (payload.status || "").toUpperCase();
+      const isSuccess = ["SUCCESSFUL", "SUCCESS", "COMPLETED", "PAID", "APPROVED"].includes(statusUpper);
+      const isFailed  = ["FAILED", "FAILURE", "CANCELLED", "CANCELED", "REJECTED", "EXPIRED"].includes(statusUpper);
+
+      const pending = await storage.getPendingPaymentByProviderReference(reference);
+      if (!pending || pending.gateway !== "clapay") {
+        console.log(`[CLAPAY CALLBACK] Paiement non trouvé pour ref=${reference}`);
+        return res.json({ received: true });
+      }
+      if (isSuccess) {
+        // ── CAS atomique — même protection que le callback gateway ──────────
+        // Un seul UPDATE réussira si deux callbacks arrivent simultanément.
+        const cpCas = await financialPool.query(
+          `UPDATE pending_payments SET status = 'gateway_confirmed'
+           WHERE id = $1 AND status NOT IN ('gateway_confirmed','confirmed','gateway_error')
+           RETURNING id`,
+          [pending.id]
+        );
+        if (!cpCas.rowCount || cpCas.rowCount === 0) {
+          console.log(`[CLAPAY CALLBACK] Déjà traité (CAS) ref=${reference}`);
+          return res.json({ received: true, alreadyConfirmed: true });
+        }
+
+        const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
+        const merchant = await storage.getMerchantById(pending.merchantId);
+        if (!mc) return res.json({ received: true });
+
+        const credit = calcMerchantCreditForMerchant(pending.amount, pending.country, merchant);
+        const westpayFee = pending.amount - credit;
+        const txRef = `CP-${reference}`;
+        const existingTx = await storage.getTransactionByTxId(txRef);
+        if (!existingTx) {
+          await storage.incrementMerchantCountryBalance(mc.id, credit);
+          await storage.createTransaction({
+            merchantId: pending.merchantId,
+            country: pending.country,
+            txId: txRef,
+            amount: pending.amount,
+            payerNumber: pending.payerPhone || payload.transaction_phone_number || null,
+            payerName: pending.payerName || null,
+            status: "confirmed",
+            provider: "clapay",
+            providerTxId: payload.signature || payload.transaction_id || null,
+            operator: pending.paymentMethod || payload.transaction_service_name || null,
+            providerReference: reference,
+            errorMessage: null,
+            providerFee: westpayFee,
+          });
+          notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "clapay" }).catch(() => {});
+          notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "clapay", status: "confirmed" }).catch(() => {});
+        }
+        if (pending.redirectUrl) {
+          try {
+            const webhookMerchant = await storage.getMerchantById(pending.merchantId);
+            if (webhookMerchant?.webhookUrl) {
+              const { triggerWebhook } = await import("./routes");
+              triggerWebhook && triggerWebhook(webhookMerchant, { txId: txRef, amount: pending.amount, payerPhone: pending.payerPhone, country: pending.country }).catch(() => {});
+            }
+          } catch {}
+        }
+        console.log(`[CLAPAY CALLBACK] Paiement confirmé — ref=${reference} montant=${pending.amount} crédit=${credit}`);
+      } else if (isFailed) {
+        await storage.updatePendingPaymentStatus(pending.id, "gateway_failed");
+        const failTxRef = `CP-${reference}`;
+        const existFail = await storage.getTransactionByTxId(failTxRef);
+        if (!existFail) {
+          storage.createTransaction({
+            merchantId: pending.merchantId,
+            country: pending.country,
+            txId: failTxRef,
+            amount: pending.amount,
+            payerNumber: pending.payerPhone || null,
+            payerName: pending.payerName || null,
+            status: "failed",
+            provider: "clapay",
+            providerTxId: payload.signature || payload.transaction_id || null,
+            operator: pending.paymentMethod || null,
+            providerReference: reference,
+            errorMessage: `Paiement ${statusUpper}`,
+            providerFee: 0,
+          }).catch(() => {});
+        }
+        console.log(`[CLAPAY CALLBACK] Paiement échoué — ref=${reference}`);
+      }
+
+      res.json({ received: true });
+    } catch (err: any) {
+      console.error("[CLAPAY CALLBACK] Erreur:", err.message);
+      res.status(200).json({ received: true });
+    }
+  });
+
+app.post("/api/clapay/payout-callback", async (req, res) => {
+    try {
+      const nowalletSig = (req.headers["nowallet-signature"] || "") as string;
+      const rawBody = (req.rawBody as Buffer)?.toString() || JSON.stringify(req.body);
+      const payload = req.body as ClapayWebhookPayload;
+
+      console.log(`[CLAPAY PAYOUT CALLBACK] Status: ${payload.status} — Ref: ${payload.reference || payload.external_reference}`);
+
+      const [webhookSecret, webhookUniqueKey] = await Promise.all([getClapayWebhookSecret(), getClapayWebhookUniqueKey()]);
+      if (webhookSecret && webhookUniqueKey && nowalletSig) {
+        if (!verifyClapaySignature(nowalletSig, rawBody, webhookSecret, webhookUniqueKey)) {
+          console.warn("[CLAPAY PAYOUT CALLBACK] Signature invalide");
+          return res.status(401).json({ message: "Signature invalide" });
+        }
+      }
+
+      // v3 : transaction_id = notre référence marchande du retrait
+      const orderId = payload.transaction_id || payload.reference || payload.external_reference || payload.order_id || "";
+      let withdrawal = orderId ? await storage.getWithdrawalByProviderReference(orderId) : undefined;
+      // Certains callbacks ClaPay renvoient la signature comme identifiant
+      // principal au lieu de notre transaction_id.
+      if (!withdrawal && payload.signature) {
+        withdrawal = await storage.getWithdrawalByProviderTxId(payload.signature);
+      }
+      if (!withdrawal) return res.json({ received: true });
+      if (payload.signature) {
+        await storage.updateWithdrawalProviderTxId(withdrawal.id, payload.signature);
+      }
+
+      const statusUpper = (payload.status || "").toUpperCase();
+      const isSuccess = ["SUCCESSFUL", "SUCCESS", "COMPLETED", "PAID", "APPROVED"].includes(statusUpper);
+      const isFailure = ["FAILED", "FAILURE", "CANCELLED", "CANCELED", "REJECTED", "EXPIRED"].includes(statusUpper);
+      if (isSuccess) {
+        if (withdrawal.status !== "approved") {
+          await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Approuvé par ClaPay — ref=${orderId}`, orderId);
+        }
+        console.log(`[CLAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} approuvé`);
+      } else if (isFailure) {
+        if (withdrawal.status === "pending") {
+          await storage.updateWithdrawalStatus(withdrawal.id, "failed", `Rejeté par ClaPay — statut ${statusUpper}`, orderId);
+          const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
+          if (mc) await storage.incrementMerchantCountryBalance(mc.id, withdrawal.amount);
+        }
+        console.log(`[CLAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} échoué`);
+      } else {
+        // Un callback intermédiaire (PENDING/PROCESSING) ne doit jamais
+        // transformer un retrait encore en cours en échec local.
+        console.log(`[CLAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} encore en cours — statut ${statusUpper}`);
+        return res.json({ received: true, status: "pending" });
+      }
+      res.json({ received: true });
+    } catch (err: any) {
+      console.error("[CLAPAY PAYOUT CALLBACK] Erreur:", err.message);
+      res.status(200).json({ received: true });
+    }
+  });
+
+app.get("/api/admin/lipapap/settings", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const [dbClientKey, dbSecretKey, dbPaymentUrl, dbCallbackUrl, environment, action, networkIdsJson, payoutCodesJson, payerEmail, locale, connectorName] = await Promise.all([
+        storage.getSetting("lipapap_client_key"),
+        storage.getSetting("lipapap_secret_key"),
+        storage.getSetting("lipapap_payment_url"),
+        storage.getSetting("lipapap_callback_url"),
+        storage.getSetting("lipapap_environment"),
+        storage.getSetting("lipapap_action"),
+        storage.getSetting("lipapap_network_ids"),
+        storage.getSetting("lipapap_payout_codes"),
+        storage.getSetting("lipapap_payer_email"),
+        storage.getSetting("lipapap_locale"),
+        storage.getSetting("lipapap_connector_name"),
+      ]);
+      const clientKey = cleanConfiguredSecret(dbClientKey) || cleanConfiguredSecret(process.env.LIPAPAP_CLIENT_KEY);
+      const secretKey = cleanConfiguredSecret(dbSecretKey) || cleanConfiguredSecret(process.env.LIPAPAP_SECRET_KEY);
+      const paymentUrl = cleanConfiguredSecret(dbPaymentUrl) || cleanConfiguredSecret(process.env.LIPAPAP_PAYMENT_URL);
+      const callbackUrl = cleanConfiguredSecret(dbCallbackUrl);
+      const payerEmailValue = cleanConfiguredSecret(payerEmail) || cleanConfiguredSecret(process.env.LIPAPAP_PAYER_EMAIL);
+      let networkMappingCount = 0;
+      let payoutCodeCount = 0;
+      try {
+        const parsed = networkIdsJson ? JSON.parse(networkIdsJson) : LIPAPAP_DEFAULT_NETWORK_IDS;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          networkMappingCount = Object.entries(parsed).filter(([, value]) =>
+            (typeof value === "string" || typeof value === "number") && String(value).trim() !== "",
+          ).length;
+        }
+      } catch {
+        // Invalid saved JSON is reported as missing until corrected in the panel.
+      }
+      try {
+        const parsed = payoutCodesJson ? JSON.parse(payoutCodesJson) : {};
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          payoutCodeCount = Object.values(parsed).reduce((count, value) => {
+            if (!value || typeof value !== "object" || Array.isArray(value)) return count;
+            return count + Object.entries(value).filter(([, code]) => typeof code === "string" && code.trim() !== "").length;
+          }, 0);
+        }
+      } catch {
+        // Invalid saved JSON is reported as missing until corrected in the panel.
+      }
+      const configurationChecks = {
+        clientKey: !!clientKey,
+        secretKey: !!secretKey,
+        paymentUrl: !!paymentUrl,
+        callbackUrl: !!callbackUrl,
+        payerEmail: !!payerEmailValue,
+        networkMappings: networkMappingCount > 0,
+        payoutProviderCodes: payoutCodeCount > 0,
+      };
+      const payinConfigured = configurationChecks.clientKey &&
+        configurationChecks.secretKey &&
+        configurationChecks.paymentUrl &&
+        configurationChecks.callbackUrl &&
+        configurationChecks.networkMappings;
+      const payoutConfigured = payinConfigured &&
+        configurationChecks.payerEmail &&
+        configurationChecks.payoutProviderCodes;
+      res.json({
+        clientKey: dbClientKey ? "••••••••[DB]" : (process.env.LIPAPAP_CLIENT_KEY ? "••••••••[ENV]" : ""),
+        secretKey: dbSecretKey ? "••••••••[DB]" : (process.env.LIPAPAP_SECRET_KEY ? "••••••••[ENV]" : ""),
+        paymentUrl: paymentUrl || "",
+        payerEmail: payerEmailValue || "",
+        environment: environment === "production" ? "production" : "sandbox",
+        action: action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMO",
+        locale: locale || "",
+        connectorName: connectorName || "",
+        networkIdsJson: networkIdsJson || JSON.stringify(LIPAPAP_DEFAULT_NETWORK_IDS),
+        payoutCodesJson: payoutCodesJson || "{}",
+        configured: payinConfigured && payoutConfigured,
+        payinConfigured,
+        payoutConfigured,
+        configurationChecks,
+        networkMappingCount,
+        payoutCodeCount,
+        envOverride: {
+          clientKey: !!process.env.LIPAPAP_CLIENT_KEY,
+          secretKey: !!process.env.LIPAPAP_SECRET_KEY,
+          paymentUrl: !!process.env.LIPAPAP_PAYMENT_URL,
+        },
+        callbackUrl: callbackUrl || "",
+        payoutSupported: payoutConfigured,
+        payoutMessage: payoutConfigured
+          ? "MOMOPAYOUT utilise uniquement les provider_code enregistrés dans ce panneau."
+          : "Configurez les provider_code payout dans ce panneau avant d’utiliser les retraits LipaPap.",
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/admin/lipapap/networks", authMiddleware("admin"), async (_req, res) => {
+    const { LIPAPAP_NETWORKS } = await import("./lipapap");
+    res.json(LIPAPAP_NETWORKS);
+  });
+
+app.post("/api/admin/lipapap/settings", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { clientKey, secretKey, paymentUrl, callbackUrl, payerEmail, environment, action, networkIdsJson, payoutCodesJson, locale, connectorName } = req.body || {};
+      if (clientKey !== undefined && clientKey !== "") await storage.setSetting("lipapap_client_key", String(clientKey).trim());
+      if (secretKey !== undefined && secretKey !== "") await storage.setSetting("lipapap_secret_key", String(secretKey).trim());
+      if (payerEmail !== undefined && payerEmail !== "") {
+        const normalizedEmail = String(payerEmail).trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+          return res.status(400).json({ message: "LIPAPAP_PAYER_EMAIL doit être une adresse email valide." });
+        }
+        await storage.setSetting("lipapap_payer_email", normalizedEmail);
+      }
+      if (paymentUrl !== undefined && paymentUrl !== "") {
+        try {
+          const parsedUrl = new URL(String(paymentUrl).trim());
+          if (parsedUrl.protocol !== "https:") throw new Error("HTTPS requis");
+        } catch {
+          return res.status(400).json({ message: "PAYMENT_URL doit être une URL HTTPS valide." });
+        }
+        await storage.setSetting("lipapap_payment_url", String(paymentUrl).trim());
+      }
+      if (callbackUrl !== undefined && callbackUrl !== "") {
+        try {
+          const parsedUrl = new URL(String(callbackUrl).trim());
+          if (parsedUrl.protocol !== "https:") throw new Error("HTTPS requis");
+        } catch {
+          return res.status(400).json({ message: "L’URL callback doit être une URL HTTPS valide." });
+        }
+        await storage.setSetting("lipapap_callback_url", String(callbackUrl).trim());
+      }
+      if (environment !== undefined) {
+        if (!["sandbox", "production"].includes(environment)) return res.status(400).json({ message: "Environnement invalide." });
+        await storage.setSetting("lipapap_environment", environment);
+      }
+      if (action !== undefined) {
+        if (!["MOMO", "MOMOAPM", "C2B_SIMULATE"].includes(action)) return res.status(400).json({ message: "Action LipaPap invalide." });
+        const effectiveEnvironment = environment || await storage.getSetting("lipapap_environment") || "sandbox";
+        if (action === "C2B_SIMULATE" && effectiveEnvironment !== "sandbox") {
+          return res.status(400).json({ message: "C2B_SIMULATE est autorisé uniquement en Sandbox." });
+        }
+        await storage.setSetting("lipapap_action", action === "C2B_SIMULATE" ? "C2B_SIMULATE" : "MOMO");
+      }
+      if (locale !== undefined) {
+        const normalizedLocale = String(locale).trim();
+        if (!normalizedLocale || normalizedLocale.length > 32) {
+          return res.status(400).json({ message: "La locale LipaPap est invalide." });
+        }
+        await storage.setSetting("lipapap_locale", normalizedLocale);
+      }
+      if (connectorName !== undefined) {
+        const normalizedConnectorName = String(connectorName).trim();
+        if (!normalizedConnectorName || normalizedConnectorName.length > 64) {
+          return res.status(400).json({ message: "Le connector_name LipaPap est invalide." });
+        }
+        await storage.setSetting("lipapap_connector_name", normalizedConnectorName);
+      }
+      if (networkIdsJson !== undefined) {
+        let parsed: unknown;
+        try { parsed = JSON.parse(String(networkIdsJson)); } catch { return res.status(400).json({ message: "Les IDs réseaux doivent être un JSON valide." }); }
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          return res.status(400).json({ message: "Les IDs réseaux doivent être un objet JSON." });
+        }
+        await storage.setSetting("lipapap_network_ids", JSON.stringify(parsed));
+      }
+      if (payoutCodesJson !== undefined) {
+        let parsed: unknown;
+        try { parsed = JSON.parse(String(payoutCodesJson)); } catch { return res.status(400).json({ message: "Les provider_code payout doivent être un JSON valide." }); }
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          return res.status(400).json({ message: "Les provider_code payout doivent être un objet JSON par pays." });
+        }
+        for (const [country, operators] of Object.entries(parsed)) {
+          if (!country.trim() || !operators || typeof operators !== "object" || Array.isArray(operators)) {
+            return res.status(400).json({ message: "Chaque pays doit contenir un objet opérateur/provider_code." });
+          }
+          for (const [operator, code] of Object.entries(operators)) {
+            if (!operator.trim() || typeof code !== "string" || !code.trim()) {
+              return res.status(400).json({ message: "Chaque opérateur payout doit avoir un provider_code non vide." });
+            }
+          }
+        }
+        await storage.setSetting("lipapap_payout_codes", JSON.stringify(parsed));
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/admin/clapay/settings", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const [dbApiKey, dbWebhookSecret, dbWebhookUniqueKey] = await Promise.all([
+        storage.getSetting("clapay_api_key"),
+        storage.getSetting("clapay_webhook_secret"),
+        storage.getSetting("clapay_webhook_unique_key"),
+      ]);
+      const activeKey = await getClapayApiKey();
+      const envOverride = !!process.env.CLAPAY_API_KEY;
+      res.json({
+        apiKey: dbApiKey ? "••••••••[DB]" : "",
+        webhookSecret: dbWebhookSecret ? "••••••••[DB]" : "",
+        webhookUniqueKey: dbWebhookUniqueKey ? "••••••••[DB]" : "",
+        configured: !!activeKey,
+        envOverride,
+        callbackUrl: `${process.env.APP_URL || "https://westpay.cfd"}/api/clapay/callback`,
+        payoutCallbackUrl: `${process.env.APP_URL || "https://westpay.cfd"}/api/clapay/payout-callback`,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.post("/api/admin/clapay/settings", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { apiKey, webhookSecret, webhookUniqueKey } = req.body;
+      if (apiKey !== undefined && apiKey !== "") await storage.setSetting("clapay_api_key", apiKey);
+      if (webhookSecret !== undefined && webhookSecret !== "") await storage.setSetting("clapay_webhook_secret", webhookSecret);
+      if (webhookUniqueKey !== undefined && webhookUniqueKey !== "") await storage.setSetting("clapay_webhook_unique_key", webhookUniqueKey);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/admin/clapay/balance", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const token = await getClapayApiKey();
+      if (!token) return res.status(400).json({ message: "Clé API ClaPay non configurée" });
+      const result = await clapayGetBalance(token);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.post("/api/admin/mbiyo/confirm-payment", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { reference, txId } = req.body;
+      if (!reference) return res.status(400).json({ message: "reference requis" });
+
+      const pending = await storage.getPendingPaymentByProviderReference(reference);
+      if (!pending) return res.status(404).json({ message: `Paiement introuvable pour la référence: ${reference}` });
+
+      if (pending.status === "gateway_confirmed") {
+        return res.status(400).json({ message: "Ce paiement est déjà confirmé" });
+      }
+
+      await storage.updatePendingPaymentStatus(pending.id, "gateway_confirmed");
+
+      const merchant = await storage.getMerchantById(pending.merchantId);
+      const credit = calcMerchantCredit(pending.amount, pending.country);
+
+      const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
+      if (mc) {
+        await storage.incrementMerchantCountryBalance(mc.id, credit);
+      }
+
+      const tx = await storage.createTransaction({
+        merchantId: pending.merchantId,
+        country: pending.country,
+        txId: txId || reference,
+        amount: pending.amount,
+        payerNumber: pending.payerPhone || null,
+        payerName: pending.payerName || null,
+        status: "confirmed",
+        provider: "mbiyo",
+        providerTxId: txId || null,
+        operator: pending.paymentMethod || null,
+        providerReference: reference,
+        errorMessage: null,
+      });
+
+      if (merchant) {
+        notifyConfirmedPaymentWebhook(pending.merchantId, {
+          event: "payment.confirmed",
+          txId: tx.txId || "",
+          amount: pending.amount,
+          currency: pending.country,
+          payer: pending.payerPhone || "",
+          payerNumber: pending.payerPhone || null,
+          country: pending.country,
+          merchantSlug: merchant.slug,
+          provider: "mbiyo",
+          reference,
+          status: "confirmed",
+          timestamp: new Date().toISOString(),
+        }).catch((err) => console.error("[WEBHOOK] Erreur async:", err));
+        notifyMerchantPayment(pending.merchantId, { txId: tx.txId || "", amount: pending.amount, payerNumber: pending.payerPhone || null, country: pending.country, provider: "mbiyo" }).catch(() => {});
+        notifyAdminPayment(merchant, pending.amount, pending.payerPhone || "", tx.txId || "", "Mbiyo (Manuel)").catch(() => {});
+      }
+
+      console.log(`[MBIYO ADMIN] Paiement confirmé manuellement: ${reference} — Crédit: ${credit} — Marchand: ${merchant?.name}`);
+      res.json({ success: true, credit, txId: tx.txId, merchantName: merchant?.name });
+    } catch (err: any) {
+      console.error("[MBIYO ADMIN] Erreur confirmation manuelle:", err.message);
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.post("/api/admin/revoke-sessions", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { targetType, targetId } = req.body;
+      if (!targetType || !targetId) {
+        return res.status(400).json({ message: "targetType et targetId requis" });
+      }
+      if (targetType === "admin") {
+        await storage.revokeAdminTokens(parseInt(targetId));
+        storage.createSecurityLog({
+          eventType: "session_revoked",
+          ip: extractIp(req),
+          userEmail: (req as any).user?.email || "admin",
+          action: "admin_session_revoked",
+          details: `Sessions admin id=${targetId} révoquées manuellement`,
+        }).catch(() => {});
+      } else if (targetType === "merchant") {
+        await storage.revokeMerchantTokens(parseInt(targetId));
+        storage.createSecurityLog({
+          eventType: "session_revoked",
+          ip: extractIp(req),
+          userEmail: (req as any).user?.email || "admin",
+          action: "merchant_session_revoked",
+          details: `Sessions marchand id=${targetId} révoquées manuellement`,
+        }).catch(() => {});
+      } else {
+        return res.status(400).json({ message: "targetType invalide (admin|merchant)" });
+      }
+      res.json({ success: true, message: `Sessions ${targetType} id=${targetId} révoquées` });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.patch("/api/admin/merchant-countries/:id/gateway", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const requestedGateway = String(req.body?.payinGateway || "").trim().toLowerCase();
+      const gateway = requestedGateway === "lipa" ? "lipapap" : requestedGateway;
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "Identifiant invalide" });
+      if (!SUPPORTED_PAYMENT_GATEWAYS.has(gateway)) {
+        return res.status(400).json({ message: "Passerelle de paiement invalide" });
+      }
+      const merchantCountry = await storage.getMerchantCountryById(id);
+      if (!merchantCountry) return res.status(404).json({ message: "Configuration de pays introuvable" });
+      await storage.updateMerchantCountryPayinGateway(id, gateway);
+      return res.json({ success: true, payinGateway: gateway });
+    } catch (err: any) {
+      return res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.post("/api/merchant/transfer", apiKeyAuthMiddleware, async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const { msisdn, amount, firstName, lastName, operator } = req.body;
+      const country = normalizeCountry(req.body.country || "");
+      if (!country || !msisdn || !amount || !firstName || !lastName) {
+        return res.status(400).json({ message: "Pays, numero, montant, prenom et nom requis" });
+      }
+
+      const parsedAmount = Number(amount);
+      if (!Number.isInteger(parsedAmount) || parsedAmount <= 0 || parsedAmount > 50_000_000) {
+        return res.status(400).json({ message: "Le montant doit etre un entier positif raisonnable" });
+      }
+      const merchantCountry = await storage.findMerchantCountryBySimAndCountry(merchantId, country);
+      if (!merchantCountry || !merchantCountry.active) {
+        return res.status(400).json({ message: `Pays "${country}" non configure ou desactive sur ce compte marchand` });
+      }
+      if (!merchantCountry.gatewayEnabled) return res.status(400).json({ message: "Les paiements sont désactivés pour ce pays" });
+      const merchant = await storage.getMerchantById(merchantId);
+      if (merchant?.withdrawalsDisabled) return res.status(404).json({ message: MERCHANT_PAYMENT_DISABLED_MESSAGE });
+      if (await storage.getSetting("withdrawals_disabled") === "true") {
+        return res.status(503).json({ message: "Les transferts sont temporairement indisponibles" });
+      }
+      if (merchantCountry.balance < parsedAmount) return res.status(400).json({ message: "Solde insuffisant" });
+
+      const token = await getClapayApiKey();
+      if (!token) return res.status(503).json({ message: "Service de retrait non configuré" });
+      const countryCode = clapayCountryCode(country);
+      const operatorRecord = operator
+        ? await storage.getWithdrawalOperatorByNameAndCountry(String(operator), country)
+        : null;
+      if (operator && !operatorRecord) return res.status(400).json({ message: "Opérateur de retrait invalide" });
+
+      const reference = clapayGenerateRef();
+      const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+      const result = await clapayInitiatePayout(token, {
+        transaction_id: reference,
+        amount: parsedAmount,
+        country_code: countryCode,
+        operators_code: [operatorRecord?.clapayCode || operatorRecord?.name || String(operator || "")].filter(Boolean),
+        method: "CASHIN",
+        tunnel: "API",
+        callback_url: `${callbackBaseUrl}/api/clapay/payout-callback`,
+        additional_infos: {
+          customer_phone: clapayLocalPhone(String(msisdn), countryCode),
+          customer_firstname: String(firstName).slice(0, 80),
+          customer_lastname: String(lastName).slice(0, 80),
+        },
+      });
+      if (!result.success) return res.status(400).json({ message: result.message || "Transfert refusé par le fournisseur" });
+
+      const debited = await storage.decrementMerchantCountryBalanceAtomic(merchantCountry.id, parsedAmount);
+      if (!debited) {
+        return res.status(409).json({ message: "Solde insuffisant après vérification atomique; contactez l'administrateur avec la référence.", reference });
+      }
+      const txId = `TR-${reference}`;
+      const providerTxId = result.data?.signature ? String(result.data.signature) : null;
+      await storage.createTransaction({
+        merchantId,
+        country,
+        txId,
+        amount: -parsedAmount,
+        payerNumber: String(msisdn),
+        status: "confirmed",
+        provider: "clapay",
+        providerTxId,
+        providerReference: reference,
+      });
+      await storage.createApiLog({
+        merchantId,
+        action: "clapay_transfer",
+        ip: req.ip || "",
+        description: `Transfert ClaPay: ${parsedAmount} vers ${String(msisdn).slice(-4)} - référence ${reference}`,
+      });
+      return res.json({
+        success: true,
+        reference,
+        providerTransactionId: providerTxId,
+        fees: 0,
+        amount: parsedAmount,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+function normalizePhone(phone: string): string {
+    let cleaned = String(phone).replace(/[\s\-()]/g, "").trim();
+    if (cleaned.startsWith("00")) cleaned = `+${cleaned.slice(2)}`;
+    return cleaned;
+  }
+
+function parseSmsContent(smsText: string): { txId: string | null; amount: number | null; payerNumber: string | null; errors: string[] } {
+    const errors: string[] = [];
+    let txId: string | null = null;
+    let amount: number | null = null;
+    let payerNumber: string | null = null;
+    const txPatterns = [
+      /(?:Transaction\s*ID|Trans\.?\s*ID|TXN?\s*ID|TX\s*N°)\s*[:\s]?\s*([A-Za-z0-9\-\.]{5,})/i,
+      /(?:Ref(?:erence)?|N°)\s*[:\s]?\s*([A-Za-z0-9\-\.]{5,})/i,
+      /(?:ID)\s*[:\s]\s*([A-Za-z0-9\-\.]{5,})/i,
+      /\b(TX[A-Za-z0-9\-]{4,})\b/i,
+      /\b(TM\d{6,})\b/i,
+      /\b(MM\d{6,})\b/i,
+      /\b(OM\d{6,})\b/i,
+      /\b([A-Z]{2,4}\d{8,})\b/,
+      /\b(\d{12,})\b/,
+    ];
+    for (const pattern of txPatterns) {
+      const match = smsText.match(pattern);
+      if (match?.[1]) { txId = match[1].trim(); break; }
+    }
+
+    const amountPatterns = [
+      /([\d\s.,]+)\s*(?:F\s*CFA|FCFA|XOF|CFA)/i,
+      /(?:montant|amount|recu|received|envoye|sent)\s*[:\s]?\s*([\d\s.,]+)/i,
+      /(?:GHS|NGN|XOF)\s*([\d\s.,]+)/i,
+      /([\d.,]+)\s*(?:cedis?|naira)/i,
+    ];
+    for (const pattern of amountPatterns) {
+      const match = smsText.match(pattern);
+      if (!match?.[1]) continue;
+      const cleaned = match[1].replace(/\s/g, "").replace(/,/g, ".");
+      const parts = cleaned.split(".");
+      const lastPart = parts[parts.length - 1];
+      const numeric = parts.length > 1
+        ? (lastPart.length <= 2 ? `${parts.slice(0, -1).join("")}.${lastPart}` : parts.join(""))
+        : cleaned;
+      const parsed = Number.parseFloat(numeric);
+      if (Number.isFinite(parsed) && parsed > 0) { amount = Math.round(parsed); break; }
+    }
+
+    const phonePatterns = [
+      /(?:de|from|par|numero)\s*[:\s]?\s*(\+?\d[\d\s\-]{8,15})/i,
+      /(\+\d{10,15})/,
+    ];
+    for (const pattern of phonePatterns) {
+      const match = smsText.match(pattern);
+      if (match?.[1]) { payerNumber = normalizePhone(match[1]); break; }
+    }
+    if (!txId) errors.push("ID de transaction non trouve dans le SMS");
+    if (!amount) errors.push("Montant non trouve dans le SMS");
+    return { txId, amount, payerNumber, errors };
+  }
+
+async function reconcilePendingPayments(txId: string, merchantId: number, amount: number): Promise<void> {
+    try {
+      const pendingPayments = await storage.getPendingPaymentsByTxId(txId);
+      for (const pending of pendingPayments) {
+        if (pending.merchantId === merchantId && pending.amount === amount) {
+          await storage.updatePendingPaymentStatus(pending.id, "confirmed");
+          console.log(`[SMS] Paiement en attente #${pending.id} confirmé (TX: ${txId})`);
+        }
+      }
+    } catch (error) {
+      console.error("[SMS] Erreur reconciliation paiement en attente:", error);
+    }
+  }
+
+app.post("/sms/receive", async (req, res) => {
+    try {
+      const { from_sim, sms_text, received_at } = req.body;
+
+      if (!from_sim || !sms_text) {
+        console.log("[SMS] Requete invalide - donnees manquantes:", { from_sim: !!from_sim, sms_text: !!sms_text });
+        return res.status(400).json({ message: "Donnees SMS manquantes (from_sim et sms_text requis)" });
+      }
+
+      const normalizedSim = normalizePhone(from_sim);
+      console.log(`[SMS] Recu de ${normalizedSim}: ${sms_text.substring(0, 100)}...`);
+
+      const { txId, amount, payerNumber, errors } = parseSmsContent(sms_text);
+
+      if (errors.length > 0 || !txId || !amount) {
+        const errorMsg = errors.join("; ");
+        console.log(`[SMS] Parsing partiel - Erreurs: ${errorMsg}`);
+
+        await storage.createSmsLog({
+          fromSim: normalizedSim,
+          smsText: sms_text,
+          parsed: false,
+          errorMessage: errorMsg || "Parsing incomplet",
+          parsedAmount: amount,
+          parsedTxId: txId,
+          parsedPayer: payerNumber,
+        });
+
+        return res.json({
+          status: "logged",
+          message: "SMS enregistre mais non traite - parsing incomplet",
+          errors,
+          parsed: { txId, amount, payerNumber },
+        });
+      }
+
+      const existingTx = await storage.getTransactionByTxId(txId);
+      if (existingTx) {
+        console.log(`[SMS] Transaction dupliquee: ${txId}`);
+        await storage.createSmsLog({
+          fromSim: normalizedSim,
+          smsText: sms_text,
+          parsed: false,
+          errorMessage: `Transaction dupliquee: ${txId}`,
+          parsedAmount: amount,
+          parsedTxId: txId,
+          parsedPayer: payerNumber,
+        });
+        return res.json({ status: "duplicate", txId, message: "Cette transaction a deja ete enregistree" });
+      }
+
+      const simNumber = await storage.getNumberByPhone(normalizedSim);
+
+      if (!simNumber) {
+        const allNumbers = await storage.getNumbers();
+        const found = allNumbers.find(n => {
+          const norm = normalizePhone(n.phoneNumber);
+          return norm === normalizedSim || norm.endsWith(normalizedSim.slice(-8)) || normalizedSim.endsWith(norm.slice(-8));
+        });
+
+        if (!found) {
+          console.log(`[SMS] Numero SIM non reconnu: ${normalizedSim}`);
+          await storage.createSmsLog({
+            fromSim: normalizedSim,
+            smsText: sms_text,
+            parsed: false,
+            errorMessage: `Numero SIM non reconnu: ${normalizedSim}`,
+            parsedAmount: amount,
+            parsedTxId: txId,
+            parsedPayer: payerNumber,
+          });
+          return res.json({ status: "unmatched", message: "Numero SIM non associe a un marchand", txId, amount });
+        }
+
+        if (!found.merchantId) {
+          console.log(`[SMS] Numero ${normalizedSim} trouve mais non associe a un marchand`);
+          await storage.createSmsLog({
+            fromSim: normalizedSim,
+            smsText: sms_text,
+            parsed: false,
+            errorMessage: `Numero trouve (${found.phoneNumber}) mais non associe a un marchand`,
+            parsedAmount: amount,
+            parsedTxId: txId,
+            parsedPayer: payerNumber,
+          });
+          return res.json({ status: "unmatched", message: "Numero non associe a un marchand", txId, amount });
+        }
+
+        const merchantCountry = await storage.findMerchantCountryBySimAndCountry(found.merchantId, found.country);
+
+        if (!merchantCountry || !merchantCountry.active) {
+          console.log(`[SMS] Pays ${found.country} non actif pour le marchand #${found.merchantId}`);
+          await storage.createSmsLog({
+            fromSim: normalizedSim,
+            smsText: sms_text,
+            parsed: false,
+            errorMessage: `Pays ${found.country} inactif pour le marchand`,
+            parsedAmount: amount,
+            parsedTxId: txId,
+            parsedPayer: payerNumber,
+          });
+          return res.json({ status: "inactive", message: "Le pays n'est pas actif pour ce marchand" });
+        }
+
+        const smsM2 = await storage.getMerchantById(found.merchantId);
+        const merchantCredit2 = calcMerchantCreditForMerchant(amount, found.country, smsM2);
+        await storage.createTransaction({
+          merchantId: found.merchantId,
+          country: found.country,
+          txId,
+          amount,
+          payerNumber: payerNumber || null,
+          status: "confirmed",
+        });
+
+        await storage.incrementMerchantCountryBalance(merchantCountry.id, merchantCredit2);
+
+        await storage.createSmsLog({
+          fromSim: normalizedSim,
+          smsText: sms_text,
+          parsed: true,
+          parsedAmount: amount,
+          parsedTxId: txId,
+          parsedPayer: payerNumber,
+        });
+
+        await storage.createApiLog({
+          merchantId: found.merchantId,
+          action: "sms_payment_confirmed",
+          ip: "",
+          description: `Paiement confirme par SMS - TX: ${txId} - Montant: ${amount} F CFA - De: ${payerNumber || "inconnu"} - SIM: ${normalizedSim}`,
+        });
+
+        await reconcilePendingPayments(txId, found.merchantId, amount);
+
+        const foundMerchant = await storage.getMerchantById(found.merchantId);
+        notifyConfirmedPaymentWebhook(found.merchantId, {
+          event: "payment.confirmed",
+          txId,
+          amount,
+          currency: "XOF",
+          payer: payerNumber || "",
+          country: found.country,
+          merchantSlug: foundMerchant?.slug || "",
+          provider: "sms",
+          timestamp: new Date().toISOString(),
+        }).catch(err => console.error("[WEBHOOK] Erreur async:", err));
+
+        notifyMerchantPayment(found.merchantId, {
+          txId,
+          amount,
+          payerNumber,
+          country: found.country,
+          provider: "sms",
+        }).catch(() => {});
+
+        notifyAdminPayment({
+          txId,
+          merchantName: foundMerchant?.name || `#${found.merchantId}`,
+          payerNumber,
+          country: found.country,
+          amount,
+          provider: "sms",
+          status: "confirmed",
+        }).catch(() => {});
+
+        console.log(`[SMS] Transaction confirmee: TX=${txId}, Montant=${amount}, Marchand=#${found.merchantId}, Pays=${found.country}`);
+        return res.json({ status: "processed", txId, amount, country: found.country });
+      }
+
+      if (!simNumber.merchantId) {
+        console.log(`[SMS] Numero ${normalizedSim} non associe a un marchand`);
+        await storage.createSmsLog({
+          fromSim: normalizedSim,
+          smsText: sms_text,
+          parsed: false,
+          errorMessage: `Numero non associe a un marchand`,
+          parsedAmount: amount,
+          parsedTxId: txId,
+          parsedPayer: payerNumber,
+        });
+        return res.json({ status: "unmatched", message: "Numero non associe a un marchand", txId, amount });
+      }
+
+      const merchantCountry = await storage.findMerchantCountryBySimAndCountry(
+        simNumber.merchantId,
+        simNumber.country
+      );
+
+      if (!merchantCountry || !merchantCountry.active) {
+        console.log(`[SMS] Pays ${simNumber.country} non actif pour le marchand #${simNumber.merchantId}`);
+        await storage.createSmsLog({
+          fromSim: normalizedSim,
+          smsText: sms_text,
+          parsed: false,
+          errorMessage: `Pays ${simNumber.country} inactif pour le marchand`,
+          parsedAmount: amount,
+          parsedTxId: txId,
+          parsedPayer: payerNumber,
+        });
+        return res.json({ status: "inactive", message: "Le pays n'est pas actif pour ce marchand" });
+      }
+
+      const smsM3 = await storage.getMerchantById(simNumber.merchantId);
+      const merchantCredit3 = calcMerchantCreditForMerchant(amount, simNumber.country, smsM3);
+      await storage.createTransaction({
+        merchantId: simNumber.merchantId,
+        country: simNumber.country,
+        txId,
+        amount,
+        payerNumber: payerNumber || null,
+        status: "confirmed",
+      });
+
+      await storage.incrementMerchantCountryBalance(merchantCountry.id, merchantCredit3);
+
+      await storage.createSmsLog({
+        fromSim: normalizedSim,
+        smsText: sms_text,
+        parsed: true,
+        parsedAmount: amount,
+        parsedTxId: txId,
+        parsedPayer: payerNumber,
+      });
+
+      await storage.createApiLog({
+        merchantId: simNumber.merchantId,
+        action: "sms_payment_confirmed",
+        ip: "",
+        description: `Paiement confirme par SMS - TX: ${txId} - Montant: ${amount} F CFA - De: ${payerNumber || "inconnu"} - SIM: ${normalizedSim}`,
+      });
+
+      await reconcilePendingPayments(txId, simNumber.merchantId, amount);
+
+      const simMerchant = await storage.getMerchantById(simNumber.merchantId);
+      notifyConfirmedPaymentWebhook(simNumber.merchantId, {
+        event: "payment.confirmed",
+        txId,
+        amount,
+        currency: "XOF",
+        payer: payerNumber || "",
+        country: simNumber.country,
+        merchantSlug: simMerchant?.slug || "",
+        provider: "sms",
+        timestamp: new Date().toISOString(),
+      }).catch(err => console.error("[WEBHOOK] Erreur async:", err));
+
+      notifyMerchantPayment(simNumber.merchantId, {
+        txId,
+        amount,
+        payerNumber,
+        country: simNumber.country,
+        provider: "sms",
+      }).catch(() => {});
+
+      notifyAdminPayment({
+        txId,
+        merchantName: simMerchant?.name || `#${simNumber.merchantId}`,
+        payerNumber,
+        country: simNumber.country,
+        amount,
+        provider: "sms",
+        status: "confirmed",
+      }).catch(() => {});
+
+      console.log(`[SMS] Transaction confirmee: TX=${txId}, Montant=${amount}, Marchand=#${simNumber.merchantId}, Pays=${simNumber.country}`);
+      return res.json({ status: "processed", txId, amount, country: simNumber.country });
+    } catch (err: any) {
+      console.error("[SMS] Erreur serveur:", err.message);
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/admin/payment-links", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const links = await storage.getAllPaymentLinks();
+      res.json(links);
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.put("/api/admin/payment-links/:id/toggle", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const link = await storage.getPaymentLinkById(id);
+      if (!link) return res.status(404).json({ message: "Lien introuvable" });
+      const updated = await storage.updatePaymentLink(id, { active: !link.active });
+      await storage.createApiLog({ merchantId: link.merchantId, action: "admin_toggle_payment_link", ip: req.ip || "", description: `Admin: lien #${id} ${updated.active ? "activé" : "désactivé"}` });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.delete("/api/admin/payment-links/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const link = await storage.getPaymentLinkById(id);
+      if (!link) return res.status(404).json({ message: "Lien introuvable" });
+      await storage.deletePaymentLink(id);
+      await storage.createApiLog({ merchantId: link.merchantId, action: "admin_delete_payment_link", ip: req.ip || "", description: `Admin: lien #${id} "${link.name}" supprimé` });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/merchant/payment-links", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const links = await storage.getPaymentLinks(merchantId);
+      res.json(links);
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.post("/api/merchant/payment-links", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const { name, description, amountType, amount, redirectUrl, expiresAt, paymentLimit, active, countries, confirmationMessage, collectBillingAddress, showShareButton, notificationEmail, bank: requestedBank } = req.body;
+      if (!name || !amountType) return res.status(400).json({ message: "name et amountType requis" });
+      if (amountType === "fixed" && !amount) return res.status(400).json({ message: "amount requis pour un lien fixe" });
+      if (requestedBank !== undefined && !["bank1", "bank2"].includes(String(requestedBank))) {
+        return res.status(400).json({ message: "Banque de paiement invalide" });
+      }
+      const uniqueId = Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+      const link = await storage.createPaymentLink({
+        merchantId: merchantId,
+        uniqueId,
+        name,
+        bank: requestedBank === "bank2" ? "bank2" : "bank1",
+        description: description || null,
+        amountType,
+        amount: amount ? Number(amount) : null,
+        redirectUrl: redirectUrl || null,
+        expiresAt: expiresAt ? new Date(expiresAt) : null,
+        paymentLimit: paymentLimit ? Number(paymentLimit) : null,
+        active: active !== false,
+        countries: Array.isArray(countries) && countries.length > 0 ? countries : null,
+        confirmationMessage: confirmationMessage || null,
+        collectBillingAddress: collectBillingAddress === true,
+        showShareButton: showShareButton !== false,
+        notificationEmail: notificationEmail || null,
+      });
+      res.json(link);
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.put("/api/merchant/payment-links/:id", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const id = Number(req.params.id);
+      const existing = await storage.getPaymentLinkById(id);
+      if (!existing || existing.merchantId !== merchantId) return res.status(404).json({ message: "Lien introuvable" });
+      const { name, description, amountType, amount, redirectUrl, expiresAt, paymentLimit, active, countries, confirmationMessage, collectBillingAddress, showShareButton, notificationEmail, bank: requestedBank } = req.body;
+      if (requestedBank !== undefined && !["bank1", "bank2"].includes(String(requestedBank))) {
+        return res.status(400).json({ message: "Banque de paiement invalide" });
+      }
+      const updated = await storage.updatePaymentLink(id, {
+        ...(name !== undefined && { name }),
+        ...(requestedBank !== undefined && { bank: requestedBank }),
+        ...(description !== undefined && { description: description || null }),
+        ...(amountType !== undefined && { amountType }),
+        ...(amount !== undefined && { amount: amount ? Number(amount) : null }),
+        ...(redirectUrl !== undefined && { redirectUrl: redirectUrl || null }),
+        ...(expiresAt !== undefined && { expiresAt: expiresAt ? new Date(expiresAt) : null }),
+        ...(paymentLimit !== undefined && { paymentLimit: paymentLimit ? Number(paymentLimit) : null }),
+        ...(active !== undefined && { active }),
+        ...(countries !== undefined && { countries: Array.isArray(countries) && countries.length > 0 ? countries : null }),
+        ...(confirmationMessage !== undefined && { confirmationMessage: confirmationMessage || null }),
+        ...(collectBillingAddress !== undefined && { collectBillingAddress: collectBillingAddress === true }),
+        ...(showShareButton !== undefined && { showShareButton: showShareButton !== false }),
+        ...(notificationEmail !== undefined && { notificationEmail: notificationEmail || null }),
+      });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.delete("/api/merchant/payment-links/:id", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const id = Number(req.params.id);
+      const existing = await storage.getPaymentLinkById(id);
+      if (!existing || existing.merchantId !== merchantId) return res.status(404).json({ message: "Lien introuvable" });
+      await storage.deletePaymentLink(id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/payment-link/:uniqueId", async (req, res) => {
+    try {
+      const link = await storage.getPaymentLinkByUniqueId(req.params.uniqueId);
+      if (!link || !link.active) return res.status(404).json({ message: "Lien de paiement introuvable ou inactif" });
+      if (link.expiresAt && new Date() > link.expiresAt) return res.status(410).json({ message: "Ce lien de paiement a expiré" });
+      if (link.paymentLimit && link.paymentCount >= link.paymentLimit) return res.status(410).json({ message: "Ce lien a atteint sa limite de paiements" });
+
+      // Les liens Bank 1 utilisent désormais link.westpay.cfd. On bloque
+      // uniquement les anciens liens Bank 1 sur le domaine principal.
+      // Les anciens liens Bank 2 restent volontairement autorisés afin de
+      // conserver leur redirection vers payment.bank2.westpay.cfd.
+      const requestHost = (req.hostname || "").toLowerCase();
+      const isLegacyBank1Host = requestHost === "westpay.cfd" || requestHost === "www.westpay.cfd";
+      if (isLegacyBank1Host && link.bank !== "bank2") {
+        return res.status(404).json({ message: "Ce lien de paiement n'est plus disponible à cette adresse." });
+      }
+
+      const merchant = await storage.getMerchantById(link.merchantId);
+      if (!merchant || merchant.suspended) return res.status(404).json({ message: "Marchand introuvable" });
+      const countries = await storage.getMerchantCountries(merchant.id);
+      const activeCountries = countries.filter(c => c.active).map(c => c.country);
+      const configuredCountries = Array.isArray(link.countries) && link.countries.length > 0 ? link.countries : null;
+      const allowedCountries = link.bank === "bank2" && configuredCountries
+        ? activeCountries.filter(country => configuredCountries.includes(country))
+        : activeCountries;
+      if (link.bank === "bank2" && allowedCountries.length === 0) {
+        return res.status(409).json({ message: "Aucun pays actif n'est disponible pour ce lien de paiement." });
+      }
+      res.json({ link, merchantName: merchant.name, merchantSlug: merchant.slug, countries: allowedCountries });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/public/wallet-transfer-fee", async (_req, res) => {
+    try {
+      const feeType = await storage.getSetting("wallet_transfer_fee_type");
+      const feeValue = await storage.getSetting("wallet_transfer_fee_value");
+      res.json({
+        feeType: feeType || "percentage",
+        feeValue: parseFloat(feeValue || "4.5"),
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/public/platform-flags", async (_req, res) => {
+    try {
+      const [withdrawalsDisabled, minAmountRaw, walletTransfersDisabled] = await Promise.all([
+        storage.getSetting("withdrawals_disabled"),
+        storage.getSetting("withdrawal_min_amount"),
+        storage.getSetting("wallet_transfers_disabled"),
+      ]);
+      const withdrawalMinAmount = minAmountRaw ? parseInt(minAmountRaw) || 200 : 200;
+      res.json({
+        withdrawalsDisabled: withdrawalsDisabled === "true",
+        withdrawalMinAmount,
+        walletTransfersDisabled: walletTransfersDisabled === "true",
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.put("/api/admin/platform-flags", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { withdrawalsDisabled, withdrawalMinAmount, walletTransfersDisabled } = req.body;
+      if (withdrawalsDisabled !== undefined) {
+        await storage.setSetting("withdrawals_disabled", withdrawalsDisabled ? "true" : "false");
+      }
+      if (walletTransfersDisabled !== undefined) {
+        await storage.setSetting("wallet_transfers_disabled", walletTransfersDisabled ? "true" : "false");
+      }
+      if (withdrawalMinAmount !== undefined) {
+        const parsed = parseInt(withdrawalMinAmount);
+        if (!isNaN(parsed) && parsed >= 1) {
+          await storage.setSetting("withdrawal_min_amount", String(parsed));
+        }
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+  // ==================== SUPPORT / AIDE ====================
+  const supportHelpRateLimit = makeRateLimit({ max: 5, windowMs: 5 * 60 * 1000, label: "support_help" });
+  app.post("/api/support/help", supportHelpRateLimit, async (req, res) => {
+    try {
+      const { name, whatsapp, message, merchantName, merchantSlug } = req.body;
+      if (!name || !message) return res.status(400).json({ message: "Nom et message sont requis" });
+
+      const safeName = String(name).slice(0, 80).replace(/[*_`[\]]/g, "");
+      const safeWhatsapp = String(whatsapp || "").slice(0, 20).replace(/[^0-9+\s]/g, "");
+      const safeMessage = String(message).slice(0, 500).replace(/[*_`[\]]/g, "");
+      const safeMerchant = merchantName ? String(merchantName).slice(0, 60).replace(/[*_`[\]]/g, "") : null;
+      const safeSlug = merchantSlug ? String(merchantSlug).slice(0, 40).replace(/[^a-z0-9-]/g, "") : null;
+      const now = new Date();
+      const merchantInfo = safeMerchant
+        ? `Marchand : ${safeMerchant}${safeSlug ? ` (${safeSlug})` : ""}`
+        : "Marchand : Inconnu";
+      const text =
+        `Nouvelle demande d'aide — Page de paiement\n\n${merchantInfo}\n\n` +
+        `Nom : ${safeName}\nWhatsApp : ${safeWhatsapp || "Non renseigné"}\n` +
+        `Message :\n${safeMessage}\n\n` +
+        `Date : ${now.toLocaleDateString("fr-FR")} ${now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`;
+      const { notifyAdminGroup } = await import("./telegram-bot");
+      await notifyAdminGroup(text);
+      return res.json({ success: true });
+    } catch (err: any) {
+      console.error("[SUPPORT] Erreur envoi aide:", err.message);
+      return res.status(500).json({ message: "Erreur lors de l'envoi" });
+    }
+  });
+
+app.get("/api/public/support-contacts", async (_req, res) => {
+    try {
+      const [tg1, tg2, tg3, tg4] = await Promise.all([
+        storage.getSetting("support_telegram_1"),
+        storage.getSetting("support_telegram_2"),
+        storage.getSetting("support_telegram_3"),
+        storage.getSetting("support_telegram_4"),
+      ]);
+      res.json({
+        telegram1: tg1 || "@Atfchalvt",
+        telegram2: tg2 || "@geeorbotpay",
+        telegram3: tg3 || "@pankeyrobotpay",
+        telegram4: tg4 || "@astapay",
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/wallet-transfer-countries", async (_req, res) => {
+    try {
+      const countries = await storage.getWalletTransferCountries(true);
+      res.json(countries);
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/admin/wallet-transfer-countries", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const countries = await storage.getWalletTransferCountries(false);
+      res.json(countries);
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.post("/api/admin/wallet-transfer-countries", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { country, currencyZone } = req.body;
+      if (!country?.trim() || !["XOF", "XAF", "CDF", "GNF", "GMD"].includes(currencyZone)) {
+        return res.status(400).json({ message: "Pays et zone monetaire requis (XOF, XAF, CDF, GNF ou GMD)" });
+      }
+      const existing = await storage.getWalletTransferCountryByName(country.trim());
+      if (existing) return res.status(409).json({ message: "Ce pays existe deja" });
+      const created = await storage.createWalletTransferCountry({ country: country.trim(), currencyZone, active: true });
+      res.json(created);
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.patch("/api/admin/wallet-transfer-countries/:id/toggle", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { active } = req.body;
+      await storage.toggleWalletTransferCountry(id, !!active);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.delete("/api/admin/wallet-transfer-countries/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteWalletTransferCountry(id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/merchant/wallet-transfers", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const transfers = await storage.getWalletTransfers(merchantId);
+      res.json(transfers);
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.post("/api/merchant/wallet-transfers", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const { fromCountryId, toCountryId, amount } = req.body;
+      if (!fromCountryId || !toCountryId || !amount) {
+        return res.status(400).json({ message: "Champs manquants" });
+      }
+      const parsedAmount = parseInt(amount);
+      if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        return res.status(400).json({ message: "Montant invalide" });
+      }
+      const fromMC = await storage.getMerchantCountryById(parseInt(fromCountryId));
+      const toMC = await storage.getMerchantCountryById(parseInt(toCountryId));
+      if (!fromMC || fromMC.merchantId !== merchantId) {
+        return res.status(400).json({ message: "Pays source invalide" });
+      }
+      if (!toMC || toMC.merchantId !== merchantId) {
+        return res.status(400).json({ message: "Pays destination invalide" });
+      }
+      if (fromMC.id === toMC.id) {
+        return res.status(400).json({ message: "Pays source et destination identiques" });
+      }
+      // Bloquer Niger et Kenya : devise propre, pas d'échange inter-pays autorisé
+      if (NO_WALLET_TRANSFER_COUNTRIES.has(fromMC.country)) {
+        return res.status(400).json({ message: `Les transferts inter-pays ne sont pas autorisés depuis le ${fromMC.country}. Les fonds reçus au ${fromMC.country} doivent être retirés localement.` });
+      }
+      if (NO_WALLET_TRANSFER_COUNTRIES.has(toMC.country)) {
+        return res.status(400).json({ message: `Les transferts inter-pays ne sont pas autorisés vers le ${toMC.country}.` });
+      }
+      const fromZone = await getCurrencyZone(fromMC.country);
+      const toZone = await getCurrencyZone(toMC.country);
+      if (!fromZone || !toZone || fromZone !== toZone) {
+        return res.status(400).json({ message: "Les deux pays doivent etre dans la meme zone monetaire (XOF ou XAF)" });
+      }
+      // Vérifier si les virements inter-wallets sont globalement désactivés
+      const walletTransfersDisabledFlag = await storage.getSetting("wallet_transfers_disabled");
+      if (walletTransfersDisabledFlag === "true") {
+        return res.status(403).json({
+          code: "WALLET_EXCHANGE_UNAVAILABLE",
+          message: "Wallet exchange is unavailable",
+        });
+      }
+
+      const wtMerchantForFee = await storage.getMerchantById(merchantId);
+      const feeTypeSetting = await storage.getSetting("wallet_transfer_fee_type");
+      const feeValueSetting = await storage.getSetting("wallet_transfer_fee_value");
+      const feeType = feeTypeSetting || "percentage";
+      const feeValue = parseFloat(feeValueSetting || "4.5");
+      let fee = 0;
+      if (!wtMerchantForFee?.feeExempt) {
+        if (feeType === "percentage") {
+          fee = Math.round((parsedAmount * feeValue) / 100);
+        } else {
+          fee = Math.round(feeValue);
+        }
+      }
+      const totalNeeded = parsedAmount + fee;
+      if (fromMC.balance < totalNeeded) {
+        return res.status(400).json({ message: `Solde insuffisant. Vous avez ${fromMC.balance.toLocaleString("fr-FR")} ${fromZone}, vous avez besoin de ${totalNeeded.toLocaleString("fr-FR")} ${fromZone} (montant + frais)` });
+      }
+
+      // ── DÉBIT ATOMIQUE transfert (élimine la race condition) ──────────────────
+      const transferDebited = await storage.decrementMerchantCountryBalanceAtomic(fromMC.id, totalNeeded);
+      if (!transferDebited) {
+        return res.status(400).json({ message: "Solde insuffisant (vérification atomique échouée)" });
+      }
+
+      const transfer = await storage.createWalletTransfer({
+        merchantId,
+        fromCountryId: fromMC.id,
+        toCountryId: toMC.id,
+        fromCountry: fromMC.country,
+        toCountry: toMC.country,
+        currency: fromZone,
+        amount: parsedAmount,
+        fee,
+        netAmount: parsedAmount,
+        status: "pending",
+      });
+
+      notifyAdminWalletTransfer({ id: transfer.id, merchantName: wtMerchantForFee?.name || `#${merchantId}`, fromCountry: fromMC.country, toCountry: toMC.country, amount: parsedAmount, fee, currency: fromZone, status: "pending" }).catch(() => {});
+
+      res.json(transfer);
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/admin/wallet-transfers", authMiddleware("admin"), async (req, res) => {
+    try {
+      const transfers = await storage.getWalletTransfers();
+      res.json(transfers);
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.put("/api/admin/wallet-transfers/:id/approve", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const transfer = await storage.getWalletTransferById(id);
+      if (!transfer) return res.status(404).json({ message: "Transfert introuvable" });
+      if (transfer.status !== "pending") return res.status(400).json({ message: "Ce transfert n'est plus en attente" });
+      await storage.applyWalletTransfer(id);
+      await storage.updateWalletTransferStatus(id, "approved", req.body.note || null);
+      const wtApprMerchant = await storage.getMerchantById(transfer.merchantId);
+      notifyAdminWalletTransfer({ id, merchantName: wtApprMerchant?.name || `#${transfer.merchantId}`, fromCountry: transfer.fromCountry, toCountry: transfer.toCountry, amount: transfer.amount, fee: transfer.fee, currency: transfer.currency, status: "approved" }).catch(() => {});
+      notifyMerchantWalletTransfer(transfer.merchantId, { id, fromCountry: transfer.fromCountry, toCountry: transfer.toCountry, amount: transfer.amount, fee: transfer.fee, currency: transfer.currency, status: "approved" }).catch(() => {});
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.put("/api/admin/wallet-transfers/:id/reject", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const transfer = await storage.getWalletTransferById(id);
+      if (!transfer) return res.status(404).json({ message: "Transfert introuvable" });
+      if (transfer.status !== "pending") return res.status(400).json({ message: "Ce transfert n'est plus en attente" });
+      await storage.reimbursWalletTransfer(id);
+      await storage.updateWalletTransferStatus(id, "rejected", req.body.note || null);
+      const wtRejMerchant = await storage.getMerchantById(transfer.merchantId);
+      notifyAdminWalletTransfer({ id, merchantName: wtRejMerchant?.name || `#${transfer.merchantId}`, fromCountry: transfer.fromCountry, toCountry: transfer.toCountry, amount: transfer.amount, fee: transfer.fee, currency: transfer.currency, status: "rejected" }).catch(() => {});
+      notifyMerchantWalletTransfer(transfer.merchantId, { id, fromCountry: transfer.fromCountry, toCountry: transfer.toCountry, amount: transfer.amount, fee: transfer.fee, currency: transfer.currency, status: "rejected" }).catch(() => {});
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/admin/wallet-transfer-fee", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const feeType = await storage.getSetting("wallet_transfer_fee_type");
+      const feeValue = await storage.getSetting("wallet_transfer_fee_value");
+      res.json({
+        feeType: feeType || "percentage",
+        feeValue: feeValue || "4.5",
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.post("/api/admin/wallet-transfer-fee", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { feeType, feeValue } = req.body;
+      if (!["percentage", "fixed"].includes(feeType)) return res.status(400).json({ message: "Type de frais invalide" });
+      const v = parseFloat(feeValue);
+      if (isNaN(v) || v < 0) return res.status(400).json({ message: "Valeur de frais invalide" });
+      await storage.setSetting("wallet_transfer_fee_type", feeType);
+      await storage.setSetting("wallet_transfer_fee_value", String(v));
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/admin/fee-settings", authMiddleware("admin"), async (_req, res) => {
+    try {
+      res.json(getFeeSnapshot());
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.post("/api/admin/fee-settings", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { payinRate, payoutRate, countryOverrides } = req.body;
+      const payin  = parseFloat(payinRate);
+      const payout = parseFloat(payoutRate);
+      if (isNaN(payin)  || payin  < 0 || payin  > 100) return res.status(400).json({ message: "Taux payin invalide (0–100)" });
+      if (isNaN(payout) || payout < 0 || payout > 100) return res.status(400).json({ message: "Taux payout invalide (0–100)" });
+      if (typeof countryOverrides !== "object" || Array.isArray(countryOverrides)) {
+        return res.status(400).json({ message: "countryOverrides invalide" });
+      }
+      // Valider chaque override pays
+      for (const [country, rates] of Object.entries(countryOverrides as any)) {
+        const r = rates as any;
+        if (typeof r?.payin !== "number" || typeof r?.payout !== "number" || r.payin < 0 || r.payout < 0) {
+          return res.status(400).json({ message: `Override invalide pour ${country}` });
+        }
+      }
+      await saveFeeConfig(payin, payout, countryOverrides as any);
+      res.json({ success: true, ...getFeeSnapshot() });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/admin/ai-keys", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const [openai, groq, gemini] = await Promise.all([
+        storage.getSetting("ai_key_openai"),
+        storage.getSetting("ai_key_groq"),
+        storage.getSetting("ai_key_gemini"),
+      ]);
+      const mask = (k: string | null) => k && k.length > 8 ? k.slice(0, 6) + "..." + k.slice(-4) : null;
+      res.json({
+        openai: mask(openai),
+        groq: mask(groq),
+        gemini: mask(gemini),
+        openaiConfigured: !!(openai && openai.length > 5) || !!(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.length > 10),
+        groqConfigured: !!(groq && groq.length > 5) || !!(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY.length > 10),
+        geminiConfigured: !!(gemini && gemini.length > 5) || !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.length > 10),
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.post("/api/admin/ai-keys", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { openai, groq, gemini } = req.body;
+      if (openai !== undefined) await storage.setSetting("ai_key_openai", openai);
+      if (groq !== undefined) await storage.setSetting("ai_key_groq", groq);
+      if (gemini !== undefined) await storage.setSetting("ai_key_gemini", gemini);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.post("/api/admin/ai-keys/test", authMiddleware("admin"), async (req, res) => {
+    const { provider } = req.body;
+    if (!["openai", "groq", "gemini"].includes(provider)) {
+      return res.status(400).json({ success: false, message: "Provider invalide" });
+    }
+    const getKey = async (p: string) => {
+      const envMap: Record<string, string | undefined> = {
+        openai: process.env.OPENAI_API_KEY,
+        groq: process.env.GROQ_API_KEY,
+        gemini: process.env.GEMINI_API_KEY,
+      };
+      const dbKeyMap: Record<string, string> = {
+        openai: "ai_key_openai",
+        groq: "ai_key_groq",
+        gemini: "ai_key_gemini",
+      };
+      const envKey = envMap[p];
+      if (envKey && envKey.length > 10) return envKey;
+      const dbKey = await storage.getSetting(dbKeyMap[p]).catch(() => null);
+      return dbKey && dbKey.length > 5 ? dbKey : null;
+    };
+    try {
+      const apiKey = await getKey(provider);
+      if (!apiKey) return res.json({ success: false, message: "Aucune clé configurée pour ce provider", source: null });
+      const envSources: Record<string, string | undefined> = {
+        openai: process.env.OPENAI_API_KEY,
+        groq: process.env.GROQ_API_KEY,
+        gemini: process.env.GEMINI_API_KEY,
+      };
+      const source = (envSources[provider] && envSources[provider]!.length > 10) ? "env" : "db";
+      if (provider === "openai") {
+        const r = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({ model: "gpt-4o-mini", max_tokens: 5, messages: [{ role: "user", content: "Hi" }] }),
+        });
+        if (!r.ok) { const t = await r.text(); return res.json({ success: false, message: `OpenAI: ${r.status} — ${t.slice(0, 120)}`, source }); }
+        const d = await r.json() as any;
+        return res.json({ success: true, message: `OpenAI OK — modèle: ${d.model || "gpt-4o-mini"}`, source });
+      }
+      if (provider === "groq") {
+        const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({ model: "llama-3.1-8b-instant", max_tokens: 5, messages: [{ role: "user", content: "Hi" }] }),
+        });
+        if (!r.ok) { const t = await r.text(); return res.json({ success: false, message: `Groq: ${r.status} — ${t.slice(0, 120)}`, source }); }
+        return res.json({ success: true, message: "Groq OK — llama-3.1-8b-instant", source });
+      }
+      if (provider === "gemini") {
+        const r = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Hi" }] }], generationConfig: { maxOutputTokens: 5 } }),
+          }
+        );
+        if (!r.ok) { const t = await r.text(); return res.json({ success: false, message: `Gemini: ${r.status} — ${t.slice(0, 120)}`, source }); }
+        return res.json({ success: true, message: "Gemini OK — gemini-1.5-flash", source });
+      }
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+app.post("/api/admin/support-contacts", authMiddleware("admin"), async (req, res) => {
+    try {
+      const { telegram1, telegram2, telegram3, telegram4 } = req.body;
+      if (telegram1 !== undefined) await storage.setSetting("support_telegram_1", telegram1);
+      if (telegram2 !== undefined) await storage.setSetting("support_telegram_2", telegram2);
+      if (telegram3 !== undefined) await storage.setSetting("support_telegram_3", telegram3);
+      if (telegram4 !== undefined) await storage.setSetting("support_telegram_4", telegram4);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const merchantId = (req as any).user.id;
+      const list = await storage.getWithdrawals(merchantId);
+      // Never expose the internal provider error stored in adminNote.
+      // Also repair the public status of legacy records whose note already
+      // proves that the provider rejected the withdrawal.
+      const sanitized = list.map((withdrawal: any) => {
+        const status = normalizeMerchantWithdrawalStatus(withdrawal.status, withdrawal.adminNote);
+        return {
+          ...withdrawal,
+          status,
+          adminNote: merchantWithdrawalNote(status),
+        };
+      });
+      res.json(sanitized);
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, res) => {
+    let reservedBalance = false;
+    let createdWithdrawal: any = null;
+    let merchantCountry: any = null;
+    try {
+      const merchantId = (req as any).user.id;
+      const clientIp = extractIp(req);
+      const rateLimit = checkWithdrawalRateLimit(clientIp);
+      if (!rateLimit.allowed) {
+        res.setHeader("Retry-After", String(rateLimit.retryAfterSec));
+        return res.status(429).json({
+          message: `Trop de demandes de retrait. Réessayez dans ${Math.ceil(rateLimit.retryAfterSec / 60)} minute(s).`,
+          retryAfterSec: rateLimit.retryAfterSec,
+        });
+      }
+
+      const merchantCountryId = Number(req.body?.merchantCountryId);
+      const amount = Number(req.body?.amount);
+      const phone = String(req.body?.phone || "").trim();
+      const accountNumber = String(req.body?.accountNumber || "").replace(/[\s\-().]/g, "");
+      const operatorName = String(req.body?.operator || "").trim();
+      const recipientName = String(req.body?.recipientName || "").trim();
+      if (!Number.isInteger(merchantCountryId) || merchantCountryId <= 0 || !Number.isInteger(amount) || amount <= 0 || (!phone && !accountNumber)) {
+        return res.status(400).json({ message: "Champs requis manquants ou invalides" });
+      }
+      if (phone && !/^\+?[0-9\s\-().]{6,20}$/.test(phone)) {
+        return res.status(400).json({ message: "Numéro de téléphone invalide" });
+      }
+      if (accountNumber && !/^[0-9]{6,34}$/.test(accountNumber)) {
+        return res.status(400).json({ message: "Numéro de compte bancaire invalide" });
+      }
+      if (amount > 50_000_000) return res.status(400).json({ message: "Montant maximum dépassé" });
+
+      const merchant = await storage.getMerchantById(merchantId);
+      if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
+      if (merchant.withdrawalsDisabled) return res.status(404).json({ message: MERCHANT_PAYMENT_DISABLED_MESSAGE });
+      if (await storage.getSetting("withdrawals_disabled") === "true") {
+        return res.status(503).json({ message: "Les retraits sont temporairement indisponibles.", withdrawalsDisabled: true });
+      }
+
+      merchantCountry = await storage.getMerchantCountryById(merchantCountryId);
+      if (!merchantCountry || merchantCountry.merchantId !== merchantId) {
+        return res.status(403).json({ message: "Wallet introuvable" });
+      }
+      if (merchantCountry.balance < amount) return res.status(400).json({ message: "Solde insuffisant" });
+
+      const payoutOperator = operatorName
+        ? await storage.getWithdrawalOperatorByNameAndCountry(operatorName, merchantCountry.country)
+        : null;
+      if (operatorName && !payoutOperator) return res.status(400).json({ message: "Opérateur de retrait introuvable" });
+      if (payoutOperator?.maintenanceAll || payoutOperator?.maintenanceWithdrawals) {
+        return res.status(503).json({ message: "Cet opérateur est temporairement indisponible" });
+      }
+      const provider = normalizeGatewayName(payoutOperator?.gateway) || "clapay";
+      if (!["clapay", "mbiyo", "seapay", "lipapap"].includes(provider)) {
+        return res.status(400).json({ message: "Aucune passerelle de retrait active n'est configurée pour cet opérateur" });
+      }
+      const isBankTransfer = payoutOperator?.type === "Virement bancaire";
+      if (isBankTransfer && !accountNumber) return res.status(400).json({ message: "Le numéro de compte bancaire est requis." });
+      if (!isBankTransfer && !phone) return res.status(400).json({ message: "Le numéro de téléphone est requis." });
+      const destination = isBankTransfer ? accountNumber : phone;
+
+      const minimum = Math.max(1, Number.parseInt((await storage.getSetting("withdrawal_min_amount")) || "200", 10) || 200);
+      if (amount < minimum) return res.status(400).json({ message: `Le montant minimum de retrait est de ${minimum}.` });
+
+      const duplicate = await financialPool.query(
+        `SELECT id, status, created_at FROM withdrawals
+          WHERE merchant_id = $1 AND phone = $2 AND amount = $3 AND country = $4
+            AND status IN ('pending', 'approved')
+            AND created_at > NOW() - INTERVAL '2 hours'
+          ORDER BY created_at DESC LIMIT 1`,
+        [merchantId, destination, amount, merchantCountry.country],
+      );
+      if (duplicate.rowCount) {
+        return res.status(409).json({
+          message: "Une demande de retrait identique est déjà en cours. Attendez deux heures avant de réessayer.",
+          duplicateId: duplicate.rows[0].id,
+        });
+      }
+
+      const deposits = await storage.getTotalConfirmedDepositsForMC(merchantId, merchantCountry.country);
+      const adminCredits = Number((merchantCountry as any).adminCreditsTotal) || 0;
+      const allowed = deposits + adminCredits;
+      const alreadyWithdrawn = await storage.getTotalApprovedWithdrawalsForMC(merchantCountry.id);
+      if (allowed <= 0 || alreadyWithdrawn + amount > allowed) {
+        return res.status(400).json({
+          message: "La vérification de sécurité des dépôts et retraits n'autorise pas cette demande.",
+          securityBlock: true,
+          totalDeposits: deposits,
+          adminCredits,
+          totalAllowed: allowed,
+          totalAlreadyWithdrawn: alreadyWithdrawn,
+          requested: amount,
+        });
+      }
+
+      const withdrawalFee = merchant.customFeeRate != null
+        ? Math.floor(amount * merchant.customFeeRate / 100)
+        : merchant.feeExempt ? 0 : calcWithdrawalFee(amount, merchantCountry.country);
+      const debit = await storage.decrementMerchantCountryBalanceAtomic(merchantCountry.id, amount);
+      if (!debit) return res.status(400).json({ message: "Solde insuffisant (vérification atomique échouée)" });
+      reservedBalance = true;
+
+      try {
+        createdWithdrawal = await storage.createWithdrawal({
+          merchantId,
+          merchantCountryId: merchantCountry.id,
+          country: merchantCountry.country,
+          amount,
+          phone: destination,
+          accountNumber: isBankTransfer ? accountNumber : null,
+          recipientName: recipientName || null,
+          operator: operatorName || null,
+          status: "pending",
+          withdrawalMode: "auto",
+          adminNote: null,
+          gateway: provider,
+          fees: withdrawalFee,
+        });
+      } catch (error) {
+        await storage.incrementMerchantCountryBalance(merchantCountry.id, amount);
+        reservedBalance = false;
+        throw error;
+      }
+
+      const rawIp = (req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "").split(",")[0].trim();
+      getGeoInfo(rawIp).then(geo => {
+        notifyAdminWithdrawal({
+          id: createdWithdrawal.id, merchantName: merchant.name, merchantEmail: merchant.email, merchantId,
+          country: merchantCountry.country, amount, fees: withdrawalFee, phone: destination,
+          accountNumber: isBankTransfer ? accountNumber : null, operator: operatorName || null,
+          status: "pending", mode: "auto", ip: geo.ip || rawIp, geo,
+        }).catch(() => {});
+      }).catch(() => {
+        notifyAdminWithdrawal({
+          id: createdWithdrawal.id, merchantName: merchant.name, merchantEmail: merchant.email, merchantId,
+          country: merchantCountry.country, amount, fees: withdrawalFee, phone: destination,
+          accountNumber: isBankTransfer ? accountNumber : null, operator: operatorName || null,
+          status: "pending", mode: "auto", ip: rawIp,
+        }).catch(() => {});
+      });
+
+      const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+      const payout = await initiateWithdrawalPayout(createdWithdrawal, provider, callbackBaseUrl);
+      if (!payout.accepted) {
+        if (payout.uncertain) {
+          await storage.updateWithdrawalStatus(
+            createdWithdrawal.id,
+            "pending",
+            "Résultat de l'initiation incertain — vérification administrative requise",
+          );
+          notifyAdminWithdrawalError({
+            id: createdWithdrawal.id, merchantName: merchant.name, merchantEmail: merchant.email,
+            merchantId, country: merchantCountry.country, amount, phone: destination,
+            operator: operatorName, gateway: provider, stage: "initiation du retrait", error: payout.message,
+          }).catch(() => {});
+          return res.status(202).json({
+            ...createdWithdrawal,
+            status: "pending",
+            gateway: provider,
+            autoProcessed: false,
+            message: "La demande est enregistrée et sera vérifiée par l'équipe.",
+          });
+        }
+        await storage.updateWithdrawalStatus(createdWithdrawal.id, "failed", payout.message);
+        await storage.incrementMerchantCountryBalance(merchantCountry.id, amount);
+        reservedBalance = false;
+        return res.status(502).json({ message: "Le fournisseur a refusé le retrait. Le solde a été restitué." });
+      }
+
+      await storage.updateWithdrawalStatus(
+        createdWithdrawal.id,
+        "pending",
+        `En attente de confirmation chez ${provider}`,
+        payout.reference,
+        payout.fees,
+        payout.providerPayoutFee,
+      );
+      if (payout.providerTxId) await storage.updateWithdrawalProviderTxId(createdWithdrawal.id, payout.providerTxId);
+      return res.status(202).json({
+        ...createdWithdrawal,
+        status: "pending",
+        gateway: provider,
+        providerReference: payout.reference,
+        fees: payout.fees,
+        netAmount: amount - payout.fees,
+        autoProcessed: true,
+      });
+    } catch (err: any) {
+      if (reservedBalance && merchantCountry && !createdWithdrawal) {
+        await storage.incrementMerchantCountryBalance(merchantCountry.id, Number(req.body?.amount) || 0).catch(() => {});
+      }
+      return res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/merchant/withdrawal-operators/:country", authMiddleware("merchant"), async (req, res) => {
+    try {
+      const country = req.params.country as string;
+      const ops = await storage.getWithdrawalOperators(country, true);
+      const available = ops.filter(op => !op.maintenanceAll && !op.maintenanceWithdrawals);
+      res.json(available);
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/admin/withdrawals", authMiddleware("admin"), async (_req, res) => {
+    try {
+      const list = await storage.getWithdrawals();
+      res.json(list);
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.put("/api/admin/withdrawals/:id/approve", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "Identifiant de retrait invalide" });
+      const withdrawal = await storage.getWithdrawalById(id);
+      if (!withdrawal) return res.status(404).json({ message: "Reversement introuvable" });
+      if (withdrawal.status !== "pending") return res.status(400).json({ message: "Reversement déjà traité" });
+      if (withdrawal.providerReference) {
+        return res.status(409).json({
+          message: `Ce retrait est déjà transmis au fournisseur (réf. ${withdrawal.providerReference}). Attendez sa confirmation.`,
+        });
+      }
+
+      const provider = normalizeGatewayName(req.body?.provider || withdrawal.gateway);
+      if (!["clapay", "mbiyo", "seapay", "lipapap"].includes(provider)) {
+        return res.status(400).json({ message: "Choisissez une passerelle de retrait active avant l'approbation." });
+      }
+      const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+      const payout = await initiateWithdrawalPayout(withdrawal, provider, callbackBaseUrl);
+      if (!payout.accepted) {
+        if (payout.uncertain) {
+          await storage.updateWithdrawalStatus(id, "pending", "Résultat de l'initiation incertain — vérification administrative requise");
+          return res.status(202).json({ success: true, pendingPayment: true, outcomeUnknown: true });
+        }
+        return res.status(502).json({ success: false, message: payout.message });
+      }
+
+      if (withdrawal.gateway !== provider) await storage.updateWithdrawalGateway(id, provider);
+      await storage.updateWithdrawalStatus(
+        id,
+        "pending",
+        `En attente de confirmation chez ${provider}${req.body?.note ? ` — ${String(req.body.note).slice(0, 200)}` : ""}`,
+        payout.reference,
+        payout.fees,
+        payout.providerPayoutFee,
+      );
+      if (payout.providerTxId) await storage.updateWithdrawalProviderTxId(id, payout.providerTxId);
+      return res.json({
+        success: true,
+        provider,
+        providerReference: payout.reference,
+        fees: payout.fees,
+        pendingPayment: true,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.put("/api/admin/withdrawals/:id/reject", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const { note } = req.body;
+      const w = await storage.getWithdrawalById(id);
+      if (!w) return res.status(404).json({ message: "Reversement introuvable" });
+      if (w.status !== "pending") return res.status(400).json({ message: "Reversement deja traite" });
+      const rejMerchant = await storage.getMerchantById(w.merchantId);
+      await storage.updateWithdrawalStatus(id, "rejected", note);
+      await storage.incrementMerchantCountryBalance(w.merchantCountryId, w.amount);
+      notifyAdminWithdrawal({ id, merchantName: rejMerchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "rejected", mode: "manual" }).catch(() => {});
+      notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "rejected" }).catch(() => {});
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+app.get("/api/admin/withdrawals/:id/check-status", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const requestedProvider = normalizeGatewayName(req.query.provider);
+      const w = await storage.getWithdrawalById(id);
+      if (!w) return res.status(404).json({ message: "Reversement introuvable" });
+      const provider = requestedProvider || normalizeGatewayName(w.gateway);
+      if (!["mbiyo", "seapay", "clapay", "lipapap"].includes(provider)) {
+        return res.status(400).json({ message: "Choisissez une passerelle de retrait active." });
+      }
+      if (normalizeGatewayName(w.gateway) !== provider) {
+        return res.status(409).json({ message: "La référence n'appartient pas à la passerelle sélectionnée." });
+      }
+      if (!w.providerReference) return res.status(400).json({ message: "Aucune référence fournisseur pour ce reversement" });
+      if (provider === "clapay" && !/^CP/i.test(w.providerReference)) {
+        return res.status(410).json({ message: "Le statut de cette ancienne opération n'est plus interrogeable." });
+      }
+
+      if (provider === "clapay") {
+        const apiKey = await getClapayApiKey();
+        if (!apiKey) return res.status(500).json({ message: "Clé API ClaPay non configurée" });
+        const result = await clapayGetTransactionStatus(apiKey, w.providerTxId || w.providerReference);
+        return res.json({ provider, success: result.success, status: result.status, data: result.data, error: result.message });
+      }
+      if (provider === "mbiyo") {
+        const apiKey = await getMbiyoApiKey();
+        if (!apiKey) return res.status(500).json({ message: "Clé API Mbiyo non configurée" });
+        const result: any = await mbiyoGetStatus(apiKey, w.providerReference);
+        return res.json({ provider, success: result.status === "success", status: result.data?.status || result.status, data: result.data, error: result.message });
+      }
+      if (provider === "seapay") {
+        const [merchantId, apiKey] = await Promise.all([getSeapayMerchantId(w.country), getSeapayApiKey(w.country)]);
+        if (!merchantId || !apiKey) return res.status(500).json({ message: "Clé API SeaPay non configurée" });
+        const currency = SEAPAY_CURRENCY_COUNTRY[w.country] || "USD";
+        const result = await seapayQuery(merchantId, w.providerReference, currency, apiKey);
+        return res.json({ provider, success: result.code === 200, status: result.data?.status, data: result.data, error: result.msg });
+      }
+      const config = await getLipaPapConfig();
+      if (!config?.payerEmail) return res.status(500).json({ message: "Configuration LipaPap incomplète" });
+      const result = await getLipaPapPayoutStatus(config, w.providerReference, config.payerEmail);
+      return res.json({ provider, success: true, status: result.status || result.result, data: result, error: result.decline_reason || result.message });
+    } catch (err: any) {
+      return res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
   return httpServer;
 }

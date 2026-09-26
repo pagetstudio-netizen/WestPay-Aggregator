@@ -152,8 +152,6 @@ function currencyForCountry(c: string) {
   return "XOF";
 }
 
-/* ── SendavaPay helpers ─────────────────────────────────────────────────── */
-
 /* ══════════════════════════════════════════════════════════════════════════
    COMPONENT
 ══════════════════════════════════════════════════════════════════════════ */
@@ -169,7 +167,7 @@ export default function PaymentPage() {
   const amountParam     = urlParams.get("amount");
   const countryParam    = urlParams.get("country") || "";
   const redirectUrlParam= urlParams.get("redirect") || "";
-  const omnipayStatus   = urlParams.get("omnipay_status") || "";
+  const paymentStatus   = urlParams.get("payment_status") || "";
   const clapayReturn    = urlParams.get("clapay_return") === "1";
   const refParam        = urlParams.get("ref") || "";
   const phoneParam      = urlParams.get("phone") || urlParams.get("payerPhone") || "";
@@ -180,7 +178,7 @@ export default function PaymentPage() {
   const [redirectUrl, setRedirectUrl] = useState(redirectUrlParam);
   const redirectRef   = useRef(redirectUrlParam);
 
-  const [step,         setStep]        = useState(omnipayStatus === "complete" && !clapayReturn ? 3 : 1);
+  const [step,         setStep]        = useState(paymentStatus === "complete" && !clapayReturn ? 3 : 1);
   const [merchantInfo, setMerchantInfo]= useState<MerchantInfo | null>(null);
   const [isLoading,    setIsLoading]   = useState(true);
   const [loadError,    setLoadError]   = useState<string | null>(null);
@@ -197,8 +195,8 @@ export default function PaymentPage() {
   const [countdown,    setCountdown]   = useState(5);
 
   const [paymentUrl,   setPaymentUrl]  = useState<string | null>(null);
-  const [omniRef,      setOmniRef]     = useState<string | null>(null);
-  const [omniPolling,  setOmniPolling] = useState(false);
+  const [providerReference, setProviderReference] = useState<string | null>(null);
+  const [providerPolling, setProviderPolling] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [dynMethods,  setDynMethods]  = useState<{ name: string; logo: string | null }[] | null>(null);
@@ -219,12 +217,6 @@ export default function PaymentPage() {
     }
   }, [country, setDefaultLang]);
 
-  /* ── SendavaPay API flow ──────────────────────────────────────────────── */
-  const [sndOtpRequired,   setSndOtpRequired]   = useState(false);
-
-  const [sndOtp,           setSndOtp]           = useState("");
-  const [sndOtpSubmitting, setSndOtpSubmitting] = useState(false);
-  const [sndProxyToken,    setSndProxyToken]    = useState<string | null>(null);
   const [helpName,     setHelpName]     = useState("");
   const [helpWhatsapp, setHelpWhatsapp] = useState("");
   const [helpMessage,  setHelpMessage]  = useState("");
@@ -277,15 +269,15 @@ export default function PaymentPage() {
         .then(d => {
           if (d.amount) setAmount(d.amount);
           if (d.redirectUrl) { setRedirectUrl(d.redirectUrl); redirectRef.current = d.redirectUrl; }
-          if (d.omnipayReference) setOmniRef(d.omnipayReference);
+          if (d.providerReference) setProviderReference(d.providerReference);
           if (d.paymentId) setPaymentId(d.paymentId);
           if (d.merchantName || d.merchantSlug) {
             setMerchantInfo({ name: d.merchantName || d.merchantSlug, slug: d.merchantSlug || "", countries: d.country ? [d.country] : [] });
           }
-          if (["omnipay_confirmed", "lipapap_confirmed", "confirmed"].includes(d.status)) {
+          if (["provider_confirmed", "lipapap_confirmed", "confirmed"].includes(d.status)) {
             setConfirmedAt(new Date());
             setStep(3);
-          } else if (["omnipay_failed", "lipapap_failed", "omnipay_error", "lipapap_error", "failed", "expired"].includes(d.status)) {
+          } else if (["provider_failed", "lipapap_failed", "provider_error", "lipapap_error", "failed", "expired"].includes(d.status)) {
             setFailed(true);
             setFailReason(t("payFailedDesc"));
             setStep(2);
@@ -298,13 +290,13 @@ export default function PaymentPage() {
         .finally(() => setIsLoading(false));
       return;
     }
-    if (omnipayStatus === "complete" && refParam) {
+    if (paymentStatus === "complete" && refParam) {
       setIsLoading(false);
       fetch(`/api/payment/by-ref/${encodeURIComponent(refParam)}`)
         .then(r => r.json()).then(d => {
           if (d.amount)         setAmount(d.amount);
           if (d.redirectUrl)    { setRedirectUrl(d.redirectUrl); redirectRef.current = d.redirectUrl; }
-          if (d.omnipayReference) setOmniRef(d.omnipayReference);
+          if (d.providerReference) setProviderReference(d.providerReference);
           if (d.merchantName || d.merchantSlug)
             setMerchantInfo({ name: d.merchantName || d.merchantSlug, slug: d.merchantSlug || "", countries: d.country ? [d.country] : [] });
           setConfirmedAt(new Date());
@@ -351,14 +343,14 @@ export default function PaymentPage() {
 
   /* ── polling ────────────────────────────────────────────────────────── */
   const startPolling = (pId: number) => {
-    setOmniPolling(true);
+    setProviderPolling(true);
     if (pollingRef.current) clearInterval(pollingRef.current);
     pollingRef.current = setInterval(async () => {
       try {
-        const r = await fetch(`/api/omnipay/payment/${pId}/status`);
+        const r = await fetch(`/api/payment/${pId}/status`);
         const d = await r.json();
-        if (d.status === "confirmed") { clearInterval(pollingRef.current!); setOmniPolling(false); setConfirmedAt(new Date()); setStep(3); }
-        else if (d.status === "failed") { clearInterval(pollingRef.current!); setOmniPolling(false); setFailed(true); setFailReason(t("payFailedDesc")); }
+        if (d.status === "confirmed") { clearInterval(pollingRef.current!); setProviderPolling(false); setConfirmedAt(new Date()); setStep(3); }
+        else if (d.status === "failed") { clearInterval(pollingRef.current!); setProviderPolling(false); setFailed(true); setFailReason(t("payFailedDesc")); }
       } catch {}
     }, 5000);
   };
@@ -368,11 +360,11 @@ export default function PaymentPage() {
   useEffect(() => {
     if (step !== 3) return;
     const tCount = setInterval(() => setCountdown(p => {
-      if (p <= 1) { clearInterval(tCount); if (redirectRef.current) safeRedirect(redirectRef.current, { status:"success", amount:String(amount), ref:omniRef||"" }); return 0; }
+      if (p <= 1) { clearInterval(tCount); if (redirectRef.current) safeRedirect(redirectRef.current, { status:"success", amount:String(amount), ref:providerReference||"" }); return 0; }
       return p - 1;
     }), 1000);
     return () => clearInterval(tCount);
-  }, [step, amount, omniRef]);
+  }, [step, amount, providerReference]);
 
   /* ── handlers ───────────────────────────────────────────────────────── */
   const selectMethod = useCallback((m: string) => { setMethod(m); setOtpCode(""); }, []);
@@ -405,97 +397,16 @@ export default function PaymentPage() {
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.message);
-      setPaymentId(d.paymentId); setOmniRef(d.omnipayReference); setShowOtpModal(false);
-      if (d.sendavapay) {
-        /* ── SendavaPay: push USSD déclenché côté serveur ── */
-        if (d.proxyToken) setSndProxyToken(d.proxyToken);
-        setStep(2);
-        if (d.requiresOtp) {
-          setSndOtpRequired(true);
-          // otpToken is now stored server-side; no need to hold it in browser state.
-        } else if (d.paymentUrl) {
-          setPaymentUrl(d.paymentUrl);
-          startPolling(d.paymentId);
-        } else {
-          startPolling(d.paymentId);
-        }
-        return;
-      }
+      setPaymentId(d.paymentId); setProviderReference(d.providerReference); setShowOtpModal(false);
       if (d.paymentUrl) { setPaymentUrl(d.paymentUrl); setStep(2); }
       else { setStep(2); startPolling(d.paymentId); }
     } catch (e: any) { toast({ title: t("payFailed"), description: sanitizePaymentMessage(e?.message, t("payFailedDesc")), variant:"destructive" }); }
     finally { setIsSubmitting(false); }
   };
 
-  /* ── SendavaPay : résolution de l'ID opérateur ──────────────────────── */
-  const SNDV_DISPLAY_TO_BRAND: Record<string, string> = {
-    "tmoney": "tmoney", "moov money": "moov", "moov": "moov",
-    "mtn mobile money": "mtn", "mtn money": "mtn", "mtn": "mtn",
-    "orange money": "orange", "orange": "orange",
-    "wave": "wave",
-    "mixx by yas": "mixx", "mixx": "mixx",
-    "free money": "free", "free": "free",
-    "coris money": "coris", "coris": "coris",
-    "airtel money": "airtel", "airtel": "airtel",
-    "m-pesa": "mpesa", "mpesa": "mpesa",
-    "vodacom": "vodacom",
-    "africell money": "africell", "africell": "africell",
-    "celtiis": "celtiis",
-  };
-
-  const resolveOperatorId = (ops: any[], methodName: string, _cc: string): string | null => {
-    const norm = (s: string) => s.toLowerCase().replace(/[\s\-_]+/g, "");
-    const low = methodName.toLowerCase().trim();
-    const normLow = norm(low);
-    const exactNorm = ops.find((o: any) => norm(o.name) === normLow);
-    if (exactNorm) return exactNorm.id;
-    const contained = ops.find((o: any) => {
-      const on = norm(o.name);
-      return normLow.includes(on) || on.includes(normLow);
-    });
-    if (contained) return contained.id;
-    const brand = SNDV_DISPLAY_TO_BRAND[low];
-    if (brand) {
-      const branded = ops.find((o: any) => norm(o.name).includes(brand) || norm(o.id).includes(brand));
-      if (branded) return branded.id;
-    }
-    const BRAND_KEYWORDS = ["mtn","orange","moov","wave","mixx","airtel","vodacom","mpesa","tmoney","coris","free","africell","celtiis"];
-    for (const kw of BRAND_KEYWORDS) {
-      if (normLow.includes(kw)) {
-        const found = ops.find((o: any) => norm(o.name).includes(kw) || norm(o.id).includes(kw));
-        if (found) return found.id;
-      }
-    }
-    return ops[0]?.id ?? null;
-  };
-
-  /* ── SendavaPay : soumettre le code OTP ──────────────────────────────── */
-  const submitSendavaOtp = async () => {
-    if (!sndOtpRequired || !sndOtp.trim()) return;
-    setSndOtpSubmitting(true);
-    try {
-      const proxyHeaders: Record<string, string> = sndProxyToken ? { "X-Sp-Proxy-Token": sndProxyToken } : {};
-      // Only send the user-entered OTP code — the OTP token is stored server-side and
-      // used directly by the proxy without trusting the client to supply it.
-      const res = await fetch("/api/sendavapay/proxy/v1/submit-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...proxyHeaders },
-        body: JSON.stringify({ otp: sndOtp.trim() }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.message || t("otpInvalidCode"));
-      setSndOtpRequired(false);
-      if (paymentId) startPolling(paymentId);
-    } catch (e: any) {
-      toast({ title: t("otpInvalidCode"), description: sanitizePaymentMessage(e.message, t("otpInvalidCode")), variant: "destructive" });
-    } finally {
-      setSndOtpSubmitting(false);
-    }
-  };
-
   const retry = () => {
     if (pollingRef.current) clearInterval(pollingRef.current);
-    setOmniPolling(false); setFailed(false); setFailReason(""); setPaymentUrl(null); setStep(1); setSndOtpRequired(false);
+    setProviderPolling(false); setFailed(false); setFailReason(""); setPaymentUrl(null); setStep(1);
   };
 
   if (isLoading) return (
@@ -763,38 +674,6 @@ export default function PaymentPage() {
                       <RefreshCw style={{ width:16, height:16 }} /> {t("payTryAgain")}
                     </button>
                   </div>
-                ) : sndOtpRequired ? (
-                  <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-                    <div style={{ background:"#fff7ed", border:"1.5px solid #fed7aa", borderRadius:14, padding:"14px 16px" }}>
-                      <div style={{ display:"flex", alignItems:"flex-start", gap:12 }}>
-                        <div style={{ width:42, height:42, borderRadius:10, background:"#FF6600", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-                          <Smartphone style={{ width:20, height:20, color:"#fff" }} />
-                        </div>
-                        <div>
-                          <p style={{ fontWeight:700, fontSize:14, color:"#c2410c", marginBottom:4 }}>{t("otpTitle")}</p>
-                          <p style={{ fontSize:12, color:"#92400e" }}>{t("otpDesc")}</p>
-                        </div>
-                      </div>
-                    </div>
-                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                      <label style={{ fontSize:12, fontWeight:600, color:"#374151" }}>{t("otpCodePlaceholder")}</label>
-                      <input
-                        type="text" inputMode="numeric" maxLength={8}
-                        value={sndOtp} onChange={e => setSndOtp(e.target.value.replace(/\D/g,""))}
-                        placeholder="123456"
-                        data-testid="input-snd-otp"
-                        style={{ padding:"12px 14px", fontSize:22, fontWeight:700, letterSpacing:"0.25em", textAlign:"center", border:"1.5px solid #d1d5db", borderRadius:12, outline:"none", background:"#fff", color:"#111" }}
-                      />
-                    </div>
-                    <button type="button" onClick={submitSendavaOtp}
-                      disabled={sndOtpSubmitting || sndOtp.trim().length < 4}
-                      className="paybtn" data-testid="button-snd-otp-submit"
-                      style={{ background:"#f5c100", color:"#111" }}>
-                      {sndOtpSubmitting && <Loader2 style={{ width:16, height:16, animation:"spin 1s linear infinite" }} />}
-                      {t("confirm")}
-                    </button>
-                    <button type="button" onClick={retry} className="ghost">← {t("back")}</button>
-                  </div>
                 ) : paymentUrl ? (<>
                   <div style={{ background:"#dbeafe", borderRadius:12, padding:12, textAlign:"center", fontSize:14, fontWeight:500, color:"#1e40af" }}>
                     {t("payWaitingValidation")}
@@ -803,7 +682,7 @@ export default function PaymentPage() {
                     className="paybtn" style={{ background:"#f5c100", color:"#111" }}>
                     <ExternalLink style={{ width:16, height:16 }} /> {t("payOpenPaymentLink")}
                   </button>
-                  {omniPolling && (
+                  {providerPolling && (
                     <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, color:"#6b7280" }}>
                       <Loader2 style={{ width:15, height:15, animation:"spin 1s linear infinite" }} />
                       <span style={{ fontSize:13 }}>{t("payProcessing")}</span>
@@ -828,7 +707,7 @@ export default function PaymentPage() {
                       <p style={{ fontSize:12, color:"#92400e" }}>{t("payValidateOnPhone")}</p>
                     </div>
                   )}
-                  {omniPolling && (
+                  {providerPolling && (
                     <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, color:"#6b7280" }}>
                       <Loader2 style={{ width:14, height:14, animation:"spin 1s linear infinite" }} />
                       <span style={{ fontSize:12 }}>{t("payProcessing")}</span>
@@ -861,10 +740,10 @@ export default function PaymentPage() {
                   </p>
                 </div>
                 <div style={{ width:"100%", border:"1.5px solid #e5e7eb", borderRadius:16, overflow:"hidden", marginBottom:16 }}>
-                  {omniRef && (
+                  {providerReference && (
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"13px 18px", borderBottom:"1px solid #f3f4f6" }}>
                       <span style={{ fontSize:12, color:"#6b7280", fontWeight:500 }}>{t("payTransactionRef")}</span>
-                      <span style={{ fontSize:12, fontFamily:"monospace", fontWeight:700, color:"#111", background:"#f3f4f6", padding:"3px 10px", borderRadius:8 }}>{omniRef}</span>
+                      <span style={{ fontSize:12, fontFamily:"monospace", fontWeight:700, color:"#111", background:"#f3f4f6", padding:"3px 10px", borderRadius:8 }}>{providerReference}</span>
                     </div>
                   )}
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"13px 18px", borderBottom: confirmedAt ? "1px solid #f3f4f6" : "none" }}>
@@ -895,7 +774,7 @@ export default function PaymentPage() {
                         {t("payBackToMerchant")} <strong>{countdown}s</strong> ...
                       </p>
                     </div>
-                    <a href={(() => { try { const u = new URL(/^https?:\/\//i.test(redirectUrl) ? redirectUrl : `https://${redirectUrl}`); u.searchParams.set("status","success"); u.searchParams.set("amount",String(amount)); u.searchParams.set("ref",omniRef||""); return u.toString(); } catch { return "#"; } })()}
+                    <a href={(() => { try { const u = new URL(/^https?:\/\//i.test(redirectUrl) ? redirectUrl : `https://${redirectUrl}`); u.searchParams.set("status","success"); u.searchParams.set("amount",String(amount)); u.searchParams.set("ref",providerReference||""); return u.toString(); } catch { return "#"; } })()}
                       className="paybtn" style={{ textDecoration:"none", background:"#22c55e", color:"#fff", width:"100%", textAlign:"center" }} data-testid="link-redirect">
                       {t("payBackToMerchant")}
                     </a>

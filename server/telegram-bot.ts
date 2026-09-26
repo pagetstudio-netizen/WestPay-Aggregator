@@ -3,11 +3,6 @@ import type { Express, Request, Response } from "express";
 import { storage } from "./storage";
 import { pool, financialPool } from "./db";
 import {
-  initiateTransfer as omnipayInitiateTransfer,
-  getTransactionStatus as omnipayGetStatus,
-  getBalance as omnipayGetBalance,
-} from "./omnipay";
-import {
   initiatePayout as mbiyoInitiatePayout,
   getTransactionStatus as mbiyoGetStatus,
   getBalance as mbiyoGetBalance,
@@ -17,17 +12,14 @@ import {
   generateReference as mbiyoGenerateRef,
 } from "./mbiyo";
 import {
-  initiateWithdraw as sendavaInitiateWithdraw,
-  getWithdrawalStatus as sendavaGetWithdrawalStatus,
-  toSendavaOperator,
-  SENDAVAPAY_COUNTRY_CODES,
-  SENDAVAPAY_CURRENCY_MAP,
-  getBalance as sendavaGetBalance,
-} from "./sendavapay";
-import {
   seapayBalance,
 } from "./seapay";
-import { clapayGetBalance } from "./clapay";
+import {
+  clapayGetBalance,
+  clapayInitiatePayout,
+  clapayCountryCode,
+  clapayGetTransactionStatus,
+} from "./clapay";
 import {
   initiateLipaPapPayout,
   getLipaPapPayoutStatus,
@@ -37,9 +29,6 @@ import {
 } from "./lipapap";
 import {
   WESTPAY_PAYOUT_BENEFICIARY,
-  WESTPAY_PAYOUT_FIRST_NAME,
-  WESTPAY_PAYOUT_LAST_NAME,
-  WESTPAY_PAYOUT_DESCRIPTION,
 } from "./payout-constants";
 
 export interface GeoInfo {
@@ -706,8 +695,6 @@ type GatewayBalanceResult = {
 };
 
 const GATEWAY_BALANCE_OPTIONS = [
-  { id: "omnipay", label: "OmniPay" },
-  { id: "sendavapay", label: "SendavaPay" },
   { id: "mbiyo", label: "MbiyoPay" },
   { id: "seapay", label: "SeaPay" },
   { id: "clapay", label: "ClaPay" },
@@ -736,10 +723,6 @@ function normalizeGatewayAmount(value: unknown): number {
 function gatewayBalanceMenuMarkup() {
   return {
     inline_keyboard: [
-      [
-        { text: "💰 OmniPay", callback_data: "gateway_balance:omnipay" },
-        { text: "💰 SendavaPay", callback_data: "gateway_balance:sendavapay" },
-      ],
       [
         { text: "💰 SeaPay", callback_data: "gateway_balance:seapay" },
         { text: "💰 ClaPay", callback_data: "gateway_balance:clapay" },
@@ -812,40 +795,6 @@ async function getSeapayCredential(country: string, type: "merchant_id" | "api_s
 }
 
 async function fetchGatewayBalances(gateway: GatewayBalanceId): Promise<GatewayBalanceResult> {
-  if (gateway === "omnipay") {
-    const apiKey = process.env.OMNIPAY_API_KEY || await storage.getSetting("omnipay_api_key");
-    if (!apiKey) throw new Error("OmniPay n'est pas configuré.");
-
-    const result = await omnipayGetBalance(apiKey);
-    if (result.success !== 1) throw new Error("OmniPay n'a pas retourné le solde.");
-    const rawBalances = Array.isArray(result.balance) ? result.balance : [];
-    return {
-      wallets: rawBalances.map((wallet: any) => ({
-        country: wallet.countryName || wallet.countryCode || "Pays inconnu",
-        currency: wallet.currency || "—",
-        amount: normalizeGatewayAmount(wallet.amount),
-        pending: wallet.pending !== undefined ? normalizeGatewayAmount(wallet.pending) : undefined,
-      })),
-    };
-  }
-
-  if (gateway === "sendavapay") {
-    const apiKey = process.env.SENDAVA_API_KEY
-      || process.env.SENDAVAPAY_API_KEY
-      || await storage.getSetting("sendavapay_api_key");
-    if (!apiKey) throw new Error("SendavaPay n'est pas configuré.");
-
-    const result = await sendavaGetBalance(apiKey);
-    if (!result.success) throw new Error(result.message || "SendavaPay n'a pas retourné le solde.");
-    return {
-      wallets: (result.data?.wallets || []).map((wallet) => ({
-        country: wallet.countryName || wallet.country || "Pays inconnu",
-        currency: wallet.currency || "—",
-        amount: normalizeGatewayAmount(wallet.balance),
-      })),
-    };
-  }
-
   if (gateway === "mbiyo") {
     const apiKey = process.env.MBIYO_API_KEY || await storage.getSetting("mbiyo_api_key");
     if (!apiKey) throw new Error("MbiyoPay n'est pas configuré.");
@@ -1289,7 +1238,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     );
   });
 
-  bot.action(/^gateway_balance:(omnipay|sendavapay|mbiyo|seapay|clapay)$/, async (ctx) => {
+  bot.action(/^gateway_balance:(mbiyo|seapay|clapay)$/, async (ctx) => {
     const chatId = String(ctx.chat?.id || "");
     if (!chatId || !await isAdminGroup(chatId)) {
       await ctx.answerCbQuery("⛔ Non autorisé").catch(() => {});
@@ -1661,7 +1610,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       // withdrawals → base financière ; merchants → base auth (deux requêtes séparées)
       const result = await financialPool.query<any>(
         `SELECT w.id, w.phone, w.amount, w.country, w.status, w.gateway, w.operator,
-                w.omnipay_ref, w.created_at, w.fees, w.admin_note, w.merchant_id
+                w.provider_reference, w.created_at, w.fees, w.admin_note, w.merchant_id
          FROM withdrawals w
          WHERE REGEXP_REPLACE(w.phone, '[^0-9]', '', 'g') LIKE $1
            AND w.status IN ('pending', 'failed')
@@ -1705,7 +1654,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `🌍 Pays : ${w.country}\n` +
           `🏦 Opérateur : ${w.operator || "N/A"}\n` +
           `⚙️ Fournisseur : ${w.gateway || "N/A"}\n` +
-          `🔗 Réf fournisseur : ${w.omnipay_ref || "—"}\n` +
+          `🔗 Réf fournisseur : ${w.provider_reference || "—"}\n` +
           `📅 Date : ${date}` +
           (w.admin_note ? `\n📝 Note : ${String(w.admin_note).slice(0, 80)}` : "");
         await ctx.reply(wMsg, {
@@ -2284,15 +2233,15 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     try {
       const w = await storage.getWithdrawalById(id);
       if (!w) { await ctx.reply(`❌ Retrait #${id} introuvable`); return; }
-      if (w.omnipayRef && w.status === "pending") {
+      if (w.providerReference && w.status === "pending") {
         await ctx.reply(
           `⚠️ *Retrait #${id}* — déjà en cours chez *${w.gateway}*\n` +
-          `Réf : \`${w.omnipayRef}\`\n\nAttendez la confirmation ou utilisez 🔍 Vérifier.`,
+          `Réf : \`${w.providerReference}\`\n\nAttendez la confirmation ou utilisez 🔍 Vérifier.`,
           { parse_mode: "Markdown" }
         );
         return;
       }
-      const gateway = (w.gateway || "omnipay").toLowerCase();
+      const gateway = (w.gateway || "clapay").toLowerCase();
       const appUrl = process.env.APP_URL || "";
       let resultMsg = "";
 
@@ -2317,30 +2266,6 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           resultMsg = `✅ Déclenché chez *Mbiyo*\nRéf : \`${reference}\`\nStatut : ${result.status}`;
         } else {
           resultMsg = `❌ Mbiyo : ${result.message || "Échec"}`;
-        }
-      } else if (gateway === "sendavapay") {
-        const apiKey = process.env.SENDAVA_API_KEY || process.env.SENDAVAPAY_API_KEY || await storage.getSetting("sendavapay_api_key");
-        if (!apiKey) { await ctx.reply("❌ Clé API SendavaPay non configurée"); return; }
-        const reference = `SD-WD-${w.id}-${Date.now()}`;
-        const countryCode = SENDAVAPAY_COUNTRY_CODES[w.country] || "";
-        const currency = SENDAVAPAY_CURRENCY_MAP[countryCode] || "XOF";
-        const msisdn = botPrependDialCode(w.phone, w.country);
-        const mappedOperator = toSendavaOperator(w.operator || "", countryCode);
-        const result = await sendavaInitiateWithdraw(apiKey, {
-          amount: w.amount - (w.fees || 0),
-          phoneNumber: msisdn,
-          operator: mappedOperator,
-          country: countryCode,
-          currency,
-          description: WESTPAY_PAYOUT_DESCRIPTION,
-          externalReference: reference,
-        });
-        if (result.success) {
-          const ref = result.data?.reference || reference;
-          await storage.updateWithdrawalStatus(id, "pending", `Déclenché via Telegram bot par ${admin}`, ref, w.fees || 0, w.fees || 0);
-          resultMsg = `✅ Déclenché chez *SendavaPay*\nRéf : \`${ref}\``;
-        } else {
-          resultMsg = `❌ SendavaPay : ${result.message || result.error || "Échec"}`;
         }
       } else if (gateway === "lipapap" || gateway === "lipa") {
         const config = await getTelegramLipaPapConfig();
@@ -2375,29 +2300,39 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
             resultMsg = `❌ LipaPap : ${result.decline_reason || result.message || resultStatus || "Échec"}`;
           }
         }
-      } else {
-        // OmniPay (default)
-        const apiKey = process.env.OMNIPAY_PAYOUT_API_KEY || process.env.OMNIPAY_API_KEY
-          || await storage.getSetting("omnipay_payout_api_key") || await storage.getSetting("omnipay_api_key");
-        if (!apiKey) { await ctx.reply("❌ Clé API OmniPay non configurée"); return; }
-        const reference = `WD-${w.id}-${Date.now()}`;
-        const msisdn = botPrependDialCode(w.phone, w.country);
-        const result = await omnipayInitiateTransfer({
-          apikey: apiKey,
-          msisdn,
-          amount: w.amount - (w.fees || 0),
-          reference,
-          first_name: WESTPAY_PAYOUT_FIRST_NAME,
-          last_name: WESTPAY_PAYOUT_LAST_NAME,
-          operator: w.operator || undefined,
-        });
-        if (result.success === 1) {
-          const omnipayRef = (result as any).reference || reference;
-          await storage.updateWithdrawalStatus(id, "pending", `Déclenché via Telegram bot par ${admin}`, omnipayRef, w.fees || 0, w.fees || 0);
-          resultMsg = `✅ Déclenché chez *OmniPay*\nRéf : \`${omnipayRef}\``;
+      } else if (gateway === "clapay") {
+        const token = process.env.CLAPAY_API_KEY || await storage.getSetting("clapay_api_key");
+        const countryCode = clapayCountryCode(w.country);
+        if (!token || !countryCode) {
+          resultMsg = "❌ ClaPay : configuration indisponible pour ce pays";
         } else {
-          resultMsg = `❌ OmniPay (code ${(result as any).code || "?"}) : ${result.message || "Échec"}`;
+          const reference = `CP-WD-${id}-${Date.now().toString(36).toUpperCase()}`;
+          const operatorConfig = w.operator
+            ? await storage.getWithdrawalOperatorByNameAndCountry(w.operator, w.country)
+            : undefined;
+          const result = await clapayInitiatePayout(token, {
+            transaction_id: reference,
+            amount: w.amount - (w.fees || 0),
+            country_code: countryCode,
+            operators_code: [operatorConfig?.clapayCode || w.operator || ""].filter(Boolean),
+            method: "CASHIN",
+            tunnel: "API",
+            callback_url: `${appUrl}/api/clapay/callback`,
+            additional_infos: {
+              customer_phone: w.phone,
+              customer_firstname: WESTPAY_PAYOUT_BENEFICIARY,
+            },
+          });
+          if (result.success) {
+            const ref = result.data?.signature || reference;
+            await storage.updateWithdrawalStatus(id, "pending", `Déclenché via Telegram bot par ${admin}`, ref, w.fees || 0, 0);
+            resultMsg = `✅ Déclenché chez *ClaPay*\nRéf : \`${ref}\``;
+          } else {
+            resultMsg = `❌ ClaPay : ${result.message || "Échec"}`;
+          }
         }
+      } else {
+        resultMsg = "❌ Retrait non déclenché : le prestataire historique n'est plus disponible.";
       }
 
       const triggerSuccess = resultMsg.startsWith("✅");
@@ -2438,7 +2373,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     try {
       const w = await storage.getWithdrawalById(id);
       if (!w) { await ctx.reply(`❌ Retrait #${id} introuvable`); return; }
-      if (!w.omnipayRef) {
+      if (!w.providerReference) {
         await ctx.reply(
           `⚠️ *Retrait #${id}* — Aucune référence fournisseur.\n` +
           `Le retrait n'a pas encore été déclenché chez le fournisseur.\n` +
@@ -2447,40 +2382,35 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         );
         return;
       }
-      const gateway = (w.gateway || "omnipay").toLowerCase();
+      const gateway = (w.gateway || "clapay").toLowerCase();
       let statusMsg = "";
 
       if (gateway === "mbiyo") {
         const apiKey = process.env.MBIYO_API_KEY || await storage.getSetting("mbiyo_api_key");
         if (!apiKey) { await ctx.reply("❌ Clé API Mbiyo non configurée"); return; }
-        const result = await mbiyoGetStatus(apiKey, w.omnipayRef);
+        const result = await mbiyoGetStatus(apiKey, w.providerReference);
         const ps = String(result.data?.status || result.status || "inconnu");
-        statusMsg = `Fournisseur : *Mbiyo*\nStatut fournisseur : *${ps}*\nRéf : \`${w.omnipayRef}\``;
+        statusMsg = `Fournisseur : *Mbiyo*\nStatut fournisseur : *${ps}*\nRéf : \`${w.providerReference}\``;
         if (result.data) statusMsg += `\n\`\`\`\n${JSON.stringify(result.data, null, 2).slice(0, 400)}\n\`\`\``;
-      } else if (gateway === "sendavapay") {
-        const apiKey = process.env.SENDAVA_API_KEY || process.env.SENDAVAPAY_API_KEY || await storage.getSetting("sendavapay_api_key");
-        if (!apiKey) { await ctx.reply("❌ Clé API SendavaPay non configurée"); return; }
-        const result = await sendavaGetWithdrawalStatus(apiKey, w.omnipayRef);
-        const ps = String(result.data?.status || (result.success ? "trouvé" : "inconnu"));
-        statusMsg = `Fournisseur : *SendavaPay*\nStatut fournisseur : *${ps}*\nRéf : \`${w.omnipayRef}\``;
-        if (result.data) statusMsg += `\n\`\`\`\n${JSON.stringify(result.data, null, 2).slice(0, 400)}\n\`\`\``;
-        else if (result.message) statusMsg += `\nDétail : ${result.message}`;
       } else if (gateway === "lipapap" || gateway === "lipa") {
         const config = await getTelegramLipaPapConfig();
         if (!config?.payerEmail) { await ctx.reply("❌ Email enregistré LipaPap non configuré"); return; }
-        const result = await getLipaPapPayoutStatus(config, w.omnipayRef, config.payerEmail);
+        const result = await getLipaPapPayoutStatus(config, w.providerReference, config.payerEmail);
         const ps = String(result.status || result.result || "inconnu");
-        statusMsg = `Fournisseur : *LipaPap*\nStatut fournisseur : *${ps}*\nRéf : \`${w.omnipayRef}\``;
+        statusMsg = `Fournisseur : *LipaPap*\nStatut fournisseur : *${ps}*\nRéf : \`${w.providerReference}\``;
         statusMsg += `\n\`\`\`\n${JSON.stringify(result, null, 2).slice(0, 400)}\n\`\`\``;
+      } else if (gateway === "clapay") {
+        const token = process.env.CLAPAY_API_KEY || await storage.getSetting("clapay_api_key");
+        if (!token) {
+          statusMsg = "Fournisseur : *ClaPay*\nStatut : configuration indisponible";
+        } else {
+          const result = await clapayGetTransactionStatus(token, w.providerReference);
+          const ps = String(result.data?.status || result.status || "inconnu");
+          statusMsg = `Fournisseur : *ClaPay*\nStatut fournisseur : *${ps}*\nRéf : \`${w.providerReference}\``;
+          if (result.data) statusMsg += `\n\`\`\`\n${JSON.stringify(result.data, null, 2).slice(0, 400)}\n\`\`\``;
+        }
       } else {
-        const apiKey = process.env.OMNIPAY_PAYOUT_API_KEY || process.env.OMNIPAY_API_KEY
-          || await storage.getSetting("omnipay_payout_api_key") || await storage.getSetting("omnipay_api_key");
-        if (!apiKey) { await ctx.reply("❌ Clé API OmniPay non configurée"); return; }
-        const result = await omnipayGetStatus(apiKey, w.omnipayRef);
-        const ps = String((result as any).data?.status || (result as any).status || "inconnu");
-        statusMsg = `Fournisseur : *OmniPay*\nStatut fournisseur : *${ps}*\nRéf : \`${w.omnipayRef}\``;
-        const d = (result as any).data;
-        if (d) statusMsg += `\n\`\`\`\n${JSON.stringify(d, null, 2).slice(0, 400)}\n\`\`\``;
+        statusMsg = "Retrait historique : aucun connecteur actif pour vérifier ce statut.";
       }
 
       await ctx.reply(
@@ -3362,7 +3292,7 @@ export async function notifyAdminPayment(data: {
   });
   const icon = data.status === "confirmed" ? "✅" : "❌";
   const statusLabel = data.status === "confirmed" ? "Succès" : "Échoué";
-  const methodLabel = data.provider === "omnipay" ? "Mobile Money" : "SMS";
+  const methodLabel = data.provider === "sms" ? "SMS" : "Mobile Money";
 
   const msg = [
     `${icon} *Nouvelle transaction WestPay*`,
