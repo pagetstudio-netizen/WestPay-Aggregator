@@ -9,6 +9,7 @@ import { db, pool, financialDb, financialPool } from "./db";
 import { generateSecret as totpGenerateSecret, generateURI as totpGenerateURI, verifySync as totpVerifySync } from "otplib";
 import QRCode from "qrcode";
 import { admins, merchantCountries, transactions, pendingPayments, withdrawals } from "@shared/schema";
+import { isMerchantCategory, isMerchantSettlementCycle } from "@shared/merchant-account";
 import { normalizeEmailInput } from "@shared/email-validation";
 import { and, eq, or, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
@@ -3307,8 +3308,14 @@ export async function registerRoutes(
 
   app.post("/api/admin/create-merchant", authMiddleware("admin"), createMerchantRateLimit, async (req, res) => {
     try {
-      const { name, email, slug, password, pin, website, totpCode } = req.body;
+      const { name, email, slug, password, pin, website, totpCode, accountType, merchantCategory } = req.body;
       if (!name || !email || !slug || !password) return res.status(400).json({ message: "Tous les champs sont requis" });
+      if (!isMerchantSettlementCycle(accountType)) {
+        return res.status(400).json({ message: "Sélectionnez un type de compte valide." });
+      }
+      if (!isMerchantCategory(merchantCategory)) {
+        return res.status(400).json({ message: "Sélectionnez une catégorie de marchand valide." });
+      }
 
       // ── Vérification TOTP Google Authenticator obligatoire ────────────────────────────
       // L'admin doit fournir son code Google Authenticator pour créer un marchand.
@@ -3342,7 +3349,16 @@ export async function registerRoutes(
       if (slugExists) return res.status(400).json({ message: "Slug deja utilise" });
 
       const passwordHash = await bcrypt.hash(password, 10);
-      const merchant = await storage.createMerchant({ name, email, slug, passwordHash, suspended: false, website: website?.trim() || null });
+      const merchant = await storage.createMerchant({
+        name,
+        email,
+        slug,
+        passwordHash,
+        suspended: false,
+        website: website?.trim() || null,
+        accountType,
+        merchantCategory,
+      });
 
       if (pin && pin.length === 6) {
         const pinHash = await bcrypt.hash(pin, 10);
@@ -4029,7 +4045,16 @@ export async function registerRoutes(
     try {
       const merchant = await storage.getMerchantById((req as any).user.id);
       if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
-      res.json({ id: merchant.id, name: merchant.name, email: merchant.email, slug: merchant.slug, feeExempt: merchant.feeExempt, withdrawalsDisabled: !!merchant.withdrawalsDisabled });
+      res.json({
+        id: merchant.id,
+        name: merchant.name,
+        email: merchant.email,
+        slug: merchant.slug,
+        feeExempt: merchant.feeExempt,
+        withdrawalsDisabled: !!merchant.withdrawalsDisabled,
+        accountType: merchant.accountType || null,
+        merchantCategory: merchant.merchantCategory || null,
+      });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }

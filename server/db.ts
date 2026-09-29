@@ -118,6 +118,8 @@ export async function runAuthMigrations() {
         telegram_bot_language text NOT NULL DEFAULT 'fr',
         withdrawal_mode text NOT NULL DEFAULT 'manual',
         website text,
+        account_type text,
+        merchant_category text,
         crypto_api_key text,
         sdk_enabled boolean NOT NULL DEFAULT false,
         sdk_api_key text,
@@ -312,6 +314,8 @@ export async function runAuthMigrations() {
     await client.query(`
       ALTER TABLE merchants ADD COLUMN IF NOT EXISTS custom_fee_rate REAL;
       ALTER TABLE merchants ADD COLUMN IF NOT EXISTS payin_disabled BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE merchants ADD COLUMN IF NOT EXISTS account_type TEXT;
+      ALTER TABLE merchants ADD COLUMN IF NOT EXISTS merchant_category TEXT;
     `);
 
     await client.query(`
