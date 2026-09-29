@@ -61,9 +61,9 @@ const periodicCycles: SettlementCycleOption[] = [
 export const MERCHANT_SETTLEMENT_CYCLES = [...dayBasedCycles, ...periodicCycles];
 
 export const MERCHANT_CATEGORIES = [
-  { value: "betting", labelFr: "Paris / betting", labelZh: "博彩" },
+  { value: "betting", labelFr: "Paris sportifs", labelZh: "博彩" },
   { value: "investment", labelFr: "Investissement", labelZh: "投资" },
-  { value: "gaming", labelFr: "Jeux / gaming", labelZh: "游戏" },
+  { value: "gaming", labelFr: "Jeux en ligne", labelZh: "游戏" },
   { value: "other_platforms", labelFr: "Autres plateformes", labelZh: "其他平台" },
 ] as const;
 
