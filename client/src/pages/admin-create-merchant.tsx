@@ -15,6 +15,11 @@ import {
 } from "lucide-react";
 
 import { adminConfig } from "@/lib/admin-config";
+import {
+  MERCHANT_CATEGORIES,
+  MERCHANT_SETTLEMENT_CYCLES,
+  getSettlementCycle,
+} from "@shared/merchant-account";
 
 export default function AdminCreateMerchant() {
   const { user, isLoading: authLoading, token } = useAuth();
@@ -29,6 +34,8 @@ export default function AdminCreateMerchant() {
   const [website, setWebsite] = useState("");
   const [pin, setPin] = useState("");
   const [totpCode, setTotpCode] = useState("");
+  const [accountType, setAccountType] = useState("");
+  const [merchantCategory, setMerchantCategory] = useState("");
 
   useEffect(() => {
     if (!authLoading && (!user || user.role !== "admin")) {
@@ -58,6 +65,8 @@ export default function AdminCreateMerchant() {
           password,
           pin: pin || undefined,
           website: website || undefined,
+          accountType,
+          merchantCategory,
           totpCode,
         }),
       });
@@ -87,7 +96,9 @@ export default function AdminCreateMerchant() {
     );
   }
 
-  const isValid = name.trim() && email.trim() && slug.trim() && password && totpCode.length === 6;
+  const isValid = name.trim() && email.trim() && slug.trim() && password &&
+    accountType && merchantCategory && totpCode.length === 6;
+  const selectedCycle = getSettlementCycle(accountType);
 
   return (
     <div className="min-h-screen bg-background">
@@ -312,6 +323,64 @@ export default function AdminCreateMerchant() {
                         className="h-10 font-mono tracking-widest"
                       />
                       <p className="text-xs text-muted-foreground">Accès documentation API</p>
+                    </div>
+                  </div>
+
+                  {/* Informational account classification */}
+                  <div className="rounded-xl border bg-muted/20 p-4 space-y-4">
+                    <div>
+                      <h2 className="text-sm font-semibold text-foreground">Type de compte et catégorie</h2>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Ces informations sont indicatives uniquement et ne modifient pas le règlement réel.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="merchant-account-type">
+                          Type de compte / cycle de règlement <span className="text-red-500">*</span>
+                        </Label>
+                        <select
+                          id="merchant-account-type"
+                          value={accountType}
+                          onChange={(e) => setAccountType(e.target.value)}
+                          required
+                          data-testid="select-merchant-account-type"
+                          className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          <option value="">Choisir un cycle</option>
+                          <optgroup label="Délais indicatifs en jours ouvrés">
+                            {MERCHANT_SETTLEMENT_CYCLES.filter(option => option.value === "D0" || option.value.startsWith("D+"))
+                              .map(option => <option key={option.value} value={option.value}>{option.labelFr}</option>)}
+                          </optgroup>
+                          <optgroup label="Cycles périodiques">
+                            {MERCHANT_SETTLEMENT_CYCLES.filter(option => !option.value.startsWith("D"))
+                              .map(option => <option key={option.value} value={option.value}>{option.labelFr}</option>)}
+                          </optgroup>
+                        </select>
+                        {selectedCycle && (
+                          <p className="text-xs text-muted-foreground" data-testid="text-settlement-cycle-description">
+                            {selectedCycle.descriptionFr}
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="merchant-category">
+                          Catégorie <span className="text-red-500">*</span>
+                        </Label>
+                        <select
+                          id="merchant-category"
+                          value={merchantCategory}
+                          onChange={(e) => setMerchantCategory(e.target.value)}
+                          required
+                          data-testid="select-merchant-category"
+                          className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          <option value="">Choisir une catégorie</option>
+                          {MERCHANT_CATEGORIES.map(category => (
+                            <option key={category.value} value={category.value}>{category.labelFr}</option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                   </div>
 

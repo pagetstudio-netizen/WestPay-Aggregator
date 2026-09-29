@@ -29,6 +29,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { MerchantCountry, Transaction, WebhookLog, PaymentLink, WalletTransfer, WalletTransferCountry, Withdrawal } from "@shared/schema";
 import { useLanguage, LANGUAGES } from "@/lib/language";
+import { getMerchantCategory, getSettlementCycle } from "@shared/merchant-account";
 import { sanitizePaymentMessage } from "@/lib/sanitize-payment-message";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import imgSidebarBg from "@assets/IMG-20260524-WA0032_1779626216477.jpg";
@@ -2497,6 +2498,9 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [isChanging, setIsChanging] = useState(false);
+  const { data: merchantProfile } = useMerchantFetch("/api/merchant/me", ["/api/merchant/me"], token);
+  const settlementCycle = getSettlementCycle(merchantProfile?.accountType);
+  const merchantCategory = getMerchantCategory(merchantProfile?.merchantCategory);
 
   const { data: contacts } = useQuery<{
     telegram1: string; telegram2: string; telegram3: string; telegram4: string;
@@ -2650,6 +2654,38 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
                   </div>
                 </div>
               </div>
+            </div>
+            <div
+              className="bg-white rounded-2xl overflow-hidden shadow-sm"
+              style={{ border: "1.5px solid #e8ecf0" }}
+              data-testid="merchant-account-classification"
+            >
+              <div className="px-5 py-4" style={{ borderBottom: "1px solid #f5f5f5" }}>
+                <span className="font-bold text-sm" style={{ color: "#1a1a1a" }}>账户信息</span>
+              </div>
+              <div className="divide-y" style={{ borderColor: "#f8f9fa" }}>
+                <div className="px-5 py-3 flex items-center justify-between gap-4">
+                  <span className="text-xs font-semibold" style={{ color: "#888" }}>账户类型</span>
+                  <span className="text-sm font-bold text-right" style={{ color: "#1a1a1a" }}>
+                    {settlementCycle?.labelZh || "未设置"}
+                  </span>
+                </div>
+                <div className="px-5 py-3 flex items-center justify-between gap-4">
+                  <span className="text-xs font-semibold" style={{ color: "#888" }}>结算周期</span>
+                  <span className="text-sm font-medium text-right" style={{ color: "#1a1a1a" }}>
+                    {settlementCycle?.descriptionZh || "未设置"}
+                  </span>
+                </div>
+                <div className="px-5 py-3 flex items-center justify-between gap-4">
+                  <span className="text-xs font-semibold" style={{ color: "#888" }}>类别</span>
+                  <span className="text-sm font-medium text-right" style={{ color: "#1a1a1a" }}>
+                    {merchantCategory?.labelZh || "未设置"}
+                  </span>
+                </div>
+              </div>
+              <p className="px-5 py-3 text-xs leading-relaxed" style={{ color: "#888", background: "#fafafa" }}>
+                此信息仅供参考，不会改变实际付款、账户余额或结算流程。
+              </p>
             </div>
             <div className="rounded-2xl p-4 flex items-start gap-3" style={{ background: "#fffbea", border: "1.5px solid #fef3c7" }}>
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "#d97706" }} />
