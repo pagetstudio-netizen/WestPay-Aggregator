@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
+import { getMerchantCategory, getSettlementCycle } from "@shared/merchant-account";
 
 type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "mbiyo" | "lipapap" | "drimpay" | "seapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge" | "actionlogs";
 
@@ -1466,6 +1467,26 @@ function MerchantsPanel() {
                       </div>
                     </div>
                     <p className="text-xs text-muted-foreground">Slug: /{merchant.slug}</p>
+                    <div
+                      className="mt-2 rounded-lg border border-dashed bg-muted/30 px-3 py-2 space-y-1 text-xs"
+                      data-testid={`merchant-classification-${merchant.id}`}
+                    >
+                      <p>
+                        <span className="font-semibold">Type de compte :</span>{" "}
+                        {getSettlementCycle(merchant.accountType)?.labelFr || "Non renseigné"}
+                      </p>
+                      <p>
+                        <span className="font-semibold">Cycle de règlement :</span>{" "}
+                        {getSettlementCycle(merchant.accountType)?.descriptionFr || "Non renseigné"}
+                      </p>
+                      <p>
+                        <span className="font-semibold">Catégorie :</span>{" "}
+                        {getMerchantCategory(merchant.merchantCategory)?.labelFr || "Non renseignée"}
+                      </p>
+                      <p className="text-muted-foreground">
+                        Informations indicatives uniquement — aucun effet sur le règlement réel.
+                      </p>
+                    </div>
                     <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
                       <span><Link className="w-3 h-3 inline mr-1" />{merchant.linkCount || 0} liens</span>
                       <span><ArrowRightLeft className="w-3 h-3 inline mr-1" />{merchant.txCount || 0} transactions</span>
