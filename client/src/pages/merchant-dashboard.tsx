@@ -2683,9 +2683,6 @@ function MerchantSettingsPanel({ token }: { token: string | null }) {
                   </span>
                 </div>
               </div>
-              <p className="px-5 py-3 text-xs leading-relaxed" style={{ color: "#888", background: "#fafafa" }}>
-                此信息仅供参考，不会改变实际付款、账户余额或结算流程。
-              </p>
             </div>
             <div className="rounded-2xl p-4 flex items-start gap-3" style={{ background: "#fffbea", border: "1.5px solid #fef3c7" }}>
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "#d97706" }} />

@@ -33,28 +33,28 @@ const periodicCycles: SettlementCycleOption[] = [
     labelFr: "Hebdomadaire",
     descriptionFr: "Cycle hebdomadaire, à titre indicatif.",
     labelZh: "每周",
-    descriptionZh: "预计按周结算（仅供参考）。",
+    descriptionZh: "预计按周结算。",
   },
   {
     value: "EVERY_TWO_WEEKS",
     labelFr: "Toutes les deux semaines",
     descriptionFr: "Cycle toutes les deux semaines, à titre indicatif.",
     labelZh: "每两周",
-    descriptionZh: "预计每两周结算（仅供参考）。",
+    descriptionZh: "预计每两周结算。",
   },
   {
     value: "MONTHLY",
     labelFr: "Mensuel",
     descriptionFr: "Cycle mensuel, à titre indicatif.",
     labelZh: "每月",
-    descriptionZh: "预计按月结算（仅供参考）。",
+    descriptionZh: "预计按月结算。",
   },
   {
     value: "CUSTOM",
     labelFr: "Personnalisé",
     descriptionFr: "Cycle personnalisé, à titre indicatif.",
     labelZh: "自定义",
-    descriptionZh: "自定义结算周期（仅供参考）。",
+    descriptionZh: "自定义结算周期。",
   },
 ];
 
