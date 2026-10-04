@@ -4,6 +4,7 @@ import { Loader2, Smartphone, ExternalLink, Bitcoin, X, RefreshCw, Clock } from 
 import { useLanguage, detectLangFromCountry } from "@/lib/language";
 import { sanitizePaymentMessage } from "@/lib/sanitize-payment-message";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
+import ManualPaymentStep, { type ManualPaymentDetails } from "@/components/manual-payment-step";
 
 import waveIcon      from "@assets/zOMoVcU_1779635321598.png";
 import moovIcon      from "@assets/ZJCa7PK_1779635321640.jpg";
@@ -195,6 +196,7 @@ export default function PaymentPage() {
   const [countdown,    setCountdown]   = useState(5);
 
   const [paymentUrl,   setPaymentUrl]  = useState<string | null>(null);
+  const [manualPayment, setManualPayment] = useState<ManualPaymentDetails | null>(null);
   const [providerReference, setProviderReference] = useState<string | null>(null);
   const [providerPolling, setProviderPolling] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -342,12 +344,14 @@ export default function PaymentPage() {
   }, [merchantSlug]);
 
   /* ── polling ────────────────────────────────────────────────────────── */
-  const startPolling = (pId: number) => {
+  const startPolling = (pId: number, paymentToken?: string) => {
     setProviderPolling(true);
     if (pollingRef.current) clearInterval(pollingRef.current);
     pollingRef.current = setInterval(async () => {
       try {
-        const r = await fetch(`/api/payment/${pId}/status`);
+        const r = await fetch(`/api/payment/${pId}/status`, {
+          headers: paymentToken ? { "X-Payment-Token": paymentToken } : undefined,
+        });
         const d = await r.json();
         if (d.status === "confirmed") { clearInterval(pollingRef.current!); setProviderPolling(false); setConfirmedAt(new Date()); setStep(3); }
         else if (d.status === "failed") { clearInterval(pollingRef.current!); setProviderPolling(false); setFailed(true); setFailReason(t("payFailedDesc")); }
@@ -397,16 +401,16 @@ export default function PaymentPage() {
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.message);
-      setPaymentId(d.paymentId); setProviderReference(d.providerReference); setShowOtpModal(false);
+      setPaymentId(d.paymentId); setProviderReference(d.providerReference); setManualPayment(d.manualPayment || null); setShowOtpModal(false);
       if (d.paymentUrl) { setPaymentUrl(d.paymentUrl); setStep(2); }
-      else { setStep(2); startPolling(d.paymentId); }
+      else { setStep(2); startPolling(d.paymentId, d.manualPayment?.paymentToken); }
     } catch (e: any) { toast({ title: t("payFailed"), description: sanitizePaymentMessage(e?.message, t("payFailedDesc")), variant:"destructive" }); }
     finally { setIsSubmitting(false); }
   };
 
   const retry = () => {
     if (pollingRef.current) clearInterval(pollingRef.current);
-    setProviderPolling(false); setFailed(false); setFailReason(""); setPaymentUrl(null); setStep(1);
+    setProviderPolling(false); setFailed(false); setFailReason(""); setPaymentUrl(null); setManualPayment(null); setStep(1);
   };
 
   if (isLoading) return (
@@ -674,6 +678,15 @@ export default function PaymentPage() {
                       <RefreshCw style={{ width:16, height:16 }} /> {t("payTryAgain")}
                     </button>
                   </div>
+                ) : manualPayment && paymentId ? (
+                  <ManualPaymentStep
+                    paymentId={paymentId}
+                    reference={providerReference}
+                    amount={amount}
+                    currency={currency}
+                    operator={method}
+                    payment={manualPayment}
+                  />
                 ) : paymentUrl ? (<>
                   <div style={{ background:"#dbeafe", borderRadius:12, padding:12, textAlign:"center", fontSize:14, fontWeight:500, color:"#1e40af" }}>
                     {t("payWaitingValidation")}

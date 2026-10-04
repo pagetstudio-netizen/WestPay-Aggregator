@@ -16,7 +16,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { sendMerchantOtpEmail } from "./email";
-import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminPaymentError, notifyAdminWithdrawal, notifyAdminWithdrawalError, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, notifyAdminMerchantCreated, notifyAdminAdminCreated, getGeoInfo, notifyAdminMerchantLogin, notifyAdminIpBlocked, notifyAdminBruteForce, notifyAdminDeviceBlocked, notifyAdminNewDevice, notifyAdminOtp, notifyAdminVpn, notifyAdminCountryBlocked, notifyAdminLocationJump, notifyAdminNewMerchantIp, broadcastToMerchants, sendTelegramMessage } from "./telegram-bot";
+import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminManualPaymentSubmission, notifyAdminPaymentError, notifyAdminWithdrawal, notifyAdminWithdrawalError, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, notifyAdminMerchantCreated, notifyAdminAdminCreated, getGeoInfo, notifyAdminMerchantLogin, notifyAdminIpBlocked, notifyAdminBruteForce, notifyAdminDeviceBlocked, notifyAdminNewDevice, notifyAdminOtp, notifyAdminVpn, notifyAdminCountryBlocked, notifyAdminLocationJump, notifyAdminNewMerchantIp, broadcastToMerchants, sendTelegramMessage } from "./telegram-bot";
 import {
   createInvoice as oxapayCreateInvoice,
   createWhiteLabel as oxapayCreateWhiteLabel,
@@ -97,8 +97,11 @@ import {
 } from "./payout-constants";
 import {
   getCollectionFeeRate, getWithdrawalFeeRate, calcMerchantCredit,
-  FLAT_PAYIN_FEE, loadFeeConfig, saveFeeConfig, getFeeSnapshot,
+  loadFeeConfig, saveFeeConfig, getFeeSnapshot,
 } from "./feeConfig";
+import { calcMerchantCreditForMerchant } from "./payment-fees";
+import { buildManualUssdCode, validateManualUssdTemplate } from "./manual-payment-utils";
+import { reviewManualPayment, submitManualPaymentProof } from "./manual-payment-service";
 
 const BANK1_CHECKOUT_URL = "https://checkout1.westpay.cfd";
 
@@ -487,20 +490,6 @@ const MERCHANT_PAYMENT_DISABLED_MESSAGE = "404 未经授权的付款";
 /* Pays fermés aux transferts inter-pays (wallet transfer interdit — devise isolée) */
 const NO_WALLET_TRANSFER_COUNTRIES = new Set(["Niger", "Kenya", "Ghana"]);
 
-/** Calcule le montant net crédité au marchand en tenant compte du taux personnalisé. */
-function calcMerchantCreditForMerchant(
-  grossAmount: number,
-  country: string | null | undefined,
-  merchant: { feeExempt?: boolean; customFeeRate?: number | null } | null | undefined
-): number {
-  if (merchant?.customFeeRate != null) {
-    // Taux personnalisé (ex: 3.5 → 3.5%) — frais fixes pays conservés
-    const flatFee = country && FLAT_PAYIN_FEE[country] ? FLAT_PAYIN_FEE[country] : 0;
-    return Math.max(0, Math.floor(grossAmount * (1 - merchant.customFeeRate / 100) - flatFee));
-  }
-  if (merchant?.feeExempt) return grossAmount; // 0% — totalement gratuit
-  return calcMerchantCredit(grossAmount, country);
-}
 function calcWithdrawalFee(amount: number, country?: string | null): number {
   return Math.floor(amount * getWithdrawalFeeRate(country));
 }
@@ -3742,7 +3731,7 @@ export async function registerRoutes(
       // Seuls les paiements vraiment EN COURS sont affichés ici.
       // Les confirmés et échoués apparaissent déjà via la table transactions → pas de doublon.
       const pendingItems = pendingPays
-        .filter(p => ["gateway_pending", "lipapap_pending", "submitted", "pending"].includes(p.status))
+        .filter(p => ["gateway_pending", "lipapap_pending", "submitted", "pending", "manual_submitted"].includes(p.status))
         .map(p => ({
           id: `pp-${p.id}`,
           rowId: p.id,
@@ -3757,6 +3746,10 @@ export async function registerRoutes(
           operator: p.paymentMethod,
           provider: "westpay",
           providerReference: p.providerReference,
+          manualPayment: p.gateway === "manual",
+          manualRecipientPhone: p.manualRecipientPhone || null,
+          manualSubmission: p.gateway === "manual" ? p.manualSubmission || null : null,
+          gateway: p.gateway,
           errorMessage: (p as any).errorMessage || null,
           createdAt: p.createdAt,
         }));
@@ -4696,7 +4689,11 @@ export async function registerRoutes(
         if (type === "api" && op.maintenanceApiPayment) return false;
         return true;
       });
-      res.json({ methods: activeOps.map(o => ({ name: o.name, logo: o.logo || null })) });
+      res.json({ methods: activeOps.map(o => ({
+        name: o.name,
+        logo: o.logo || null,
+        manual: Boolean(o.manualPayinEnabled),
+      })) });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }
@@ -4965,6 +4962,21 @@ export async function registerRoutes(
       if (!pending) return res.status(404).json({ message: "Paiement introuvable" });
 
       const status = String(pending.status || "").toLowerCase();
+      if (pending.gateway === "manual") {
+        const providedToken = req.header("x-payment-token") || "";
+        const expectedToken = pending.paymentToken || "";
+        const tokenMatches = providedToken.length === expectedToken.length
+          && expectedToken.length >= 32
+          && crypto.timingSafeEqual(Buffer.from(providedToken), Buffer.from(expectedToken));
+        if (!tokenMatches) return res.status(403).json({ message: "Accès au paiement refusé" });
+        if (["confirmed", "completed", "paid"].includes(status)) {
+          return res.json({ status: "confirmed", paymentId: pending.id });
+        }
+        if (status === "manual_rejected" || (status === "manual_waiting_submission" && new Date(pending.expiresAt).getTime() <= Date.now())) {
+          return res.json({ status: "failed", paymentId: pending.id });
+        }
+        return res.json({ status: "pending", paymentId: pending.id });
+      }
       if (status === "confirmed" || status === "completed" || status === "paid" || status.endsWith("_confirmed")) {
         return res.json({ status: "confirmed", paymentId: pending.id });
       }
@@ -4986,6 +4998,50 @@ export async function registerRoutes(
       return res.json({ status: "pending", paymentId: pending.id });
     } catch (err: any) {
       return res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+  app.post("/api/payment/manual/submit", paymentRateLimit, async (req, res) => {
+    try {
+      const id = Number(req.body?.paymentId);
+      const paymentToken = String(req.body?.paymentToken || "");
+      const proof = typeof req.body?.proof === "string" ? req.body.proof : "";
+      if (!Number.isInteger(id) || id <= 0 || !/^[a-f0-9]{64}$/i.test(paymentToken)) {
+        return res.status(400).json({ message: "Informations de paiement invalides." });
+      }
+
+      const result = await submitManualPaymentProof(id, paymentToken, proof);
+      if (result.outcome === "not_found") return res.status(404).json({ message: "Paiement introuvable." });
+      if (result.outcome === "expired") return res.status(410).json({ message: "La demande a expiré. Relancez le paiement." });
+      if (result.outcome === "already_final") return res.status(409).json({ message: "Ce paiement a déjà été clôturé." });
+
+      if (result.outcome === "submitted" && result.payment) {
+        const merchant = await storage.getMerchantById(result.payment.merchantId);
+        const sent = await notifyAdminManualPaymentSubmission({
+          paymentId: result.payment.id,
+          txId: result.payment.txId || result.payment.providerReference || `WP-${result.payment.id}`,
+          merchantName: merchant?.name || `Marchand #${result.payment.merchantId}`,
+          payerNumber: result.payment.payerPhone || "",
+          recipientPhone: result.payment.manualRecipientPhone || "",
+          country: result.payment.country,
+          operator: result.payment.paymentMethod,
+          amount: result.payment.amount,
+          proof: result.payment.manualSubmission || proof.trim(),
+        });
+        if (!sent) console.error(`[MANUAL PAYIN] Notification Telegram non envoyée pour le paiement #${result.payment.id}`);
+      }
+
+      return res.json({
+        success: true,
+        alreadySubmitted: result.outcome === "already_submitted",
+        status: "manual_submitted",
+      });
+    } catch (err: any) {
+      if (String(err?.message || "").includes("entre 1 et 120")) {
+        return res.status(400).json({ message: err.message });
+      }
+      console.error("[MANUAL PAYIN] Erreur d’enregistrement de la preuve:", err?.message || err);
+      return res.status(500).json({ message: "Impossible d’enregistrer la référence. Réessayez." });
     }
   });
 
@@ -5129,6 +5185,86 @@ export async function registerRoutes(
           `operatorGateway=${payinGateway.operatorGateway || "(vide)"} ` +
           `selected=${gatewayLower}`,
         );
+      }
+
+      if (operatorRecord.manualPayinEnabled) {
+        const targetNumber = (await storage.getNumbers()).find((number) => number.id === operatorRecord.manualNumberId);
+        const sameOperator = (value: string | null | undefined) =>
+          (value || "").trim().toLocaleLowerCase() === paymentMethod.trim().toLocaleLowerCase();
+        if (
+          !targetNumber ||
+          targetNumber.status !== "active" ||
+          targetNumber.country.trim().toLocaleLowerCase() !== country.trim().toLocaleLowerCase() ||
+          !sameOperator(targetNumber.operator) ||
+          (targetNumber.merchantId != null && targetNumber.merchantId !== merchant.id)
+        ) {
+          console.error(`[MANUAL PAYIN CONFIG] Numéro destinataire invalide pour ${country}/${paymentMethod}`);
+          return res.status(503).json({
+            message: "Le numéro de paiement de cet opérateur est indisponible. Contactez l’administrateur.",
+          });
+        }
+
+        let ussdCode: string | null;
+        try {
+          ussdCode = buildManualUssdCode(
+            operatorRecord.manualUssdTemplate,
+            parsedAmount,
+            targetNumber.phoneNumber,
+            country,
+          );
+        } catch (error: any) {
+          console.error(`[MANUAL PAYIN CONFIG] Modèle USSD invalide pour ${country}/${paymentMethod}:`, error.message);
+          return res.status(503).json({
+            message: "Le code USSD de cet opérateur est mal configuré. Contactez l’administrateur.",
+          });
+        }
+
+        const reference = `WP-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(6).toString("hex").toUpperCase()}`;
+        const paymentToken = crypto.randomBytes(32).toString("hex");
+        const manualInstructions = operatorRecord.manualInstructions?.trim()
+          || "Effectuez le paiement vers le numéro indiqué. Votre opérateur vous guidera pour terminer l’opération. Revenez ensuite saisir la référence de transaction affichée après le paiement.";
+        const pending = await storage.createPendingPayment({
+          merchantId: merchant.id,
+          country,
+          amount: parsedAmount,
+          payerPhone: payerPhone || null,
+          payerName: payerName || null,
+          paymentMethod,
+          txId: reference,
+          status: "manual_waiting_submission",
+          redirectUrl: redirectUrl || null,
+          providerReference: reference,
+          providerTxId: null,
+          providerPaymentUrl: null,
+          gateway: "manual",
+          paymentToken,
+          manualRecipientPhone: targetNumber.phoneNumber,
+          manualUssdCode: ussdCode,
+          manualInstructions,
+          expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
+        });
+        await storage.createApiLog({
+          merchantId: merchant.id,
+          action: "manual_payment_initiated",
+          ip: req.ip || "",
+          description: `Paiement manuel initié — ${country}/${paymentMethod}, référence ${reference}`,
+        }).catch(() => {});
+        return res.json({
+          success: true,
+          paymentId: pending.id,
+          gateway: "manual",
+          provider: "WestPay",
+          reference,
+          providerReference: reference,
+          polling: true,
+          fees: 0,
+          manualPayment: {
+            recipientPhone: targetNumber.phoneNumber,
+            ussdCode,
+            instructions: manualInstructions,
+            paymentToken,
+          },
+        });
       }
 
       if (!SUPPORTED_PAYMENT_GATEWAYS.has(gatewayLower)) {
@@ -6152,6 +6288,59 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/admin/manual-payments/:id/approve", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "ID de paiement invalide." });
+      const reviewer = String((req as any).user?.email || "admin");
+      const result = await reviewManualPayment(id, reviewer, "approve");
+      if (result.outcome === "not_found") return res.status(404).json({ message: "Paiement manuel introuvable." });
+      if (result.outcome === "not_submitted") return res.status(409).json({ message: "Le client n’a pas encore envoyé de référence à vérifier." });
+      if (result.outcome === "approved" && result.payment) {
+        const payment = result.payment;
+        const merchantName = result.merchant?.name || `#${payment.merchantId}`;
+        const txId = payment.txId || payment.providerReference || `WP-${payment.id}`;
+        notifyAdminPayment({
+          txId,
+          merchantName,
+          payerNumber: payment.payerPhone,
+          country: payment.country,
+          amount: payment.amount,
+          provider: "mobile_money",
+          status: "confirmed",
+          platformFee: payment.amount - (result.credit ?? payment.amount),
+          creditedAmount: result.credit ?? payment.amount,
+        }).catch(() => {});
+        notifyMerchantPayment(payment.merchantId, {
+          txId,
+          amount: payment.amount,
+          payerNumber: payment.payerPhone,
+          country: payment.country,
+          provider: "mobile_money",
+        }).catch(() => {});
+      }
+      return res.json({ success: true, alreadyApproved: result.outcome === "already_approved" });
+    } catch (err: any) {
+      console.error("[MANUAL PAYIN] Erreur d’approbation admin:", err?.message || err);
+      return res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+  app.post("/api/admin/manual-payments/:id/reject", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "ID de paiement invalide." });
+      const reviewer = String((req as any).user?.email || "admin");
+      const result = await reviewManualPayment(id, reviewer, "reject");
+      if (result.outcome === "not_found") return res.status(404).json({ message: "Paiement manuel introuvable." });
+      if (result.outcome === "not_submitted") return res.status(409).json({ message: "Le client n’a pas encore envoyé de référence à vérifier." });
+      return res.json({ success: true, alreadyRejected: result.outcome === "already_rejected" });
+    } catch (err: any) {
+      console.error("[MANUAL PAYIN] Erreur de rejet admin:", err?.message || err);
+      return res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
   // Vérifie le statut d'un paiement (transaction confirmée ou en attente) auprès d'un fournisseur choisi par l'admin
   app.get("/api/admin/transactions/:id/check-status", authMiddleware("admin"), async (req, res) => {
     try {
@@ -6664,6 +6853,25 @@ export async function registerRoutes(
     try {
       const { name, type, country, dailyLimit, gateway, clapayCode, mbiyoCode, seapayCode, active } = req.body;
       if (!name || !country) return res.status(400).json({ message: "Nom et pays requis" });
+      const manualPayinEnabled = req.body.manualPayinEnabled === true;
+      const manualNumberId = req.body.manualNumberId ? Number(req.body.manualNumberId) : null;
+      const manualUssdTemplate = typeof req.body.manualUssdTemplate === "string" ? req.body.manualUssdTemplate.trim() || null : null;
+      const manualInstructions = typeof req.body.manualInstructions === "string" ? req.body.manualInstructions.trim() || null : null;
+      const ussdError = validateManualUssdTemplate(manualUssdTemplate || "");
+      if (ussdError) return res.status(400).json({ message: ussdError });
+      if (manualInstructions && manualInstructions.length > 1200) {
+        return res.status(400).json({ message: "Les instructions de paiement ne peuvent pas dépasser 1 200 caractères." });
+      }
+      if (manualPayinEnabled) {
+        const number = (await storage.getNumbers()).find((item) => item.id === manualNumberId);
+        if (
+          !number || number.status !== "active" ||
+          number.country.trim().toLocaleLowerCase() !== String(country).trim().toLocaleLowerCase() ||
+          (number.operator || "").trim().toLocaleLowerCase() !== String(name).trim().toLocaleLowerCase()
+        ) {
+          return res.status(400).json({ message: "Choisissez un numéro actif déjà enregistré pour ce pays et cet opérateur." });
+        }
+      }
       const op = await storage.createWithdrawalOperator({
         name,
         type: type || "Mobile Money",
@@ -6679,6 +6887,10 @@ export async function registerRoutes(
         maintenanceWithdrawals: false,
         maintenancePaymentLinks: false,
         maintenanceApiPayment: false,
+        manualPayinEnabled,
+        manualNumberId: manualPayinEnabled ? manualNumberId : null,
+        manualUssdTemplate,
+        manualInstructions,
       });
       res.json(op);
     } catch (err: any) {
@@ -6689,7 +6901,37 @@ export async function registerRoutes(
   app.put("/api/admin/withdrawal-operators/:id", authMiddleware("admin"), async (req, res) => {
     try {
       const id = Number(req.params.id);
+      const existing = await storage.getWithdrawalOperatorById(id);
+      if (!existing) return res.status(404).json({ message: "Opérateur introuvable" });
       const { name, type, country, dailyLimit, gateway, clapayCode, mbiyoCode, seapayCode, logo, sortOrder, active, maintenanceAll, maintenanceDeposits, maintenanceWithdrawals, maintenancePaymentLinks, maintenanceApiPayment } = req.body;
+      const nextName = name ?? existing.name;
+      const nextCountry = country ?? existing.country;
+      const manualPayinEnabled = req.body.manualPayinEnabled === undefined
+        ? existing.manualPayinEnabled
+        : req.body.manualPayinEnabled === true;
+      const rawManualNumberId = req.body.manualNumberId === undefined ? existing.manualNumberId : req.body.manualNumberId;
+      const manualNumberId = rawManualNumberId ? Number(rawManualNumberId) : null;
+      const manualUssdTemplate = req.body.manualUssdTemplate === undefined
+        ? existing.manualUssdTemplate
+        : (typeof req.body.manualUssdTemplate === "string" ? req.body.manualUssdTemplate.trim() || null : null);
+      const manualInstructions = req.body.manualInstructions === undefined
+        ? existing.manualInstructions
+        : (typeof req.body.manualInstructions === "string" ? req.body.manualInstructions.trim() || null : null);
+      const ussdError = validateManualUssdTemplate(manualUssdTemplate || "");
+      if (ussdError) return res.status(400).json({ message: ussdError });
+      if (manualInstructions && manualInstructions.length > 1200) {
+        return res.status(400).json({ message: "Les instructions de paiement ne peuvent pas dépasser 1 200 caractères." });
+      }
+      if (manualPayinEnabled) {
+        const number = (await storage.getNumbers()).find((item) => item.id === manualNumberId);
+        if (
+          !number || number.status !== "active" ||
+          number.country.trim().toLocaleLowerCase() !== String(nextCountry).trim().toLocaleLowerCase() ||
+          (number.operator || "").trim().toLocaleLowerCase() !== String(nextName).trim().toLocaleLowerCase()
+        ) {
+          return res.status(400).json({ message: "Choisissez un numéro actif déjà enregistré pour ce pays et cet opérateur." });
+        }
+      }
       const updated = await storage.updateWithdrawalOperator(id, {
         ...(name !== undefined && { name }),
         ...(type !== undefined && { type }),
@@ -6708,6 +6950,10 @@ export async function registerRoutes(
         ...(maintenanceWithdrawals !== undefined && { maintenanceWithdrawals }),
         ...(maintenancePaymentLinks !== undefined && { maintenancePaymentLinks }),
         ...(maintenanceApiPayment !== undefined && { maintenanceApiPayment }),
+        manualPayinEnabled,
+        manualNumberId: manualPayinEnabled ? manualNumberId : null,
+        manualUssdTemplate,
+        manualInstructions,
       });
       res.json(updated);
     } catch (err: any) {
@@ -8031,6 +8277,7 @@ app.get("/api/payment/by-ref/:reference", paymentByRefRateLimit, async (req, res
       const pending = await storage.getPendingPaymentByProviderReference(reference);
       if (!pending) return res.status(404).json({ message: "Paiement introuvable" });
       const merchant = await storage.getMerchantById(pending.merchantId);
+      const isManual = pending.gateway === "manual";
       // merchantSlug omitted — not needed post-payment and reduces data exposure
       res.json({
         paymentId: pending.id,
@@ -8038,9 +8285,15 @@ app.get("/api/payment/by-ref/:reference", paymentByRefRateLimit, async (req, res
         amount: pending.amount,
         country: pending.country,
         redirectUrl: pending.redirectUrl || null,
-        status: providerAwarePendingStatus(pending.gateway, pending.status),
+        status: isManual ? pending.status : providerAwarePendingStatus(pending.gateway, pending.status),
         gateway: pending.gateway,
         providerReference: pending.providerReference,
+        manualPayment: isManual ? {
+          recipientPhone: pending.manualRecipientPhone,
+          ussdCode: pending.manualUssdCode,
+          instructions: pending.manualInstructions,
+          submitted: pending.status === "manual_submitted",
+        } : undefined,
       });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });

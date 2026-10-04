@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useLanguage, detectLangFromCountry } from "@/lib/language";
 import { sanitizePaymentMessage } from "@/lib/sanitize-payment-message";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
+import ManualPaymentStep, { type ManualPaymentDetails } from "@/components/manual-payment-step";
 
 import waveIcon      from "@assets/zOMoVcU_1779635321598.png";
 import moovIcon      from "@assets/ZJCa7PK_1779635321640.jpg";
@@ -166,6 +167,7 @@ export default function PaymentLinkPage() {
   const [paymentId, setPaymentId]     = useState<number | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [paymentUrl, setPaymentUrl]   = useState<string | null>(null);
+  const [manualPayment, setManualPayment] = useState<ManualPaymentDetails | null>(null);
   const [providerReference, setProviderReference]         = useState<string | null>(null);
   const [providerPolling, setProviderPolling] = useState(false);
   const [countdown, setCountdown]     = useState(5);
@@ -288,12 +290,14 @@ export default function PaymentLinkPage() {
     ? (data?.link.amount ?? 0)
     : (Number(customAmount) || 0);
 
-  const startPolling = (pId: number) => {
+  const startPolling = (pId: number, paymentToken?: string) => {
     setProviderPolling(true);
     if (pollingRef.current) clearInterval(pollingRef.current);
     pollingRef.current = setInterval(async () => {
       try {
-        const r = await fetch(`/api/payment/${pId}/status`);
+        const r = await fetch(`/api/payment/${pId}/status`, {
+          headers: paymentToken ? { "X-Payment-Token": paymentToken } : undefined,
+        });
         const d = await r.json();
         if (d.status === "confirmed") {
           clearInterval(pollingRef.current!); setProviderPolling(false);
@@ -323,7 +327,7 @@ export default function PaymentLinkPage() {
 
   const retry = () => {
     if (pollingRef.current) clearInterval(pollingRef.current);
-    setProviderPolling(false); setFailed(false); setFailReason(""); setPaymentUrl(null);
+    setProviderPolling(false); setFailed(false); setFailReason(""); setPaymentUrl(null); setManualPayment(null);
     setStep(1);
   };
 
@@ -358,9 +362,9 @@ export default function PaymentLinkPage() {
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.message);
-      setPaymentId(d.paymentId); setProviderReference(d.providerReference); setShowOtpModal(false);
+      setPaymentId(d.paymentId); setProviderReference(d.providerReference); setManualPayment(d.manualPayment || null); setShowOtpModal(false);
       if (d.paymentUrl) { setPaymentUrl(d.paymentUrl); setStep(2); }
-      else { setStep(2); startPolling(d.paymentId); }
+      else { setStep(2); startPolling(d.paymentId, d.manualPayment?.paymentToken); }
     } catch (e: any) {
       toast({ title: "Paiement non abouti", description: sanitizePaymentMessage(e.message, "Vérifiez vos informations et réessayez."), variant: "destructive" });
     } finally { setIsSubmitting(false); }
@@ -612,6 +616,15 @@ export default function PaymentLinkPage() {
                     </button>
                   </div>
 
+                ) : manualPayment && paymentId ? (
+                  <ManualPaymentStep
+                    paymentId={paymentId}
+                    reference={providerReference}
+                    amount={effectiveAmount}
+                    currency={currency}
+                    operator={method}
+                    payment={manualPayment}
+                  />
                 ) : paymentUrl ? (<>
                   <div style={{ background: "#dbeafe", borderRadius: 12, padding: 12, textAlign: "center", fontSize: 14, fontWeight: 500, color: "#1e40af" }}>
                     {t("payProcessingRequestBy")} {fmt(effectiveAmount)} {currency}

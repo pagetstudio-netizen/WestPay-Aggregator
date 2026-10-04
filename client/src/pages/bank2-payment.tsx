@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { sanitizePaymentMessage } from "@/lib/sanitize-payment-message";
+import ManualPaymentStep, { type ManualPaymentDetails } from "@/components/manual-payment-step";
 
 type MerchantInfo = {
   name: string;
@@ -200,6 +201,7 @@ export default function Bank2PaymentPage() {
   const [paymentId, setPaymentId] = useState<number | null>(null);
   const [reference, setReference] = useState(referenceParam);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+  const [manualPayment, setManualPayment] = useState<ManualPaymentDetails | null>(null);
   const [confirmedAt, setConfirmedAt] = useState<Date | null>(completeParam ? new Date() : null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -235,11 +237,13 @@ export default function Bank2PaymentPage() {
     }
   }, [amount, reference]);
 
-  const startPolling = useCallback((id: number) => {
+  const startPolling = useCallback((id: number, paymentToken?: string) => {
     if (pollingRef.current) clearInterval(pollingRef.current);
     pollingRef.current = setInterval(async () => {
       try {
-        const response = await fetch(`/api/payment/${id}/status`);
+        const response = await fetch(`/api/payment/${id}/status`, {
+          headers: paymentToken ? { "X-Payment-Token": paymentToken } : undefined,
+        });
         const data = await response.json();
         if (data.status === "confirmed") {
           if (pollingRef.current) clearInterval(pollingRef.current);
@@ -412,8 +416,9 @@ export default function Bank2PaymentPage() {
       setPaymentId(data.paymentId);
       setReference(data.providerReference || data.reference || "");
       setPaymentUrl(data.paymentUrl || null);
+      setManualPayment(data.manualPayment || null);
       setScreen("pending");
-      if (data.paymentId) startPolling(data.paymentId);
+      if (data.paymentId) startPolling(data.paymentId, data.manualPayment?.paymentToken);
     } catch (caught: any) {
       setError(sanitizePaymentMessage(caught.message, "Une erreur est survenue."));
     } finally {
@@ -426,6 +431,7 @@ export default function Bank2PaymentPage() {
     setError("");
     setOtp("");
     setPaymentUrl(null);
+    setManualPayment(null);
     setScreen("phone");
   };
 
@@ -621,22 +627,35 @@ export default function Bank2PaymentPage() {
             )}
 
             {screen === "pending" && (
-              <div className="bank2-content bank2-state">
-                <ShieldCheck className="bank2-shield bank2-pulse" size={88} />
-                <h2>Paiement en cours de confirmation</h2>
-                <p>Validez la demande sur votre téléphone. La page se met à jour automatiquement.</p>
-                {paymentUrl && (
-                  <a
-                    className="bank2-button primary wide bank2-link"
-                    href={paymentUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={() => paymentId && startPolling(paymentId)}
-                  >
-                    <ExternalLink size={18} /> Ouvrir la page de paiement
-                  </a>
-                )}
-              </div>
+              manualPayment && paymentId ? (
+                <div className="bank2-content bank2-state">
+                  <ManualPaymentStep
+                    paymentId={paymentId}
+                    reference={reference}
+                    amount={amount}
+                    currency={currency}
+                    operator={method}
+                    payment={manualPayment}
+                  />
+                </div>
+              ) : (
+                <div className="bank2-content bank2-state">
+                  <ShieldCheck className="bank2-shield bank2-pulse" size={88} />
+                  <h2>Paiement en cours de confirmation</h2>
+                  <p>Validez la demande sur votre téléphone. La page se met à jour automatiquement.</p>
+                  {paymentUrl && (
+                    <a
+                      className="bank2-button primary wide bank2-link"
+                      href={paymentUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={() => paymentId && startPolling(paymentId)}
+                    >
+                      <ExternalLink size={18} /> Ouvrir la page de paiement
+                    </a>
+                  )}
+                </div>
+              )
             )}
 
             {screen === "failed" && (

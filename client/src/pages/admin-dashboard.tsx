@@ -1653,6 +1653,26 @@ function TransactionsPanel() {
     onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
   });
 
+  const manualReviewMutation = useMutation({
+    mutationFn: async ({ id, action }: { id: number; action: "approve" | "reject" }) => {
+      const response = await fetch(`/api/admin/manual-payments/${id}/${action}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({}),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Action impossible");
+      return { ...data, action };
+    },
+    onSuccess: ({ action }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      toast({ title: action === "approve" ? "Paiement approuvé et solde crédité" : "Paiement rejeté" });
+    },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
+
   const [txStatusDialogOpen, setTxStatusDialogOpen] = useState(false);
   const [txStatusLoading, setTxStatusLoading] = useState(false);
   const [txStatusResult, setTxStatusResult] = useState<any>(null);
@@ -1750,12 +1770,13 @@ function TransactionsPanel() {
       t.country?.toLowerCase().includes(term) ||
       t.merchantName?.toLowerCase().includes(term) ||
       t.payerNumber?.toLowerCase().includes(term) ||
+      t.manualRecipientPhone?.toLowerCase().includes(term) ||
       t.providerReference?.toLowerCase().includes(term);
     const matchStatus =
       statusFilter === "all" ||
       (statusFilter === "confirmed" && ["confirmed", "approved", "success", "completed"].includes(t.status)) ||
       (statusFilter === "failed" && ["failed", "rejected", "provider_failed", "lipapap_failed"].includes(t.status)) ||
-      (statusFilter === "pending" && ["pending", "provider_pending", "lipapap_pending", "submitted"].includes(t.status));
+      (statusFilter === "pending" && ["pending", "provider_pending", "lipapap_pending", "submitted", "manual_submitted"].includes(t.status));
     const matchType =
       typeFilter === "all" ||
       t.type === typeFilter;
@@ -1791,6 +1812,8 @@ function TransactionsPanel() {
       return <Badge variant="default" className="text-xs">{status === "approved" ? "Approuvé" : "Confirmé"}</Badge>;
     if (["failed", "rejected", "provider_failed", "lipapap_failed"].includes(status))
       return <Badge variant="destructive" className="text-xs">{status === "rejected" ? "Rejeté" : "Échoué"}</Badge>;
+    if (status === "manual_submitted")
+      return <Badge className="text-xs bg-orange-100 text-orange-800 border-orange-200">À vérifier</Badge>;
     if (["provider_pending", "lipapap_pending", "submitted"].includes(status))
       return <Badge className="text-xs bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400">En cours</Badge>;
     return <Badge variant="secondary" className="text-xs">En attente</Badge>;
@@ -1924,6 +1947,13 @@ function TransactionsPanel() {
                               </Button>
                             </div>
                           )}
+                          {tx.manualPayment && (
+                            <div className="mt-2 rounded-md border border-orange-300 bg-orange-50 dark:bg-orange-900/10 dark:border-orange-800 px-3 py-2 space-y-1.5">
+                              <p className="text-xs font-semibold text-orange-900 dark:text-orange-200">Soumission du client</p>
+                              {tx.manualRecipientPhone && <p className="text-xs text-orange-900 dark:text-orange-200">Numéro destinataire : <code>{tx.manualRecipientPhone}</code></p>}
+                              {tx.manualSubmission && <p className="text-xs text-orange-900 dark:text-orange-200 whitespace-pre-wrap break-words">{tx.manualSubmission}</p>}
+                            </div>
+                          )}
                           {tx.errorMessage && (
                             <p className="text-xs text-destructive mt-1 bg-destructive/10 rounded px-2 py-1">⚠️ {tx.errorMessage}</p>
                           )}
@@ -1933,7 +1963,7 @@ function TransactionsPanel() {
                           <p className={`text-lg font-bold ${isFailed ? "text-destructive" : "text-foreground"}`}>{tx.amount?.toLocaleString("fr-FR")}</p>
                           <p className="text-xs text-muted-foreground">F CFA</p>
                           <div className="flex gap-1 mt-1 flex-wrap justify-end">
-                            {["pending", "en cours", "approved", "confirmed", "provider_pending", "lipapap_pending", "submitted"].includes(tx.status) && (
+                            {!tx.manualPayment && ["pending", "en cours", "approved", "confirmed", "provider_pending", "lipapap_pending", "submitted"].includes(tx.status) && (
                               <>
                                 <ProviderPickerButton label="Vérifier statut" icon={RefreshCw} colorClass="border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50"
                                   onPick={(provider) => checkTxStatus(tx, provider)} testId={`button-check-status-tx-${tx.id}`} />
@@ -1942,13 +1972,29 @@ function TransactionsPanel() {
                                   onPick={(provider) => syncTxStatusMutation.mutate({ tx, provider })} testId={`button-sync-status-tx-${tx.id}`} />
                               </>
                             )}
-                            {(tx.type === "pending" || ["provider_pending", "lipapap_pending", "submitted"].includes(tx.status)) && (
+                            {!tx.manualPayment && (tx.type === "pending" || ["provider_pending", "lipapap_pending", "submitted"].includes(tx.status)) && (
                               <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
                                 disabled={retryTxMutation.isPending}
                                 onPick={async (provider) => { if (await showConfirm(`Déclencher le paiement chez ${provider} ?\nUne nouvelle invite USSD sera envoyée au client.`)) retryTxMutation.mutate({ tx, provider }); }}
                                 testId={`button-trigger-tx-${tx.id}`} />
                             )}
-                            {tx.status !== "confirmed" && tx.status !== "completed" && tx.status !== "success" && (
+                            {tx.manualPayment && tx.status === "manual_submitted" && (
+                              <>
+                                <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white gap-1"
+                                  disabled={manualReviewMutation.isPending}
+                                  onClick={async () => { if (await showConfirm("Confirmer la réception de l’argent ? Le solde du marchand sera crédité une seule fois.")) manualReviewMutation.mutate({ id: tx.rowId, action: "approve" }); }}
+                                  data-testid={`button-approve-manual-${tx.rowId}`}>
+                                  <CheckCircle className="w-3 h-3" />Approuver et créditer
+                                </Button>
+                                <Button size="sm" variant="destructive" className="h-7 text-xs gap-1"
+                                  disabled={manualReviewMutation.isPending}
+                                  onClick={async () => { if (await showConfirm("Rejeter cette soumission de paiement ?")) manualReviewMutation.mutate({ id: tx.rowId, action: "reject" }); }}
+                                  data-testid={`button-reject-manual-${tx.rowId}`}>
+                                  <XCircle className="w-3 h-3" />Rejeter
+                                </Button>
+                              </>
+                            )}
+                            {!tx.manualPayment && tx.status !== "confirmed" && tx.status !== "completed" && tx.status !== "success" && (
                               <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white gap-1"
                                 disabled={validateTxMutation.isPending}
                                 onClick={async () => { if (await showConfirm("Valider cette transaction manuellement ? (à utiliser si l'argent est bien arrivé au client)")) validateTxMutation.mutate(tx.rowId); }}
@@ -1956,7 +2002,7 @@ function TransactionsPanel() {
                                 <CheckCircle className="w-3 h-3" />Valider manuellement
                               </Button>
                             )}
-                            {tx.status !== "rejected" && tx.status !== "failed" && (
+                            {!tx.manualPayment && tx.status !== "rejected" && tx.status !== "failed" && (
                               <Button size="sm" variant="destructive" className="h-7 text-xs gap-1"
                                 disabled={rejectTxMutation.isPending}
                                 onClick={async () => { if (await showConfirm("Rejeter cette transaction manuellement ?")) rejectTxMutation.mutate(tx.rowId); }}
@@ -4525,6 +4571,7 @@ function SortableOpRow({
               <span className="font-semibold text-sm">{op.name}</span>
               <Badge variant="outline" className="text-xs py-0">{op.type}</Badge>
               <Badge variant="secondary" className="text-xs py-0">{op.country}</Badge>
+              {(op as any).manualPayinEnabled && <Badge className="text-xs py-0 bg-amber-100 text-amber-800 border-amber-200">Encaissement manuel</Badge>}
               {!op.active && <Badge variant="destructive" className="text-xs py-0">Inactif</Badge>}
             </div>
             <span className="text-xs text-muted-foreground">
@@ -4568,6 +4615,7 @@ function WithdrawalOperatorsPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
   const { data: opList = [], isLoading: opsLoading } = useAdminFetch("/api/admin/withdrawal-operators", ["/api/admin/withdrawal-operators"]);
+  const { data: numberList = [] } = useAdminFetch("/api/admin/numbers", ["/api/admin/numbers"]);
 
   const [opDialogOpen, setOpDialogOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<WithdrawalOperator | null>(null);
@@ -4577,13 +4625,18 @@ function WithdrawalOperatorsPanel() {
 
   useEffect(() => { setLocalOps(opList as WithdrawalOperator[]); }, [opList]);
 
-  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "ClaPay", clapayCode: "", mbiyoCode: "", seapayCode: "", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false };
+  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "ClaPay", clapayCode: "", mbiyoCode: "", seapayCode: "", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false, manualPayinEnabled: false, manualNumberId: "", manualUssdTemplate: "", manualInstructions: "" };
   const [form, setForm] = useState(emptyForm);
+  const manualNumbers = (numberList as PhoneNumber[]).filter((number) =>
+    number.status === "active" &&
+    number.country.trim().toLocaleLowerCase() === form.country.trim().toLocaleLowerCase() &&
+    (number.operator || "").trim().toLocaleLowerCase() === form.name.trim().toLocaleLowerCase()
+  );
 
   const openCreate = () => { setEditingOp(null); setForm(emptyForm); setOpDialogOpen(true); };
   const openEdit = (op: WithdrawalOperator) => {
     setEditingOp(op);
-    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, clapayCode: (op as any).clapayCode || "", mbiyoCode: op.mbiyoCode || "", seapayCode: (op as any).seapayCode || "", active: op.active, maintenanceAll: op.maintenanceAll, maintenanceDeposits: op.maintenanceDeposits, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment });
+    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, clapayCode: (op as any).clapayCode || "", mbiyoCode: op.mbiyoCode || "", seapayCode: (op as any).seapayCode || "", active: op.active, maintenanceAll: op.maintenanceAll, maintenanceDeposits: op.maintenanceDeposits, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment, manualPayinEnabled: (op as any).manualPayinEnabled || false, manualNumberId: (op as any).manualNumberId ? String((op as any).manualNumberId) : "", manualUssdTemplate: (op as any).manualUssdTemplate || "", manualInstructions: (op as any).manualInstructions || "" });
     setOpDialogOpen(true);
   };
 
@@ -4769,6 +4822,58 @@ function WithdrawalOperatorsPanel() {
               </Select>
               <p className="text-xs text-muted-foreground">La passerelle sélectionnée sera utilisée pour tous les paiements et retraits via cet opérateur, pour tous les marchands de ce pays.</p>
             </div>
+            <div className="rounded-md border p-3 space-y-3">
+              <div className="flex items-start gap-3">
+                <Switch checked={form.manualPayinEnabled} onCheckedChange={v => setForm(f => ({ ...f, manualPayinEnabled: v }))} data-testid="switch-op-manual-payin" />
+                <div className="space-y-1">
+                  <Label>Encaissement manuel pour cet opérateur</Label>
+                  <p className="text-xs text-muted-foreground">Remplace uniquement le prestataire d’encaissement. Les retraits et les autres opérateurs gardent leur configuration actuelle.</p>
+                </div>
+              </div>
+              {form.manualPayinEnabled && (
+                <div className="space-y-3 border-t pt-3">
+                  <div className="space-y-2">
+                    <Label>Numéro destinataire actif</Label>
+                    <Select value={form.manualNumberId || "none"} onValueChange={v => setForm(f => ({ ...f, manualNumberId: v === "none" ? "" : v }))}>
+                      <SelectTrigger data-testid="select-op-manual-number"><SelectValue placeholder="Choisir un numéro" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Choisir un numéro</SelectItem>
+                        {manualNumbers.map(number => (
+                          <SelectItem key={number.id} value={String(number.id)}>
+                            {number.phoneNumber}{number.merchantId ? " · numéro associé à un marchand" : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {manualNumbers.length === 0 && (
+                      <p className="text-xs text-destructive">Ajoutez d’abord un numéro actif correspondant exactement à ce pays et cet opérateur dans « Numéros Mobile Money ».</p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Modèle USSD public (facultatif)</Label>
+                    <Input
+                      value={form.manualUssdTemplate}
+                      onChange={e => setForm(f => ({ ...f, manualUssdTemplate: e.target.value }))}
+                      placeholder="*145*1*{{amount}}*{{number}}#"
+                      data-testid="input-op-manual-ussd"
+                    />
+                    <p className="text-xs text-muted-foreground">Variables facultatives : <code>{"{{amount}}"}</code> et <code>{"{{number}}"}</code>. N’inscrivez aucun PIN ni code secret.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Instructions affichées au client (facultatif)</Label>
+                    <textarea
+                      value={form.manualInstructions}
+                      onChange={e => setForm(f => ({ ...f, manualInstructions: e.target.value }))}
+                      maxLength={1200}
+                      rows={3}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      placeholder="Effectuez le paiement, puis saisissez la référence de transaction affichée."
+                      data-testid="textarea-op-manual-instructions"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
             {form.gateway?.toLowerCase() === "clapay" && (
               <div className="space-y-2">
                 <Label>Code opérateur ClaPay</Label>
@@ -4806,7 +4911,7 @@ function WithdrawalOperatorsPanel() {
             </div>
             <div className="flex gap-2 justify-end pt-2">
               <Button variant="outline" onClick={() => setOpDialogOpen(false)}>Annuler</Button>
-              <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.name || !form.country} data-testid="button-save-operator">
+              <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.name || !form.country || (form.manualPayinEnabled && (!form.manualNumberId || manualNumbers.length === 0))} data-testid="button-save-operator">
                 {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                 {editingOp ? "Mettre à jour" : "Créer"}
               </Button>

@@ -3,6 +3,7 @@ import type { Express, Request, Response } from "express";
 import crypto from "crypto";
 import { storage } from "./storage";
 import { pool, financialPool } from "./db";
+import { reviewManualPayment, searchManualPaymentsByNumber } from "./manual-payment-service";
 import {
   initiatePayout as mbiyoInitiatePayout,
   getTransactionStatus as mbiyoGetStatus,
@@ -1911,6 +1912,37 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     }
   });
 
+  // ─── /manualpayments — rechercher et traiter les preuves de paiement manuel ──
+  bot.command("manualpayments", async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
+    if (!isGroup || !await isAdminGroup(chatId)) return;
+    const query = String((ctx.message as any)?.text || "").trim().split(/\s+/).slice(1).join(" ");
+    try {
+      const payments = await searchManualPaymentsByNumber(query);
+      if (!payments.length) {
+        await ctx.reply("Aucun paiement manuel en attente ne correspond à ce numéro.");
+        return;
+      }
+      const merchants = await Promise.all(payments.map((payment) => storage.getMerchantById(payment.merchantId)));
+      const lines = ["Paiements manuels à vérifier :"];
+      const keyboard: { text: string; callback_data: string }[][] = [];
+      payments.forEach((payment, index) => {
+        lines.push(
+          `${index + 1}. #${payment.id} · ${merchants[index]?.name || `Marchand #${payment.merchantId}`} · ${formatAmountC(payment.amount, payment.country)} · ${countryLabel(payment.country)}`,
+          `Réf. ${payment.txId || payment.providerReference || "N/A"} · Client ${payment.payerPhone || "N/A"} · Destinataire ${payment.manualRecipientPhone || "N/A"}`,
+        );
+        keyboard.push([
+          { text: `Approuver #${payment.id}`, callback_data: `mpay:approve:${payment.id}` },
+          { text: `Rejeter #${payment.id}`, callback_data: `mpay:reject:${payment.id}` },
+        ]);
+      });
+      await ctx.reply(lines.join("\n"), { reply_markup: { inline_keyboard: keyboard } });
+    } catch (error: any) {
+      await ctx.reply(error?.message || "Erreur lors de la recherche des paiements manuels.");
+    }
+  });
+
   // ─── /groups (groupe admin uniquement) — liste et nettoyage des groupes connus ──
   bot.command("groups", async (ctx) => {
     const chatId = String(ctx.chat.id);
@@ -2209,6 +2241,61 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       await ctx.answerCbQuery("❌ " + String(e.message || "Erreur").slice(0, 60));
     }
   });
+
+  bot.action(/^mpay:(approve|reject):(\d+)$/, async (ctx) => {
+    const chatId = String(ctx.chat?.id ?? "");
+    if (!await isAdminGroup(chatId)) { await ctx.answerCbQuery("Non autorisé"); return; }
+    const action = ctx.match![1] as "approve" | "reject";
+    const id = Number(ctx.match![2]);
+    const reviewer = `Telegram ${formatUser(ctx)}`;
+    await ctx.answerCbQuery("Traitement en cours…");
+    try {
+      const result = await reviewManualPayment(id, reviewer, action);
+      if (result.outcome === "not_found") {
+        await ctx.reply(`Paiement manuel #${id} introuvable.`);
+        return;
+      }
+      if (result.outcome === "not_submitted") {
+        await ctx.reply(`Le paiement #${id} n’a pas encore été soumis pour vérification.`);
+        return;
+      }
+      const payment = result.payment;
+      if (action === "approve" && result.outcome === "approved" && payment) {
+        const merchantName = result.merchant?.name || `#${payment.merchantId}`;
+        const txId = payment.txId || payment.providerReference || `WP-${payment.id}`;
+        notifyAdminPayment({
+          txId,
+          merchantName,
+          payerNumber: payment.payerPhone,
+          country: payment.country,
+          amount: payment.amount,
+          provider: "mobile_money",
+          status: "confirmed",
+          platformFee: payment.amount - (result.credit ?? payment.amount),
+          creditedAmount: result.credit ?? payment.amount,
+        }).catch(() => {});
+        notifyMerchantPayment(payment.merchantId, {
+          txId,
+          amount: payment.amount,
+          payerNumber: payment.payerPhone,
+          country: payment.country,
+          provider: "mobile_money",
+        }).catch(() => {});
+      }
+      const alreadyHandled = result.outcome === "already_approved" || result.outcome === "already_rejected";
+      const actionLabel = action === "approve" ? "Approuvé et crédité" : "Rejeté";
+      const adminName = formatUser(ctx);
+      await ctx.editMessageReplyMarkup({
+        inline_keyboard: [[{
+          text: alreadyHandled ? `Déjà traité · #${id}` : `${actionLabel} par ${adminName}`,
+          callback_data: "mpay:noop",
+        }]],
+      }).catch(() => {});
+    } catch (error: any) {
+      await ctx.reply(`Erreur de traitement du paiement #${id} : ${String(error?.message || "erreur").slice(0, 250)}`);
+    }
+  });
+  bot.action(/^mpay:noop$/, async (ctx) => { await ctx.answerCbQuery("Paiement déjà traité"); });
 
   // wd:approve — marque le retrait comme approuvé manuellement (sans appel fournisseur)
   bot.action(/^wd:approve:(\d+)$/, async (ctx) => {
@@ -3371,6 +3458,8 @@ export async function notifyAdminPayment(data: {
   amount: number;
   provider: string;
   status: "confirmed" | "failed";
+  platformFee?: number;
+  creditedAmount?: number;
 }): Promise<void> {
   const dateStr = new Date().toLocaleString("fr-FR", {
     day: "2-digit", month: "long", year: "numeric",
@@ -3389,14 +3478,57 @@ export async function notifyAdminPayment(data: {
     `📞 *Numéro client :* ${data.payerNumber || "N/A"}`,
     `🌍 *Pays :* ${countryLabel(data.country)}`,
     `💰 *Montant total :* ${formatAmountC(data.amount, data.country)}`,
-    `💵 *Frais plateforme :* 0 ${currencyForCountry(data.country)}`,
-    `✅ *Montant reçu :* ${formatAmountC(data.amount, data.country)}`,
+    `💵 *Frais plateforme :* ${formatAmountC(data.platformFee ?? 0, data.country)}`,
+    `✅ *Montant reçu :* ${formatAmountC(data.creditedAmount ?? data.amount, data.country)}`,
     `📱 *Méthode :* ${methodLabel}`,
     `📊 *Statut :* ${statusLabel}`,
     `📅 *Date :* ${dateStr}`,
   ].join("\n");
 
   await notifyAdminGroup(msg);
+}
+
+export async function notifyAdminManualPaymentSubmission(data: {
+  paymentId: number;
+  txId: string;
+  merchantName: string;
+  payerNumber: string;
+  recipientPhone: string;
+  country: string;
+  operator: string;
+  amount: number;
+  proof: string;
+}): Promise<boolean> {
+  try {
+    const groupId = await storage.getSetting("telegram_group_id");
+    if (!bot || !groupId) return false;
+    const message = [
+      "Paiement manuel à vérifier",
+      `Demande #${data.paymentId} · Référence ${data.txId}`,
+      `Marchand : ${data.merchantName}`,
+      `Montant : ${formatAmountC(data.amount, data.country)}`,
+      `Pays / opérateur : ${countryLabel(data.country)} · ${data.operator}`,
+      `Client : ${data.payerNumber || "N/A"}`,
+      `Numéro destinataire : ${data.recipientPhone || "N/A"}`,
+      "",
+      "Référence de transaction transmise par le client :",
+      data.proof.slice(0, 2000),
+      "",
+      "Vérifiez la réception auprès du compte Mobile Money avant d’approuver. Ne demandez pas de PIN ni de code secret.",
+    ].join("\n");
+    await bot.telegram.sendMessage(groupId, message, {
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "Approuver et créditer", callback_data: `mpay:approve:${data.paymentId}` },
+          { text: "Rejeter", callback_data: `mpay:reject:${data.paymentId}` },
+        ]],
+      },
+    });
+    return true;
+  } catch (error: any) {
+    console.error("[TELEGRAM] Notification d’encaissement manuel impossible:", error?.message || error);
+    return false;
+  }
 }
 
 function formatAdminRawError(error: unknown): string {
