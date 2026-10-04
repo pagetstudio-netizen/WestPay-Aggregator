@@ -150,6 +150,11 @@ export const pendingPayments = pgTable("pending_payments", {
   gateway: text("gateway").default("clapay").notNull(),
   errorMessage: text("error_message"),
   paymentToken: text("payment_token"),
+  manualRecipientPhone: text("manual_recipient_phone"),
+  manualSubmission: text("manual_submission"),
+  manualSubmittedAt: timestamp("manual_submitted_at"),
+  manualReviewedBy: text("manual_reviewed_by"),
+  manualReviewedAt: timestamp("manual_reviewed_at"),
   expiresAt: timestamp("expires_at").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -240,6 +245,10 @@ export const withdrawalOperators = pgTable("withdrawal_operators", {
   maintenanceWithdrawals: boolean("maintenance_withdrawals").default(false).notNull(),
   maintenancePaymentLinks: boolean("maintenance_payment_links").default(false).notNull(),
   maintenanceApiPayment: boolean("maintenance_api_payment").default(false).notNull(),
+  manualPayinEnabled: boolean("manual_payin_enabled").default(false).notNull(),
+  manualNumberId: integer("manual_number_id"),
+  manualUssdTemplate: text("manual_ussd_template"),
+  manualInstructions: text("manual_instructions"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

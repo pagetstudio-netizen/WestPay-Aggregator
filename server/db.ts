@@ -272,6 +272,10 @@ export async function runAuthMigrations() {
         maintenance_withdrawals boolean NOT NULL DEFAULT false,
         maintenance_payment_links boolean NOT NULL DEFAULT false,
         maintenance_api_payment boolean NOT NULL DEFAULT false,
+        manual_payin_enabled boolean NOT NULL DEFAULT false,
+        manual_number_id integer,
+        manual_ussd_template text,
+        manual_instructions text,
         created_at timestamp DEFAULT now() NOT NULL
       );
 
@@ -316,6 +320,10 @@ export async function runAuthMigrations() {
       ALTER TABLE merchants ADD COLUMN IF NOT EXISTS payin_disabled BOOLEAN NOT NULL DEFAULT false;
       ALTER TABLE merchants ADD COLUMN IF NOT EXISTS account_type TEXT;
       ALTER TABLE merchants ADD COLUMN IF NOT EXISTS merchant_category TEXT;
+      ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS manual_payin_enabled BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS manual_number_id INTEGER;
+      ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS manual_ussd_template TEXT;
+      ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS manual_instructions TEXT;
     `);
 
     await client.query(`
@@ -508,6 +516,11 @@ export async function runFinancialMigrations() {
         gateway text NOT NULL DEFAULT 'clapay',
         error_message text,
         payment_token text,
+        manual_recipient_phone text,
+        manual_submission text,
+        manual_submitted_at timestamp,
+        manual_reviewed_by text,
+        manual_reviewed_at timestamp,
         expires_at timestamp NOT NULL,
         created_at timestamp DEFAULT now() NOT NULL
       );
