@@ -151,6 +151,8 @@ export const pendingPayments = pgTable("pending_payments", {
   errorMessage: text("error_message"),
   paymentToken: text("payment_token"),
   manualRecipientPhone: text("manual_recipient_phone"),
+  manualUssdCode: text("manual_ussd_code"),
+  manualInstructions: text("manual_instructions"),
   manualSubmission: text("manual_submission"),
   manualSubmittedAt: timestamp("manual_submitted_at"),
   manualReviewedBy: text("manual_reviewed_by"),

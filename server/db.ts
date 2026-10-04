@@ -517,6 +517,8 @@ export async function runFinancialMigrations() {
         error_message text,
         payment_token text,
         manual_recipient_phone text,
+        manual_ussd_code text,
+        manual_instructions text,
         manual_submission text,
         manual_submitted_at timestamp,
         manual_reviewed_by text,
@@ -721,6 +723,17 @@ export async function runFinancialMigrations() {
         ALTER TABLE merchant_countries ALTER COLUMN payin_gateway SET DEFAULT 'clapay';
         ALTER TABLE pending_payments ALTER COLUMN gateway SET DEFAULT 'clapay';
         ALTER TABLE withdrawals ALTER COLUMN gateway SET DEFAULT 'clapay';
+        ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_recipient_phone TEXT;
+        ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_ussd_code TEXT;
+        ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_instructions TEXT;
+        ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_submission TEXT;
+        ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_submitted_at TIMESTAMP;
+        ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_reviewed_by TEXT;
+        ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_reviewed_at TIMESTAMP;
+        CREATE INDEX IF NOT EXISTS pending_payments_manual_review_idx
+          ON pending_payments (gateway, status, created_at DESC);
+        CREATE INDEX IF NOT EXISTS pending_payments_manual_recipient_idx
+          ON pending_payments (manual_recipient_phone);
         UPDATE merchant_countries SET gateway_enabled = true
           WHERE gateway_enabled = false AND LOWER(COALESCE(payin_gateway, '')) IN ('omnipay','sendavapay','sendava');
         UPDATE merchant_countries SET payin_gateway = 'clapay'
