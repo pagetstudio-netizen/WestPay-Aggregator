@@ -1874,6 +1874,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `/stats — Statistiques globales\n` +
           `/balance — Soldes détaillés de tous les marchands\n\n` +
           `/findwithdrawal@Westpaybot — Rechercher un retrait par numéro\n` +
+          `/findmanualpayment NUMERO — Rechercher une soumission par numéro et la traiter\n` +
+          `/manualpayments NUMERO — Alias de la commande\n` +
           `/gatewaybalance@Westpaybot — Consulter le solde d'un gateway et ses wallets pays\n\n` +
           `📢 *Diffusion*\n` +
           `/broadcast — Envoyer un message dans les groupes\n` +
@@ -1913,8 +1915,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     }
   });
 
-  // ─── /manualpayments — rechercher et traiter les preuves de paiement manuel ──
-  bot.command("manualpayments", async (ctx) => {
+  // ─── Recherche admin des soumissions de paiement par numéro ────────────────
+  const handleManualPaymentSearch = async (ctx: any) => {
     const chatId = String(ctx.chat.id);
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
     if (!isGroup || !await isAdminGroup(chatId)) return;
@@ -1922,27 +1924,42 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     try {
       const payments = await searchManualPaymentsByNumber(query);
       if (!payments.length) {
-        await ctx.reply("Aucun paiement manuel en attente ne correspond à ce numéro.");
+        await ctx.reply("Aucune soumission en attente ne correspond à ce numéro.");
         return;
       }
       const merchants = await Promise.all(payments.map((payment) => storage.getMerchantById(payment.merchantId)));
-      const lines = ["Paiements manuels à vérifier :"];
-      const keyboard: { text: string; callback_data: string }[][] = [];
-      payments.forEach((payment, index) => {
-        lines.push(
-          `${index + 1}. #${payment.id} · ${merchants[index]?.name || `Marchand #${payment.merchantId}`} · ${formatAmountC(payment.amount, payment.country)} · ${countryLabel(payment.country)}`,
-          `Réf. ${payment.txId || payment.providerReference || "N/A"} · Client ${payment.payerPhone || "N/A"} · Destinataire ${payment.manualRecipientPhone || "N/A"}`,
-        );
-        keyboard.push([
-          { text: `Approuver #${payment.id}`, callback_data: `mpay:approve:${payment.id}` },
-          { text: `Rejeter #${payment.id}`, callback_data: `mpay:reject:${payment.id}` },
-        ]);
-      });
-      await ctx.reply(lines.join("\n"), { reply_markup: { inline_keyboard: keyboard } });
+      // Keep each Telegram message comfortably under its size limit while
+      // showing both references and all submitted routing details.
+      for (let offset = 0; offset < payments.length; offset += 3) {
+        const batch = payments.slice(offset, offset + 3);
+        const lines = [`Soumissions trouvées pour ${query} (${offset + 1}–${offset + batch.length}/${payments.length}) :`];
+        const keyboard: { text: string; callback_data: string }[][] = [];
+        batch.forEach((payment, index) => {
+          const merchant = merchants[offset + index];
+          const depositReference = payment.providerReference || payment.txId || "N/A";
+          const customerReference = (payment.manualSubmission || "N/A").replace(/\s+/g, " ").trim().slice(0, 120);
+          lines.push(
+            `#${payment.id} · ${merchant?.name || `Marchand #${payment.merchantId}`}`,
+            `Montant : ${formatAmountC(payment.amount, payment.country)} · Pays : ${countryLabel(payment.country)} · Opérateur : ${payment.paymentMethod || "N/A"}`,
+            `Client : ${payment.payerName || "N/A"} · Numéro : ${payment.payerPhone || "N/A"}`,
+            `Numéro destinataire : ${payment.manualRecipientPhone || "N/A"}`,
+            `Référence du dépôt : ${depositReference}`,
+            `Référence saisie par le client : ${customerReference || "N/A"}`,
+            "",
+          );
+          keyboard.push([
+            { text: `Approuver #${payment.id}`, callback_data: `mpay:approve:${payment.id}` },
+            { text: `Rejeter #${payment.id}`, callback_data: `mpay:reject:${payment.id}` },
+          ]);
+        });
+        await ctx.reply(lines.join("\n"), { reply_markup: { inline_keyboard: keyboard } });
+      }
     } catch (error: any) {
       await ctx.reply(error?.message || "Erreur lors de la recherche des paiements manuels.");
     }
-  });
+  };
+  bot.command("findmanualpayment", handleManualPaymentSearch);
+  bot.command("manualpayments", handleManualPaymentSearch);
 
   // ─── /groups (groupe admin uniquement) — liste et nettoyage des groupes connus ──
   bot.command("groups", async (ctx) => {
