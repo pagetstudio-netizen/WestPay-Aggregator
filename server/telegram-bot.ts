@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { storage } from "./storage";
 import { pool, financialPool } from "./db";
 import { reviewManualPayment, searchManualPaymentsByNumber } from "./manual-payment-service";
+import { notifyConfirmedPaymentWebhook } from "./merchant-webhooks";
 import {
   initiatePayout as mbiyoInitiatePayout,
   getTransactionStatus as mbiyoGetStatus,
@@ -2280,6 +2281,20 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           payerNumber: payment.payerPhone,
           country: payment.country,
           provider: "mobile_money",
+          platformFee: payment.amount - (result.credit ?? payment.amount),
+          creditedAmount: result.credit ?? payment.amount,
+        }).catch(() => {});
+        notifyConfirmedPaymentWebhook(payment.merchantId, {
+          event: "payment.confirmed",
+          txId,
+          amount: payment.amount,
+          currency: payment.country,
+          payer: payment.payerPhone || "",
+          country: payment.country,
+          merchantSlug: result.merchant?.slug || "",
+          provider: "mobile_money",
+          reference: payment.providerReference || txId,
+          timestamp: new Date().toISOString(),
         }).catch(() => {});
       }
       const alreadyHandled = result.outcome === "already_approved" || result.outcome === "already_rejected";
@@ -3228,6 +3243,8 @@ export async function notifyMerchantPayment(merchantId: number, data: {
   payerNumber?: string | null;
   country: string;
   provider: string;
+  platformFee?: number;
+  creditedAmount?: number;
 }): Promise<void> {
   if (!bot) return;
   try {
@@ -3258,13 +3275,14 @@ export async function notifyMerchantPayment(merchantId: number, data: {
     };
     const baseFeeRate = PAYIN_FEE_OVERRIDES[data.country] ?? 0.055;
     const feeRate = merchant?.feeExempt ? 0 : baseFeeRate;
-    const feePct = (feeRate * 100).toLocaleString("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
-    const feePctEn = (feeRate * 100).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
     const grossAmount = data.amount;
-    const westpayFee = Math.round(grossAmount * feeRate);
-    const netCredited = grossAmount - westpayFee;
+    const westpayFee = data.platformFee ?? Math.round(grossAmount * feeRate);
+    const netCredited = data.creditedAmount ?? grossAmount - westpayFee;
+    const effectiveFeeRate = grossAmount > 0 ? westpayFee / grossAmount : 0;
+    const feePct = (effectiveFeeRate * 100).toLocaleString("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
+    const feePctEn = (effectiveFeeRate * 100).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
 
-    const feeLines = feeRate > 0 ? [
+    const feeLines = westpayFee > 0 ? [
       `${t.grossReceived} ${formatAmountC(grossAmount, data.country)}`,
       `${t.westpayFee} (${lang === "fr" ? feePct : feePctEn}%):* -${formatAmountC(westpayFee, data.country)}`,
       `${t.netCredited} ${formatAmountC(netCredited, data.country)}`,
@@ -3490,29 +3508,34 @@ export async function notifyAdminPayment(data: {
 
 export async function notifyAdminManualPaymentSubmission(data: {
   paymentId: number;
-  txId: string;
+  depositReference: string;
+  customerReference: string;
   merchantName: string;
+  payerName?: string | null;
   payerNumber: string;
   recipientPhone: string;
   country: string;
   operator: string;
   amount: number;
-  proof: string;
 }): Promise<boolean> {
   try {
     const groupId = await storage.getSetting("telegram_group_id");
     if (!bot || !groupId) return false;
+    const depositReference = data.depositReference.trim() || "N/A";
+    const customerReference = data.customerReference.replace(/\s+/g, " ").trim().slice(0, 120) || "N/A";
+    const operator = data.operator.replace(/\s+/g, " ").trim() || "N/A";
     const message = [
       "Paiement manuel à vérifier",
-      `Demande #${data.paymentId} · Référence ${data.txId}`,
+      `ID de demande : ${data.paymentId}`,
+      `Référence du dépôt : ${depositReference}`,
+      `Référence saisie par le client : ${customerReference}`,
       `Marchand : ${data.merchantName}`,
       `Montant : ${formatAmountC(data.amount, data.country)}`,
-      `Pays / opérateur : ${countryLabel(data.country)} · ${data.operator}`,
-      `Client : ${data.payerNumber || "N/A"}`,
+      `Pays : ${countryLabel(data.country)}`,
+      `Opérateur : ${operator}`,
+      `Nom du client : ${data.payerName || "N/A"}`,
+      `Numéro du client : ${data.payerNumber || "N/A"}`,
       `Numéro destinataire : ${data.recipientPhone || "N/A"}`,
-      "",
-      "Référence de transaction transmise par le client :",
-      data.proof.slice(0, 2000),
       "",
       "Vérifiez la réception auprès du compte Mobile Money avant d’approuver. Ne demandez pas de PIN ni de code secret.",
     ].join("\n");

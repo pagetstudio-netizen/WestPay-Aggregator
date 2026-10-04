@@ -102,6 +102,7 @@ import {
 import { calcMerchantCreditForMerchant } from "./payment-fees";
 import { buildManualUssdCode, validateManualUssdTemplate } from "./manual-payment-utils";
 import { reviewManualPayment, submitManualPaymentProof } from "./manual-payment-service";
+import { assertPublicWebhookUrl, notifyConfirmedPaymentWebhook, sendWebhookNotification } from "./merchant-webhooks";
 
 const BANK1_CHECKOUT_URL = "https://checkout1.westpay.cfd";
 
@@ -792,44 +793,6 @@ async function cryptoApiKeyAuthMiddleware(req: Request, res: Response, next: Nex
 }
 
 const CRYPTO_FEE_RATE = 0.05;
-
-/**
- * SSRF guard: validates that a webhook URL is a public HTTP(S) address.
- * Blocks loopback, link-local, private RFC-1918, and cloud metadata addresses.
- */
-function assertPublicWebhookUrl(url: string): void {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error(`URL webhook invalide: ${url}`);
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error(`Protocole webhook non autorise: ${parsed.protocol}`);
-  }
-  const hostname = parsed.hostname.toLowerCase();
-  // Block private / loopback / link-local / metadata ranges
-  const BLOCKED = [
-    /^localhost$/,
-    /^127\./,
-    /^0\.0\.0\.0$/,
-    /^::1$/,
-    /^10\./,
-    /^172\.(1[6-9]|2\d|3[01])\./,
-    /^192\.168\./,
-    /^169\.254\./,
-    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
-    /^fc00:/i,
-    /^fe80:/i,
-    /^metadata\.google\.internal$/,
-    /^169\.254\.169\.254$/,
-  ];
-  for (const re of BLOCKED) {
-    if (re.test(hostname)) {
-      throw new Error(`URL webhook pointe vers une adresse privee/interne: ${hostname}`);
-    }
-  }
-}
 
 async function notifyCryptoWebhook(merchant: { id: number; webhookUrl?: string | null; webhookSecret?: string | null }, payload: Record<string, any>): Promise<void> {
   if (!merchant.webhookUrl) return;
@@ -4141,143 +4104,6 @@ export async function registerRoutes(
   });
 
   // ==================== MERCHANT WEBHOOK ====================
-
-  async function sendWebhookNotification(merchantId: number, payload: Record<string, any>): Promise<{ success: boolean; statusCode?: number; error?: string }> {
-    try {
-      const merchant = await storage.getMerchantById(merchantId);
-      if (!merchant?.webhookUrl) return { success: false, error: "Aucune URL webhook configuree" };
-
-      assertPublicWebhookUrl(merchant.webhookUrl);
-
-      const payloadStr = JSON.stringify(payload);
-      const signature = merchant.webhookSecret
-        ? crypto.createHmac("sha256", merchant.webhookSecret).update(payloadStr).digest("hex")
-        : "";
-
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10000);
-
-      try {
-        const response = await fetch(merchant.webhookUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-RobotPay-Signature": signature,
-            "X-RobotPay-Event": payload.event || "payment.confirmed",
-          },
-          body: payloadStr,
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-
-        const responseText = await response.text().catch(() => "");
-        const success = response.status >= 200 && response.status < 300;
-
-        await storage.createWebhookLog({
-          merchantId,
-          url: merchant.webhookUrl,
-          payload: payloadStr,
-          statusCode: response.status,
-          response: responseText.substring(0, 500),
-          success,
-        });
-
-        console.log(`[WEBHOOK] ${success ? "Succes" : "Echec"} pour marchand #${merchantId}: ${response.status}`);
-        return { success, statusCode: response.status };
-      } catch (fetchErr: any) {
-        clearTimeout(timeout);
-        const errorMsg = fetchErr.name === "AbortError" ? "Timeout (10s)" : fetchErr.message;
-
-        await storage.createWebhookLog({
-          merchantId,
-          url: merchant.webhookUrl,
-          payload: payloadStr,
-          statusCode: 0,
-          response: errorMsg,
-          success: false,
-        });
-
-        console.error(`[WEBHOOK] Erreur envoi pour marchand #${merchantId}:`, errorMsg);
-        return { success: false, error: errorMsg };
-      }
-    } catch (err: any) {
-      console.error(`[WEBHOOK] Erreur generale:`, err.message);
-      return { success: false, error: err.message };
-    }
-  }
-
-  // Payment confirmations can be received from a callback, polling, or the
-  // admin status-sync API. Keep delivery idempotent across those paths while
-  // retrying transient merchant endpoint failures.
-  const paymentWebhookInFlight = new Map<string, Promise<void>>();
-  async function notifyConfirmedPaymentWebhook(merchantId: number, payload: Record<string, any>): Promise<void> {
-    const txId = String(payload.txId || payload.reference || "");
-    const key = `${merchantId}:payment.confirmed:${txId}`;
-    if (!txId) {
-      await sendWebhookNotification(merchantId, payload);
-      return;
-    }
-
-    const running = paymentWebhookInFlight.get(key);
-    if (running) {
-      await running;
-      return;
-    }
-
-    const delivery = (async () => {
-      const merchant = await storage.getMerchantById(merchantId);
-      if (!merchant?.webhookUrl) return;
-
-      // A successful delivery is the durable idempotency marker. Failed
-      // attempts remain retryable when the provider reports success again.
-      try {
-        const logs = await storage.getWebhookLogs(merchantId);
-        const alreadyDelivered = logs.some((log) => {
-          if (!log.success || log.url !== merchant.webhookUrl) return false;
-          try {
-            const loggedPayload = JSON.parse(log.payload);
-            return loggedPayload.event === (payload.event || "payment.confirmed")
-              && String(loggedPayload.txId || loggedPayload.reference || "") === txId;
-          } catch {
-            return false;
-          }
-        });
-        if (alreadyDelivered) {
-          console.log(`[WEBHOOK] Confirmation déjà livrée pour marchand #${merchantId}, TX=${txId}`);
-          return;
-        }
-      } catch (err: any) {
-        // Delivery is still attempted if the audit lookup is temporarily
-        // unavailable; the send itself will create a new audit record.
-        console.warn(`[WEBHOOK] Lecture idempotence impossible pour TX=${txId}: ${err.message}`);
-      }
-
-      const retryDelays = [0, 500, 1500];
-      for (let attempt = 0; attempt < retryDelays.length; attempt++) {
-        if (retryDelays[attempt] > 0) {
-          await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
-        }
-        const result = await sendWebhookNotification(merchantId, payload);
-        if (result.success) {
-          console.log(`[WEBHOOK] Confirmation livrée pour TX=${txId} (tentative ${attempt + 1})`);
-          return;
-        }
-        if (attempt < retryDelays.length - 1) {
-          console.warn(`[WEBHOOK] Échec livraison TX=${txId}, nouvelle tentative ${attempt + 2}/3`);
-        }
-      }
-    })();
-
-    paymentWebhookInFlight.set(key, delivery);
-    try {
-      await delivery;
-    } finally {
-      if (paymentWebhookInFlight.get(key) === delivery) {
-        paymentWebhookInFlight.delete(key);
-      }
-    }
-  }
-
   async function settleLipaPapPayment(pending: any, providerTxId: string): Promise<boolean> {
     const merchant = await storage.getMerchantById(pending.merchantId);
     const merchantCountry = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
@@ -5019,14 +4845,15 @@ export async function registerRoutes(
         const merchant = await storage.getMerchantById(result.payment.merchantId);
         const sent = await notifyAdminManualPaymentSubmission({
           paymentId: result.payment.id,
-          txId: result.payment.txId || result.payment.providerReference || `WP-${result.payment.id}`,
+          depositReference: result.payment.providerReference || result.payment.txId || `WP-${result.payment.id}`,
+          customerReference: result.payment.manualSubmission || proof.trim(),
           merchantName: merchant?.name || `Marchand #${result.payment.merchantId}`,
+          payerName: result.payment.payerName || "",
           payerNumber: result.payment.payerPhone || "",
           recipientPhone: result.payment.manualRecipientPhone || "",
           country: result.payment.country,
           operator: result.payment.paymentMethod,
           amount: result.payment.amount,
-          proof: result.payment.manualSubmission || proof.trim(),
         });
         if (!sent) console.error(`[MANUAL PAYIN] Notification Telegram non envoyée pour le paiement #${result.payment.id}`);
       }
@@ -6317,6 +6144,20 @@ export async function registerRoutes(
           payerNumber: payment.payerPhone,
           country: payment.country,
           provider: "mobile_money",
+          platformFee: payment.amount - (result.credit ?? payment.amount),
+          creditedAmount: result.credit ?? payment.amount,
+        }).catch(() => {});
+        notifyConfirmedPaymentWebhook(payment.merchantId, {
+          event: "payment.confirmed",
+          txId,
+          amount: payment.amount,
+          currency: payment.country,
+          payer: payment.payerPhone || "",
+          country: payment.country,
+          merchantSlug: result.merchant?.slug || "",
+          provider: "mobile_money",
+          reference: payment.providerReference || txId,
+          timestamp: new Date().toISOString(),
         }).catch(() => {});
       }
       return res.json({ success: true, alreadyApproved: result.outcome === "already_approved" });
