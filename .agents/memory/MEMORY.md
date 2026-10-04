@@ -16,4 +16,4 @@
 - [Drimpay integration](drimpay-integration.md) — don't invent a balance endpoint or bank payout support; keep operator codes provider-supplied.
 - [ClaPay failed-status diagnostics](clapay-status-diagnostics.md) — a FAILED status may expose only a generic observation; compare non-sensitive routing fields and don't infer the cause.
 - [Legacy gateway retirement](gateway-retirement.md) — Never relabel or reissue an operation with an existing provider reference; preserve the reference and stop old-provider polling.
-- [Manual pay-in handling](manual-payins.md) — Never collect secrets; on approval notify the merchant, preserve history, and dispatch one confirmed-payment webhook.
+- [Manual pay-in handling](manual-payins.md) — Never collect secrets; show both searchable references to admins and notify merchants after approval.
