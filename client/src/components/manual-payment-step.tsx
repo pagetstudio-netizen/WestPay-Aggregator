@@ -168,15 +168,18 @@ ${manualPaymentDesign}
 }
 
 .copy-icon {
-  width: 13px;
-  height: 13px;
+  width: 15px;
+  height: 15px;
+  color: #fff;
+  border-width: 2px;
 }
 
 .copy-icon::after {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   left: 3px;
-  top: -4px;
+  top: -5px;
+  border-width: 2px;
   background: #58b844;
 }
 
@@ -223,6 +226,46 @@ ${manualPaymentDesign}
 
 .verify-button:hover:not(:disabled) {
   background: #f4fbf2;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 160ms ease,
+    filter 160ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease;
+  transform-origin: center;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  button:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px) scale(0.965);
+  filter: brightness(0.94);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+}
+
+button:focus-visible {
+  outline: 3px solid rgba(88, 184, 68, 0.38);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button {
+    transition: none;
+  }
+
+  button:hover:not(:disabled),
+  button:active:not(:disabled) {
+    transform: none;
+  }
 }
 
 .footer {
