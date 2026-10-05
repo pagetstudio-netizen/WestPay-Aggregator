@@ -18,3 +18,4 @@
 - [ClaPay failed-status diagnostics](clapay-status-diagnostics.md) — a FAILED status may expose only a generic observation; compare non-sensitive routing fields and don't infer the cause.
 - [Legacy gateway retirement](gateway-retirement.md) — Never relabel or reissue an operation with an existing provider reference; preserve the reference and stop old-provider polling.
 - [Manual pay-in handling](manual-payins.md) — Never collect secrets; show both searchable references to admins and notify merchants after approval.
+- [Node package-manager mismatch](node-package-manager-mismatch.md) — A pnpm-backed node_modules tree may lack npm .bin shims; inspect package entrypoints before attempting repair.

@@ -456,14 +456,18 @@ export default function Bank2PaymentPage() {
     );
   }
 
+  const isManualPaymentScreen = screen === "pending" && Boolean(manualPayment && paymentId);
+
   return (
-    <div className="bank2-page">
+    <div className={`bank2-page${isManualPaymentScreen ? " bank2-manual-payment" : ""}`}>
       <Bank2Styles />
       <main className="bank2-shell">
-        <header className="bank2-amount">
-          <span>Montant :</span>
-          <strong>{amount > 0 ? formatAmount(amount) : "—"} <small>{currency}</small></strong>
-        </header>
+        {!isManualPaymentScreen && (
+          <header className="bank2-amount">
+            <span>Montant :</span>
+            <strong>{amount > 0 ? formatAmount(amount) : "—"} <small>{currency}</small></strong>
+          </header>
+        )}
 
         {screen === "countries" ? (
           <section className="bank2-country-card">
@@ -628,7 +632,7 @@ export default function Bank2PaymentPage() {
 
             {screen === "pending" && (
               manualPayment && paymentId ? (
-                <div className="bank2-content bank2-state">
+                <div className="bank2-content bank2-manual-content">
                   <ManualPaymentStep
                     paymentId={paymentId}
                     reference={reference}
@@ -782,6 +786,9 @@ function Bank2Styles() {
         .bank2-content{padding:10px 22px 24px}.bank2-notice{font-size:14px}.bank2-label{font-size:15px}.bank2-actions{gap:14px}.bank2-button{font-size:16px;min-height:52px}
         .bank2-state h2{font-size:20px}.bank2-state>p{font-size:15px}.bank2-success h2{font-size:22px}.bank2-success h3{font-size:21px}
       }
+      .bank2-page.bank2-manual-payment{background:#f5f7f6;color:#45545b;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:0}
+      .bank2-manual-payment .bank2-shell{max-width:512px}
+      .bank2-manual-content{display:block;padding:0;text-align:left}
     `}</style>
   );
 }

@@ -5122,7 +5122,7 @@ export async function registerRoutes(
         const reference = `WP-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(6).toString("hex").toUpperCase()}`;
         const paymentToken = crypto.randomBytes(32).toString("hex");
         const manualInstructions = operatorRecord.manualInstructions?.trim()
-          || "Effectuez le paiement vers le numéro indiqué. Votre opérateur vous guidera pour terminer l’opération. Revenez ensuite saisir la référence de transaction affichée après le paiement.";
+          || "Veuillez envoyer le montant indiqué au numéro ci-dessous. Vérifiez attentivement le numéro avant de confirmer. Après le paiement, saisissez la référence de transaction ou le message de confirmation reçu. En cas de problème, contactez le commerçant.";
         const pending = await storage.createPendingPayment({
           merchantId: merchant.id,
           country,

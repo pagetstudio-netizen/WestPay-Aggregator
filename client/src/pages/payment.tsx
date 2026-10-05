@@ -445,6 +445,8 @@ export default function PaymentPage() {
     </div>
   );
 
+  const isManualPaymentScreen = step === 2 && Boolean(manualPayment && paymentId);
+
   /* ══════════════════════════ RENDER ═════════════════════════════════════ */
   return (
     <>
@@ -516,10 +518,10 @@ export default function PaymentPage() {
         }
       `}</style>
 
-      <div style={{ minHeight:"100vh", background:"#fff", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"12px 0" }}>
+      <div style={{ minHeight:"100vh", background:isManualPaymentScreen ? "#f5f7f6" : "#fff", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:isManualPaymentScreen ? "flex-start" : "center", padding:isManualPaymentScreen ? 0 : "12px 0" }}>
 
         {/* ── top header (outside card) ─────────────────────────────── */}
-        <div style={{ width:"100%", maxWidth:400, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 20px 14px" }}>
+        {!isManualPaymentScreen && <div style={{ width:"100%", maxWidth:400, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 20px 14px" }}>
           <div style={{ display:"flex", alignItems:"center", gap:10 }}>
             <div style={{ width:40, height:40, borderRadius:10, background:"#e8f0fe", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
               <img src={bankCardIcon} alt="" style={{ width:24, height:24, filter:"brightness(0) saturate(100%) invert(24%) sepia(95%) saturate(1200%) hue-rotate(218deg) brightness(99%) contrast(97%)" }} />
@@ -534,11 +536,11 @@ export default function PaymentPage() {
               <img src="/help-icon.png" alt={t("help")} style={{ width:42, height:42, objectFit:"cover", borderRadius:"50%" }} />
             </button>
           </div>
-        </div>
+        </div>}
 
         {/* ── white card ───────────────────────────────────────────── */}
-        <div style={{ width:"100%", maxWidth:400, background:"#fff", borderRadius:24, boxShadow:"0 2px 24px rgba(0,0,0,.14), 0 1px 4px rgba(0,0,0,.07)", overflow:"hidden" }}>
-          <div style={{ padding:"18px 20px 20px", display:"flex", flexDirection:"column", gap:14 }}>
+        <div style={{ width:"100%", maxWidth:isManualPaymentScreen ? 512 : 400, background:"#fff", borderRadius:isManualPaymentScreen ? 0 : 24, boxShadow:isManualPaymentScreen ? "none" : "0 2px 24px rgba(0,0,0,.14), 0 1px 4px rgba(0,0,0,.07)", overflow:"hidden" }}>
+          <div style={{ padding:isManualPaymentScreen ? 0 : "18px 20px 20px", display:"flex", flexDirection:"column", gap:isManualPaymentScreen ? 0 : 14 }}>
 
             {/* ══ STEP 1 ══════════════════════════════════════════════ */}
             {step === 1 && (<>

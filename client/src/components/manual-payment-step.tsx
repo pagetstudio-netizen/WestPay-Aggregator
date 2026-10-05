@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from "react";
+import { Check, Copy, ShieldCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/lib/language";
+import "./manual-payment-step.css";
 
 export type ManualPaymentDetails = {
   recipientPhone: string;
@@ -19,28 +21,27 @@ type Props = {
   payment: ManualPaymentDetails;
 };
 
-export default function ManualPaymentStep({ paymentId, reference, amount, currency, operator, payment }: Props) {
+export default function ManualPaymentStep({ paymentId, amount, currency, operator, payment }: Props) {
   const { t } = useLanguage();
   const { toast } = useToast();
   const [proof, setProof] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
-  const copyInstructions = async () => {
-    const text = [
-      payment.instructions,
-      payment.recipientName ? `${t("manualRecipientNameLabel")}: ${payment.recipientName}` : "",
-      `${t("manualRecipientLabel")}: ${payment.recipientPhone}`,
-      payment.ussdCode ? `USSD: ${payment.ussdCode}` : "",
-      `${operator} · ${amount.toLocaleString()} ${currency}`,
-    ].filter(Boolean).join("\n");
+  const copyValue = async (value: string, field: string) => {
     try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2500);
+      await navigator.clipboard.writeText(value);
+      setCopiedField(field);
+      window.setTimeout(() => {
+        setCopiedField((current) => current === field ? null : current);
+      }, 2000);
     } catch {
-      toast({ title: "Copie impossible", description: "Votre navigateur n’autorise pas l’accès au presse-papiers.", variant: "destructive" });
+      toast({
+        title: t("manualCopyErrorTitle"),
+        description: t("manualCopyErrorDescription"),
+        variant: "destructive",
+      });
     }
   };
 
@@ -54,13 +55,13 @@ export default function ManualPaymentStep({ paymentId, reference, amount, curren
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paymentId, paymentToken: payment.paymentToken, proof: proof.trim() }),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || "Impossible d’envoyer cette référence.");
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || t("manualSubmitError"));
       setSubmitted(true);
     } catch (error: any) {
       toast({
-        title: "Envoi impossible",
-        description: error?.message || "Vérifiez votre connexion puis réessayez.",
+        title: t("manualSubmitError"),
+        description: error?.message || t("manualSubmitError"),
         variant: "destructive",
       });
     } finally {
@@ -68,86 +69,124 @@ export default function ManualPaymentStep({ paymentId, reference, amount, curren
     }
   };
 
-  return (
-    <section style={{ display: "flex", flexDirection: "column", gap: 14 }} data-testid="manual-payment-step">
-      <div style={{ border: "1px solid #bfdbfe", borderRadius: 12, background: "#eff6ff", padding: "14px 16px" }}>
-        <p style={{ fontSize: 15, fontWeight: 700, color: "#1e3a8a", margin: "0 0 8px" }}>{t("manualPaymentTitle")}</p>
-        <p style={{ fontSize: 13, color: "#1e40af", margin: 0 }}>
-          {operator} · {amount.toLocaleString()} {currency}
-          {reference ? ` · ${reference}` : ""}
-        </p>
-      </div>
+  const copyButton = (value: string, field: string, label: string) => {
+    const isCopied = copiedField === field;
+    return (
+      <button
+        type="button"
+        className="manual-payment__copy"
+        onClick={() => void copyValue(value, field)}
+        aria-label={`${isCopied ? t("manualCopied") : t("manualCopyButton")} ${label}`}
+        title={`${isCopied ? t("manualCopied") : t("manualCopyButton")} ${label}`}
+        data-testid={`button-manual-copy-${field}`}
+      >
+        {isCopied ? <Check size={14} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
+        <span>{isCopied ? t("manualCopied") : t("manualCopyButton")}</span>
+      </button>
+    );
+  };
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-        {payment.recipientName && (
-          <div>
-            <p style={{ fontSize: 12, color: "#6b7280", margin: "0 0 4px" }}>{t("manualRecipientNameLabel")}</p>
-            <p style={{ fontSize: 16, fontWeight: 700, color: "#111827", margin: 0 }}>{payment.recipientName}</p>
-          </div>
-        )}
-        <div>
-          <p style={{ fontSize: 12, color: "#6b7280", margin: "0 0 4px" }}>{t("manualRecipientLabel")}</p>
-          <p style={{ fontSize: 18, fontWeight: 700, color: "#111827", margin: 0 }}>{payment.recipientPhone}</p>
+  return (
+    <section className="manual-payment" data-testid="manual-payment-step">
+      <header className="manual-payment__header">
+        <h1 className="manual-payment__title">{t("payTitle")}</h1>
+        <div className="manual-payment__operator">
+          <span>{t("payOperator")}:</span>
+          <strong>{operator}</strong>
         </div>
-        <p style={{ whiteSpace: "pre-wrap", fontSize: 13, color: "#374151", margin: 0 }}>{payment.instructions}</p>
-        {payment.ussdCode ? (
-          <>
-            <code style={{ display: "block", padding: "10px 12px", borderRadius: 8, background: "#f3f4f6", color: "#111827", fontSize: 15, fontWeight: 700, wordBreak: "break-all" }}>
-              {payment.ussdCode}
-            </code>
+      </header>
+
+      <div className="manual-payment__body">
+        <div className="manual-payment__notice" role="note">
+          <p className="manual-payment__kicker">{t("manualNoticeKicker")}</p>
+          <p className="manual-payment__intro">
+            {payment.instructions?.trim() || t("manualInstructionIntro")}
+          </p>
+          <p className="manual-payment__security">
+            <ShieldCheck size={17} aria-hidden="true" />
+            <span>{t("manualNoSecret")}</span>
+          </p>
+        </div>
+
+        <section className="manual-payment__card" aria-labelledby="manual-transfer-step">
+          <p className="manual-payment__step" id="manual-transfer-step">{t("manualStepTransfer")}</p>
+          <div className="manual-payment__details">
+            {payment.recipientName && (
+              <div className="manual-payment__detail-row">
+                <span className="manual-payment__label">{t("manualRecipientNameLabel")}</span>
+                <strong className="manual-payment__value">{payment.recipientName}</strong>
+                {copyButton(payment.recipientName, "account", t("manualRecipientNameLabel"))}
+              </div>
+            )}
+            <div className="manual-payment__detail-row">
+              <span className="manual-payment__label">{t("manualRecipientLabel")}</span>
+              <strong className="manual-payment__value">{payment.recipientPhone}</strong>
+              {copyButton(payment.recipientPhone.replace(/\s+/g, ""), "phone", t("manualRecipientLabel"))}
+            </div>
+            <div className="manual-payment__detail-row manual-payment__amount-row">
+              <span className="manual-payment__label">{t("manualAmountLabel")}</span>
+              <strong className="manual-payment__value">
+                {amount.toLocaleString()} {currency}
+              </strong>
+            </div>
+          </div>
+        </section>
+
+        <section className="manual-payment__card manual-payment__pay-card" aria-labelledby="manual-dial-step">
+          <p className="manual-payment__step" id="manual-dial-step">
+            {payment.ussdCode ? t("manualStepDial") : t("manualStepNoUssd")}
+          </p>
+          {payment.ussdCode ? (
             <a
               href={`tel:${encodeURIComponent(payment.ussdCode)}`}
-              style={{ display: "block", borderRadius: 9, background: "#2563eb", color: "#fff", padding: "12px 14px", fontSize: 14, fontWeight: 700, textAlign: "center", textDecoration: "none" }}
+              className="manual-payment__pay-button"
               data-testid="button-manual-open-dialer"
             >
               {t("manualDialerButton")}
             </a>
-          </>
-        ) : (
-          <p style={{ fontSize: 12, color: "#4b5563", margin: 0 }}>{t("manualNoUssd")}</p>
-        )}
-        <button
-          type="button"
-          onClick={copyInstructions}
-          style={{ border: "1px solid #cbd5e1", borderRadius: 9, background: "#fff", color: "#1f2937", padding: "10px 14px", fontSize: 13, fontWeight: 600 }}
-          data-testid="button-manual-copy-instructions"
-        >
-          {copied ? t("manualCopied") : t("manualCopyButton")}
-        </button>
+          ) : null}
+        </section>
+
+        <section className="manual-payment__card manual-payment__proof-card" aria-labelledby="manual-proof-step">
+          <p className="manual-payment__step" id="manual-proof-step">{t("manualStepProof")}</p>
+          {submitted ? (
+            <div className="manual-payment__submitted" role="status" aria-live="polite">
+              <Check size={19} aria-hidden="true" />
+              <span>{t("manualSubmitted")}</span>
+            </div>
+          ) : (
+            <form onSubmit={submitProof} className="manual-payment__proof-form">
+              <label className="manual-payment__sr-only" htmlFor={`manual-proof-${paymentId}`}>
+                {t("manualProofLabel")}
+              </label>
+              <input
+                id={`manual-proof-${paymentId}`}
+                type="text"
+                value={proof}
+                onChange={(event) => setProof(event.target.value.slice(0, 120))}
+                placeholder={t("manualProofPlaceholder")}
+                maxLength={120}
+                required
+                autoComplete="off"
+                data-testid="input-manual-proof"
+              />
+              <button
+                type="submit"
+                disabled={!proof.trim() || submitting}
+                data-testid="button-manual-submit-proof"
+              >
+                {submitting ? t("payProcessing") : t("manualSubmitButton")}
+              </button>
+            </form>
+          )}
+        </section>
+
+        <footer className="manual-payment__footer">
+          <ShieldCheck className="manual-payment__footer-shield" size={47} strokeWidth={2.3} aria-hidden="true" />
+          <span>{t("manualSecurityFooter")}</span>
+          <strong>RobotPay</strong>
+        </footer>
       </div>
-
-      <p style={{ fontSize: 12, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 9, padding: "10px 12px", margin: 0 }}>
-        {t("manualNoSecret")}
-      </p>
-
-      {submitted ? (
-        <div role="status" style={{ border: "1px solid #86efac", borderRadius: 10, background: "#f0fdf4", color: "#166534", padding: "12px 14px", fontSize: 13, fontWeight: 600 }}>
-          {t("manualSubmitted")}
-        </div>
-      ) : (
-        <form onSubmit={submitProof} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <label htmlFor={`manual-proof-${paymentId}`} style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{t("manualProofLabel")}</label>
-          <input
-            id={`manual-proof-${paymentId}`}
-            type="text"
-            value={proof}
-            onChange={(event) => setProof(event.target.value.slice(0, 120))}
-            placeholder={t("manualProofPlaceholder")}
-            maxLength={120}
-            required
-            style={{ width: "100%", boxSizing: "border-box", border: "1px solid #d1d5db", borderRadius: 9, padding: "10px 12px", fontSize: 13 }}
-            data-testid="input-manual-proof"
-          />
-          <button
-            type="submit"
-            disabled={!proof.trim() || submitting}
-            style={{ border: 0, borderRadius: 9, background: !proof.trim() || submitting ? "#9ca3af" : "#16a34a", color: "#fff", padding: "12px 14px", fontSize: 14, fontWeight: 700, cursor: !proof.trim() || submitting ? "not-allowed" : "pointer" }}
-            data-testid="button-manual-submit-proof"
-          >
-            {submitting ? t("payProcessing") : t("manualSubmitButton")}
-          </button>
-        </form>
-      )}
     </section>
   );
 }
