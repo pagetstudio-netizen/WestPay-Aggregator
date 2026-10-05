@@ -57,27 +57,21 @@ export function Maquette() {
         .manual-payment-maquette-frame *::before,
         .manual-payment-maquette-frame *::after { box-sizing: border-box; }
         .mp-top {
-          min-height: 170px;
-          padding: 15px 20px 20px;
+          min-height: 96px;
+          display: flex;
+          align-items: center;
+          padding: 12px 20px;
           color: #fff;
           background: var(--pay-green);
           box-shadow: 0 3px 12px rgba(48, 108, 48, .16);
         }
-        .mp-top-inner { max-width: 510px; margin: 0 auto; }
-        .mp-top-title {
-          margin: 0;
-          text-align: center;
-          font-size: 16px;
-          line-height: 1.3;
-          font-weight: 750;
-          letter-spacing: -.015em;
-        }
+        .mp-top-inner { width: 100%; max-width: 510px; margin: 0 auto; }
         .mp-operator-line {
           display: flex;
           align-items: end;
           justify-content: space-between;
           gap: 12px;
-          margin-top: 48px;
+          margin-top: 0;
         }
         .mp-operator-label {
           margin: 0;
@@ -101,12 +95,6 @@ export function Maquette() {
           border-top: 0;
           border-radius: 0 0 13px 13px;
           box-shadow: 0 4px 12px rgba(39, 65, 50, .10);
-        }
-        .mp-notice-kicker {
-          margin: 0 0 8px;
-          color: #899494;
-          font-size: 12px;
-          font-weight: 600;
         }
         .mp-notice-copy {
           margin: 0;
@@ -205,8 +193,6 @@ export function Maquette() {
         }
         .mp-dialer:hover { transform: translateY(-1px); background: #4ca541; box-shadow: 0 5px 0 #398d38, 0 9px 16px rgba(64, 139, 57, .19); }
         .mp-dialer:active { transform: translateY(2px); box-shadow: 0 2px 0 #398d38; }
-        .mp-ussd { margin: 14px 0 0; color: #7c8a8e; font-size: 12px; text-align: center; }
-        .mp-ussd code { color: #52676b; font-family: var(--font-mono, monospace); font-weight: 700; }
         .mp-proof-title { margin-top: 23px; margin-bottom: 7px; }
         .mp-proof-hint { margin: 0 0 11px 29px; color: #77868a; font-size: 12px; line-height: 1.45; }
         .mp-proof-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 9px; margin-left: 3px; }
@@ -243,21 +229,6 @@ export function Maquette() {
         .mp-submit:not(:disabled) { background: var(--pay-green-deep); }
         .mp-submit:not(:disabled):hover { background: #2e7e31; transform: translateY(-1px); }
         .mp-submit:disabled { cursor: not-allowed; opacity: .78; }
-        .mp-warning {
-          display: flex;
-          gap: 9px;
-          align-items: flex-start;
-          margin-top: 14px;
-          padding: 12px 13px;
-          border: 1px solid #f0d895;
-          border-radius: 10px;
-          background: #fff9e9;
-          color: #795e19;
-          font-size: 12px;
-          line-height: 1.45;
-          font-weight: 600;
-        }
-        .mp-warning-mark { flex: none; font-size: 15px; line-height: 1.2; font-weight: 850; }
         .mp-success {
           margin: 12px 0 0 3px;
           padding: 13px 14px;
@@ -281,10 +252,8 @@ export function Maquette() {
         .mp-shield { width: 49px; height: 54px; flex: none; }
         .mp-footer-kicker { display: block; margin-bottom: 1px; font-size: 13px; line-height: 1.2; font-weight: 650; }
         .mp-brand { display: block; font-family: Georgia, serif; font-size: 29px; line-height: 1; font-weight: 700; letter-spacing: -.07em; }
-        .mp-security-note { margin: 8px 0 0; color: #82908d; font-size: 10px; text-align: center; }
         @media (min-width: 560px) {
-          .mp-top { min-height: 185px; padding-top: 18px; }
-          .mp-operator-line { margin-top: 52px; }
+          .mp-top { min-height: 112px; padding-top: 18px; }
           .mp-content { width: min(100% - 32px, 510px); }
           .mp-card { padding: 19px 20px; }
           .mp-action-card { padding: 20px 20px 22px; }

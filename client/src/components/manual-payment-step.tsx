@@ -89,7 +89,6 @@ export default function ManualPaymentStep({ paymentId, amount, currency, operato
   return (
     <section className="manual-payment" data-testid="manual-payment-step">
       <header className="manual-payment__header">
-        <h1 className="manual-payment__title">{t("payTitle")}</h1>
         <div className="manual-payment__operator">
           <span>{t("payOperator")}:</span>
           <strong>{operator}</strong>
@@ -98,13 +97,8 @@ export default function ManualPaymentStep({ paymentId, amount, currency, operato
 
       <div className="manual-payment__body">
         <div className="manual-payment__notice" role="note">
-          <p className="manual-payment__kicker">{t("manualNoticeKicker")}</p>
           <p className="manual-payment__intro">
             {payment.instructions?.trim() || t("manualInstructionIntro")}
-          </p>
-          <p className="manual-payment__security">
-            <ShieldCheck size={17} aria-hidden="true" />
-            <span>{t("manualNoSecret")}</span>
           </p>
         </div>
 
