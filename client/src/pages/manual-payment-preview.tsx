@@ -4,7 +4,7 @@ import { useLanguage } from "@/lib/language";
 
 const previewPayment: ManualPaymentDetails = {
   recipientPhone: "00 00 00 00",
-  recipientName: "RobotPay — démonstration",
+  recipientName: "Compte démo",
   ussdCode: "*000#",
   instructions: "Après le transfert, saisissez la référence ou le message de confirmation ci-dessous.",
   paymentToken: "preview-only",
@@ -18,28 +18,10 @@ export default function ManualPaymentPreview() {
   }, [setDefaultLang]);
 
   return (
-    <main style={{ minHeight: "100vh", padding: "16px 12px 32px", background: "#eef2ef" }}>
-      <div
-        role="note"
-        style={{
-          maxWidth: 512,
-          margin: "0 auto 14px",
-          padding: "12px 14px",
-          border: "1px solid #efd48e",
-          borderRadius: 9,
-          background: "#fff8e7",
-          color: "#604b1a",
-          fontFamily: "Inter, system-ui, sans-serif",
-          fontSize: 13,
-          lineHeight: 1.45,
-        }}
-      >
-        <strong style={{ display: "block", marginBottom: 4 }}>Aperçu de démonstration</strong>
-        <span>
-          Les coordonnées sont fictives. Le bouton de paiement et l’envoi de preuve ne déclenchent
-          aucune opération depuis cet aperçu.
-        </span>
-      </div>
+    <main
+      aria-label="Aperçu de démonstration, paiement et envoi de preuve désactivés."
+      style={{ minHeight: "100vh", width: "100%", margin: 0, padding: 0, background: "#f5f5f5" }}
+    >
       <ManualPaymentStep
         paymentId={0}
         reference="DEMO-RP-0001"

@@ -37,6 +37,312 @@ const scopedDesign = `
 
 @scope (.robotpay-manual-page-root) {
 ${manualPaymentDesign}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 146px;
+  padding: 12px 22px 24px;
+}
+
+.header-title {
+  width: 100%;
+  text-align: center;
+  font-size: 26px;
+}
+
+.operator-row {
+  width: 100%;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 38px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.operator-row span:first-child {
+  font-weight: 700;
+}
+
+.card {
+  width: calc(100% - 16px);
+  margin: 6px auto 0;
+  padding: 16px;
+  border-radius: 9px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.payment-method-title {
+  color: #777;
+  text-align: center;
+  font-size: 18px;
+  margin-bottom: 16px;
+}
+
+.warning {
+  color: #e53935;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.step-title,
+.step-two-title,
+.step-three-title {
+  color: #536169;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.step-title,
+.step-two-title,
+.step-three-title {
+  margin-bottom: 18px;
+}
+
+.info-row,
+.info-row.last-row {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: none;
+}
+
+.info-row.last-row {
+  padding-bottom: 2px;
+}
+
+.info-label,
+.info-value {
+  color: #536169;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.info-label {
+  flex: 0 0 auto;
+  max-width: none;
+  white-space: nowrap;
+}
+
+.info-value {
+  flex: 0 1 auto;
+  max-width: 60%;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.info-value > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.copy-btn {
+  flex-shrink: 0;
+  min-height: 34px;
+  padding: 5px 9px;
+  border: none;
+  border-radius: 7px;
+  background: #58b844;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.copy-btn:hover {
+  background: #4aa83a;
+}
+
+.copy-icon,
+.copy-icon::after {
+  border-color: #fff;
+}
+
+.copy-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.copy-icon::after {
+  width: 8px;
+  height: 8px;
+  left: 3px;
+  top: -4px;
+  background: #58b844;
+}
+
+.pay-button {
+  min-height: 60px;
+  border-radius: 999px;
+  font-size: 22px;
+}
+
+.step-two,
+.step-three {
+  padding-right: 22px;
+  padding-left: 22px;
+}
+
+.reference-input {
+  height: 64px;
+  border: 2px solid #58b844;
+  border-radius: 10px;
+  font-size: 16px;
+}
+
+.submit-btn {
+  min-width: 110px;
+  height: 64px;
+  border-radius: 10px;
+  font-size: 16px;
+}
+
+.submit-btn:disabled {
+  background: #cbd2d5;
+  color: #fff;
+  opacity: 1;
+}
+
+.verify-button {
+  min-height: 64px;
+  margin-top: 16px;
+  border: 2px solid #58b844;
+  border-radius: 10px;
+  color: #58b844;
+  font-size: 18px;
+}
+
+.verify-button:hover:not(:disabled) {
+  background: #f4fbf2;
+}
+
+.footer {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 30px 16px 40px;
+  background: #fff;
+}
+
+.footer img,
+.success-footer img {
+  width: 400px;
+  max-width: 85%;
+}
+
+.success-footer img {
+  width: 360px;
+}
+
+@media (min-width: 768px) {
+  .header {
+    padding-left: calc((100% - 700px) / 2 + 16px);
+    padding-right: calc((100% - 700px) / 2 + 16px);
+  }
+}
+
+@media (max-width: 480px) {
+  .header {
+    min-height: 132px;
+    padding: 12px 16px 20px;
+  }
+
+  .header-title {
+    font-size: 22px;
+  }
+
+  .operator-row {
+    margin-top: 34px;
+    font-size: 16px;
+  }
+
+  .card {
+    width: calc(100% - 18px);
+    margin-top: 9px;
+    padding: 14px;
+  }
+
+  .payment-method-title {
+    font-size: 16px;
+  }
+
+  .warning,
+  .step-title,
+  .step-two-title,
+  .step-three-title {
+    font-size: 16px;
+  }
+
+  .info-row,
+  .info-row.last-row {
+    gap: 7px;
+    padding: 10px 0;
+  }
+
+  .info-label,
+  .info-value {
+    font-size: 15px;
+  }
+
+  .info-label {
+    max-width: none;
+    line-height: 1.35;
+  }
+
+  .info-value {
+    max-width: 60%;
+    gap: 6px;
+    line-height: 1.35;
+  }
+
+  .copy-btn {
+    min-height: 32px;
+    padding: 4px 7px;
+    font-size: 12px;
+  }
+
+  .pay-button {
+    min-height: 54px;
+    font-size: 18px;
+  }
+
+  .reference-row {
+    gap: 6px;
+  }
+
+  .reference-input,
+  .submit-btn {
+    height: 54px;
+  }
+
+  .submit-btn {
+    min-width: 88px;
+    font-size: 13px;
+  }
+
+  .verify-button {
+    min-height: 58px;
+    font-size: 15px;
+  }
+
+  .footer {
+    padding: 28px 12px 34px;
+  }
+
+  .footer img {
+    width: 360px;
+    max-width: 88%;
+  }
+}
 }
 `;
 
