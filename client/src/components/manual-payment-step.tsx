@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Check, Copy, ShieldCheck } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/lib/language";
 import "./manual-payment-step.css";
@@ -176,9 +176,8 @@ export default function ManualPaymentStep({ paymentId, amount, currency, operato
         </section>
 
         <footer className="manual-payment__footer">
-          <ShieldCheck className="manual-payment__footer-shield" size={47} strokeWidth={2.3} aria-hidden="true" />
           <span>{t("manualSecurityFooter")}</span>
-          <strong>RobotPay</strong>
+          <img className="manual-payment__footer-logo" src="/robotpay-logo.png" alt="RobotPay" />
         </footer>
       </div>
     </section>

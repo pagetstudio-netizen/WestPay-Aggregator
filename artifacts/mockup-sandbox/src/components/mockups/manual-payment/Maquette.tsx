@@ -242,16 +242,16 @@ export function Maquette() {
         }
         .mp-footer {
           display: flex;
-          justify-content: center;
+          flex-direction: column;
           align-items: center;
-          gap: 12px;
+          justify-content: center;
+          gap: 6px;
           margin: 20px auto 0;
           color: #202624;
-          text-align: left;
+          text-align: center;
         }
-        .mp-shield { width: 49px; height: 54px; flex: none; }
         .mp-footer-kicker { display: block; margin-bottom: 1px; font-size: 13px; line-height: 1.2; font-weight: 650; }
-        .mp-brand { display: block; font-family: Georgia, serif; font-size: 29px; line-height: 1; font-weight: 700; letter-spacing: -.07em; }
+        .mp-logo { display: block; width: 164px; max-width: 45vw; height: auto; object-fit: contain; }
         @media (min-width: 560px) {
           .mp-top { min-height: 112px; padding-top: 18px; }
           .mp-content { width: min(100% - 32px, 510px); }
@@ -269,7 +269,6 @@ export function Maquette() {
 
       <header className="mp-top">
         <div className="mp-top-inner">
-          <p className="mp-top-title">Paiement</p>
           <div className="mp-operator-line">
             <p className="mp-operator-label">Opérateur :</p>
             <p className="mp-operator-name">{payment.operator}</p>
@@ -279,7 +278,6 @@ export function Maquette() {
 
       <div className="mp-content">
         <section className="mp-notice" aria-label="Instructions de paiement">
-          <p className="mp-notice-kicker">Paiement mobile · Togo</p>
           <p className="mp-notice-copy">
             Envoyez exactement {payment.amount} {payment.currency} au numéro indiqué. Vérifiez le bénéficiaire avant de confirmer le paiement.
           </p>
@@ -321,7 +319,6 @@ export function Maquette() {
             <span aria-hidden="true">↗</span>
             <span>Cliquez ici pour payer</span>
           </a>
-          <p className="mp-ussd">Code USSD : <code>{payment.ussdCode}</code></p>
           <button
             className="mp-copy"
             style={{ display: "block", margin: "10px auto 0", padding: "7px 12px", fontSize: 12 }}
@@ -363,21 +360,13 @@ export function Maquette() {
             </form>
           )}
 
-          <aside className="mp-warning" role="note">
-            <span className="mp-warning-mark" aria-hidden="true">!</span>
-            <span><strong>Ne communiquez jamais votre code PIN ni aucun code secret.</strong> L’opérateur ne vous demandera que de confirmer le paiement sur votre téléphone.</span>
-          </aside>
         </section>
 
         <footer>
           <div className="mp-footer" aria-label="Hébergé et sécurisé par RobotPay">
-            <svg className="mp-shield" viewBox="0 0 52 58" fill="none" aria-hidden="true">
-              <path d="M26 3 47 10v16c0 14-8 23-21 29C13 49 5 40 5 26V10L26 3Z" fill="#fff" stroke="#202624" strokeWidth="5" />
-              <path d="m14 29 8 8 17-19" stroke="#202624" strokeWidth="6" strokeLinecap="square" strokeLinejoin="miter" />
-            </svg>
-            <span><span className="mp-footer-kicker">Hébergé et sécurisé par</span><span className="mp-brand">RobotPay</span></span>
+            <span className="mp-footer-kicker">Hébergé et sécurisé par</span>
+            <img className="mp-logo" src="/robotpay-logo.png" alt="RobotPay" />
           </div>
-          <p className="mp-security-note">Paiement protégé · Ne partagez jamais vos codes secrets</p>
         </footer>
       </div>
     </main>
