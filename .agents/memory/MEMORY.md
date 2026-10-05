@@ -19,4 +19,5 @@
 - [Legacy gateway retirement](gateway-retirement.md) — Never relabel or reissue an operation with an existing provider reference; preserve the reference and stop old-provider polling.
 - [Manual pay-in handling](manual-payins.md) — Never collect secrets; show both searchable references to admins and notify merchants after approval.
 - [Node package-manager mismatch](node-package-manager-mismatch.md) — A pnpm-backed node_modules tree may lack npm .bin shims; inspect package entrypoints before attempting repair.
+- [Workflow process collisions](workflow-process-collisions.md) — After a restart, inspect processes; an older dev server may survive and cause EADDRINUSE or duplicate jobs.
 - [Pay-in failure handling](payin-failure-handling.md) — Block checkout on confirmed provider errors and alert admins in Telegram; preserve pending state when provider outcome is uncertain.

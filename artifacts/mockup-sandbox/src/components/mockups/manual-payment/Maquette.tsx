@@ -316,7 +316,6 @@ export function Maquette() {
           </h2>
           <p className="mp-instructions">Touchez le bouton pour ouvrir le composeur avec le code prérempli, puis suivez les étapes affichées par votre opérateur.</p>
           <a className="mp-dialer" href={`tel:${encodeURIComponent(payment.ussdCode)}`} data-testid="button-manual-open-dialer">
-            <span aria-hidden="true">↗</span>
             <span>Cliquez ici pour payer</span>
           </a>
           <button

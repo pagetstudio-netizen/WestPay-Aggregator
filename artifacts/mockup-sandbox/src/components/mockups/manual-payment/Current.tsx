@@ -74,18 +74,13 @@ function CurrentManualPaymentStep({ paymentId, reference, amount, currency, oper
         </div>
         <p style={{ whiteSpace: "pre-wrap", fontSize: 13, color: "#374151", margin: 0 }}>{payment.instructions}</p>
         {payment.ussdCode ? (
-          <>
-            <code style={{ display: "block", padding: "10px 12px", borderRadius: 8, background: "#f3f4f6", color: "#111827", fontSize: 15, fontWeight: 700, wordBreak: "break-all" }}>
-              {payment.ussdCode}
-            </code>
-            <a
-              href={`tel:${encodeURIComponent(payment.ussdCode)}`}
-              style={{ display: "block", borderRadius: 9, background: "#2563eb", color: "#fff", padding: "12px 14px", fontSize: 14, fontWeight: 700, textAlign: "center", textDecoration: "none" }}
-              data-testid="button-manual-open-dialer"
-            >
-              Ouvrir le composeur avec le code USSD
-            </a>
-          </>
+          <a
+            href={`tel:${encodeURIComponent(payment.ussdCode)}`}
+            style={{ display: "block", borderRadius: 9, background: "#2563eb", color: "#fff", padding: "12px 14px", fontSize: 14, fontWeight: 700, textAlign: "center", textDecoration: "none" }}
+            data-testid="button-manual-open-dialer"
+          >
+            Ouvrir le composeur avec le code USSD
+          </a>
         ) : (
           <p style={{ fontSize: 12, color: "#4b5563", margin: 0 }}>Suivez les instructions ci-dessous sur votre téléphone.</p>
         )}
@@ -98,10 +93,6 @@ function CurrentManualPaymentStep({ paymentId, reference, amount, currency, oper
           {copied ? "Instructions copiées" : "Copier les instructions"}
         </button>
       </div>
-
-      <p style={{ fontSize: 12, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 9, padding: "10px 12px", margin: 0 }}>
-        Ne saisissez ni PIN ni code secret. L’opérateur vous demandera les informations nécessaires.
-      </p>
 
       {submitted ? (
         <div role="status" style={{ border: "1px solid #86efac", borderRadius: 10, background: "#f0fdf4", color: "#166534", padding: "12px 14px", fontSize: 13, fontWeight: 600 }}>
@@ -131,6 +122,11 @@ function CurrentManualPaymentStep({ paymentId, reference, amount, currency, oper
           </button>
         </form>
       )}
+
+      <footer style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "14px 8px 0", color: "#202326" }}>
+        <span style={{ fontSize: 11, lineHeight: 1.25 }}>Hébergé et sécurisé par</span>
+        <img src="/robotpay-logo.png" alt="RobotPay" style={{ display: "block", width: 156, maxWidth: "46vw", height: "auto", objectFit: "contain" }} />
+      </footer>
     </section>
   );
 }
@@ -138,10 +134,6 @@ function CurrentManualPaymentStep({ paymentId, reference, amount, currency, oper
 export function Current() {
   return (
     <main className="manual-payment-current-frame" style={{ background: "#fff", padding: "12px 16px 24px", boxSizing: "border-box" }}>
-      <div style={{ maxWidth: 400, margin: "0 auto 14px", display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ width: 40, height: 40, borderRadius: 10, background: "#e8f0fe", display: "grid", placeItems: "center", color: "#2563eb", fontSize: 20 }}>▣</div>
-        <strong style={{ color: "#111827", fontSize: 16 }}>Paiement</strong>
-      </div>
       <div style={{ maxWidth: 400, margin: "0 auto", padding: 20, borderRadius: 24, boxShadow: "0 2px 24px rgba(0,0,0,.14), 0 1px 4px rgba(0,0,0,.07)", boxSizing: "border-box" }}>
         <CurrentManualPaymentStep
           paymentId={4218}
