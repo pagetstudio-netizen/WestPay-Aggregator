@@ -103,7 +103,11 @@ import { calcMerchantCreditForMerchant } from "./payment-fees";
 import { buildManualUssdCode, validateManualUssdTemplate } from "./manual-payment-utils";
 import { reviewManualPayment, submitManualPaymentProof } from "./manual-payment-service";
 import { assertPublicWebhookUrl, notifyConfirmedPaymentWebhook, sendWebhookNotification } from "./merchant-webhooks";
-import { isPaymentChannelAvailable, PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE } from "./payment-availability";
+import {
+  isPaymentChannelAvailable,
+  PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE,
+  PAYMENT_PROVIDER_UNAVAILABLE_MESSAGE,
+} from "./payment-availability";
 
 const BANK1_CHECKOUT_URL = "https://checkout1.westpay.cfd";
 
@@ -2451,7 +2455,7 @@ export async function registerRoutes(
 
       return res.json({ requiresOtp: true, tempToken, otpVia, merchantName: merchant.name });
     } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
+      return res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -4963,6 +4967,28 @@ export async function registerRoutes(
 
   // ==================== PAYMENT WIZARD (public) ====================
   app.post("/api/payment/initiate", paymentRateLimit, async (req, res) => {
+    let payinFailureContext: {
+      merchantName: string;
+      merchantId?: number;
+      country: string;
+      amount: number;
+      payerNumber?: string;
+      operator?: string;
+      gateway?: string;
+    } | null = null;
+    const notifyPayinFailure = (stage: string, error: unknown) => {
+      if (!payinFailureContext) return;
+      void notifyAdminPaymentError({
+        ...payinFailureContext,
+        stage,
+        error,
+      }).catch((notificationError) => {
+        console.error("[PAYMENT ERROR] Échec de notification au groupe Telegram administrateur:", notificationError);
+      });
+    };
+    const respondChannelUnavailable = () =>
+      res.status(503).json({ message: PAYMENT_PROVIDER_UNAVAILABLE_MESSAGE });
+
     try {
       const requestHost = (req.hostname || "").toLowerCase();
       if (requestHost === "westpay.cfd" || requestHost === "www.westpay.cfd") {
@@ -4979,10 +5005,19 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Le montant doit etre un nombre positif" });
       }
 
+      payinFailureContext = {
+        merchantName: String(merchantSlug),
+        country: String(country),
+        amount: parsedAmount,
+        operator: String(paymentMethod),
+      };
+
       const merchant = await storage.getMerchantBySlug(merchantSlug);
       if (!merchant || merchant.suspended) {
         return res.status(404).json({ message: "Marchand introuvable ou suspendu" });
       }
+      payinFailureContext.merchantName = merchant.name;
+      payinFailureContext.merchantId = merchant.id;
       if (merchant.payinDisabled) {
         return res.status(404).json({ message: MERCHANT_PAYMENT_DISABLED_MESSAGE });
       }
@@ -5036,6 +5071,7 @@ export async function registerRoutes(
         ? cleanPhone.slice(1)
         : cleanPhone;
       const msisdn = localPhone.startsWith(dialCode) ? localPhone : `${dialCode}${localPhone}`;
+      payinFailureContext.payerNumber = msisdn;
 
       const operatorRecord = await storage.getWithdrawalOperatorByNameAndCountry(paymentMethod, country);
       const payinGateway = resolvePayinGateway(
@@ -5043,6 +5079,7 @@ export async function registerRoutes(
         operatorRecord?.gateway,
       );
       const gatewayLower = payinGateway.gateway;
+      payinFailureContext.gateway = gatewayLower || "inconnu";
       const useMbiyo = gatewayLower === "mbiyo";
             const useSeapay = gatewayLower === "seapay";
       const useClapay = gatewayLower === "clapay";
@@ -5064,9 +5101,7 @@ export async function registerRoutes(
           stage: "résolution de la configuration opérateur",
           error: "Opérateur de paiement introuvable pour ce pays",
         }).catch(() => {});
-        return res.status(500).json({
-          message: "Configuration du moyen de paiement indisponible. Contactez l'administrateur.",
-        });
+        return respondChannelUnavailable();
       } else if (!operatorRecord.active) {
         return res.status(503).json({ message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
       } else {
@@ -5099,9 +5134,8 @@ export async function registerRoutes(
           (targetNumber.merchantId != null && targetNumber.merchantId !== merchant.id)
         ) {
           console.error(`[MANUAL PAYIN CONFIG] Numéro destinataire invalide pour ${country}/${paymentMethod}`);
-          return res.status(503).json({
-            message: "Le numéro de paiement de cet opérateur est indisponible. Contactez l’administrateur.",
-          });
+          notifyPayinFailure("validation de la configuration du paiement manuel", "Numéro destinataire introuvable ou invalide");
+          return respondChannelUnavailable();
         }
 
         let ussdCode: string | null;
@@ -5114,9 +5148,8 @@ export async function registerRoutes(
           );
         } catch (error: any) {
           console.error(`[MANUAL PAYIN CONFIG] Modèle USSD invalide pour ${country}/${paymentMethod}:`, error.message);
-          return res.status(503).json({
-            message: "Le code USSD de cet opérateur est mal configuré. Contactez l’administrateur.",
-          });
+          notifyPayinFailure("validation du modèle USSD manuel", error);
+          return respondChannelUnavailable();
         }
 
         const reference = `WP-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(6).toString("hex").toUpperCase()}`;
@@ -5173,9 +5206,8 @@ export async function registerRoutes(
         console.error(
           `[PAYMENT CONFIG] Gateway inconnu "${gatewayLower}" pour pays=${country} opérateur=${paymentMethod}`,
         );
-        return res.status(500).json({
-          message: "Configuration du service de paiement invalide. Contactez l'administrateur.",
-        });
+        notifyPayinFailure("validation de la passerelle de paiement", `Passerelle non prise en charge : ${gatewayLower || "vide"}`);
+        return respondChannelUnavailable();
       }
 
       if (useLipaPap) {
@@ -5184,7 +5216,8 @@ export async function registerRoutes(
           lipaConfig = await getLipaPapConfig();
         } catch (configErr: any) {
           console.error(`[PAYMENT CONFIG] LipaPap configuration invalide: ${configErr.message}`);
-          return res.status(500).json({ message: "Configuration LipaPap invalide. Contactez l'administrateur." });
+          notifyPayinFailure("lecture de la configuration LipaPap", configErr);
+          return respondChannelUnavailable();
         }
         if (!lipaConfig) {
           console.error(`[PAYMENT CONFIG] Identifiants LipaPap absents pour pays=${country} opérateur=${paymentMethod}`);
@@ -5199,10 +5232,11 @@ export async function registerRoutes(
             stage: "lecture des identifiants API",
             error: "LIPAPAP_CLIENT_KEY, LIPAPAP_SECRET_KEY ou LIPAPAP_PAYMENT_URL absent",
           }).catch(() => {});
-          return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
+          return respondChannelUnavailable();
         }
         if (lipaConfig.action === "C2B_SIMULATE" && country !== "Kenya") {
-          return res.status(400).json({ message: "C2B_SIMULATE LipaPap est réservé au Kenya en Sandbox. Utilisez MOMO pour ce pays." });
+          notifyPayinFailure("validation du mode Sandbox LipaPap", "C2B_SIMULATE est réservé au Kenya en Sandbox");
+          return respondChannelUnavailable();
         }
 
         const reference = `LP-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
@@ -5223,7 +5257,7 @@ export async function registerRoutes(
             stage: "validation de la configuration callback",
             error: configurationError,
           }).catch(() => {});
-          return res.status(500).json({ message: "Configuration du callback de paiement indisponible. Contactez l'administrateur." });
+          return respondChannelUnavailable();
         }
         const returnUrl = `${BANK1_CHECKOUT_URL}/pay?ref=${encodeURIComponent(reference)}&lipapap_return=1`;
         if (!networkCode || (!isKenyaMpesaStkPush && (networkId === undefined || String(networkId).trim() === ""))) {
@@ -5242,9 +5276,7 @@ export async function registerRoutes(
             stage: "validation de la configuration réseau",
             error: configurationError,
           }).catch(() => {});
-          return res.status(500).json({
-            message: "Configuration du réseau de paiement indisponible. Contactez l'administrateur.",
-          });
+          return respondChannelUnavailable();
         }
 
         try {
@@ -5276,7 +5308,8 @@ export async function registerRoutes(
               operator: paymentMethod || networkCode || null, providerReference: reference,
               errorMessage: errorMsg, providerFee: 0,
             }).catch(() => {});
-            return res.status(400).json({ message: "Paiement non abouti. Veuillez reessayer." });
+            notifyPayinFailure("réponse API d'initiation du paiement", errorMsg);
+            return respondChannelUnavailable();
           }
 
           const providerReference = result.trans_id
@@ -5329,7 +5362,7 @@ export async function registerRoutes(
             stage: "appel API d'initiation du paiement",
             error: lipaErr,
           }).catch(() => {});
-          return res.status(502).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
+          return respondChannelUnavailable();
         }
       } else if (gatewayLower === "drimpay") {
         let drimpayConfig: Awaited<ReturnType<typeof getDrimpayConfig>>;
@@ -5337,12 +5370,14 @@ export async function registerRoutes(
         try {
           drimpayConfig = await getDrimpayConfig();
           if (!drimpayConfig) {
-            return res.status(500).json({ message: "Clé API Drimpay non configurée dans l’administration." });
+            notifyPayinFailure("lecture de la configuration Drimpay", "Clé API Drimpay absente");
+            return respondChannelUnavailable();
           }
           drimpayRoute = resolveDrimpayRoute(drimpayConfig, country, paymentMethod, "payin");
         } catch (configError: any) {
           console.error(`[DRIMPAY CONFIG] Configuration pay-in invalide: ${configError.message}`);
-          return res.status(500).json({ message: configError.message || "Configuration Drimpay invalide." });
+          notifyPayinFailure("validation de la configuration Drimpay", configError);
+          return respondChannelUnavailable();
         }
 
         const orderId = `DP-PAY-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(5).toString("hex").toUpperCase()}`;
@@ -5381,7 +5416,8 @@ export async function registerRoutes(
                WHERE id = $1 AND status IN ('gateway_pending','pending','submitted')`,
               [pending.id],
             );
-            return res.status(502).json({ message: "Drimpay a refusé le paiement. Veuillez réessayer." });
+            notifyPayinFailure("réponse API d'initiation du paiement", `Drimpay a refusé le paiement (${result.status})`);
+            return respondChannelUnavailable();
           }
 
           await financialPool.query(
@@ -5430,7 +5466,7 @@ export async function registerRoutes(
                WHERE id = $1 AND status IN ('gateway_pending','pending','submitted')`,
               [pending.id],
             );
-            return res.status(502).json({ message: "Drimpay a refusé le paiement. Vérifiez les paramètres avant de réessayer." });
+            return respondChannelUnavailable();
           }
           return res.status(202).json({
             success: true,
@@ -5463,7 +5499,7 @@ export async function registerRoutes(
             stage: "lecture de la clé API",
             error: "MBIYO_API_KEY/mbiyo_api_key absent ou vide",
           }).catch(() => {});
-          return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
+          return respondChannelUnavailable();
         }
 
         const reference = mbiyoGenerateRef();
@@ -5513,7 +5549,7 @@ export async function registerRoutes(
               providerReference: reference,
               errorMessage: errorMsg,
             }).catch(() => {});
-            return res.status(400).json({ message: errorMsg });
+            return respondChannelUnavailable();
           }
 
           const paymentUrl = mbiyoResult.data.redirect_url || null;
@@ -5564,7 +5600,7 @@ export async function registerRoutes(
             stage: "appel API d'initiation du paiement",
             error: mbiyoErr,
           }).catch(() => {});
-          return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
+          return respondChannelUnavailable();
         }
       } else if (useSeapay) {
         /* ── SeaPay : GCash / Maya / UPI / EasyPaisa / JazzCash ─────────── */
@@ -5582,7 +5618,7 @@ export async function registerRoutes(
             stage: "lecture des identifiants pays",
             error: "Identifiants SeaPay incomplets",
           }).catch(() => {});
-          return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
+          return respondChannelUnavailable();
         }
 
         const reference = seapayGenerateRef();
@@ -5627,7 +5663,7 @@ export async function registerRoutes(
               providerTxId: null, operator: paymentMethod || null,
               providerReference: reference, errorMessage: errorMsg,
             }).catch(() => {});
-            return res.status(400).json({ message: "Paiement non abouti. Veuillez reessayer." });
+            return respondChannelUnavailable();
           }
 
           const paymentUrl = spResult.data.payment_url || null;
@@ -5678,7 +5714,7 @@ export async function registerRoutes(
             stage: "appel API d'initiation du paiement",
             error: spErr,
           }).catch(() => {});
-          return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
+          return respondChannelUnavailable();
         }
       } else if (useClapay) {
         /* ── ClaPay : paiement mobile money multi-pays ────────────────── */
@@ -5698,7 +5734,7 @@ export async function registerRoutes(
             stage: "lecture de la clé API",
             error: "CLAPAY_API_KEY/clapay_api_key absent ou vide",
           }).catch(() => {});
-          return res.status(500).json({ message: "Service de paiement non configure. Contactez l'administrateur." });
+          return respondChannelUnavailable();
         }
 
         const reference = clapayGenerateRef();
@@ -5767,7 +5803,7 @@ export async function registerRoutes(
               providerTxId: null, operator: paymentMethod || null,
               providerReference: reference, errorMessage: errorMsg,
             }).catch(() => {});
-            return res.status(400).json({ message: "Paiement non abouti. Veuillez reessayer." });
+            return respondChannelUnavailable();
           }
 
           const paymentUrl = cpResult.data?.payment_url || null;
@@ -5820,13 +5856,19 @@ export async function registerRoutes(
             stage: "appel API d'initiation du paiement",
             error: cpErr,
           }).catch(() => {});
-          return res.status(500).json({ message: "Erreur de connexion au service de paiement. Veuillez reessayer." });
+          return respondChannelUnavailable();
         }
       } else {
-        return res.status(400).json({ success: false, message: "Passerelle de paiement non disponible pour ce pays." });
+        notifyPayinFailure("sélection de la passerelle de paiement", `Aucun parcours disponible pour ${gatewayLower}`);
+        return respondChannelUnavailable();
       }
     } catch (err: any) {
-      res.status(500).json({ message: safeErrMsg(err) });
+      if (payinFailureContext) {
+        console.error("[PAYMENT INITIATION] Erreur inattendue:", err);
+        notifyPayinFailure("erreur inattendue durant l'initialisation du dépôt", err);
+        return respondChannelUnavailable();
+      }
+      return res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 

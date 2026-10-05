@@ -4,6 +4,7 @@ import {
   isPaymentChannelAvailable,
   isWithinPaymentHours,
   PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE,
+  PAYMENT_PROVIDER_UNAVAILABLE_MESSAGE,
 } from "./payment-availability";
 
 test("payment hours use the selected country's local timezone", () => {
@@ -26,4 +27,11 @@ test("maintenance and unknown countries fail closed with the shared customer mes
   assert.equal(isPaymentChannelAvailable("Togo", duringHours, true), false);
   assert.equal(isPaymentChannelAvailable("Unknown country", duringHours), false);
   assert.match(PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE, /7h à 20h/);
+});
+
+test("provider initiation failures use a temporary channel-unavailable message", () => {
+  assert.equal(
+    PAYMENT_PROVIDER_UNAVAILABLE_MESSAGE,
+    "Canal de paiement indisponible pour le moment. Veuillez réessayer plus tard.",
+  );
 });

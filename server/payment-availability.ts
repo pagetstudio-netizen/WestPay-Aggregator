@@ -55,6 +55,9 @@ const COUNTRY_TIME_ZONES: Record<string, string> = {
 export const PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE =
   "Canal de paiement indisponible. Les canaux de paiement sont disponibles de 7h à 20h.";
 
+export const PAYMENT_PROVIDER_UNAVAILABLE_MESSAGE =
+  "Canal de paiement indisponible pour le moment. Veuillez réessayer plus tard.";
+
 function normalizeCountryKey(country: string): string {
   return country.trim().toLocaleLowerCase().normalize("NFC");
 }
