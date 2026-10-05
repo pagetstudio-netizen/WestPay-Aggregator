@@ -3,7 +3,17 @@ import type { Express, Request, Response } from "express";
 import crypto from "crypto";
 import { storage } from "./storage";
 import { pool, financialPool } from "./db";
-import { reviewManualPayment, searchManualPaymentsByNumber } from "./manual-payment-service";
+import {
+  reviewPendingPayment,
+  reviewTransactionPayment,
+  getPaymentReviewRecord,
+  searchPaymentsByNumber,
+} from "./manual-payment-service";
+import {
+  checkPaymentProviderStatus,
+  supportsPaymentProviderStatus,
+} from "./payment-provider-status";
+import { getPaymentReviewActions } from "./payment-review-rules";
 import { notifyConfirmedPaymentWebhook } from "./merchant-webhooks";
 import {
   initiatePayout as mbiyoInitiatePayout,
@@ -1874,8 +1884,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `/stats — Statistiques globales\n` +
           `/balance — Soldes détaillés de tous les marchands\n\n` +
           `/findwithdrawal@Westpaybot — Rechercher un retrait par numéro\n` +
-          `/findmanualpayment NUMERO — Rechercher une soumission par numéro et la traiter\n` +
-          `/manualpayments NUMERO — Alias de la commande\n` +
+          `/findpayment NUMERO — Rechercher tous les paiements et leur historique\n` +
+          `/findmanualpayment NUMERO — Alias historique de la commande\n` +
           `/gatewaybalance@Westpaybot — Consulter le solde d'un gateway et ses wallets pays\n\n` +
           `📢 *Diffusion*\n` +
           `/broadcast — Envoyer un message dans les groupes\n` +
@@ -1915,51 +1925,57 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     }
   });
 
-  // ─── Recherche admin des soumissions de paiement par numéro ────────────────
-  const handleManualPaymentSearch = async (ctx: any) => {
+  // ─── Recherche admin de tous les paiements par numéro ──────────────────────
+  const handlePaymentSearch = async (ctx: any) => {
     const chatId = String(ctx.chat.id);
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
     if (!isGroup || !await isAdminGroup(chatId)) return;
     const query = String((ctx.message as any)?.text || "").trim().split(/\s+/).slice(1).join(" ");
     try {
-      const payments = await searchManualPaymentsByNumber(query);
+      const payments = await searchPaymentsByNumber(query);
       if (!payments.length) {
-        await ctx.reply("Aucune soumission en attente ne correspond à ce numéro.");
+        await ctx.reply("Aucun paiement ni élément d’historique ne correspond à ce numéro.");
         return;
       }
       const merchants = await Promise.all(payments.map((payment) => storage.getMerchantById(payment.merchantId)));
-      // Keep each Telegram message comfortably under its size limit while
-      // showing both references and all submitted routing details.
       for (let offset = 0; offset < payments.length; offset += 3) {
         const batch = payments.slice(offset, offset + 3);
-        const lines = [`Soumissions trouvées pour ${query} (${offset + 1}–${offset + batch.length}/${payments.length}) :`];
+        const lines = [`Paiements trouvés pour ${query} (${offset + 1}–${offset + batch.length}/${payments.length}) :`];
         const keyboard: { text: string; callback_data: string }[][] = [];
         batch.forEach((payment, index) => {
           const merchant = merchants[offset + index];
-          const depositReference = payment.providerReference || payment.txId || "N/A";
-          const customerReference = (payment.manualSubmission || "N/A").replace(/\s+/g, " ").trim().slice(0, 120);
+          const reference = payment.txId || payment.providerReference || payment.providerTxId || "N/A";
+          const customerReference = payment.manualSubmission?.replace(/\s+/g, " ").trim().slice(0, 120);
+          const gateway = payment.gateway || "inconnu";
+          const sourceCode = payment.source === "pending" ? "p" : "t";
+          const reviewActions = getPaymentReviewActions(payment);
           lines.push(
-            `#${payment.id} · ${merchant?.name || `Marchand #${payment.merchantId}`}`,
+            `${payment.source === "pending" ? "Demande" : "Transaction"} #${payment.id} · ${merchant?.name || `Marchand #${payment.merchantId}`}`,
             `Montant : ${formatAmountC(payment.amount, payment.country)} · Pays : ${countryLabel(payment.country)} · Opérateur : ${payment.paymentMethod || "N/A"}`,
+            `Fournisseur : ${gateway} · Statut : ${payment.status}`,
             `Client : ${payment.payerName || "N/A"} · Numéro : ${payment.payerPhone || "N/A"}`,
-            `Numéro destinataire : ${payment.manualRecipientPhone || "N/A"}`,
-            `Référence du dépôt : ${depositReference}`,
-            `Référence saisie par le client : ${customerReference || "N/A"}`,
+            `Référence : ${reference}`,
+            ...(payment.manualRecipientPhone ? [`Numéro destinataire : ${payment.manualRecipientPhone}`] : []),
+            ...(customerReference ? [`Référence saisie par le client : ${customerReference}`] : []),
             "",
           );
-          keyboard.push([
-            { text: `Approuver #${payment.id}`, callback_data: `mpay:approve:${payment.id}` },
-            { text: `Rejeter #${payment.id}`, callback_data: `mpay:reject:${payment.id}` },
-          ]);
+          if (supportsPaymentProviderStatus(payment)) {
+            keyboard.push([{ text: `🔍 Vérifier fournisseur #${payment.id}`, callback_data: `pay:check:${sourceCode}:${payment.id}` }]);
+          }
+          const actions: { text: string; callback_data: string }[] = [];
+          if (reviewActions.approve) actions.push({ text: `✅ Valider manuellement #${payment.id}`, callback_data: `pay:approve:${sourceCode}:${payment.id}` });
+          if (reviewActions.reject) actions.push({ text: `❌ Rejeter #${payment.id}`, callback_data: `pay:reject:${sourceCode}:${payment.id}` });
+          if (actions.length) keyboard.push(actions);
         });
-        await ctx.reply(lines.join("\n"), { reply_markup: { inline_keyboard: keyboard } });
+        await ctx.reply(lines.join("\n"), keyboard.length ? { reply_markup: { inline_keyboard: keyboard } } : {});
       }
     } catch (error: any) {
       await ctx.reply(error?.message || "Erreur lors de la recherche des paiements manuels.");
     }
   };
-  bot.command("findmanualpayment", handleManualPaymentSearch);
-  bot.command("manualpayments", handleManualPaymentSearch);
+  bot.command("findpayment", handlePaymentSearch);
+  bot.command("findmanualpayment", handlePaymentSearch);
+  bot.command("manualpayments", handlePaymentSearch);
 
   // ─── /groups (groupe admin uniquement) — liste et nettoyage des groupes connus ──
   bot.command("groups", async (ctx) => {
@@ -2260,46 +2276,78 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     }
   });
 
-  bot.action(/^mpay:(approve|reject):(\d+)$/, async (ctx) => {
+  bot.action(/^(?:pay:(check|approve|reject):(p|t):(\d+)|mpay:(approve|reject):(\d+))$/, async (ctx) => {
     const chatId = String(ctx.chat?.id ?? "");
     if (!await isAdminGroup(chatId)) { await ctx.answerCbQuery("Non autorisé"); return; }
-    const action = ctx.match![1] as "approve" | "reject";
-    const id = Number(ctx.match![2]);
+    const action = (ctx.match![4] || ctx.match![1]) as "check" | "approve" | "reject";
+    const source = ctx.match![4] ? "pending" : ctx.match![2] === "p" ? "pending" : "transaction";
+    const id = Number(ctx.match![5] || ctx.match![3]);
     const reviewer = `Telegram ${formatUser(ctx)}`;
-    await ctx.answerCbQuery("Traitement en cours…");
+    await ctx.answerCbQuery(action === "check" ? "Vérification fournisseur en cours…" : "Traitement en cours…");
     try {
-      const result = await reviewManualPayment(id, reviewer, action);
+      if (action === "check") {
+        const payment = await getPaymentReviewRecord(source, id);
+        if (!payment) {
+          await ctx.reply(`Paiement #${id} introuvable.`);
+          return;
+        }
+        if (!supportsPaymentProviderStatus(payment)) {
+          await ctx.reply(`Paiement #${id} : aucune vérification fournisseur disponible pour cette référence.`);
+          return;
+        }
+        const result = await checkPaymentProviderStatus(payment);
+        await ctx.reply(
+          `🔍 Paiement #${id} — ${result.provider}\n` +
+          `Statut fournisseur : ${result.status.replace(/[\r\n]+/g, " ").slice(0, 200)}\n` +
+          `${result.message ? `Détail : ${result.message.replace(/[\r\n]+/g, " ").slice(0, 250)}\n` : ""}` +
+          `Aucun changement au paiement n’a été appliqué.`,
+        );
+        return;
+      }
+
+      const result = source === "pending"
+        ? await reviewPendingPayment(id, reviewer, action)
+        : await reviewTransactionPayment(id, action);
       if (result.outcome === "not_found") {
-        await ctx.reply(`Paiement manuel #${id} introuvable.`);
+        await ctx.reply(`Paiement #${id} introuvable.`);
         return;
       }
       if (result.outcome === "not_submitted") {
         await ctx.reply(`Le paiement #${id} n’a pas encore été soumis pour vérification.`);
         return;
       }
+      if (result.outcome === "not_actionable") {
+        await ctx.reply(`Le paiement #${id} n’est plus en attente. Aucune modification n’a été appliquée.`);
+        return;
+      }
       const payment = result.payment;
       if (action === "approve" && result.outcome === "approved" && payment) {
         const merchantName = result.merchant?.name || `#${payment.merchantId}`;
         const txId = payment.txId || payment.providerReference || `WP-${payment.id}`;
+        const provider = payment.gateway.toLowerCase() === "manual"
+          ? "mobile_money"
+          : payment.gateway || "mobile_money";
+        const platformFee = payment.amount - (result.credit ?? payment.amount);
+        const creditedAmount = result.credit ?? payment.amount;
         notifyAdminPayment({
           txId,
           merchantName,
           payerNumber: payment.payerPhone,
           country: payment.country,
           amount: payment.amount,
-          provider: "mobile_money",
+          provider,
           status: "confirmed",
-          platformFee: payment.amount - (result.credit ?? payment.amount),
-          creditedAmount: result.credit ?? payment.amount,
+          platformFee,
+          creditedAmount,
         }).catch(() => {});
         notifyMerchantPayment(payment.merchantId, {
           txId,
           amount: payment.amount,
           payerNumber: payment.payerPhone,
           country: payment.country,
-          provider: "mobile_money",
-          platformFee: payment.amount - (result.credit ?? payment.amount),
-          creditedAmount: result.credit ?? payment.amount,
+          provider: payment.gateway.toLowerCase() === "manual" ? "mobile_money" : provider,
+          platformFee,
+          creditedAmount,
         }).catch(() => {});
         notifyConfirmedPaymentWebhook(payment.merchantId, {
           event: "payment.confirmed",
@@ -2309,24 +2357,25 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           payer: payment.payerPhone || "",
           country: payment.country,
           merchantSlug: result.merchant?.slug || "",
-          provider: "mobile_money",
+          provider,
           reference: payment.providerReference || txId,
           timestamp: new Date().toISOString(),
         }).catch(() => {});
       }
       const alreadyHandled = result.outcome === "already_approved" || result.outcome === "already_rejected";
-      const actionLabel = action === "approve" ? "Approuvé et crédité" : "Rejeté";
+      const actionLabel = result.outcome === "approved" ? "Validé et crédité" : "Rejeté";
       const adminName = formatUser(ctx);
       await ctx.editMessageReplyMarkup({
         inline_keyboard: [[{
           text: alreadyHandled ? `Déjà traité · #${id}` : `${actionLabel} par ${adminName}`,
-          callback_data: "mpay:noop",
+          callback_data: "pay:noop",
         }]],
       }).catch(() => {});
     } catch (error: any) {
       await ctx.reply(`Erreur de traitement du paiement #${id} : ${String(error?.message || "erreur").slice(0, 250)}`);
     }
   });
+  bot.action(/^pay:noop$/, async (ctx) => { await ctx.answerCbQuery("Paiement déjà traité"); });
   bot.action(/^mpay:noop$/, async (ctx) => { await ctx.answerCbQuery("Paiement déjà traité"); });
 
   // wd:approve — marque le retrait comme approuvé manuellement (sans appel fournisseur)
@@ -3559,8 +3608,8 @@ export async function notifyAdminManualPaymentSubmission(data: {
     await bot.telegram.sendMessage(groupId, message, {
       reply_markup: {
         inline_keyboard: [[
-          { text: "Approuver et créditer", callback_data: `mpay:approve:${data.paymentId}` },
-          { text: "Rejeter", callback_data: `mpay:reject:${data.paymentId}` },
+          { text: "Approuver et créditer", callback_data: `pay:approve:p:${data.paymentId}` },
+          { text: "Rejeter", callback_data: `pay:reject:p:${data.paymentId}` },
         ]],
       },
     });
