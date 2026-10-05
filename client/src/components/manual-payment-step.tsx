@@ -19,9 +19,17 @@ type Props = {
   currency: string;
   operator: string;
   payment: ManualPaymentDetails;
+  previewMode?: boolean;
 };
 
-export default function ManualPaymentStep({ paymentId, amount, currency, operator, payment }: Props) {
+export default function ManualPaymentStep({
+  paymentId,
+  amount,
+  currency,
+  operator,
+  payment,
+  previewMode = false,
+}: Props) {
   const { t } = useLanguage();
   const { toast } = useToast();
   const [proof, setProof] = useState("");
@@ -48,6 +56,13 @@ export default function ManualPaymentStep({ paymentId, amount, currency, operato
   const submitProof = async (event: FormEvent) => {
     event.preventDefault();
     if (!proof.trim() || submitting || submitted) return;
+    if (previewMode) {
+      toast({
+        title: "Aperçu sans paiement",
+        description: "La preuve n’a pas été envoyée.",
+      });
+      return;
+    }
     setSubmitting(true);
     try {
       const response = await fetch("/api/payment/manual/submit", {
@@ -132,7 +147,15 @@ export default function ManualPaymentStep({ paymentId, amount, currency, operato
           </p>
           {payment.ussdCode ? (
             <a
-              href={`tel:${encodeURIComponent(payment.ussdCode)}`}
+              href={previewMode ? "#" : `tel:${encodeURIComponent(payment.ussdCode)}`}
+              onClick={previewMode ? (event) => {
+                event.preventDefault();
+                toast({
+                  title: "Aperçu sans paiement",
+                  description: "Le composeur ne sera pas ouvert.",
+                });
+              } : undefined}
+              aria-disabled={previewMode}
               className="manual-payment__pay-button"
               data-testid="button-manual-open-dialer"
             >

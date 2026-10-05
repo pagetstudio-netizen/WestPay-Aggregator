@@ -23,6 +23,7 @@ import NotFound from "@/pages/not-found";
 import Bank2UnavailablePage from "@/pages/bank2-unavailable";
 import IpVerificationPage from "@/pages/ip-verification";
 import AdminCreateMerchant from "@/pages/admin-create-merchant";
+import ManualPaymentPreview from "@/pages/manual-payment-preview";
 import { useState, useEffect } from "react";
 
 function Router() {
@@ -83,6 +84,9 @@ function Router() {
   if (isLegacyDocsPath) return <NotFound />;
   if (isLegacyMerchantLoginPath) return <NotFound />;
   if (isHiddenPublicRoot) return <NotFound />;
+  if (import.meta.env.DEV && currentPath === "/__preview/manual-payment") {
+    return <ManualPaymentPreview />;
+  }
 
   // Nouvelle URL officielle de connexion marchand. Le domaine reste
   // utilisable ensuite pour afficher /merchant/:slug après authentification.
