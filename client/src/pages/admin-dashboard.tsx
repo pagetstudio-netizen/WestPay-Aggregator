@@ -1771,6 +1771,7 @@ function TransactionsPanel() {
       t.merchantName?.toLowerCase().includes(term) ||
       t.payerNumber?.toLowerCase().includes(term) ||
       t.manualRecipientPhone?.toLowerCase().includes(term) ||
+      t.manualRecipientName?.toLowerCase().includes(term) ||
       t.providerReference?.toLowerCase().includes(term);
     const matchStatus =
       statusFilter === "all" ||
@@ -1951,6 +1952,7 @@ function TransactionsPanel() {
                             <div className="mt-2 rounded-md border border-orange-300 bg-orange-50 dark:bg-orange-900/10 dark:border-orange-800 px-3 py-2 space-y-1.5">
                               <p className="text-xs font-semibold text-orange-900 dark:text-orange-200">Soumission du client</p>
                               {tx.manualRecipientPhone && <p className="text-xs text-orange-900 dark:text-orange-200">Numéro destinataire : <code>{tx.manualRecipientPhone}</code></p>}
+                              {tx.manualRecipientName && <p className="text-xs text-orange-900 dark:text-orange-200">Titulaire du compte destinataire : {tx.manualRecipientName}</p>}
                               {tx.manualSubmission && <p className="text-xs text-orange-900 dark:text-orange-200 whitespace-pre-wrap break-words">{tx.manualSubmission}</p>}
                             </div>
                           )}
@@ -2436,24 +2438,28 @@ function NumbersPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
   const [showAdd, setShowAdd] = useState(false);
+  const [editingNumber, setEditingNumber] = useState<PhoneNumber | null>(null);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [country, setCountry] = useState("");
   const [operator, setOperator] = useState("");
   const [numMerchantId, setNumMerchantId] = useState("");
+  const [accountName, setAccountName] = useState("");
 
   const { data: numbersData = [], isLoading } = useAdminFetch("/api/admin/numbers", ["/api/admin/numbers"]);
   const { data: merchants = [] } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
 
   const addNumberMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch("/api/admin/add-number", {
-        method: "POST",
+      const isEditing = Boolean(editingNumber);
+      const res = await fetch(isEditing ? `/api/admin/numbers/${editingNumber!.id}` : "/api/admin/add-number", {
+        method: isEditing ? "PATCH" : "POST",
         credentials: "include",
 
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({
+        body: JSON.stringify(isEditing ? { accountName } : {
           phoneNumber, country, operator: operator || undefined,
           merchantId: numMerchantId ? parseInt(numMerchantId) : undefined,
+          accountName,
         }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -2461,8 +2467,8 @@ function NumbersPanel() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/numbers"] });
-      setShowAdd(false); setPhoneNumber(""); setCountry(""); setOperator(""); setNumMerchantId("");
-      toast({ title: "Numero ajoute" });
+      setShowAdd(false); setEditingNumber(null); setPhoneNumber(""); setCountry(""); setOperator(""); setNumMerchantId(""); setAccountName("");
+      toast({ title: editingNumber ? "Nom du titulaire mis à jour" : "Numéro ajouté" });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
@@ -2509,18 +2515,25 @@ function NumbersPanel() {
         <h2 className="text-lg font-semibold text-foreground">Numeros Mobile Money</h2>
         <Dialog open={showAdd} onOpenChange={setShowAdd}>
           <DialogTrigger asChild>
-            <Button data-testid="button-add-number"><Plus className="w-4 h-4 mr-2" />Ajouter un numero</Button>
+            <Button
+              onClick={() => { setEditingNumber(null); setPhoneNumber(""); setCountry(""); setOperator(""); setNumMerchantId(""); setAccountName(""); }}
+              data-testid="button-add-number"
+            >
+              <Plus className="w-4 h-4 mr-2" />Ajouter un numero
+            </Button>
           </DialogTrigger>
           <DialogContent>
-            <DialogHeader><DialogTitle>Ajouter un numero SIM</DialogTitle></DialogHeader>
+            <DialogHeader>
+              <DialogTitle>{editingNumber ? "Modifier le nom du titulaire" : "Ajouter un numero SIM"}</DialogTitle>
+            </DialogHeader>
             <form onSubmit={(e) => { e.preventDefault(); addNumberMutation.mutate(); }} className="space-y-4">
               <div className="space-y-2">
                 <Label>Numero</Label>
-                <Input value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} placeholder="+22899935673" required data-testid="input-phone-number" />
+                <Input value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} placeholder="+22899935673" required disabled={Boolean(editingNumber)} data-testid="input-phone-number" />
               </div>
               <div className="space-y-2">
                 <Label>Pays</Label>
-                <Select value={country} onValueChange={setCountry}>
+                <Select value={country} onValueChange={setCountry} disabled={Boolean(editingNumber)}>
                   <SelectTrigger data-testid="select-number-country"><SelectValue placeholder="Selectionner" /></SelectTrigger>
                   <SelectContent>
                     {["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Gabon", "Guinee", "Niger", "Kenya", "Ghana"].map((c) => (
@@ -2531,11 +2544,11 @@ function NumbersPanel() {
               </div>
               <div className="space-y-2">
                 <Label>Operateur</Label>
-                <Input value={operator} onChange={(e) => setOperator(e.target.value)} placeholder="Moov Money, TMoney..." data-testid="input-operator" />
+                <Input value={operator} onChange={(e) => setOperator(e.target.value)} placeholder="Moov Money, TMoney..." disabled={Boolean(editingNumber)} data-testid="input-operator" />
               </div>
               <div className="space-y-2">
                 <Label>Marchand (optionnel)</Label>
-                <Select value={numMerchantId} onValueChange={setNumMerchantId}>
+                <Select value={numMerchantId} onValueChange={setNumMerchantId} disabled={Boolean(editingNumber)}>
                   <SelectTrigger data-testid="select-number-merchant"><SelectValue placeholder="Aucun" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Aucun</SelectItem>
@@ -2545,9 +2558,23 @@ function NumbersPanel() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-2">
+                <Label>Nom du titulaire du compte Mobile Money</Label>
+                <Input
+                  value={accountName}
+                  onChange={(e) => setAccountName(e.target.value)}
+                  maxLength={120}
+                  required={Boolean(editingNumber)}
+                  placeholder="Ex. Kofi ADJOVI"
+                  data-testid="input-number-account-name"
+                />
+                {!editingNumber && (
+                  <p className="text-xs text-muted-foreground">Obligatoire si ce numéro est utilisé pour un paiement manuel.</p>
+                )}
+              </div>
               <Button type="submit" className="w-full" disabled={addNumberMutation.isPending} data-testid="button-submit-add-number">
                 {addNumberMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                Ajouter le numero
+                {editingNumber ? "Enregistrer le nom" : "Ajouter le numero"}
               </Button>
             </form>
           </DialogContent>
@@ -2572,8 +2599,27 @@ function NumbersPanel() {
                         {num.status === "active" ? "Actif" : "Inactif"}
                       </Badge>
                     </div>
+                    <p className={`mt-1 text-xs ${num.accountName ? "text-muted-foreground" : "text-destructive"}`}>
+                      {num.accountName ? `Titulaire : ${num.accountName}` : "Nom du titulaire non renseigné"}
+                    </p>
                   </div>
                   <div className="flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setEditingNumber(num);
+                        setPhoneNumber(num.phoneNumber);
+                        setCountry(num.country);
+                        setOperator(num.operator || "");
+                        setNumMerchantId(num.merchantId ? String(num.merchantId) : "");
+                        setAccountName(num.accountName || "");
+                        setShowAdd(true);
+                      }}
+                      data-testid={`button-edit-number-account-${num.id}`}
+                    >
+                      Modifier le nom
+                    </Button>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -4632,6 +4678,7 @@ function WithdrawalOperatorsPanel() {
     number.country.trim().toLocaleLowerCase() === form.country.trim().toLocaleLowerCase() &&
     (number.operator || "").trim().toLocaleLowerCase() === form.name.trim().toLocaleLowerCase()
   );
+  const selectedManualNumber = manualNumbers.find((number) => String(number.id) === form.manualNumberId);
 
   const openCreate = () => { setEditingOp(null); setForm(emptyForm); setOpDialogOpen(true); };
   const openEdit = (op: WithdrawalOperator) => {
@@ -4840,13 +4887,16 @@ function WithdrawalOperatorsPanel() {
                         <SelectItem value="none">Choisir un numéro</SelectItem>
                         {manualNumbers.map(number => (
                           <SelectItem key={number.id} value={String(number.id)}>
-                            {number.phoneNumber}{number.merchantId ? " · numéro associé à un marchand" : ""}
+                            {number.phoneNumber} · {number.accountName || "nom du titulaire manquant"}{number.merchantId ? " · numéro associé à un marchand" : ""}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                     {manualNumbers.length === 0 && (
                       <p className="text-xs text-destructive">Ajoutez d’abord un numéro actif correspondant exactement à ce pays et cet opérateur dans « Numéros Mobile Money ».</p>
+                    )}
+                    {selectedManualNumber && !selectedManualNumber.accountName?.trim() && (
+                      <p className="text-xs text-destructive">Renseignez le nom du titulaire dans « Numéros Mobile Money » avant d’activer cet encaissement manuel.</p>
                     )}
                   </div>
                   <div className="space-y-2">
@@ -4911,7 +4961,7 @@ function WithdrawalOperatorsPanel() {
             </div>
             <div className="flex gap-2 justify-end pt-2">
               <Button variant="outline" onClick={() => setOpDialogOpen(false)}>Annuler</Button>
-              <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.name || !form.country || (form.manualPayinEnabled && (!form.manualNumberId || manualNumbers.length === 0))} data-testid="button-save-operator">
+              <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.name || !form.country || (form.manualPayinEnabled && (!form.manualNumberId || !selectedManualNumber?.accountName?.trim()))} data-testid="button-save-operator">
                 {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                 {editingOp ? "Mettre à jour" : "Créer"}
               </Button>

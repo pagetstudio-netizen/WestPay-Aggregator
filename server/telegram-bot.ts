@@ -1956,6 +1956,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
             `Client : ${payment.payerName || "N/A"} · Numéro : ${payment.payerPhone || "N/A"}`,
             `Référence : ${reference}`,
             ...(payment.manualRecipientPhone ? [`Numéro destinataire : ${payment.manualRecipientPhone}`] : []),
+            ...(payment.manualRecipientName ? [`Titulaire du compte destinataire : ${payment.manualRecipientName}`] : []),
             ...(customerReference ? [`Référence saisie par le client : ${customerReference}`] : []),
             "",
           );
@@ -3580,6 +3581,7 @@ export async function notifyAdminManualPaymentSubmission(data: {
   payerName?: string | null;
   payerNumber: string;
   recipientPhone: string;
+  recipientName: string;
   country: string;
   operator: string;
   amount: number;
@@ -3602,6 +3604,7 @@ export async function notifyAdminManualPaymentSubmission(data: {
       `Nom du client : ${data.payerName || "N/A"}`,
       `Numéro du client : ${data.payerNumber || "N/A"}`,
       `Numéro destinataire : ${data.recipientPhone || "N/A"}`,
+      `Titulaire du compte destinataire : ${data.recipientName || "N/A"}`,
       "",
       "Vérifiez la réception auprès du compte Mobile Money avant d’approuver. Ne demandez pas de PIN ni de code secret.",
     ].join("\n");

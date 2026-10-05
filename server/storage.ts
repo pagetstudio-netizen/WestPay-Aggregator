@@ -101,6 +101,7 @@ export interface IStorage {
   getNumbers(): Promise<PhoneNumber[]>;
   getNumberByPhone(phone: string): Promise<PhoneNumber | undefined>;
   addNumber(num: InsertNumber): Promise<PhoneNumber>;
+  updateNumberAccountName(id: number, accountName: string | null): Promise<PhoneNumber>;
   toggleNumberStatus(id: number): Promise<PhoneNumber>;
   deleteNumber(id: number): Promise<void>;
 
@@ -507,6 +508,11 @@ export class DatabaseStorage implements IStorage {
   }
   async addNumber(num: InsertNumber): Promise<PhoneNumber> {
     const [n] = await authDb.insert(numbers).values(num).returning();
+    return n;
+  }
+  async updateNumberAccountName(id: number, accountName: string | null): Promise<PhoneNumber> {
+    const [n] = await authDb.update(numbers).set({ accountName }).where(eq(numbers.id, id)).returning();
+    if (!n) throw new Error("Numero introuvable");
     return n;
   }
   async toggleNumberStatus(id: number): Promise<PhoneNumber> {

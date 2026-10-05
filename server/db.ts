@@ -147,6 +147,7 @@ export async function runAuthMigrations() {
       CREATE TABLE IF NOT EXISTS numbers (
         id serial PRIMARY KEY,
         phone_number text NOT NULL,
+        account_name text,
         country text NOT NULL,
         operator text,
         status text NOT NULL DEFAULT 'active',
@@ -320,6 +321,7 @@ export async function runAuthMigrations() {
       ALTER TABLE merchants ADD COLUMN IF NOT EXISTS payin_disabled BOOLEAN NOT NULL DEFAULT false;
       ALTER TABLE merchants ADD COLUMN IF NOT EXISTS account_type TEXT;
       ALTER TABLE merchants ADD COLUMN IF NOT EXISTS merchant_category TEXT;
+      ALTER TABLE numbers ADD COLUMN IF NOT EXISTS account_name TEXT;
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS manual_payin_enabled BOOLEAN NOT NULL DEFAULT false;
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS manual_number_id INTEGER;
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS manual_ussd_template TEXT;
@@ -457,6 +459,7 @@ export async function runFinancialMigrations() {
         amount integer NOT NULL,
         payer_number text,
         payer_name text,
+        manual_recipient_name text,
         status text NOT NULL DEFAULT 'confirmed',
         provider text NOT NULL DEFAULT 'sms',
         provider_tx_id text,
@@ -517,6 +520,7 @@ export async function runFinancialMigrations() {
         error_message text,
         payment_token text,
         manual_recipient_phone text,
+        manual_recipient_name text,
         manual_ussd_code text,
         manual_instructions text,
         manual_submission text,
@@ -724,7 +728,9 @@ export async function runFinancialMigrations() {
         ALTER TABLE pending_payments ALTER COLUMN gateway SET DEFAULT 'clapay';
         ALTER TABLE withdrawals ALTER COLUMN gateway SET DEFAULT 'clapay';
         ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_recipient_phone TEXT;
+        ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_recipient_name TEXT;
         ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_ussd_code TEXT;
+        ALTER TABLE transactions ADD COLUMN IF NOT EXISTS manual_recipient_name TEXT;
         ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_instructions TEXT;
         ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_submission TEXT;
         ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_submitted_at TIMESTAMP;

@@ -3711,6 +3711,7 @@ export async function registerRoutes(
           providerReference: p.providerReference,
           manualPayment: p.gateway === "manual",
           manualRecipientPhone: p.manualRecipientPhone || null,
+          manualRecipientName: p.manualRecipientName || null,
           manualSubmission: p.gateway === "manual" ? p.manualSubmission || null : null,
           gateway: p.gateway,
           errorMessage: (p as any).errorMessage || null,
@@ -3747,14 +3748,38 @@ export async function registerRoutes(
     try {
       const { phoneNumber, country, operator, merchantId } = req.body;
       if (!phoneNumber || !country) return res.status(400).json({ message: "Numero et pays requis" });
+      const accountName = typeof req.body.accountName === "string" ? req.body.accountName.trim() || null : null;
+      if (accountName && accountName.length > 120) {
+        return res.status(400).json({ message: "Le nom du titulaire ne peut pas dépasser 120 caractères." });
+      }
       const num = await storage.addNumber({
         phoneNumber, country,
+        accountName,
         operator: operator || null,
         status: "active",
         merchantId: merchantId && merchantId !== "none" ? parseInt(merchantId) : null,
       });
       res.json(num);
     } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+  app.patch("/api/admin/numbers/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id < 1) return res.status(400).json({ message: "Numéro invalide." });
+      const accountName = typeof req.body.accountName === "string" ? req.body.accountName.trim() || null : null;
+      if (!accountName) return res.status(400).json({ message: "Le nom du titulaire est requis." });
+      if (accountName && accountName.length > 120) {
+        return res.status(400).json({ message: "Le nom du titulaire ne peut pas dépasser 120 caractères." });
+      }
+      const updated = await storage.updateNumberAccountName(id, accountName);
+      res.json(updated);
+    } catch (err: any) {
+      if (String(err?.message || "").includes("Numero introuvable")) {
+        return res.status(404).json({ message: "Numéro introuvable." });
+      }
       res.status(500).json({ message: safeErrMsg(err) });
     }
   });
@@ -4851,6 +4876,7 @@ export async function registerRoutes(
           payerName: result.payment.payerName || "",
           payerNumber: result.payment.payerPhone || "",
           recipientPhone: result.payment.manualRecipientPhone || "",
+          recipientName: result.payment.manualRecipientName || "",
           country: result.payment.country,
           operator: result.payment.paymentMethod,
           amount: result.payment.amount,
@@ -5023,6 +5049,7 @@ export async function registerRoutes(
           targetNumber.status !== "active" ||
           targetNumber.country.trim().toLocaleLowerCase() !== country.trim().toLocaleLowerCase() ||
           !sameOperator(targetNumber.operator) ||
+          !targetNumber.accountName?.trim() ||
           (targetNumber.merchantId != null && targetNumber.merchantId !== merchant.id)
         ) {
           console.error(`[MANUAL PAYIN CONFIG] Numéro destinataire invalide pour ${country}/${paymentMethod}`);
@@ -5066,6 +5093,7 @@ export async function registerRoutes(
           gateway: "manual",
           paymentToken,
           manualRecipientPhone: targetNumber.phoneNumber,
+          manualRecipientName: targetNumber.accountName.trim(),
           manualUssdCode: ussdCode,
           manualInstructions,
           expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
@@ -5087,6 +5115,7 @@ export async function registerRoutes(
           fees: 0,
           manualPayment: {
             recipientPhone: targetNumber.phoneNumber,
+            recipientName: targetNumber.accountName.trim(),
             ussdCode,
             instructions: manualInstructions,
             paymentToken,
@@ -6708,9 +6737,10 @@ export async function registerRoutes(
         if (
           !number || number.status !== "active" ||
           number.country.trim().toLocaleLowerCase() !== String(country).trim().toLocaleLowerCase() ||
-          (number.operator || "").trim().toLocaleLowerCase() !== String(name).trim().toLocaleLowerCase()
+          (number.operator || "").trim().toLocaleLowerCase() !== String(name).trim().toLocaleLowerCase() ||
+          !number.accountName?.trim()
         ) {
-          return res.status(400).json({ message: "Choisissez un numéro actif déjà enregistré pour ce pays et cet opérateur." });
+          return res.status(400).json({ message: "Choisissez un numéro actif correspondant à ce pays et cet opérateur, avec le nom du titulaire renseigné." });
         }
       }
       const op = await storage.createWithdrawalOperator({
@@ -6768,9 +6798,10 @@ export async function registerRoutes(
         if (
           !number || number.status !== "active" ||
           number.country.trim().toLocaleLowerCase() !== String(nextCountry).trim().toLocaleLowerCase() ||
-          (number.operator || "").trim().toLocaleLowerCase() !== String(nextName).trim().toLocaleLowerCase()
+          (number.operator || "").trim().toLocaleLowerCase() !== String(nextName).trim().toLocaleLowerCase() ||
+          !number.accountName?.trim()
         ) {
-          return res.status(400).json({ message: "Choisissez un numéro actif déjà enregistré pour ce pays et cet opérateur." });
+          return res.status(400).json({ message: "Choisissez un numéro actif correspondant à ce pays et cet opérateur, avec le nom du titulaire renseigné." });
         }
       }
       const updated = await storage.updateWithdrawalOperator(id, {
@@ -8131,6 +8162,7 @@ app.get("/api/payment/by-ref/:reference", paymentByRefRateLimit, async (req, res
         providerReference: pending.providerReference,
         manualPayment: isManual ? {
           recipientPhone: pending.manualRecipientPhone,
+          recipientName: pending.manualRecipientName,
           ussdCode: pending.manualUssdCode,
           instructions: pending.manualInstructions,
           submitted: pending.status === "manual_submitted",

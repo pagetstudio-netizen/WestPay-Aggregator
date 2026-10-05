@@ -4,6 +4,7 @@ import { useLanguage } from "@/lib/language";
 
 export type ManualPaymentDetails = {
   recipientPhone: string;
+  recipientName?: string | null;
   ussdCode: string | null;
   instructions: string;
   paymentToken: string;
@@ -29,6 +30,7 @@ export default function ManualPaymentStep({ paymentId, reference, amount, curren
   const copyInstructions = async () => {
     const text = [
       payment.instructions,
+      payment.recipientName ? `${t("manualRecipientNameLabel")}: ${payment.recipientName}` : "",
       `${t("manualRecipientLabel")}: ${payment.recipientPhone}`,
       payment.ussdCode ? `USSD: ${payment.ussdCode}` : "",
       `${operator} · ${amount.toLocaleString()} ${currency}`,
@@ -77,6 +79,12 @@ export default function ManualPaymentStep({ paymentId, reference, amount, curren
       </div>
 
       <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+        {payment.recipientName && (
+          <div>
+            <p style={{ fontSize: 12, color: "#6b7280", margin: "0 0 4px" }}>{t("manualRecipientNameLabel")}</p>
+            <p style={{ fontSize: 16, fontWeight: 700, color: "#111827", margin: 0 }}>{payment.recipientName}</p>
+          </div>
+        )}
         <div>
           <p style={{ fontSize: 12, color: "#6b7280", margin: "0 0 4px" }}>{t("manualRecipientLabel")}</p>
           <p style={{ fontSize: 18, fontWeight: 700, color: "#111827", margin: 0 }}>{payment.recipientPhone}</p>

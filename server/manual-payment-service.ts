@@ -18,6 +18,7 @@ export type ManualPaymentRecord = {
   providerReference: string | null;
   status: string;
   manualRecipientPhone: string | null;
+  manualRecipientName: string | null;
   manualUssdCode?: string | null;
   manualInstructions?: string | null;
   manualSubmission?: string | null;
@@ -48,6 +49,7 @@ function mapPayment(row: any): ManualPaymentRecord {
     providerReference: row.provider_reference ?? null,
     status: String(row.status || ""),
     manualRecipientPhone: row.manual_recipient_phone ?? null,
+    manualRecipientName: row.manual_recipient_name ?? null,
     manualUssdCode: row.manual_ussd_code ?? null,
     manualInstructions: row.manual_instructions ?? null,
     manualSubmission: row.manual_submission ?? null,
@@ -203,9 +205,9 @@ async function reviewPendingPaymentCore(
 
     await client.query(
       `INSERT INTO transactions
-         (merchant_id, country, tx_id, amount, payer_number, payer_name, status, provider,
+         (merchant_id, country, tx_id, amount, payer_number, payer_name, manual_recipient_name, status, provider,
           provider_tx_id, operator, provider_reference, error_message, provider_fee)
-       VALUES ($1, $2, $3, $4, $5, $6, 'confirmed', $7, $8, $9, $10, NULL, $11)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'confirmed', $8, $9, $10, $11, NULL, $12)`,
       [
         payment.merchantId,
         payment.country,
@@ -213,6 +215,7 @@ async function reviewPendingPaymentCore(
         payment.amount,
         payment.payerPhone,
         payment.payerName,
+        payment.manualRecipientName,
         transactionProvider,
         payment.providerTxId,
         payment.paymentMethod,
@@ -372,7 +375,7 @@ export async function searchPaymentsByNumber(search: string): Promise<ManualPaym
            'pending'::text AS record_source,
            p.id, p.merchant_id, p.country, p.amount, p.payer_phone, p.payer_name,
            p.payment_method, p.gateway, p.tx_id, p.provider_tx_id, p.provider_reference,
-           p.status, p.manual_recipient_phone, p.manual_submission, p.manual_submitted_at,
+           p.status, p.manual_recipient_phone, p.manual_recipient_name, p.manual_submission, p.manual_submitted_at,
            p.created_at
          FROM pending_payments p
          WHERE (
@@ -396,6 +399,7 @@ export async function searchPaymentsByNumber(search: string): Promise<ManualPaym
            t.id, t.merchant_id, t.country, t.amount, t.payer_number AS payer_phone, t.payer_name,
            t.operator AS payment_method, t.provider AS gateway, t.tx_id, t.provider_tx_id,
            t.provider_reference, t.status, NULL::text AS manual_recipient_phone,
+           t.manual_recipient_name,
            NULL::text AS manual_submission, NULL::timestamp AS manual_submitted_at, t.created_at
          FROM transactions t
          WHERE regexp_replace(COALESCE(t.payer_number, ''), '[^0-9]', '', 'g') LIKE '%' || $1 || '%'

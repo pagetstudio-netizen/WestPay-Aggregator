@@ -69,6 +69,7 @@ export const transactions = pgTable("transactions", {
   amount: integer("amount").notNull(),
   payerNumber: text("payer_number"),
   payerName: text("payer_name"),
+  manualRecipientName: text("manual_recipient_name"),
   status: text("status").notNull().default("confirmed"),
   provider: text("provider").notNull().default("sms"),
   providerTxId: text("provider_tx_id"),
@@ -94,6 +95,7 @@ export const smsLogs = pgTable("sms_logs", {
 export const numbers = pgTable("numbers", {
   id: serial("id").primaryKey(),
   phoneNumber: text("phone_number").notNull(),
+  accountName: text("account_name"),
   country: text("country").notNull(),
   operator: text("operator"),
   status: text("status").notNull().default("active"),
@@ -151,6 +153,7 @@ export const pendingPayments = pgTable("pending_payments", {
   errorMessage: text("error_message"),
   paymentToken: text("payment_token"),
   manualRecipientPhone: text("manual_recipient_phone"),
+  manualRecipientName: text("manual_recipient_name"),
   manualUssdCode: text("manual_ussd_code"),
   manualInstructions: text("manual_instructions"),
   manualSubmission: text("manual_submission"),
