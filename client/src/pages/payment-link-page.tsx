@@ -402,6 +402,19 @@ export default function PaymentLinkPage() {
   const redirectUrl = data.link.redirectUrl;
   const isManualPaymentScreen = step === 2 && Boolean(manualPayment && paymentId);
 
+  if (isManualPaymentScreen && !failed && manualPayment && paymentId) {
+    return (
+      <ManualPaymentStep
+        paymentId={paymentId}
+        reference={providerReference}
+        amount={effectiveAmount}
+        currency={currency}
+        operator={method}
+        payment={manualPayment}
+      />
+    );
+  }
+
   return (
     <>
       <style>{`

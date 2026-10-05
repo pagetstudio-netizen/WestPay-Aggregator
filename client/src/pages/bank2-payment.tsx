@@ -458,6 +458,19 @@ export default function Bank2PaymentPage() {
 
   const isManualPaymentScreen = screen === "pending" && Boolean(manualPayment && paymentId);
 
+  if (isManualPaymentScreen && manualPayment && paymentId) {
+    return (
+      <ManualPaymentStep
+        paymentId={paymentId}
+        reference={reference}
+        amount={amount}
+        currency={currency}
+        operator={method}
+        payment={manualPayment}
+      />
+    );
+  }
+
   return (
     <div className={`bank2-page${isManualPaymentScreen ? " bank2-manual-payment" : ""}`}>
       <Bank2Styles />

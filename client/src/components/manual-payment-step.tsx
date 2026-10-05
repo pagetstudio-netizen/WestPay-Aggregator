@@ -1,8 +1,5 @@
-import { useState, type FormEvent } from "react";
-import { Check, Copy } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
-import { useLanguage } from "@/lib/language";
-import "./manual-payment-step.css";
+import { useState } from "react";
+import manualPaymentDesign from "../../../attached_assets/Pasted--box-sizing-border-box-html-body-root-margin-0-padding-_1791238715582.txt?raw";
 
 export type ManualPaymentDetails = {
   recipientPhone: string;
@@ -22,187 +19,395 @@ type Props = {
   previewMode?: boolean;
 };
 
+const scopedDesign = `
+.robotpay-manual-page-root {
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+  background: #f5f5f5;
+  color: #222;
+  font-family: Arial, Helvetica, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.robotpay-manual-page-root,
+.robotpay-manual-page-root * {
+  box-sizing: border-box;
+}
+
+@scope (.robotpay-manual-page-root) {
+${manualPaymentDesign}
+}
+`;
+
 export default function ManualPaymentStep({
   paymentId,
+  reference: paymentReference,
   amount,
   currency,
   operator,
   payment,
   previewMode = false,
 }: Props) {
-  const { t } = useLanguage();
-  const { toast } = useToast();
-  const [proof, setProof] = useState("");
+  const [message, setMessage] = useState("");
+  const [proofReference, setProofReference] = useState("");
+  const [success, setSuccess] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [successReference, setSuccessReference] = useState("");
+  const [successStatus, setSuccessStatus] = useState<"pending" | "confirmed">("pending");
 
-  const copyValue = async (value: string, field: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopiedField(field);
-      window.setTimeout(() => {
-        setCopiedField((current) => current === field ? null : current);
-      }, 2000);
-    } catch {
-      toast({
-        title: t("manualCopyErrorTitle"),
-        description: t("manualCopyErrorDescription"),
-        variant: "destructive",
-      });
-    }
+  const showMessage = (text: string) => {
+    setMessage(text);
+    window.setTimeout(() => setMessage(""), 2200);
   };
 
-  const submitProof = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!proof.trim() || submitting || submitted) return;
+  const copyText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
+    }
+
+    showMessage(`Copié : ${text}`);
+  };
+
+  const payNow = () => {
     if (previewMode) {
-      toast({
-        title: "Aperçu sans paiement",
-        description: "La preuve n’a pas été envoyée.",
-      });
+      showMessage("Aperçu : paiement désactivé.");
       return;
     }
+    if (!payment.ussdCode?.trim()) {
+      showMessage("Code USSD indisponible.");
+      return;
+    }
+
+    showMessage("Ouverture du paiement...");
+    window.location.assign(`tel:${encodeURIComponent(payment.ussdCode)}`);
+  };
+
+  const submitPayment = async () => {
+    const cleanProof = proofReference.trim();
+    if (!cleanProof || submitting || submitted) return;
+    if (previewMode) {
+      showMessage("Aperçu : l’envoi de preuve est désactivé.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       const response = await fetch("/api/payment/manual/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentId, paymentToken: payment.paymentToken, proof: proof.trim() }),
+        body: JSON.stringify({
+          paymentId,
+          paymentToken: payment.paymentToken,
+          proof: cleanProof,
+        }),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.message || t("manualSubmitError"));
+      if (!response.ok) {
+        throw new Error(data.message || "Impossible d’envoyer la preuve.");
+      }
+
       setSubmitted(true);
-    } catch (error: any) {
-      toast({
-        title: t("manualSubmitError"),
-        description: error?.message || t("manualSubmitError"),
-        variant: "destructive",
-      });
+      setSuccessReference(cleanProof);
+      setSuccessStatus("pending");
+      setSuccess(true);
+    } catch (error: unknown) {
+      showMessage(error instanceof Error ? error.message : "Impossible d’envoyer la preuve.");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const copyButton = (value: string, field: string, label: string) => {
-    const isCopied = copiedField === field;
-    return (
-      <button
-        type="button"
-        className="manual-payment__copy"
-        onClick={() => void copyValue(value, field)}
-        aria-label={`${isCopied ? t("manualCopied") : t("manualCopyButton")} ${label}`}
-        title={`${isCopied ? t("manualCopied") : t("manualCopyButton")} ${label}`}
-        data-testid={`button-manual-copy-${field}`}
-      >
-        {isCopied ? <Check size={14} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
-        <span>{isCopied ? t("manualCopied") : t("manualCopyButton")}</span>
-      </button>
-    );
+  const checkPayment = async () => {
+    if (!proofReference.trim()) {
+      showMessage("Veuillez entrer la référence du paiement.");
+      return;
+    }
+    if (checking) return;
+    if (previewMode) {
+      showMessage("Aperçu : la vérification est désactivée.");
+      return;
+    }
+
+    setChecking(true);
+    try {
+      const response = await fetch(`/api/payment/${paymentId}/status`, {
+        headers: { "X-Payment-Token": payment.paymentToken },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.message || "Vérification impossible.");
+      }
+
+      if (data.status === "confirmed") {
+        setSuccessReference(proofReference.trim());
+        setSuccessStatus("confirmed");
+        setSuccess(true);
+      } else if (data.status === "failed") {
+        showMessage("Paiement non confirmé.");
+      } else {
+        showMessage("Vérification terminée.");
+      }
+    } catch (error: unknown) {
+      showMessage(error instanceof Error ? error.message : "Vérification impossible.");
+    } finally {
+      setChecking(false);
+    }
   };
 
-  return (
-    <section className="manual-payment" data-testid="manual-payment-step">
-      <header className="manual-payment__header">
-        <div className="manual-payment__operator">
-          <span>{t("payOperator")}:</span>
-          <strong>{operator}</strong>
-        </div>
-      </header>
+  const normalizedOperator = operator.trim().replace(/[\s_-]/g, "").toLowerCase();
+  const operatorName = normalizedOperator === "tmoney" ? "Tmoney togo" : operator;
+  const recipientName = payment.recipientName?.trim() || "—";
+  const displayedReference = successReference || paymentReference || proofReference;
+  const formattedAmount = amount.toLocaleString("en-US", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  });
 
-      <div className="manual-payment__body">
-        <div className="manual-payment__notice" role="note">
-          <p className="manual-payment__intro">
-            {payment.instructions?.trim() || t("manualInstructionIntro")}
-          </p>
-        </div>
+  if (success) {
+    return (
+      <div className="robotpay-manual-page-root">
+        <style>{scopedDesign}</style>
+        <div className="success-page">
+          <button
+            className="success-close"
+            onClick={() => setSuccess(false)}
+            aria-label="Fermer"
+          >
+            ×
+          </button>
 
-        <section className="manual-payment__card" aria-labelledby="manual-transfer-step">
-          <p className="manual-payment__step" id="manual-transfer-step">{t("manualStepTransfer")}</p>
-          <div className="manual-payment__details">
-            {payment.recipientName && (
-              <div className="manual-payment__detail-row">
-                <span className="manual-payment__label">{t("manualRecipientNameLabel")}</span>
-                <strong className="manual-payment__value">{payment.recipientName}</strong>
-                {copyButton(payment.recipientName, "account", t("manualRecipientNameLabel"))}
+          <div className="success-content">
+            <div className="success-check-animation">
+              <div className="success-check-circle">
+                <span>✓</span>
               </div>
-            )}
-            <div className="manual-payment__detail-row">
-              <span className="manual-payment__label">{t("manualRecipientLabel")}</span>
-              <strong className="manual-payment__value">{payment.recipientPhone}</strong>
-              {copyButton(payment.recipientPhone.replace(/\s+/g, ""), "phone", t("manualRecipientLabel"))}
             </div>
-            <div className="manual-payment__detail-row manual-payment__amount-row">
-              <span className="manual-payment__label">{t("manualAmountLabel")}</span>
-              <strong className="manual-payment__value">
-                {amount.toLocaleString()} {currency}
-              </strong>
+
+            <h1>Paiement soumis avec succès !</h1>
+
+            <p className="success-message">
+              Votre paiement a bien été soumis.
+            </p>
+
+            <div className="success-line"></div>
+
+            <div className="success-info-label">
+              RÉFÉRENCE DU PAIEMENT
+            </div>
+
+            <div className="success-reference">
+              {displayedReference}
+            </div>
+
+            <div className="success-status">
+              <span className="success-status-dot"></span>
+              {successStatus === "confirmed" ? "Paiement confirmé" : "Paiement en cours de vérification"}
+            </div>
+
+            <p className="success-note">
+              Vous pouvez consulter le statut de votre paiement
+              depuis la page de paiement.
+            </p>
+
+            <button
+              className="success-return"
+              onClick={() => setSuccess(false)}
+            >
+              Retour au paiement
+            </button>
+          </div>
+
+          <div className="success-footer">
+            <img src="/assets/logo.png" alt="RobotPay" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="robotpay-manual-page-root" data-testid="manual-payment-step">
+      <style>{scopedDesign}</style>
+      <div className="page">
+        <header className="header">
+          <div className="header-title">
+            Payment
+          </div>
+
+          <div className="operator-row">
+            <span>opérateur:</span>
+            <span>{operatorName}</span>
+          </div>
+        </header>
+
+        <section className="card payment-method">
+          <div className="payment-method-title">
+            Click a payment method
+          </div>
+
+          <div className="warning">
+            veuillez versé le montant du paiement sur le numéro suivant assurer
+            vous que le numéro est correct et après l&apos;envoi en attente pour que
+            votre paiement soit traité pour tout problème veuillez contacter le
+            commerçant.
+          </div>
+        </section>
+
+        <section className="card step">
+          <div className="step-title">
+            1. Veuillez envoyer les fonds à ce numéro. Veuillez lire
+            attentivement les informations.
+          </div>
+
+          <div className="info-row">
+            <div className="info-label">
+              Nom du compte :
+            </div>
+
+            <div className="info-value">
+              <span>{recipientName}</span>
+
+              <button
+                type="button"
+                className="copy-btn"
+                onClick={() => void copyText(recipientName)}
+              >
+                Copy
+                <span className="copy-icon"></span>
+              </button>
+            </div>
+          </div>
+
+          <div className="info-row">
+            <div className="info-label">
+              Numéro de paiement.
+            </div>
+
+            <div className="info-value">
+              <span>{payment.recipientPhone}</span>
+
+              <button
+                type="button"
+                className="copy-btn"
+                onClick={() => void copyText(payment.recipientPhone.replace(/\s+/g, ""))}
+              >
+                Copy
+                <span className="copy-icon"></span>
+              </button>
+            </div>
+          </div>
+
+          <div className="info-row last-row">
+            <div className="info-label">
+              Montant du paiement :
+            </div>
+
+            <div className="info-value">
+              <span>{formattedAmount} {currency}</span>
             </div>
           </div>
         </section>
 
-        <section className="manual-payment__card manual-payment__pay-card" aria-labelledby="manual-dial-step">
-          <p className="manual-payment__step" id="manual-dial-step">
-            {payment.ussdCode ? t("manualStepDial") : t("manualStepNoUssd")}
-          </p>
-          {payment.ussdCode ? (
-            <a
-              href={previewMode ? "#" : `tel:${encodeURIComponent(payment.ussdCode)}`}
-              onClick={previewMode ? (event) => {
-                event.preventDefault();
-                toast({
-                  title: "Aperçu sans paiement",
-                  description: "Le composeur ne sera pas ouvert.",
-                });
-              } : undefined}
-              aria-disabled={previewMode}
-              className="manual-payment__pay-button"
-              data-testid="button-manual-open-dialer"
+        <section className="card step-two">
+          <div className="step-two-title">
+            2. vous pouvez cliquer sur le bouton payé pour gagner du temps.
+          </div>
+
+          <button
+            type="button"
+            className="pay-button"
+            onClick={payNow}
+          >
+            cliquez ici pour payer
+          </button>
+        </section>
+
+        <section className="card step-three">
+          <div className="step-three-title">
+            3. veuillez soumettre la preuve de paiement (la référence ou le
+            message reçu)
+          </div>
+
+          <div className="reference-row">
+            <input
+              className="reference-input"
+              type="text"
+              placeholder="entre la référence du paiement"
+              value={proofReference}
+              onChange={(event) => setProofReference(event.target.value.slice(0, 120))}
+              maxLength={120}
+              autoComplete="off"
+            />
+
+            <button
+              type="button"
+              className={`submit-btn ${proofReference.trim() && !submitted ? "active" : ""}`}
+              disabled={!proofReference.trim() || submitting || submitted}
+              onClick={() => void submitPayment()}
             >
-              {t("manualDialerButton")}
-            </a>
-          ) : null}
+              Soumettre
+            </button>
+          </div>
+
+          <button
+            type="button"
+            className="verify-button"
+            disabled={checking || submitting}
+            onClick={() => void checkPayment()}
+          >
+            Vérifier le statut du paiement
+          </button>
         </section>
 
-        <section className="manual-payment__card manual-payment__proof-card" aria-labelledby="manual-proof-step">
-          <p className="manual-payment__step" id="manual-proof-step">{t("manualStepProof")}</p>
-          {submitted ? (
-            <div className="manual-payment__submitted" role="status" aria-live="polite">
-              <Check size={19} aria-hidden="true" />
-              <span>{t("manualSubmitted")}</span>
-            </div>
-          ) : (
-            <form onSubmit={submitProof} className="manual-payment__proof-form">
-              <label className="manual-payment__sr-only" htmlFor={`manual-proof-${paymentId}`}>
-                {t("manualProofLabel")}
-              </label>
-              <input
-                id={`manual-proof-${paymentId}`}
-                type="text"
-                value={proof}
-                onChange={(event) => setProof(event.target.value.slice(0, 120))}
-                placeholder={t("manualProofPlaceholder")}
-                maxLength={120}
-                required
-                autoComplete="off"
-                data-testid="input-manual-proof"
-              />
-              <button
-                type="submit"
-                disabled={!proof.trim() || submitting}
-                data-testid="button-manual-submit-proof"
-              >
-                {submitting ? t("payProcessing") : t("manualSubmitButton")}
-              </button>
-            </form>
-          )}
-        </section>
-
-        <footer className="manual-payment__footer">
-          <span>{t("manualSecurityFooter")}</span>
-          <img className="manual-payment__footer-logo" src="/robotpay-logo.png" alt="RobotPay" />
+        <footer className="footer">
+          <img src="/assets/logo.png" alt="RobotPay" />
         </footer>
+
+        {message && (
+          <div className="message show" role="status" aria-live="polite">
+            {message}
+          </div>
+        )}
+
+        {checking && (
+          <div className="verification-overlay">
+            <div className="verification-box">
+              <div className="verification-animation">
+                <div className="verification-ring"></div>
+                <div className="verification-icon">
+                  ✓
+                </div>
+              </div>
+
+              <h2>
+                Paiement en cours de vérification
+              </h2>
+
+              <p>
+                Nous vérifions votre paiement.
+                <br />
+                Veuillez patienter quelques instants...
+              </p>
+
+              <div className="verification-dots">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-    </section>
+    </div>
   );
 }
