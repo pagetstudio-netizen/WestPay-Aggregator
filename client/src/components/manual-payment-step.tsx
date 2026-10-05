@@ -1,5 +1,6 @@
 import { useState } from "react";
 import manualPaymentDesign from "../../../attached_assets/Pasted--box-sizing-border-box-html-body-root-margin-0-padding-_1791238715582.txt?raw";
+import copyIconPng from "../../../attached_assets/copie_1791241107801.png";
 
 export type ManualPaymentDetails = {
   recipientPhone: string;
@@ -162,25 +163,13 @@ ${manualPaymentDesign}
   background: #4aa83a;
 }
 
-.copy-icon,
-.copy-icon::after {
-  border-color: #fff;
-}
-
 .copy-icon {
+  display: block;
   width: 15px;
   height: 15px;
-  color: #fff;
-  border-width: 2px;
-}
-
-.copy-icon::after {
-  width: 10px;
-  height: 10px;
-  left: 3px;
-  top: -5px;
-  border-width: 2px;
-  background: #58b844;
+  flex: 0 0 15px;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
 }
 
 .pay-button {
@@ -632,7 +621,7 @@ export default function ManualPaymentStep({
                 onClick={() => void copyText(recipientName)}
               >
                 Copy
-                <span className="copy-icon"></span>
+                <img className="copy-icon" src={copyIconPng} alt="" aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -651,7 +640,7 @@ export default function ManualPaymentStep({
                 onClick={() => void copyText(payment.recipientPhone.replace(/\s+/g, ""))}
               >
                 Copy
-                <span className="copy-icon"></span>
+                <img className="copy-icon" src={copyIconPng} alt="" aria-hidden="true" />
               </button>
             </div>
           </div>
