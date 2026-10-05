@@ -38,7 +38,7 @@ import {
   Bot, Send, ShieldCheck
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
-import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator } from "@shared/schema";
+import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator, WaveManualPaymentConfig } from "@shared/schema";
 import { getMerchantCategory, getSettlementCycle } from "@shared/merchant-account";
 
 type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "mbiyo" | "lipapap" | "drimpay" | "seapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge" | "actionlogs";
@@ -2281,6 +2281,8 @@ function CountriesPanel() {
         />
       </div>
 
+      <WaveManualPaymentConfigPanel token={token} />
+
       <div className="space-y-3">
         {filteredCountries.length === 0 && filterSearch && (
           <Card><CardContent className="p-6 text-center text-muted-foreground text-sm">Aucun résultat pour « {filterSearch} »</CardContent></Card>
@@ -2648,6 +2650,290 @@ function NumbersPanel() {
         )}
       </div>
     </div>
+  );
+}
+
+function WaveManualPaymentConfigPanel({ token }: { token: string | null | undefined }) {
+  const { toast } = useToast();
+  const { data: configs = [], isLoading } = useAdminFetch(
+    "/api/admin/wave-manual-payment-configs",
+    ["/api/admin/wave-manual-payment-configs"],
+  );
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingConfig, setEditingConfig] = useState<WaveManualPaymentConfig | null>(null);
+  const [country, setCountry] = useState("");
+  const [paymentUrl, setPaymentUrl] = useState("");
+  const [qrFile, setQrFile] = useState<File | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const savedConfigs = configs as WaveManualPaymentConfig[];
+  const configuredCountries = new Set(savedConfigs.map((config) => config.country.toLocaleLowerCase()));
+  const availableCountries = COUNTRIES_LIST.filter((value) => !configuredCountries.has(value.toLocaleLowerCase()));
+
+  const openCreate = () => {
+    setEditingConfig(null);
+    setCountry("");
+    setPaymentUrl("");
+    setQrFile(null);
+    setDialogOpen(true);
+  };
+
+  const openEdit = (config: WaveManualPaymentConfig) => {
+    setEditingConfig(config);
+    setCountry(config.country);
+    setPaymentUrl(config.paymentUrl);
+    setQrFile(null);
+    setDialogOpen(true);
+  };
+
+  const saveConfig = async () => {
+    if (!country || !paymentUrl.trim() || (!editingConfig && !qrFile)) return;
+    setSaving(true);
+    try {
+      const formData = new FormData();
+      formData.append("country", country);
+      formData.append("paymentUrl", paymentUrl.trim());
+      if (qrFile) formData.append("qr", qrFile);
+      const response = await fetch(
+        editingConfig
+          ? `/api/admin/wave-manual-payment-configs/${editingConfig.id}`
+          : "/api/admin/wave-manual-payment-configs",
+        {
+          method: editingConfig ? "PUT" : "POST",
+          credentials: "include",
+          headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          body: formData,
+        },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "Impossible d’enregistrer le lien Wave.");
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/wave-manual-payment-configs"] });
+      toast({ title: editingConfig ? "Lien Wave mis à jour" : "Lien Wave ajouté" });
+      setDialogOpen(false);
+      setEditingConfig(null);
+      setQrFile(null);
+    } catch (error: any) {
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleConfig = async (config: WaveManualPaymentConfig) => {
+    setUpdatingId(config.id);
+    try {
+      const response = await fetch(`/api/admin/wave-manual-payment-configs/${config.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ enabled: !config.enabled }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "Impossible de modifier ce lien Wave.");
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/wave-manual-payment-configs"] });
+      toast({ title: config.enabled ? "Lien Wave désactivé" : "Lien Wave activé" });
+    } catch (error: any) {
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const removeQr = async (config: WaveManualPaymentConfig) => {
+    setUpdatingId(config.id);
+    try {
+      const response = await fetch(`/api/admin/wave-manual-payment-configs/${config.id}/qr`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "Impossible de supprimer le QR.");
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/wave-manual-payment-configs"] });
+      toast({
+        title: "QR supprimé",
+        description: "Le lien Wave est désactivé jusqu’à l’importation d’un nouveau QR.",
+      });
+    } catch (error: any) {
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const deleteConfig = async (config: WaveManualPaymentConfig) => {
+    if (!await showConfirm("Supprimer uniquement cette configuration Wave ? Les numéros déjà enregistrés ne seront pas modifiés.")) return;
+    setDeletingId(config.id);
+    try {
+      const response = await fetch(`/api/admin/wave-manual-payment-configs/${config.id}`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "Impossible de supprimer cette configuration.");
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/wave-manual-payment-configs"] });
+      toast({ title: "Configuration Wave supprimée" });
+    } catch (error: any) {
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  return (
+    <Card className="border-sky-200">
+      <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
+        <div>
+          <CardTitle className="text-base">Paiement manuel Wave par lien</CardTitle>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Configurez un lien Wave et son QR séparément. Les numéros déjà enregistrés restent inchangés.
+          </p>
+        </div>
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <Button type="button" size="sm" onClick={openCreate} disabled={availableCountries.length === 0}>
+            <Plus className="mr-2 h-4 w-4" />
+            Ajouter Wave
+          </Button>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{editingConfig ? "Modifier le lien Wave" : "Configurer Wave"}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Pays</Label>
+                <Select
+                  value={country || "none"}
+                  onValueChange={(value) => setCountry(value === "none" ? "" : value)}
+                  disabled={Boolean(editingConfig)}
+                >
+                  <SelectTrigger><SelectValue placeholder="Choisir un pays" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Choisir un pays</SelectItem>
+                    {(editingConfig ? [editingConfig.country] : availableCountries).map((value) => (
+                      <SelectItem key={value} value={value}>{value}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Lien de paiement Wave</Label>
+                <Input
+                  type="url"
+                  value={paymentUrl}
+                  onChange={(event) => setPaymentUrl(event.target.value)}
+                  placeholder="https://pay.wave.com/..."
+                  maxLength={1000}
+                />
+                <p className="text-xs text-muted-foreground">Utilisez le lien HTTPS officiel fourni par Wave.</p>
+              </div>
+              <div className="space-y-2">
+                <Label>Code QR Wave {editingConfig ? "(facultatif pour le remplacer)" : ""}</Label>
+                <Input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(event) => setQrFile(event.target.files?.[0] || null)}
+                />
+                <p className="text-xs text-muted-foreground">PNG, JPG ou WebP, 5 Mo maximum. Le QR sera stocké et pourra être remplacé ou supprimé ici.</p>
+                {editingConfig?.qrImageUrl && !qrFile && (
+                  <img
+                    src={editingConfig.qrImageUrl}
+                    alt={`QR Wave ${editingConfig.country}`}
+                    className="mx-auto max-h-44 rounded border object-contain"
+                  />
+                )}
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Annuler</Button>
+                <Button
+                  type="button"
+                  onClick={() => void saveConfig()}
+                  disabled={saving || !country || !paymentUrl.trim() || (!editingConfig && !qrFile)}
+                >
+                  {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {editingConfig ? "Enregistrer" : "Créer le lien"}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {isLoading ? (
+          <Skeleton className="h-16 w-full" />
+        ) : savedConfigs.length === 0 ? (
+          <p className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+            Aucun lien Wave configuré.
+          </p>
+        ) : (
+          savedConfigs.map((config) => (
+            <div key={config.id} className="rounded-md border p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-3">
+                  {config.qrImageUrl ? (
+                    <img src={config.qrImageUrl} alt={`QR Wave ${config.country}`} className="h-16 w-16 rounded border object-contain" />
+                  ) : (
+                    <div className="flex h-16 w-16 items-center justify-center rounded border bg-muted text-xs text-muted-foreground">QR absent</div>
+                  )}
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold">{config.country}</span>
+                      <Badge variant={config.enabled ? "default" : "secondary"}>
+                        {config.enabled ? "Actif" : "Désactivé"}
+                      </Badge>
+                    </div>
+                    <a
+                      href={config.paymentUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block max-w-full break-all text-xs text-sky-700 underline"
+                    >
+                      {config.paymentUrl}
+                    </a>
+                    {!config.qrImageUrl && <p className="text-xs text-destructive">Importez un QR pour réactiver ce paiement.</p>}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" size="sm" variant="outline" onClick={() => openEdit(config)}>Modifier</Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void toggleConfig(config)}
+                    disabled={updatingId === config.id || (!config.enabled && !config.qrImageUrl)}
+                  >
+                    {config.enabled ? "Désactiver" : "Activer"}
+                  </Button>
+                  {config.qrImageUrl && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void removeQr(config)}
+                      disabled={updatingId === config.id}
+                    >
+                      Supprimer le QR
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => void deleteConfig(config)}
+                    disabled={deletingId === config.id}
+                  >
+                    <Trash2 className="mr-1 h-3.5 w-3.5" />
+                    Supprimer
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

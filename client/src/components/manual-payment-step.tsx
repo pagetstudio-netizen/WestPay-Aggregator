@@ -1,6 +1,7 @@
 import { useState } from "react";
 import manualPaymentDesign from "../../../attached_assets/Pasted--box-sizing-border-box-html-body-root-margin-0-padding-_1791238715582.txt?raw";
 import copyIconPng from "../../../attached_assets/copie_1791241107801.png";
+import waveBrandLogo from "../../../attached_assets/1756606482154_1791243181275.png";
 
 export type ManualPaymentDetails = {
   recipientPhone: string;
@@ -8,6 +9,8 @@ export type ManualPaymentDetails = {
   ussdCode: string | null;
   instructions: string;
   paymentToken: string;
+  wavePaymentUrl?: string | null;
+  waveQrCodeUrl?: string | null;
 };
 
 type Props = {
@@ -217,6 +220,108 @@ ${manualPaymentDesign}
   background: #f4fbf2;
 }
 
+.wave-manual .header {
+  min-height: 166px;
+  background: #20bde9;
+  color: #fff;
+}
+
+.wave-manual .header-title {
+  display: none;
+}
+
+.wave-brand-logo {
+  display: block;
+  width: min(230px, 72vw);
+  height: auto;
+  margin: 2px auto 0;
+}
+
+.wave-manual .operator-row {
+  margin-top: 6px;
+  color: #fff;
+  font-size: 16px;
+}
+
+.wave-manual .payment-method {
+  display: none;
+}
+
+.wave-payment-card {
+  padding: 18px 16px 22px;
+  text-align: center;
+}
+
+.wave-instructions {
+  color: #536169;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.45;
+  margin-bottom: 12px;
+}
+
+.wave-manual .pay-button {
+  min-height: 54px;
+  border-radius: 999px;
+  background: #20bde9;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.wave-manual .pay-button:hover {
+  background: #12acd8;
+}
+
+.wave-qr-instructions {
+  margin: 22px auto 12px;
+  color: #536169;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.wave-qr {
+  display: block;
+  width: min(100%, 270px);
+  max-height: 360px;
+  margin: 0 auto 14px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.wave-payment-amount {
+  color: #536169;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.wave-manual .reference-input {
+  border-color: #20bde9;
+}
+
+.wave-manual .reference-input:focus {
+  outline-color: rgba(32, 189, 233, 0.35);
+}
+
+.wave-manual .submit-btn.active {
+  border-color: #20bde9;
+  background: #20bde9;
+}
+
+.wave-manual .verify-button {
+  border-color: #20bde9;
+  color: #20bde9;
+}
+
+.wave-manual .verify-button:hover:not(:disabled) {
+  background: #effbff;
+}
+
+.wave-manual button:focus-visible {
+  outline-color: rgba(32, 189, 233, 0.4);
+}
+
 button {
   -webkit-tap-highlight-color: transparent;
   transition:
@@ -421,6 +526,11 @@ export default function ManualPaymentStep({
       showMessage("Aperçu : paiement désactivé.");
       return;
     }
+    if (payment.wavePaymentUrl) {
+      showMessage("Ouverture de Wave...");
+      window.location.assign(payment.wavePaymentUrl);
+      return;
+    }
     if (!payment.ussdCode?.trim()) {
       showMessage("Code USSD indisponible.");
       return;
@@ -504,6 +614,7 @@ export default function ManualPaymentStep({
 
   const normalizedOperator = operator.trim().replace(/[\s_-]/g, "").toLowerCase();
   const operatorName = normalizedOperator === "tmoney" ? "Tmoney togo" : operator;
+  const isWavePayment = Boolean(payment.wavePaymentUrl && payment.waveQrCodeUrl);
   const recipientName = payment.recipientName?.trim() || "—";
   const displayedReference = successReference || paymentReference || proofReference;
   const formattedAmount = amount.toLocaleString("en-US", {
@@ -513,7 +624,7 @@ export default function ManualPaymentStep({
 
   if (success) {
     return (
-      <div className="robotpay-manual-page-root">
+      <div className={`robotpay-manual-page-root${isWavePayment ? " wave-manual" : ""}`}>
         <style>{scopedDesign}</style>
         <div className="success-page">
           <button
@@ -574,101 +685,133 @@ export default function ManualPaymentStep({
   }
 
   return (
-    <div className="robotpay-manual-page-root" data-testid="manual-payment-step">
+    <div className={`robotpay-manual-page-root${isWavePayment ? " wave-manual" : ""}`} data-testid="manual-payment-step">
       <style>{scopedDesign}</style>
       <div className="page">
         <header className="header">
-          <div className="header-title">
-            Payment
-          </div>
+          {isWavePayment ? (
+            <img className="wave-brand-logo" src={waveBrandLogo} alt="Wave" />
+          ) : (
+            <div className="header-title">
+              Payment
+            </div>
+          )}
 
           <div className="operator-row">
-            <span>opérateur:</span>
-            <span>{operatorName}</span>
+            <span>{isWavePayment ? "Montant à payer :" : "opérateur:"}</span>
+            <span>{isWavePayment ? `${formattedAmount} ${currency}` : operatorName}</span>
           </div>
         </header>
 
-        <section className="card payment-method">
-          <div className="payment-method-title">
-            Click a payment method
-          </div>
-
-          <div className="warning">
-            veuillez versé le montant du paiement sur le numéro suivant assurer
-            vous que le numéro est correct et après l&apos;envoi en attente pour que
-            votre paiement soit traité pour tout problème veuillez contacter le
-            commerçant.
-          </div>
-        </section>
-
-        <section className="card step">
-          <div className="step-title">
-            1. Veuillez envoyer les fonds à ce numéro. Veuillez lire
-            attentivement les informations.
-          </div>
-
-          <div className="info-row">
-            <div className="info-label">
-              Nom du compte :
+        {isWavePayment ? (
+          <section className="card wave-payment-card">
+            <div className="wave-instructions">
+              Veuillez ouvrir l’application Wave pour terminer le paiement
             </div>
+            <button
+              type="button"
+              className="pay-button"
+              onClick={payNow}
+            >
+              Ouvrir l’application Wave
+            </button>
+            <div className="wave-qr-instructions">
+              Appuyez longuement sur le code QR pour l’enregistrer
+            </div>
+            <img
+              className="wave-qr"
+              src={payment.waveQrCodeUrl || ""}
+              alt="Code QR de paiement Wave"
+            />
+            <div className="wave-payment-amount">
+              Référence de commande : {paymentReference || "—"}
+            </div>
+          </section>
+        ) : (
+          <>
+            <section className="card payment-method">
+              <div className="payment-method-title">
+                Click a payment method
+              </div>
 
-            <div className="info-value">
-              <span>{recipientName}</span>
+              <div className="warning">
+                veuillez versé le montant du paiement sur le numéro suivant assurer
+                vous que le numéro est correct et après l&apos;envoi en attente pour que
+                votre paiement soit traité pour tout problème veuillez contacter le
+                commerçant.
+              </div>
+            </section>
+
+            <section className="card step">
+              <div className="step-title">
+                1. Veuillez envoyer les fonds à ce numéro. Veuillez lire
+                attentivement les informations.
+              </div>
+
+              <div className="info-row">
+                <div className="info-label">
+                  Nom du compte :
+                </div>
+
+                <div className="info-value">
+                  <span>{recipientName}</span>
+
+                  <button
+                    type="button"
+                    className="copy-btn"
+                    onClick={() => void copyText(recipientName)}
+                  >
+                    Copy
+                    <img className="copy-icon" src={copyIconPng} alt="" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="info-row">
+                <div className="info-label">
+                  Numéro de paiement.
+                </div>
+
+                <div className="info-value">
+                  <span>{payment.recipientPhone}</span>
+
+                  <button
+                    type="button"
+                    className="copy-btn"
+                    onClick={() => void copyText(payment.recipientPhone.replace(/\s+/g, ""))}
+                  >
+                    Copy
+                    <img className="copy-icon" src={copyIconPng} alt="" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="info-row last-row">
+                <div className="info-label">
+                  Montant du paiement :
+                </div>
+
+                <div className="info-value">
+                  <span>{formattedAmount} {currency}</span>
+                </div>
+              </div>
+            </section>
+
+            <section className="card step-two">
+              <div className="step-two-title">
+                2. vous pouvez cliquer sur le bouton payé pour gagner du temps.
+              </div>
 
               <button
                 type="button"
-                className="copy-btn"
-                onClick={() => void copyText(recipientName)}
+                className="pay-button"
+                onClick={payNow}
               >
-                Copy
-                <img className="copy-icon" src={copyIconPng} alt="" aria-hidden="true" />
+                cliquez ici pour payer
               </button>
-            </div>
-          </div>
-
-          <div className="info-row">
-            <div className="info-label">
-              Numéro de paiement.
-            </div>
-
-            <div className="info-value">
-              <span>{payment.recipientPhone}</span>
-
-              <button
-                type="button"
-                className="copy-btn"
-                onClick={() => void copyText(payment.recipientPhone.replace(/\s+/g, ""))}
-              >
-                Copy
-                <img className="copy-icon" src={copyIconPng} alt="" aria-hidden="true" />
-              </button>
-            </div>
-          </div>
-
-          <div className="info-row last-row">
-            <div className="info-label">
-              Montant du paiement :
-            </div>
-
-            <div className="info-value">
-              <span>{formattedAmount} {currency}</span>
-            </div>
-          </div>
-        </section>
-
-        <section className="card step-two">
-          <div className="step-two-title">
-            2. vous pouvez cliquer sur le bouton payé pour gagner du temps.
-          </div>
-
-          <button
-            type="button"
-            className="pay-button"
-            onClick={payNow}
-          >
-            cliquez ici pour payer
-          </button>
-        </section>
+            </section>
+          </>
+        )}
 
         <section className="card step-three">
           <div className="step-three-title">

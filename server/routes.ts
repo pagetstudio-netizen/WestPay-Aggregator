@@ -125,6 +125,79 @@ function providerAwarePendingStatus(gateway: unknown, status: string | null | un
 const LOGOS_DIR = path.resolve(process.cwd(), "uploads", "operator-logos");
 if (!fs.existsSync(LOGOS_DIR)) fs.mkdirSync(LOGOS_DIR, { recursive: true });
 
+const WAVE_QR_DIR = path.resolve(process.cwd(), "uploads", "wave-payment-qrs");
+const WAVE_QR_PUBLIC_PREFIX = "/uploads/wave-payment-qrs/";
+if (!fs.existsSync(WAVE_QR_DIR)) fs.mkdirSync(WAVE_QR_DIR, { recursive: true });
+const waveQrUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const expectedMime: Record<string, string> = {
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".webp": "image/webp",
+    };
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (expectedMime[ext] && expectedMime[ext] === file.mimetype) cb(null, true);
+    else cb(new Error("Format non supporté (PNG, JPG ou WebP uniquement)."));
+  },
+});
+
+function normalizeWavePaymentUrl(value: unknown): string | null {
+  if (typeof value !== "string" || value.trim().length > 1000) return null;
+  try {
+    const url = new URL(value.trim());
+    if (
+      url.protocol !== "https:" ||
+      !/(^|\.)wave\.com$/i.test(url.hostname) ||
+      url.username ||
+      url.password
+    ) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function isWaveManualLinkMethod(value: unknown): boolean {
+  return typeof value === "string" &&
+    value.toLowerCase().replace(/[^a-z0-9]/g, "") === "waveparlien";
+}
+
+async function saveWaveQrUpload(file: Express.Multer.File): Promise<string> {
+  const ext = path.extname(file.originalname).toLowerCase();
+  const isPng = ext === ".png" && file.buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  const isJpeg = [".jpg", ".jpeg"].includes(ext) && file.buffer.subarray(0, 3).equals(Buffer.from([255, 216, 255]));
+  const isWebp = ext === ".webp" &&
+    file.buffer.toString("ascii", 0, 4) === "RIFF" &&
+    file.buffer.toString("ascii", 8, 12) === "WEBP";
+  if (!isPng && !isJpeg && !isWebp) {
+    throw new Error("Le fichier sélectionné n’est pas une image PNG, JPG ou WebP valide.");
+  }
+
+  const filename = `wave-qr-${crypto.randomBytes(16).toString("hex")}${ext}`;
+  await fs.promises.writeFile(path.join(WAVE_QR_DIR, filename), file.buffer, { flag: "wx" });
+  return `${WAVE_QR_PUBLIC_PREFIX}${filename}`;
+}
+
+async function removeWaveQrFileIfUnreferenced(imageUrl: string | null | undefined): Promise<void> {
+  if (!imageUrl?.startsWith(WAVE_QR_PUBLIC_PREFIX)) return;
+  try {
+    const { rows } = await financialPool.query(
+      `SELECT 1 FROM pending_payments
+       WHERE manual_wave_qr_code_url = $1 AND expires_at > NOW()
+       LIMIT 1`,
+      [imageUrl],
+    );
+    if (rows.length > 0) return;
+    const filename = path.basename(imageUrl);
+    await fs.promises.unlink(path.join(WAVE_QR_DIR, filename)).catch(() => {});
+  } catch {
+    // Keep the old image if a payment still refers to it or the database is unavailable.
+  }
+}
+
 // ── Multer — images broadcast ─────────────────────────────────────────────────
 const BROADCAST_DIR = path.resolve(process.cwd(), "uploads", "broadcast");
 if (!fs.existsSync(BROADCAST_DIR)) fs.mkdirSync(BROADCAST_DIR, { recursive: true });
@@ -3767,6 +3840,139 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/wave-manual-payment-configs", authMiddleware("admin"), async (_req, res) => {
+    try {
+      res.json(await storage.getWaveManualPaymentConfigs());
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+  app.post("/api/admin/wave-manual-payment-configs", authMiddleware("admin"), (req, res) => {
+    waveQrUpload.single("qr")(req, res, async (uploadError) => {
+      if (uploadError) return res.status(400).json({ message: uploadError.message || "Envoi du QR impossible." });
+      let savedQrUrl: string | null = null;
+      try {
+        const country = typeof req.body.country === "string" ? req.body.country.trim() : "";
+        const paymentUrl = normalizeWavePaymentUrl(req.body.paymentUrl);
+        if (!country || country.length > 80) return res.status(400).json({ message: "Pays invalide." });
+        if (!paymentUrl) return res.status(400).json({ message: "Saisissez un lien HTTPS officiel de Wave (wave.com)." });
+        if (!req.file) return res.status(400).json({ message: "Importez le code QR Wave pour créer cette configuration." });
+        if (await storage.getWaveManualPaymentConfigByCountry(country)) {
+          return res.status(409).json({ message: "Un lien Wave est déjà configuré pour ce pays." });
+        }
+
+        savedQrUrl = await saveWaveQrUpload(req.file);
+        const created = await storage.createWaveManualPaymentConfig({
+          country,
+          paymentUrl,
+          qrImageUrl: savedQrUrl,
+          enabled: true,
+        });
+        return res.status(201).json(created);
+      } catch (err: any) {
+        if (savedQrUrl) await removeWaveQrFileIfUnreferenced(savedQrUrl);
+        if (String(err?.code || "") === "23505") {
+          return res.status(409).json({ message: "Un lien Wave est déjà configuré pour ce pays." });
+        }
+        return res.status(500).json({ message: safeErrMsg(err) });
+      }
+    });
+  });
+
+  app.put("/api/admin/wave-manual-payment-configs/:id", authMiddleware("admin"), (req, res) => {
+    waveQrUpload.single("qr")(req, res, async (uploadError) => {
+      if (uploadError) return res.status(400).json({ message: uploadError.message || "Envoi du QR impossible." });
+      const id = Number(req.params.id);
+      let savedQrUrl: string | null = null;
+      try {
+        if (!Number.isInteger(id) || id < 1) return res.status(400).json({ message: "Configuration invalide." });
+        const existing = (await storage.getWaveManualPaymentConfigs()).find((item) => item.id === id);
+        if (!existing) return res.status(404).json({ message: "Configuration Wave introuvable." });
+
+        const country = typeof req.body.country === "string" ? req.body.country.trim() : existing.country;
+        const paymentUrl = normalizeWavePaymentUrl(req.body.paymentUrl ?? existing.paymentUrl);
+        if (!country || country.length > 80) return res.status(400).json({ message: "Pays invalide." });
+        if (!paymentUrl) return res.status(400).json({ message: "Saisissez un lien HTTPS officiel de Wave (wave.com)." });
+        const duplicate = await storage.getWaveManualPaymentConfigByCountry(country);
+        if (duplicate && duplicate.id !== id) {
+          return res.status(409).json({ message: "Un lien Wave est déjà configuré pour ce pays." });
+        }
+
+        if (req.file) savedQrUrl = await saveWaveQrUpload(req.file);
+        const updated = await storage.updateWaveManualPaymentConfig(id, {
+          country,
+          paymentUrl,
+          ...(savedQrUrl ? { qrImageUrl: savedQrUrl } : {}),
+          updatedAt: new Date(),
+        });
+        if (!updated) {
+          if (savedQrUrl) await removeWaveQrFileIfUnreferenced(savedQrUrl);
+          return res.status(404).json({ message: "Configuration Wave introuvable." });
+        }
+        if (savedQrUrl && existing.qrImageUrl) await removeWaveQrFileIfUnreferenced(existing.qrImageUrl);
+        return res.json(updated);
+      } catch (err: any) {
+        if (savedQrUrl) await removeWaveQrFileIfUnreferenced(savedQrUrl);
+        if (String(err?.code || "") === "23505") {
+          return res.status(409).json({ message: "Un lien Wave est déjà configuré pour ce pays." });
+        }
+        return res.status(500).json({ message: safeErrMsg(err) });
+      }
+    });
+  });
+
+  app.patch("/api/admin/wave-manual-payment-configs/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const enabled = req.body?.enabled;
+      if (!Number.isInteger(id) || id < 1 || typeof enabled !== "boolean") {
+        return res.status(400).json({ message: "Configuration ou statut invalide." });
+      }
+      const config = (await storage.getWaveManualPaymentConfigs()).find((item) => item.id === id);
+      if (!config) return res.status(404).json({ message: "Configuration Wave introuvable." });
+      if (enabled && (!config.qrImageUrl || !normalizeWavePaymentUrl(config.paymentUrl))) {
+        return res.status(400).json({ message: "Ajoutez un lien Wave valide et un QR avant d’activer cette configuration." });
+      }
+      const updated = await storage.updateWaveManualPaymentConfig(id, { enabled, updatedAt: new Date() });
+      return res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+  app.delete("/api/admin/wave-manual-payment-configs/:id/qr", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id < 1) return res.status(400).json({ message: "Configuration invalide." });
+      const config = (await storage.getWaveManualPaymentConfigs()).find((item) => item.id === id);
+      if (!config) return res.status(404).json({ message: "Configuration Wave introuvable." });
+      const updated = await storage.updateWaveManualPaymentConfig(id, {
+        qrImageUrl: null,
+        enabled: false,
+        updatedAt: new Date(),
+      });
+      await removeWaveQrFileIfUnreferenced(config.qrImageUrl);
+      return res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+  app.delete("/api/admin/wave-manual-payment-configs/:id", authMiddleware("admin"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id < 1) return res.status(400).json({ message: "Configuration invalide." });
+      const config = (await storage.getWaveManualPaymentConfigs()).find((item) => item.id === id);
+      if (!config) return res.status(404).json({ message: "Configuration Wave introuvable." });
+      await storage.deleteWaveManualPaymentConfig(id);
+      await removeWaveQrFileIfUnreferenced(config.qrImageUrl);
+      return res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
   app.post("/api/admin/add-number", authMiddleware("admin"), async (req, res) => {
     try {
       const { phoneNumber, country, operator, merchantId } = req.body;
@@ -4563,11 +4769,30 @@ export async function registerRoutes(
         if (type === "api" && op.maintenanceApiPayment) return false;
         return true;
       });
-      res.json({ methods: visibleOps.map(o => ({
+      const methods = visibleOps.map(o => ({
         name: o.name,
         logo: o.logo || null,
         manual: Boolean(o.manualPayinEnabled),
-      })) });
+      }));
+      const waveConfig = await storage.getWaveManualPaymentConfigByCountry(country);
+      const waveOperator = await storage.getWithdrawalOperatorByNameAndCountry("Wave", country);
+      const waveMethodClosed = Boolean(
+        waveOperator &&
+        (!waveOperator.active ||
+          (type === "link" && waveOperator.maintenancePaymentLinks) ||
+          (type === "api" && waveOperator.maintenanceApiPayment)),
+      );
+      const waveLinkMethodAlreadyListed = methods.some((method) => isWaveManualLinkMethod(method.name));
+      if (
+        waveConfig?.enabled &&
+        waveConfig.qrImageUrl &&
+        normalizeWavePaymentUrl(waveConfig.paymentUrl) &&
+        !waveMethodClosed &&
+        !waveLinkMethodAlreadyListed
+      ) {
+        methods.push({ name: "Wave par lien", logo: null, manual: true });
+      }
+      res.json({ methods });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }
@@ -5050,7 +5275,17 @@ export async function registerRoutes(
 
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
-      if (!payerPhone) {
+      const usesWaveManualLink = isWaveManualLinkMethod(paymentMethod);
+      const waveManualConfig = usesWaveManualLink
+        ? await storage.getWaveManualPaymentConfigByCountry(country)
+        : undefined;
+      const hasActiveWaveManualLink = Boolean(
+        waveManualConfig?.enabled &&
+        waveManualConfig.qrImageUrl &&
+        normalizeWavePaymentUrl(waveManualConfig.paymentUrl),
+      );
+
+      if (!payerPhone && !hasActiveWaveManualLink) {
         return res.status(400).json({ message: "Numero de telephone requis" });
       }
 
@@ -5064,13 +5299,15 @@ export async function registerRoutes(
         "Ghana": "233", "Niger": "227", "Kenya": "254",
       };
       const dialCode = dialCodes[country] || "";
-      const cleanPhone = payerPhone.replace(/[\s\-\(\)\+]/g, "");
+      const cleanPhone = (payerPhone || "").replace(/[\s\-\(\)\+]/g, "");
       // Certains pays utilisent un 0 comme préfixe national (ex: RDC 0981556946 → international 243981556946)
       const TRUNK_PREFIX_COUNTRIES = new Set(["Congo RDC", "Congo Brazzaville", "Gabon"]);
       const localPhone = (TRUNK_PREFIX_COUNTRIES.has(country) && cleanPhone.startsWith("0") && !cleanPhone.startsWith(dialCode))
         ? cleanPhone.slice(1)
         : cleanPhone;
-      const msisdn = localPhone.startsWith(dialCode) ? localPhone : `${dialCode}${localPhone}`;
+      const msisdn = payerPhone
+        ? (localPhone.startsWith(dialCode) ? localPhone : `${dialCode}${localPhone}`)
+        : "";
       payinFailureContext.payerNumber = msisdn;
 
       const operatorRecord = await storage.getWithdrawalOperatorByNameAndCountry(paymentMethod, country);
@@ -5085,7 +5322,7 @@ export async function registerRoutes(
       const useClapay = gatewayLower === "clapay";
       const useLipaPap = gatewayLower === "lipapap" || gatewayLower === "lipa";
 
-      if (!operatorRecord) {
+      if (!operatorRecord && !hasActiveWaveManualLink) {
         console.warn(
           `[PAYMENT CONFIG] Opérateur introuvable — gateway=${gatewayLower} ` +
           `countryGateway=${payinGateway.countryGateway}`,
@@ -5102,24 +5339,86 @@ export async function registerRoutes(
           error: "Opérateur de paiement introuvable pour ce pays",
         }).catch(() => {});
         return respondChannelUnavailable();
-      } else if (!operatorRecord.active) {
+      } else if (operatorRecord && !operatorRecord.active) {
         return res.status(503).json({ message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
-      } else {
+      } else if (operatorRecord) {
         console.log(
           `[PAYMENT ROUTING] pays=${country} opérateur=${paymentMethod} ` +
           `countryGateway=${payinGateway.countryGateway} ` +
           `operatorGateway=${payinGateway.operatorGateway || "(vide)"} ` +
           `selected=${gatewayLower}`,
         );
+      } else {
+        console.log(`[PAYMENT ROUTING] pays=${country} opérateur=Wave lien manuel`);
       }
 
       if (!isPaymentChannelAvailable(
         country,
         new Date(),
-        operatorRecord.maintenanceAll || operatorRecord.maintenanceDeposits,
+        operatorRecord?.maintenanceAll || operatorRecord?.maintenanceDeposits,
       )) {
         return res.status(503).json({ message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
       }
+
+      if (usesWaveManualLink && hasActiveWaveManualLink && waveManualConfig) {
+        const wavePaymentUrl = normalizeWavePaymentUrl(waveManualConfig.paymentUrl);
+        if (!wavePaymentUrl || !waveManualConfig.qrImageUrl) return respondChannelUnavailable();
+
+        const reference = `WP-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(6).toString("hex").toUpperCase()}`;
+        const paymentToken = crypto.randomBytes(32).toString("hex");
+        const manualInstructions =
+          "Ouvrez l’application Wave avec le bouton ci-dessous ou scannez le code QR. Après le paiement, saisissez la référence de transaction ou le message de confirmation reçu.";
+        const pending = await storage.createPendingPayment({
+          merchantId: merchant.id,
+          country,
+          amount: parsedAmount,
+          payerPhone: payerPhone || null,
+          payerName: payerName || null,
+          paymentMethod,
+          txId: reference,
+          status: "manual_waiting_submission",
+          redirectUrl: redirectUrl || null,
+          providerReference: reference,
+          providerTxId: null,
+          providerPaymentUrl: null,
+          gateway: "manual",
+          paymentToken,
+          manualRecipientPhone: null,
+          manualRecipientName: "Wave",
+          manualUssdCode: null,
+          manualInstructions,
+          manualWavePaymentUrl: wavePaymentUrl,
+          manualWaveQrCodeUrl: waveManualConfig.qrImageUrl,
+          expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
+        });
+        await storage.createApiLog({
+          merchantId: merchant.id,
+          action: "manual_wave_payment_initiated",
+          ip: req.ip || "",
+          description: `Paiement manuel Wave initié — ${country}, référence ${reference}`,
+        }).catch(() => {});
+        return res.json({
+          success: true,
+          paymentId: pending.id,
+          gateway: "manual",
+          provider: "Wave",
+          reference,
+          providerReference: reference,
+          polling: true,
+          fees: 0,
+          manualPayment: {
+            recipientPhone: "",
+            recipientName: "Wave",
+            ussdCode: null,
+            instructions: manualInstructions,
+            paymentToken,
+            wavePaymentUrl,
+            waveQrCodeUrl: waveManualConfig.qrImageUrl,
+          },
+        });
+      }
+
+      if (!operatorRecord) return respondChannelUnavailable();
 
       if (operatorRecord.manualPayinEnabled) {
         const targetNumber = (await storage.getNumbers()).find((number) => number.id === operatorRecord.manualNumberId);
@@ -8427,6 +8726,8 @@ app.get("/api/payment/by-ref/:reference", paymentByRefRateLimit, async (req, res
           recipientName: pending.manualRecipientName,
           ussdCode: pending.manualUssdCode,
           instructions: pending.manualInstructions,
+          wavePaymentUrl: pending.manualWavePaymentUrl,
+          waveQrCodeUrl: pending.manualWaveQrCodeUrl,
           submitted: pending.status === "manual_submitted",
         } : undefined,
       });

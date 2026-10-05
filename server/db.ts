@@ -154,6 +154,16 @@ export async function runAuthMigrations() {
         merchant_id integer REFERENCES merchants(id) ON DELETE SET NULL
       );
 
+      CREATE TABLE IF NOT EXISTS wave_manual_payment_configs (
+        id serial PRIMARY KEY,
+        country text NOT NULL UNIQUE,
+        payment_url text NOT NULL,
+        qr_image_url text,
+        enabled boolean NOT NULL DEFAULT true,
+        created_at timestamp DEFAULT now() NOT NULL,
+        updated_at timestamp DEFAULT now() NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS allowed_ips (
         id serial PRIMARY KEY,
         ip_address text NOT NULL UNIQUE,
@@ -523,6 +533,8 @@ export async function runFinancialMigrations() {
         manual_recipient_name text,
         manual_ussd_code text,
         manual_instructions text,
+        manual_wave_payment_url text,
+        manual_wave_qr_code_url text,
         manual_submission text,
         manual_submitted_at timestamp,
         manual_reviewed_by text,
@@ -730,6 +742,8 @@ export async function runFinancialMigrations() {
         ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_recipient_phone TEXT;
         ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_recipient_name TEXT;
         ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_ussd_code TEXT;
+        ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_wave_payment_url TEXT;
+        ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_wave_qr_code_url TEXT;
         ALTER TABLE transactions ADD COLUMN IF NOT EXISTS manual_recipient_name TEXT;
         ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_instructions TEXT;
         ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_submission TEXT;

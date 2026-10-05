@@ -102,6 +102,16 @@ export const numbers = pgTable("numbers", {
   merchantId: integer("merchant_id").references(() => merchants.id, { onDelete: "set null" }),
 });
 
+export const waveManualPaymentConfigs = pgTable("wave_manual_payment_configs", {
+  id: serial("id").primaryKey(),
+  country: text("country").notNull().unique(),
+  paymentUrl: text("payment_url").notNull(),
+  qrImageUrl: text("qr_image_url"),
+  enabled: boolean("enabled").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const settings = pgTable("settings", {
   id: serial("id").primaryKey(),
   key: text("key").notNull().unique(),
@@ -156,6 +166,8 @@ export const pendingPayments = pgTable("pending_payments", {
   manualRecipientName: text("manual_recipient_name"),
   manualUssdCode: text("manual_ussd_code"),
   manualInstructions: text("manual_instructions"),
+  manualWavePaymentUrl: text("manual_wave_payment_url"),
+  manualWaveQrCodeUrl: text("manual_wave_qr_code_url"),
   manualSubmission: text("manual_submission"),
   manualSubmittedAt: timestamp("manual_submitted_at"),
   manualReviewedBy: text("manual_reviewed_by"),
@@ -372,6 +384,7 @@ export const insertMerchantCountrySchema = createInsertSchema(merchantCountries)
 export const insertTransactionSchema = createInsertSchema(transactions).omit({ id: true, createdAt: true });
 export const insertSmsLogSchema = createInsertSchema(smsLogs).omit({ id: true, createdAt: true });
 export const insertNumberSchema = createInsertSchema(numbers).omit({ id: true });
+export const insertWaveManualPaymentConfigSchema = createInsertSchema(waveManualPaymentConfigs).omit({ id: true, createdAt: true });
 export const insertSettingSchema = createInsertSchema(settings).omit({ id: true });
 export const insertLoginLogSchema = createInsertSchema(loginLogs).omit({ id: true, createdAt: true });
 export const insertMerchantPinSchema = createInsertSchema(merchantPins).omit({ id: true, createdAt: true, updatedAt: true });
@@ -399,6 +412,8 @@ export type SmsLog = typeof smsLogs.$inferSelect;
 export type InsertSmsLog = z.infer<typeof insertSmsLogSchema>;
 export type PhoneNumber = typeof numbers.$inferSelect;
 export type InsertNumber = z.infer<typeof insertNumberSchema>;
+export type WaveManualPaymentConfig = typeof waveManualPaymentConfigs.$inferSelect;
+export type InsertWaveManualPaymentConfig = z.infer<typeof insertWaveManualPaymentConfigSchema>;
 export type Setting = typeof settings.$inferSelect;
 export type InsertSetting = z.infer<typeof insertSettingSchema>;
 export type LoginLog = typeof loginLogs.$inferSelect;

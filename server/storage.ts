@@ -1,5 +1,5 @@
 import {
-  admins, merchants, merchantCountries, transactions, smsLogs, numbers, settings, loginLogs,
+  admins, merchants, merchantCountries, transactions, smsLogs, numbers, waveManualPaymentConfigs, settings, loginLogs,
   merchantPins, apiLogs, pendingPayments, webhookLogs, telegramActivationCodes, paymentLinks,
   walletTransfers, walletTransferCountries, withdrawals, withdrawalOperators, statsBaselines,
   cryptoAggregators, cryptoAggregatorCountries, cryptoAggregatorMerchants, cryptoTransactions,
@@ -8,6 +8,7 @@ import {
   type Admin, type InsertAdmin, type Merchant, type InsertMerchant,
   type MerchantCountry, type InsertMerchantCountry, type Transaction, type InsertTransaction,
   type SmsLog, type InsertSmsLog, type PhoneNumber, type InsertNumber,
+  type WaveManualPaymentConfig, type InsertWaveManualPaymentConfig,
   type Setting, type InsertSetting, type LoginLog, type InsertLoginLog,
   type MerchantPin, type InsertMerchantPin, type ApiLog, type InsertApiLog,
   type PendingPayment, type InsertPendingPayment,
@@ -99,6 +100,11 @@ export interface IStorage {
   createSmsLog(log: InsertSmsLog): Promise<SmsLog>;
 
   getNumbers(): Promise<PhoneNumber[]>;
+  getWaveManualPaymentConfigs(): Promise<WaveManualPaymentConfig[]>;
+  getWaveManualPaymentConfigByCountry(country: string): Promise<WaveManualPaymentConfig | undefined>;
+  createWaveManualPaymentConfig(data: InsertWaveManualPaymentConfig): Promise<WaveManualPaymentConfig>;
+  updateWaveManualPaymentConfig(id: number, data: Partial<InsertWaveManualPaymentConfig>): Promise<WaveManualPaymentConfig | undefined>;
+  deleteWaveManualPaymentConfig(id: number): Promise<void>;
   getNumberByPhone(phone: string): Promise<PhoneNumber | undefined>;
   addNumber(num: InsertNumber): Promise<PhoneNumber>;
   updateNumberAccountName(id: number, accountName: string | null): Promise<PhoneNumber>;
@@ -502,6 +508,30 @@ export class DatabaseStorage implements IStorage {
   // BASE AUTH — numbers (SIM cards — configuration)
   // ══════════════════════════════════════════════════════════════════════════
   async getNumbers(): Promise<PhoneNumber[]> { return authDb.select().from(numbers); }
+  async getWaveManualPaymentConfigs(): Promise<WaveManualPaymentConfig[]> {
+    return authDb.select().from(waveManualPaymentConfigs).orderBy(waveManualPaymentConfigs.country);
+  }
+  async getWaveManualPaymentConfigByCountry(country: string): Promise<WaveManualPaymentConfig | undefined> {
+    const [config] = await authDb.select().from(waveManualPaymentConfigs).where(
+      sql`LOWER(BTRIM(${waveManualPaymentConfigs.country})) = LOWER(BTRIM(${country}))`,
+    );
+    return config;
+  }
+  async createWaveManualPaymentConfig(data: InsertWaveManualPaymentConfig): Promise<WaveManualPaymentConfig> {
+    const [config] = await authDb.insert(waveManualPaymentConfigs).values(data).returning();
+    return config;
+  }
+  async updateWaveManualPaymentConfig(
+    id: number,
+    data: Partial<InsertWaveManualPaymentConfig>,
+  ): Promise<WaveManualPaymentConfig | undefined> {
+    const [config] = await authDb.update(waveManualPaymentConfigs).set(data)
+      .where(eq(waveManualPaymentConfigs.id, id)).returning();
+    return config;
+  }
+  async deleteWaveManualPaymentConfig(id: number): Promise<void> {
+    await authDb.delete(waveManualPaymentConfigs).where(eq(waveManualPaymentConfigs.id, id));
+  }
   async getNumberByPhone(phone: string): Promise<PhoneNumber | undefined> {
     const [n] = await authDb.select().from(numbers).where(eq(numbers.phoneNumber, phone));
     return n;
