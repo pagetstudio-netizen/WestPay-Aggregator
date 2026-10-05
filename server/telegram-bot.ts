@@ -190,6 +190,16 @@ interface MerchantPaymentToggleSession {
 }
 const merchantPaymentToggleSessions = new Map<string, MerchantPaymentToggleSession>();
 
+interface OperatorMaintenanceSession {
+  step: "country" | "operator" | "action";
+  flow: "payin" | "payout";
+  operators: Array<{ id: number; name: string; country: string }>;
+  countries: string[];
+  country?: string | null;
+  targets?: Array<{ id: number; name: string; country: string }>;
+}
+const operatorMaintenanceSessions = new Map<string, OperatorMaintenanceSession>();
+
 // Ajoute le préfixe international à un numéro selon le pays (usage interne bot)
 function botPrependDialCode(phone: string, country: string): string {
   const codes: Record<string, string> = {
@@ -1455,7 +1465,10 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
   // ─── /cancel (annule le broadcast ou la recherche de retrait en cours) ────
   bot.command("cancel", async (ctx) => {
     const chatId = String(ctx.chat.id);
-    if (merchantPaymentToggleSessions.has(chatId)) {
+    if (operatorMaintenanceSessions.has(chatId)) {
+      operatorMaintenanceSessions.delete(chatId);
+      await ctx.reply("❌ Réglage de disponibilité annulé.");
+    } else if (merchantPaymentToggleSessions.has(chatId)) {
       merchantPaymentToggleSessions.delete(chatId);
       await ctx.reply("❌ Modification payin/payout annulée.");
     } else if (broadcastSessions.has(chatId)) {
@@ -1524,6 +1537,33 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
   bot.command("enablepayments", activateMerchantPayments);
   bot.command("activatepayments", activateMerchantPayments);
 
+  const startOperatorMaintenance = async (ctx: any, flow: "payin" | "payout") => {
+    const chatId = String(ctx.chat.id);
+    const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
+    if (!isGroup || !await isAdminGroup(chatId)) {
+      await ctx.reply("⛔ Cette commande est réservée au groupe admin WestPay.");
+      return;
+    }
+    const operators = await storage.getWithdrawalOperators();
+    if (operators.length === 0) {
+      await ctx.reply("Aucun opérateur n’est configuré.");
+      return;
+    }
+    const countries = operators
+      .map((operator) => operator.country)
+      .filter((country, index, allCountries) => allCountries.indexOf(country) === index)
+      .sort((a, b) => a.localeCompare(b));
+    operatorMaintenanceSessions.set(chatId, { step: "country", flow, operators, countries });
+    const countryLines = countries.map((country, index) => `${index + 1}. ${country}`);
+    await ctx.reply(
+      `Gestion du ${flow.toUpperCase()} — canaux ouverts de 7h à 20h, heure locale du pays.\n\n` +
+      `Choisissez un pays en envoyant son numéro, ou 0 pour tous les pays :\n0. Tous les pays\n${countryLines.join("\n")}\n\n` +
+      `Envoyez /cancel pour annuler.`,
+    );
+  };
+  bot.command("payin", (ctx) => startOperatorMaintenance(ctx, "payin"));
+  bot.command("payout", (ctx) => startOperatorMaintenance(ctx, "payout"));
+
   // ─── Photo reçue dans le groupe admin (pour le broadcast) ─────────────────
   // Diffuse immédiatement dès réception — pas d'étape intermédiaire.
   bot.on("photo", async (ctx, next) => {
@@ -1556,6 +1596,86 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
   // ─── Messages texte (flux commander conversationnel) ─────────────────────
   bot.on("message", async (ctx, next) => {
     const chatId = String(ctx.chat.id);
+    const maintenanceSession = operatorMaintenanceSessions.get(chatId);
+    if (maintenanceSession) {
+      const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
+      if (!isGroup || !await isAdminGroup(chatId)) {
+        operatorMaintenanceSessions.delete(chatId);
+        return next();
+      }
+      const text = String((ctx.message as any).text || "").trim();
+      if (!text || text.startsWith("/")) return next();
+
+      if (maintenanceSession.step === "country") {
+        const selected = Number(text);
+        if (!Number.isInteger(selected) || selected < 0 || selected > maintenanceSession.countries.length) {
+          await ctx.reply("Numéro invalide. Choisissez un numéro de la liste, ou 0 pour tous les pays.");
+          return;
+        }
+        const country = selected === 0 ? null : maintenanceSession.countries[selected - 1];
+        const candidates = maintenanceSession.operators.filter((operator) => !country || operator.country === country);
+        maintenanceSession.country = country;
+        maintenanceSession.targets = candidates;
+        maintenanceSession.step = "operator";
+        operatorMaintenanceSessions.set(chatId, maintenanceSession);
+        const operatorLines = candidates.map((operator, index) =>
+          `${index + 1}. ${operator.name} — ${operator.country}`,
+        );
+        await ctx.reply(
+          `Choisissez un opérateur par son numéro, ou 0 pour tous les opérateurs${country ? ` de ${country}` : ""} :\n` +
+          `0. Tous les opérateurs\n${operatorLines.join("\n")}\n\nEnvoyez /cancel pour annuler.`,
+        );
+        return;
+      }
+
+      if (maintenanceSession.step === "operator") {
+        const selected = Number(text);
+        const targets = maintenanceSession.targets || [];
+        if (!Number.isInteger(selected) || selected < 0 || selected > targets.length) {
+          await ctx.reply("Numéro invalide. Choisissez un numéro de la liste, ou 0 pour tous les opérateurs.");
+          return;
+        }
+        maintenanceSession.targets = selected === 0 ? targets : [targets[selected - 1]];
+        maintenanceSession.step = "action";
+        operatorMaintenanceSessions.set(chatId, maintenanceSession);
+        const names = maintenanceSession.targets.map((operator) => `${operator.name} (${operator.country})`);
+        await ctx.reply(
+          `Sélection : ${names.join(", ")}\n\n` +
+          `Envoyez 1 pour désactiver le ${maintenanceSession.flow.toUpperCase()} ou 2 pour le réactiver.`,
+        );
+        return;
+      }
+
+      const action = text.toLocaleLowerCase();
+      const disabled = ["1", "désactiver", "desactiver", "off"].includes(action)
+        ? true
+        : ["2", "réactiver", "reactiver", "on"].includes(action)
+          ? false
+          : null;
+      if (disabled === null) {
+        await ctx.reply("Réponse invalide. Envoyez 1 pour désactiver ou 2 pour réactiver.");
+        return;
+      }
+      const targets = maintenanceSession.targets || [];
+      for (const operator of targets) {
+        if (maintenanceSession.flow === "payin") {
+          await storage.updateWithdrawalOperator(operator.id, { maintenanceDeposits: disabled });
+        } else {
+          await storage.updateWithdrawalOperator(operator.id, { maintenanceWithdrawals: disabled });
+        }
+      }
+      operatorMaintenanceSessions.delete(chatId);
+      const state = disabled ? "désactivé" : "réactivé";
+      const scope = targets.length === maintenanceSession.operators.length
+        ? "tous les opérateurs de tous les pays"
+        : targets.map((operator) => `${operator.name} (${operator.country})`).join(", ");
+      await ctx.reply(
+        `✅ ${maintenanceSession.flow.toUpperCase()} ${state} pour ${scope}.\n` +
+        `Les canaux configurés restent visibles, mais leur étape finale est bloquée.`,
+      );
+      return;
+    }
+
     const paymentToggleSession = merchantPaymentToggleSessions.get(chatId);
     if (paymentToggleSession?.step === "waiting_slug") {
       const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
@@ -1880,6 +2000,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `/setmerchant CODE — Lier un groupe à un marchand\n\n` +
            `/disablepayments — Désactiver payin et payout d'un marchand\n\n` +
            `/enablepayments (/activatepayments) — Réactiver payin et payout d'un marchand\n\n` +
+           `/payin — Couper/réactiver le payin par pays et opérateur (07h–20h local)\n` +
+           `/payout — Couper/réactiver le payout par pays et opérateur (07h–20h local)\n\n` +
           `📊 *Statistiques & Soldes*\n` +
           `/stats — Statistiques globales\n` +
           `/balance — Soldes détaillés de tous les marchands\n\n` +

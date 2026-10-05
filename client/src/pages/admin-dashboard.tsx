@@ -4641,8 +4641,8 @@ function SortableOpRow({
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5">
           {[
             { label: "Toutes les pages", field: "maintenanceAll", val: op.maintenanceAll },
-            { label: "Dépôts", field: "maintenanceDeposits", val: op.maintenanceDeposits },
-            { label: "Retraits", field: "maintenanceWithdrawals", val: op.maintenanceWithdrawals },
+            { label: "Payin (dépôts)", field: "maintenanceDeposits", val: op.maintenanceDeposits },
+            { label: "Payout (retraits)", field: "maintenanceWithdrawals", val: op.maintenanceWithdrawals },
             { label: "Liens de paiement", field: "maintenancePaymentLinks", val: op.maintenancePaymentLinks },
             { label: "API paiement", field: "maintenanceApiPayment", val: op.maintenanceApiPayment },
           ].map(({ label, field, val }) => (
@@ -4668,8 +4668,47 @@ function WithdrawalOperatorsPanel() {
   const [filterCountry, setFilterCountry] = useState("all");
   const [uploadingLogoFor, setUploadingLogoFor] = useState<number | null>(null);
   const [localOps, setLocalOps] = useState<WithdrawalOperator[]>([]);
+  const [bulkCountry, setBulkCountry] = useState("all");
+  const [bulkOperatorId, setBulkOperatorId] = useState("all");
+  const [bulkFlow, setBulkFlow] = useState<"payin" | "payout" | "both">("payin");
+  const [bulkUpdating, setBulkUpdating] = useState(false);
 
   useEffect(() => { setLocalOps(opList as WithdrawalOperator[]); }, [opList]);
+
+  const bulkOperatorOptions = bulkCountry === "all"
+    ? localOps
+    : localOps.filter((operator) => operator.country === bulkCountry);
+
+  const setBulkMaintenance = async (disabled: boolean) => {
+    setBulkUpdating(true);
+    try {
+      const res = await fetch("/api/admin/payment-availability/maintenance", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({
+          country: bulkCountry === "all" ? null : bulkCountry,
+          operatorId: bulkOperatorId === "all" ? null : Number(bulkOperatorId),
+          flow: bulkFlow,
+          disabled,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Impossible de modifier la disponibilité.");
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawal-operators"] });
+      const scope = bulkOperatorId !== "all"
+        ? bulkOperatorOptions.find((operator) => operator.id === Number(bulkOperatorId))?.name || "opérateur sélectionné"
+        : bulkCountry === "all" ? "tous les opérateurs" : `tous les opérateurs de ${bulkCountry}`;
+      toast({
+        title: `${bulkFlow === "both" ? "Payin et payout" : bulkFlow.toUpperCase()} ${disabled ? "désactivé(s)" : "réactivé(s)"}`,
+        description: `${scope} · ${data.affected} opérateur(s)`,
+      });
+    } catch (error: any) {
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+    } finally {
+      setBulkUpdating(false);
+    }
+  };
 
   const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "ClaPay", clapayCode: "", mbiyoCode: "", seapayCode: "", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false, manualPayinEnabled: false, manualNumberId: "", manualUssdTemplate: "", manualInstructions: "" };
   const [form, setForm] = useState(emptyForm);
@@ -4805,6 +4844,54 @@ function WithdrawalOperatorsPanel() {
           </Button>
         </div>
       </div>
+
+      <Card className="border-amber-200 dark:border-amber-900">
+        <CardContent className="pt-4 space-y-3">
+          <div>
+            <p className="font-medium text-sm">Disponibilité Payin / Payout</p>
+            <p className="text-xs text-muted-foreground">Les canaux sont ouverts de 7h à 20h, selon l’heure locale du pays. Une coupure ne masque pas les champs : la dernière étape est bloquée.</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <Select value={bulkCountry} onValueChange={(value) => { setBulkCountry(value); setBulkOperatorId("all"); }}>
+              <SelectTrigger aria-label="Pays à gérer"><SelectValue placeholder="Pays" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous les pays</SelectItem>
+                {localOps.map((operator) => operator.country)
+                  .filter((country, index, countries) => countries.indexOf(country) === index)
+                  .sort()
+                  .map((country) =>
+                  <SelectItem key={country} value={country}>{country}</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+            <Select value={bulkOperatorId} onValueChange={setBulkOperatorId}>
+              <SelectTrigger aria-label="Opérateur à gérer"><SelectValue placeholder="Opérateur" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous les opérateurs</SelectItem>
+                {bulkOperatorOptions.map((operator) =>
+                  <SelectItem key={operator.id} value={String(operator.id)}>{operator.name} · {operator.country}</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+            <Select value={bulkFlow} onValueChange={(value: "payin" | "payout" | "both") => setBulkFlow(value)}>
+              <SelectTrigger aria-label="Flux à gérer"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="payin">Payin (dépôts)</SelectItem>
+                <SelectItem value="payout">Payout (retraits)</SelectItem>
+                <SelectItem value="both">Payin et payout</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="destructive" disabled={bulkUpdating || localOps.length === 0} onClick={() => setBulkMaintenance(true)}>
+              Désactiver la sélection
+            </Button>
+            <Button size="sm" variant="outline" disabled={bulkUpdating || localOps.length === 0} onClick={() => setBulkMaintenance(false)}>
+              Réactiver la sélection
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {opsLoading ? (
         <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-16 w-full" />)}</div>
@@ -5314,17 +5401,24 @@ function AdminWithdrawalsPanel() {
                             )}
                           </div>
                           <div className="flex gap-2 shrink-0 flex-wrap">
-                            {wd.providerReference && (
+                            {wd.withdrawalMode !== "manual" && wd.providerReference && (
                               <ProviderPickerButton label="Vérifier statut" icon={RefreshCw} colorClass="h-8 border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50"
                                 disabled={statusLoading} onPick={(provider) => checkStatus(wd, provider)} testId={`button-check-status-${wd.id}`} />
                             )}
-                            {wd.providerReference && (
+                            {wd.withdrawalMode !== "manual" && wd.providerReference && (
                               <ProviderPickerButton label="Approuver chez fournisseur" icon={CheckCircle} colorClass="h-8 border-teal-400 text-teal-700 dark:text-teal-300 hover:bg-teal-50"
                                 disabled={syncStatusMutation.isPending} onPick={(provider) => syncStatusMutation.mutate({ id: wd.id, provider })} testId={`button-sync-status-${wd.id}`} />
                             )}
-                            <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="h-8 border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
-                              disabled={retryMutation.isPending} onPick={async (provider) => { if (await showConfirm(`Déclencher le paiement de ce reversement chez ${provider} ?`)) retryMutation.mutate({ id: wd.id, provider }); }} testId={`button-retry-wd-${wd.id}`} />
-                            {wd.providerReference ? (
+                            {wd.withdrawalMode !== "manual" && (
+                              <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="h-8 border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
+                                disabled={retryMutation.isPending} onPick={async (provider) => { if (await showConfirm(`Déclencher le paiement de ce reversement chez ${provider} ?`)) retryMutation.mutate({ id: wd.id, provider }); }} testId={`button-retry-wd-${wd.id}`} />
+                            )}
+                            {wd.withdrawalMode === "manual" ? (
+                              <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-8 text-xs"
+                                onClick={() => openAction(wd, "force-validate")} data-testid={`button-force-validate-wd-${wd.id}`}>
+                                <CheckCircle className="w-3 h-3" />Valider manuellement
+                              </Button>
+                            ) : wd.providerReference ? (
                               <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white gap-1 h-8 text-xs"
                                 onClick={() => openAction(wd, "force-validate")} data-testid={`button-force-validate-wd-${wd.id}`}>
                                 <CheckCircle className="w-3 h-3" />Valider manuellement

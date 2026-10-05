@@ -103,6 +103,7 @@ import { calcMerchantCreditForMerchant } from "./payment-fees";
 import { buildManualUssdCode, validateManualUssdTemplate } from "./manual-payment-utils";
 import { reviewManualPayment, submitManualPaymentProof } from "./manual-payment-service";
 import { assertPublicWebhookUrl, notifyConfirmedPaymentWebhook, sendWebhookNotification } from "./merchant-webhooks";
+import { isPaymentChannelAvailable, PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE } from "./payment-availability";
 
 const BANK1_CHECKOUT_URL = "https://checkout1.westpay.cfd";
 
@@ -509,6 +510,24 @@ function normalizeGatewayName(value: unknown): string {
     ? value.trim().toLowerCase().replace(/[\s_-]+/g, "")
     : "";
   return normalized === "lipa" ? "lipapap" : normalized;
+}
+
+function normalizePaymentNetwork(value: unknown): string {
+  return typeof value === "string"
+    ? value.toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "")
+    : "";
+}
+
+async function findWithdrawalOperatorForNetwork(name: string, country: string) {
+  const byName = await storage.getWithdrawalOperatorByNameAndCountry(name, country);
+  if (byName) return byName;
+  const normalizedName = normalizePaymentNetwork(name);
+  if (!normalizedName) return undefined;
+  const operators = await storage.getWithdrawalOperators(country);
+  return operators.find((operator) =>
+    [operator.mbiyoCode, operator.clapayCode, operator.seapayCode]
+      .some((code) => normalizePaymentNetwork(code) === normalizedName),
+  );
 }
 
 /**
@@ -4533,14 +4552,14 @@ export async function registerRoutes(
       const { country } = req.params;
       const type = (req.query.type as string) || "api";
       const ops = await storage.getWithdrawalOperators(country, true);
-      const activeOps = ops.filter(op => {
-        if (op.maintenanceAll) return false;
-        if (op.maintenanceDeposits) return false;
+      // Keep configured channels visible even while closed: the final
+      // initiation/proof endpoints enforce availability and return the message.
+      const visibleOps = ops.filter(op => {
         if (type === "link" && op.maintenancePaymentLinks) return false;
         if (type === "api" && op.maintenanceApiPayment) return false;
         return true;
       });
-      res.json({ methods: activeOps.map(o => ({
+      res.json({ methods: visibleOps.map(o => ({
         name: o.name,
         logo: o.logo || null,
         manual: Boolean(o.manualPayinEnabled),
@@ -4861,6 +4880,23 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Informations de paiement invalides." });
       }
 
+      const pending = await storage.getPendingPaymentById(id);
+      const expectedToken = pending?.paymentToken || "";
+      const tokenMatches = expectedToken.length === paymentToken.length
+        && expectedToken.length >= 32
+        && crypto.timingSafeEqual(Buffer.from(expectedToken), Buffer.from(paymentToken));
+      if (!pending || !tokenMatches || pending.gateway !== "manual") {
+        return res.status(404).json({ message: "Paiement introuvable." });
+      }
+      if (pending.status === "manual_waiting_submission") {
+        const operator = await storage.getWithdrawalOperatorByNameAndCountry(pending.paymentMethod, pending.country);
+        const maintenanceDisabled = !operator || !operator.active ||
+          Boolean(operator.maintenanceAll || operator.maintenanceDeposits);
+        if (!isPaymentChannelAvailable(pending.country, new Date(), maintenanceDisabled)) {
+          return res.status(503).json({ message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
+        }
+      }
+
       const result = await submitManualPaymentProof(id, paymentToken, proof);
       if (result.outcome === "not_found") return res.status(404).json({ message: "Paiement introuvable." });
       if (result.outcome === "expired") return res.status(410).json({ message: "La demande a expiré. Relancez le paiement." });
@@ -5031,6 +5067,8 @@ export async function registerRoutes(
         return res.status(500).json({
           message: "Configuration du moyen de paiement indisponible. Contactez l'administrateur.",
         });
+      } else if (!operatorRecord.active) {
+        return res.status(503).json({ message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
       } else {
         console.log(
           `[PAYMENT ROUTING] pays=${country} opérateur=${paymentMethod} ` +
@@ -5038,6 +5076,14 @@ export async function registerRoutes(
           `operatorGateway=${payinGateway.operatorGateway || "(vide)"} ` +
           `selected=${gatewayLower}`,
         );
+      }
+
+      if (!isPaymentChannelAvailable(
+        country,
+        new Date(),
+        operatorRecord.maintenanceAll || operatorRecord.maintenanceDeposits,
+      )) {
+        return res.status(503).json({ message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
       }
 
       if (operatorRecord.manualPayinEnabled) {
@@ -5791,6 +5837,9 @@ export async function registerRoutes(
       const requestedProvider = normalizeGatewayName(req.body?.provider);
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
+      if (w.withdrawalMode === "manual") {
+        return res.status(409).json({ message: "Ce retrait est en traitement manuel et ne peut pas être vérifié chez un fournisseur." });
+      }
       if (w.status !== "pending") return res.status(409).json({ message: "Ce retrait est déjà finalisé" });
       const effectiveProvider = requestedProvider || normalizeGatewayName(w.gateway);
       if (!["mbiyo", "seapay", "clapay", "lipapap", "drimpay"].includes(effectiveProvider)) {
@@ -5890,6 +5939,19 @@ export async function registerRoutes(
       const requestedProvider = normalizeGatewayName(req.body?.provider);
       const w = await storage.getWithdrawalById(id);
       if (!w) return res.status(404).json({ message: "Reversement introuvable" });
+      if (w.withdrawalMode === "manual") {
+        return res.status(409).json({ message: "Ce retrait doit être réglé manuellement puis validé par l'administrateur." });
+      }
+      const operator = w.operator
+        ? await storage.getWithdrawalOperatorByNameAndCountry(w.operator, w.country)
+        : null;
+      if (!isPaymentChannelAvailable(
+        w.country,
+        new Date(),
+        Boolean(operator?.maintenanceAll || operator?.maintenanceWithdrawals),
+      )) {
+        return res.status(503).json({ message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
+      }
       const provider = requestedProvider || normalizeGatewayName(w.gateway) || "clapay";
       if (w.providerReference) {
         return res.status(409).json({ message: "Ce retrait possède déjà une référence fournisseur. Il faut d'abord le résoudre ou le rejeter avant toute nouvelle demande." });
@@ -6716,6 +6778,35 @@ export async function registerRoutes(
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+  app.put("/api/admin/payment-availability/maintenance", authMiddleware("admin"), async (req, res) => {
+    try {
+      const flow = req.body?.flow;
+      const disabled = req.body?.disabled;
+      const country = typeof req.body?.country === "string" ? req.body.country.trim() : "";
+      const operatorId = req.body?.operatorId == null ? null : Number(req.body.operatorId);
+      if (!["payin", "payout", "both"].includes(flow) || typeof disabled !== "boolean") {
+        return res.status(400).json({ message: "Choisissez un flux valide et un état activé/désactivé." });
+      }
+      if (operatorId !== null && (!Number.isInteger(operatorId) || operatorId <= 0)) {
+        return res.status(400).json({ message: "Identifiant d'opérateur invalide." });
+      }
+
+      const operators = await storage.getWithdrawalOperators(country || undefined);
+      const targets = operatorId === null ? operators : operators.filter((operator) => operator.id === operatorId);
+      if (targets.length === 0) return res.status(404).json({ message: "Aucun opérateur trouvé pour cette sélection." });
+
+      for (const operator of targets) {
+        await storage.updateWithdrawalOperator(operator.id, {
+          ...(flow === "payin" || flow === "both" ? { maintenanceDeposits: disabled } : {}),
+          ...(flow === "payout" || flow === "both" ? { maintenanceWithdrawals: disabled } : {}),
+        });
+      }
+      return res.json({ success: true, affected: targets.length });
+    } catch (err: any) {
+      return res.status(500).json({ message: safeErrMsg(err) });
     }
   });
 
@@ -7557,6 +7648,27 @@ export async function registerRoutes(
       if (typeof amount !== "number" || amount <= 0) {
         return res.status(400).json({ status: "error", message: "amount doit être un nombre positif." });
       }
+      const countryMap: Record<string, string> = {
+        "TG": "Togo", "BJ": "Benin", "CI": "Cote d'Ivoire", "SN": "Senegal",
+        "ML": "Mali", "BF": "Burkina Faso", "CM": "Cameroun", "CG": "Congo Brazzaville",
+        "CD": "Congo RDC", "GN": "Guinee", "GM": "Gambie", "GA": "Gabon",
+        "NE": "Niger", "KE": "Kenya", "GH": "Ghana", "GW": "Guinee-Bissau",
+        "TD": "Tchad", "CF": "Centrafrique", "GQ": "Guinee Equatoriale",
+        "PK": "Pakistan", "PH": "Philippines", "IN": "India", "NG": "Nigeria",
+      };
+      const countryName = countryMap[metadata.country_code.toUpperCase()] || metadata.country_code;
+      const payinOperator = await findWithdrawalOperatorForNetwork(metadata.network, countryName);
+      if (!payinOperator || !payinOperator.active) {
+        return res.status(503).json({ status: "error", message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
+      }
+      if (!isPaymentChannelAvailable(
+        countryName,
+        new Date(),
+        Boolean(payinOperator?.maintenanceAll || payinOperator?.maintenanceDeposits),
+      )) {
+        return res.status(503).json({ status: "error", message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
+      }
+
       const mbiyoApiKey = await getMbiyoApiKey();
       if (!mbiyoApiKey) {
         notifyAdminPaymentError({
@@ -7572,13 +7684,6 @@ export async function registerRoutes(
         }).catch(() => {});
         return res.status(503).json({ status: "error", message: "Passerelle de paiement non configurée." });
       }
-
-      const countryMap: Record<string, string> = {
-        "TG": "Togo", "BJ": "Benin", "CI": "Cote d'Ivoire", "SN": "Senegal",
-        "ML": "Mali", "BF": "Burkina Faso", "CM": "Cameroun", "CG": "Congo Brazzaville",
-        "CD": "Congo RDC", "GN": "Guinee", "GM": "Gambie",
-      };
-      const countryName = countryMap[metadata.country_code.toUpperCase()] || metadata.country_code;
 
       const internalRef = mbiyoGenerateRef();
       const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
@@ -7685,9 +7790,23 @@ export async function registerRoutes(
       const countryMap: Record<string, string> = {
         "TG": "Togo", "BJ": "Benin", "CI": "Cote d'Ivoire", "SN": "Senegal",
         "ML": "Mali", "BF": "Burkina Faso", "CM": "Cameroun", "CG": "Congo Brazzaville",
-        "CD": "Congo RDC", "GN": "Guinee", "GM": "Gambie",
+        "CD": "Congo RDC", "GN": "Guinee", "GM": "Gambie", "GA": "Gabon",
+        "NE": "Niger", "KE": "Kenya", "GH": "Ghana", "GW": "Guinee-Bissau",
+        "TD": "Tchad", "CF": "Centrafrique", "GQ": "Guinee Equatoriale",
+        "PK": "Pakistan", "PH": "Philippines", "IN": "India", "NG": "Nigeria",
       };
       const countryName = countryMap[metadata.country_code.toUpperCase()] || metadata.country_code;
+      const payoutOperator = await findWithdrawalOperatorForNetwork(metadata.network, countryName);
+      if (!payoutOperator || !payoutOperator.active) {
+        return res.status(503).json({ status: "error", message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
+      }
+      if (!isPaymentChannelAvailable(
+        countryName,
+        new Date(),
+        Boolean(payoutOperator?.maintenanceAll || payoutOperator?.maintenanceWithdrawals),
+      )) {
+        return res.status(503).json({ status: "error", message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
+      }
 
       const feeRate = merchant.customFeeRate != null
         ? merchant.customFeeRate / 100
@@ -7727,6 +7846,91 @@ export async function registerRoutes(
           status: "error",
           message: "Solde insuffisant pour ce retrait.",
           data: { required_amount: totalDeducted, available_balance: mc.balance, currency: currency.toUpperCase() },
+        });
+      }
+
+      const manualNumberId = payoutOperator?.manualNumberId || null;
+      let manualPayoutNumber: Awaited<ReturnType<typeof storage.getNumbers>>[number] | undefined;
+      if (manualNumberId) {
+        manualPayoutNumber = (await storage.getNumbers()).find((number) => number.id === manualNumberId);
+        const same = (left: string | null | undefined, right: string) =>
+          (left || "").trim().toLocaleLowerCase() === right.trim().toLocaleLowerCase();
+        if (
+          !manualPayoutNumber ||
+          manualPayoutNumber.status !== "active" ||
+          !same(manualPayoutNumber.country, countryName) ||
+          !same(manualPayoutNumber.operator, payoutOperator?.name || metadata.network) ||
+          !manualPayoutNumber.accountName?.trim() ||
+          (manualPayoutNumber.merchantId != null && manualPayoutNumber.merchantId !== merchant.id)
+        ) {
+          return res.status(503).json({ status: "error", message: "Le canal de retrait est temporairement indisponible." });
+        }
+      }
+
+      if (manualPayoutNumber) {
+        const internalRef = mbiyoGenerateRef();
+        const fees = totalDeducted - amount;
+        await storage.updateMerchantCountryBalance(mc.id, mc.balance - totalDeducted);
+        let withdrawal: Awaited<ReturnType<typeof storage.createWithdrawal>>;
+        try {
+          withdrawal = await storage.createWithdrawal({
+            merchantId: merchant.id,
+            merchantCountryId: mc.id,
+            country: countryName,
+            amount,
+            phone: metadata.phone_number,
+            status: "pending",
+            withdrawalMode: "manual",
+            operator: payoutOperator.name,
+            adminNote: null,
+            fees,
+            gateway: "manual",
+            providerReference: internalRef,
+          });
+        } catch (error) {
+          await storage.updateMerchantCountryBalance(mc.id, mc.balance);
+          throw error;
+        }
+        notifyAdminWithdrawal({
+          id: withdrawal.id,
+          merchantName: merchant.name,
+          merchantEmail: merchant.email,
+          merchantId: merchant.id,
+          country: countryName,
+          amount,
+          fees,
+          phone: metadata.phone_number,
+          operator: payoutOperator.name,
+          status: "pending",
+          mode: "manual",
+        }).catch(() => {});
+        await storage.createApiLog({
+          merchantId: merchant.id,
+          action: "sdk_payout_initiated",
+          ip: req.ip || "-",
+          description: `SDK Payout — Ref: ${internalRef} — ${amount} ${currency} vers ${metadata.phone_number} via ${metadata.network}/${metadata.country_code}`,
+        }).catch(() => {});
+        return res.json({
+          status: "success",
+          message: "Payout initié avec succès",
+          data: {
+            reference: internalRef,
+            transaction_id: null,
+            amount,
+            fee: fees,
+            charged_amount: totalDeducted,
+            currency: currency.toUpperCase(),
+            order_id,
+            status: "pending",
+            payment_method: "mobile_money",
+            recipient: {
+              phone_number: metadata.phone_number,
+              network: metadata.network,
+              country_code: metadata.country_code,
+              beneficiary: WESTPAY_PAYOUT_BENEFICIARY,
+            },
+            created_at: new Date().toISOString(),
+          },
         });
       }
 
@@ -7843,7 +8047,7 @@ export async function registerRoutes(
   app.get("/api/sdk/v1/transaction/:orderId", sdkAuthMiddleware, async (req, res) => {
     try {
       const merchant = (req as any).sdkMerchant;
-      const { orderId } = req.params;
+      const orderId = String(req.params.orderId);
       const pending = await storage.getPendingPaymentByProviderReference(orderId);
       if (pending && pending.merchantId === merchant.id) {
         return res.json({
@@ -8115,6 +8319,22 @@ app.post("/api/payment/validate", validateRateLimit, async (req, res) => {
       if (new Date(pending.expiresAt) < new Date()) {
         await storage.updatePendingPaymentStatus(pending.id, "expired");
         return res.status(400).json({ success: false, message: "Ce paiement a expire. Veuillez recommencer." });
+      }
+
+      const payinOperator = await storage.getWithdrawalOperatorByNameAndCountry(
+        pending.paymentMethod,
+        pending.country,
+      );
+      if (!isPaymentChannelAvailable(
+        pending.country,
+        new Date(),
+        !payinOperator || !payinOperator.active ||
+          Boolean(payinOperator.maintenanceAll || payinOperator.maintenanceDeposits),
+      )) {
+        return res.status(503).json({
+          success: false,
+          message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE,
+        });
       }
 
       const encryptedTxId = crypto.createHash("sha256").update(txId.trim()).digest("hex").substring(0, 16).toUpperCase();
@@ -10641,14 +10861,23 @@ app.get("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, res
     try {
       const merchantId = (req as any).user.id;
       const list = await storage.getWithdrawals(merchantId);
+      const manuallyHandledOperators = new Set(
+        (await storage.getWithdrawalOperators())
+          .filter((operator) => operator.manualNumberId)
+          .map((operator) => `${operator.country.toLocaleLowerCase()}::${operator.name.toLocaleLowerCase()}`),
+      );
       // Never expose the internal provider error stored in adminNote.
       // Also repair the public status of legacy records whose note already
       // proves that the provider rejected the withdrawal.
       const sanitized = list.map((withdrawal: any) => {
         const status = normalizeMerchantWithdrawalStatus(withdrawal.status, withdrawal.adminNote);
+        const operatorIsManual = manuallyHandledOperators.has(
+          `${String(withdrawal.country || "").toLocaleLowerCase()}::${String(withdrawal.operator || "").toLocaleLowerCase()}`,
+        );
         return {
           ...withdrawal,
           status,
+          ...(operatorIsManual && { withdrawalMode: undefined, gateway: null }),
           adminNote: merchantWithdrawalNote(status),
         };
       });
@@ -10702,18 +10931,43 @@ app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, re
       if (!merchantCountry || merchantCountry.merchantId !== merchantId) {
         return res.status(403).json({ message: "Wallet introuvable" });
       }
-      if (merchantCountry.balance < amount) return res.status(400).json({ message: "Solde insuffisant" });
-
+      if (!isPaymentChannelAvailable(merchantCountry.country)) {
+        return res.status(503).json({ message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
+      }
+      if (!operatorName) return res.status(400).json({ message: "Choisissez un opérateur de retrait." });
       const payoutOperator = operatorName
         ? await storage.getWithdrawalOperatorByNameAndCountry(operatorName, merchantCountry.country)
         : null;
-      if (operatorName && !payoutOperator) return res.status(400).json({ message: "Opérateur de retrait introuvable" });
-      if (payoutOperator?.maintenanceAll || payoutOperator?.maintenanceWithdrawals) {
-        return res.status(503).json({ message: "Cet opérateur est temporairement indisponible" });
+      if (!payoutOperator || !payoutOperator.active) return res.status(400).json({ message: "Opérateur de retrait introuvable ou indisponible." });
+      if (!isPaymentChannelAvailable(
+        merchantCountry.country,
+        new Date(),
+        Boolean(payoutOperator?.maintenanceAll || payoutOperator?.maintenanceWithdrawals),
+      )) {
+        return res.status(503).json({ message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
       }
+      if (merchantCountry.balance < amount) return res.status(400).json({ message: "Solde insuffisant" });
       const provider = normalizeGatewayName(payoutOperator?.gateway) || "clapay";
-      if (!["clapay", "mbiyo", "seapay", "lipapap", "drimpay"].includes(provider)) {
+      const manualNumberId = payoutOperator?.manualNumberId || null;
+      if (!manualNumberId && !["clapay", "mbiyo", "seapay", "lipapap", "drimpay"].includes(provider)) {
         return res.status(400).json({ message: "Aucune passerelle de retrait active n'est configurée pour cet opérateur" });
+      }
+      let isManualPayout = false;
+      if (manualNumberId) {
+        const manualNumber = (await storage.getNumbers()).find((number) => number.id === manualNumberId);
+        const same = (left: string | null | undefined, right: string) =>
+          (left || "").trim().toLocaleLowerCase() === right.trim().toLocaleLowerCase();
+        if (
+          !manualNumber ||
+          manualNumber.status !== "active" ||
+          !same(manualNumber.country, merchantCountry.country) ||
+          !same(manualNumber.operator, payoutOperator?.name || operatorName) ||
+          !manualNumber.accountName?.trim() ||
+          (manualNumber.merchantId != null && manualNumber.merchantId !== merchantId)
+        ) {
+          return res.status(503).json({ message: "Le canal de retrait de cet opérateur est indisponible. Contactez l’administrateur." });
+        }
+        isManualPayout = true;
       }
       const isBankTransfer = payoutOperator?.type === "Virement bancaire";
       if (isBankTransfer && !accountNumber) return res.status(400).json({ message: "Le numéro de compte bancaire est requis." });
@@ -10772,7 +11026,7 @@ app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, re
           recipientName: recipientName || null,
           operator: operatorName || null,
           status: "pending",
-          withdrawalMode: "auto",
+          withdrawalMode: isManualPayout ? "manual" : "auto",
           adminNote: null,
           gateway: provider,
           fees: withdrawalFee,
@@ -10789,16 +11043,26 @@ app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, re
           id: createdWithdrawal.id, merchantName: merchant.name, merchantEmail: merchant.email, merchantId,
           country: merchantCountry.country, amount, fees: withdrawalFee, phone: destination,
           accountNumber: isBankTransfer ? accountNumber : null, operator: operatorName || null,
-          status: "pending", mode: "auto", ip: geo.ip || rawIp, geo,
+          status: "pending", mode: isManualPayout ? "manual" : "auto", ip: geo.ip || rawIp, geo,
         }).catch(() => {});
       }).catch(() => {
         notifyAdminWithdrawal({
           id: createdWithdrawal.id, merchantName: merchant.name, merchantEmail: merchant.email, merchantId,
           country: merchantCountry.country, amount, fees: withdrawalFee, phone: destination,
           accountNumber: isBankTransfer ? accountNumber : null, operator: operatorName || null,
-          status: "pending", mode: "auto", ip: rawIp,
+          status: "pending", mode: isManualPayout ? "manual" : "auto", ip: rawIp,
         }).catch(() => {});
       });
+
+      if (isManualPayout) {
+        return res.status(202).json({
+          ...createdWithdrawal,
+          withdrawalMode: undefined,
+          gateway: null,
+          status: "pending",
+          message: "Votre demande a été lancée et est en attente de traitement.",
+        });
+      }
 
       const callbackBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
       const payout = await initiateWithdrawalPayout(
@@ -10873,8 +11137,7 @@ app.get("/api/merchant/withdrawal-operators/:country", authMiddleware("merchant"
     try {
       const country = req.params.country as string;
       const ops = await storage.getWithdrawalOperators(country, true);
-      const available = ops.filter(op => !op.maintenanceAll && !op.maintenanceWithdrawals);
-      res.json(available);
+      res.json(ops);
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }
@@ -10896,6 +11159,21 @@ app.put("/api/admin/withdrawals/:id/approve", authMiddleware("admin"), async (re
       const withdrawal = await storage.getWithdrawalById(id);
       if (!withdrawal) return res.status(404).json({ message: "Reversement introuvable" });
       if (withdrawal.status !== "pending") return res.status(400).json({ message: "Reversement déjà traité" });
+      if (withdrawal.withdrawalMode === "manual") {
+        return res.status(409).json({
+          message: "Ce retrait est prévu pour un règlement manuel. Effectuez le transfert hors plateforme puis utilisez « Valider manuellement ».",
+        });
+      }
+      const operator = withdrawal.operator
+        ? await storage.getWithdrawalOperatorByNameAndCountry(withdrawal.operator, withdrawal.country)
+        : null;
+      if (!isPaymentChannelAvailable(
+        withdrawal.country,
+        new Date(),
+        Boolean(operator?.maintenanceAll || operator?.maintenanceWithdrawals),
+      )) {
+        return res.status(503).json({ message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
+      }
       if (withdrawal.providerReference) {
         return res.status(409).json({
           message: `Ce retrait est déjà transmis au fournisseur (réf. ${withdrawal.providerReference}). Attendez sa confirmation.`,
