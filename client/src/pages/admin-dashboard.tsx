@@ -2490,9 +2490,20 @@ function NumbersPanel() {
   const [operator, setOperator] = useState("");
   const [numMerchantId, setNumMerchantId] = useState("");
   const [accountName, setAccountName] = useState("");
+  const [ussdTemplate, setUssdTemplate] = useState("");
 
   const { data: numbersData = [], isLoading } = useAdminFetch("/api/admin/numbers", ["/api/admin/numbers"]);
   const { data: merchants = [] } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
+  const { data: operators = [], isLoading: isOperatorsLoading } = useAdminFetch(
+    "/api/admin/withdrawal-operators",
+    ["/api/admin/withdrawal-operators"],
+  );
+  const configuredOperators = operators as WithdrawalOperator[];
+  const mobileMoneyOperators = configuredOperators.filter((item) => item.type.trim().toLocaleLowerCase() === "mobile money");
+  const numberCountries = Array.from(new Set(mobileMoneyOperators.map((item) => item.country.trim()).filter(Boolean))).sort();
+  const operatorOptions = mobileMoneyOperators
+    .filter((item) => item.country.trim().toLocaleLowerCase() === country.trim().toLocaleLowerCase())
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const addNumberMutation = useMutation({
     mutationFn: async () => {
@@ -2502,10 +2513,10 @@ function NumbersPanel() {
         credentials: "include",
 
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify(isEditing ? { accountName } : {
+        body: JSON.stringify(isEditing ? { accountName, ussdTemplate } : {
           phoneNumber, country, operator: operator || undefined,
           merchantId: numMerchantId ? parseInt(numMerchantId) : undefined,
-          accountName,
+          accountName, ussdTemplate,
         }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
@@ -2513,8 +2524,8 @@ function NumbersPanel() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/numbers"] });
-      setShowAdd(false); setEditingNumber(null); setPhoneNumber(""); setCountry(""); setOperator(""); setNumMerchantId(""); setAccountName("");
-      toast({ title: editingNumber ? "Nom du titulaire mis à jour" : "Numéro ajouté" });
+      setShowAdd(false); setEditingNumber(null); setPhoneNumber(""); setCountry(""); setOperator(""); setNumMerchantId(""); setAccountName(""); setUssdTemplate("");
+      toast({ title: editingNumber ? "Numéro mis à jour" : "Numéro ajouté" });
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
@@ -2562,7 +2573,7 @@ function NumbersPanel() {
         <Dialog open={showAdd} onOpenChange={setShowAdd}>
           <DialogTrigger asChild>
             <Button
-              onClick={() => { setEditingNumber(null); setPhoneNumber(""); setCountry(""); setOperator(""); setNumMerchantId(""); setAccountName(""); }}
+              onClick={() => { setEditingNumber(null); setPhoneNumber(""); setCountry(""); setOperator(""); setNumMerchantId(""); setAccountName(""); setUssdTemplate(""); }}
               data-testid="button-add-number"
             >
               <Plus className="w-4 h-4 mr-2" />Ajouter un numero
@@ -2570,7 +2581,7 @@ function NumbersPanel() {
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>{editingNumber ? "Modifier le nom du titulaire" : "Ajouter un numero SIM"}</DialogTitle>
+              <DialogTitle>{editingNumber ? "Modifier le numéro" : "Ajouter un numéro SIM"}</DialogTitle>
             </DialogHeader>
             <form onSubmit={(e) => { e.preventDefault(); addNumberMutation.mutate(); }} className="space-y-4">
               <div className="space-y-2">
@@ -2579,10 +2590,10 @@ function NumbersPanel() {
               </div>
               <div className="space-y-2">
                 <Label>Pays</Label>
-                <Select value={country} onValueChange={setCountry} disabled={Boolean(editingNumber)}>
+                <Select value={country} onValueChange={(value) => { setCountry(value); setOperator(""); }} disabled={Boolean(editingNumber) || isOperatorsLoading}>
                   <SelectTrigger data-testid="select-number-country"><SelectValue placeholder="Selectionner" /></SelectTrigger>
                   <SelectContent>
-                    {["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Gabon", "Guinee", "Niger", "Kenya", "Ghana"].map((c) => (
+                    {numberCountries.map((c) => (
                       <SelectItem key={c} value={c}>{c}</SelectItem>
                     ))}
                   </SelectContent>
@@ -2590,7 +2601,18 @@ function NumbersPanel() {
               </div>
               <div className="space-y-2">
                 <Label>Operateur</Label>
-                <Input value={operator} onChange={(e) => setOperator(e.target.value)} placeholder="Moov Money, TMoney..." disabled={Boolean(editingNumber)} data-testid="input-operator" />
+                <Select value={operator || "none"} onValueChange={(value) => setOperator(value === "none" ? "" : value)} disabled={Boolean(editingNumber) || !country || operatorOptions.length === 0}>
+                  <SelectTrigger data-testid="select-number-operator"><SelectValue placeholder="Choisir un opérateur" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Choisir un opérateur</SelectItem>
+                    {operatorOptions.map((item) => (
+                      <SelectItem key={item.id} value={item.name}>{item.name}{item.active ? "" : " · inactif"}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {!editingNumber && country && operatorOptions.length === 0 && (
+                  <p className="text-xs text-destructive">Aucun opérateur n’est configuré pour ce pays.</p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>Marchand (optionnel)</Label>
@@ -2618,9 +2640,25 @@ function NumbersPanel() {
                   <p className="text-xs text-muted-foreground">Obligatoire si ce numéro est utilisé pour un paiement manuel.</p>
                 )}
               </div>
-              <Button type="submit" className="w-full" disabled={addNumberMutation.isPending} data-testid="button-submit-add-number">
+              <div className="space-y-2">
+                <Label>Modèle USSD public (facultatif)</Label>
+                <Input
+                  value={ussdTemplate}
+                  onChange={(e) => setUssdTemplate(e.target.value)}
+                  maxLength={300}
+                  placeholder="*145*1*{{amount}}*{{number}}#"
+                  data-testid="input-number-ussd-template"
+                />
+                <p className="text-xs text-muted-foreground">Variables facultatives : <code>{"{{amount}}"}</code> et <code>{"{{number}}"}</code>. N’inscrivez aucun PIN ni code secret.</p>
+              </div>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={addNumberMutation.isPending || (!editingNumber && (!phoneNumber || !country || !operator))}
+                data-testid="button-submit-add-number"
+              >
                 {addNumberMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                {editingNumber ? "Enregistrer le nom" : "Ajouter le numero"}
+                {editingNumber ? "Enregistrer" : "Ajouter le numero"}
               </Button>
             </form>
           </DialogContent>
@@ -2660,6 +2698,7 @@ function NumbersPanel() {
                         setOperator(num.operator || "");
                         setNumMerchantId(num.merchantId ? String(num.merchantId) : "");
                         setAccountName(num.accountName || "");
+                        setUssdTemplate(num.ussdTemplate || "");
                         setShowAdd(true);
                       }}
                       data-testid={`button-edit-number-account-${num.id}`}
@@ -2702,6 +2741,10 @@ function WaveManualPaymentConfigPanel({ token }: { token: string | null | undefi
   const { data: configs = [], isLoading } = useAdminFetch(
     "/api/admin/wave-manual-payment-configs",
     ["/api/admin/wave-manual-payment-configs"],
+  );
+  const { data: operators = [] } = useAdminFetch(
+    "/api/admin/withdrawal-operators",
+    ["/api/admin/withdrawal-operators"],
   );
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingConfig, setEditingConfig] = useState<WaveManualPaymentConfig | null>(null);
@@ -2833,7 +2876,7 @@ function WaveManualPaymentConfigPanel({ token }: { token: string | null | undefi
         <div>
           <CardTitle className="text-base">Paiement manuel Wave par lien</CardTitle>
           <p className="mt-1 text-xs text-muted-foreground">
-            Configurez un lien Wave et son QR séparément. Les numéros déjà enregistrés restent inchangés.
+            Le lien et le QR sont ajoutés désactivés. Pour les activer sans doublon, la passerelle de l’opérateur Wave doit être « Manuel ».
           </p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -2912,7 +2955,15 @@ function WaveManualPaymentConfigPanel({ token }: { token: string | null | undefi
             Aucun lien Wave configuré.
           </p>
         ) : (
-          savedConfigs.map((config) => (
+          savedConfigs.map((config) => {
+            const waveOperator = (operators as WithdrawalOperator[]).find((operator) =>
+              isWaveOperatorLabel(operator.name) &&
+              operator.country.trim().toLocaleLowerCase() === config.country.trim().toLocaleLowerCase(),
+            );
+            const waveCanBeUsed = Boolean(
+              waveOperator?.active && isManualGatewayValue(waveOperator.gateway),
+            );
+            return (
             <div key={config.id} className="rounded-md border p-3">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="flex min-w-0 items-start gap-3">
@@ -2924,8 +2975,8 @@ function WaveManualPaymentConfigPanel({ token }: { token: string | null | undefi
                   <div className="min-w-0 space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-semibold">{config.country}</span>
-                      <Badge variant={config.enabled ? "default" : "secondary"}>
-                        {config.enabled ? "Actif" : "Désactivé"}
+                      <Badge variant={config.enabled && waveCanBeUsed ? "default" : "secondary"}>
+                        {config.enabled ? (waveCanBeUsed ? "Actif" : "Bloqué") : "Désactivé"}
                       </Badge>
                     </div>
                     <a
@@ -2937,6 +2988,15 @@ function WaveManualPaymentConfigPanel({ token }: { token: string | null | undefi
                       {config.paymentUrl}
                     </a>
                     {!config.qrImageUrl && <p className="text-xs text-destructive">Importez un QR pour réactiver ce paiement.</p>}
+                    {!waveCanBeUsed && (
+                      <p className="text-xs text-amber-700" role="status">
+                        {!waveOperator
+                          ? `L’opérateur Wave de ${config.country} est introuvable. Configurez-le et choisissez « Manuel » avant d’activer le lien + QR.`
+                          : !waveOperator.active
+                            ? `L’opérateur Wave de ${config.country} est inactif. Activez-le avant le lien + QR.`
+                            : `Wave (${config.country}) utilise actuellement « ${waveOperator.gateway} ». Réglez « Passerelle de paiement » sur « Manuel » dans sa fiche opérateur avant d’activer le lien + QR.`}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -2974,7 +3034,8 @@ function WaveManualPaymentConfigPanel({ token }: { token: string | null | undefi
                 </div>
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </CardContent>
     </Card>
@@ -4880,6 +4941,15 @@ const COUNTRIES_LIST = [
   "Pakistan", "Philippines", "India", "Nigeria",
 ];
 const OPERATOR_TYPES = ["Mobile Money", "Virement bancaire", "Carte bancaire", "Cryptomonnaie", "Autre"];
+function isManualGatewayValue(value: unknown): boolean {
+  return typeof value === "string" && ["manual", "manuel"].includes(value.trim().toLocaleLowerCase().replace(/[\s_-]+/g, ""));
+}
+
+function isWaveOperatorLabel(value: unknown): boolean {
+  return typeof value === "string" &&
+    value.trim().toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "") === "wave";
+}
+
 const GATEWAYS = ["Mbiyo", "LipaPap", "SeaPay", "ClaPay", "Drimpay", "Manuel"];
 
 function SortableOpRow({
@@ -5040,7 +5110,7 @@ function WithdrawalOperatorsPanel() {
     }
   };
 
-  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "ClaPay", clapayCode: "", mbiyoCode: "", seapayCode: "", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false, manualPayinEnabled: false, manualNumberId: "", manualUssdTemplate: "", manualInstructions: "" };
+  const emptyForm = { name: "", type: "Mobile Money", country: "Togo", dailyLimit: 1000000, gateway: "ClaPay", clapayCode: "", mbiyoCode: "", seapayCode: "", active: true, maintenanceAll: false, maintenanceDeposits: false, maintenanceWithdrawals: false, maintenancePaymentLinks: false, maintenanceApiPayment: false, manualNumberId: "", manualInstructions: "" };
   const [form, setForm] = useState(emptyForm);
   const manualNumbers = (numberList as PhoneNumber[]).filter((number) =>
     number.status === "active" &&
@@ -5048,11 +5118,12 @@ function WithdrawalOperatorsPanel() {
     (number.operator || "").trim().toLocaleLowerCase() === form.name.trim().toLocaleLowerCase()
   );
   const selectedManualNumber = manualNumbers.find((number) => String(number.id) === form.manualNumberId);
+  const waveNeedsManualGateway = isWaveOperatorLabel(form.name) && !isManualGatewayValue(form.gateway);
 
   const openCreate = () => { setEditingOp(null); setForm(emptyForm); setOpDialogOpen(true); };
   const openEdit = (op: WithdrawalOperator) => {
     setEditingOp(op);
-    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, clapayCode: (op as any).clapayCode || "", mbiyoCode: op.mbiyoCode || "", seapayCode: (op as any).seapayCode || "", active: op.active, maintenanceAll: op.maintenanceAll, maintenanceDeposits: op.maintenanceDeposits, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment, manualPayinEnabled: (op as any).manualPayinEnabled || false, manualNumberId: (op as any).manualNumberId ? String((op as any).manualNumberId) : "", manualUssdTemplate: (op as any).manualUssdTemplate || "", manualInstructions: (op as any).manualInstructions || "" });
+    setForm({ name: op.name, type: op.type, country: op.country, dailyLimit: op.dailyLimit, gateway: op.gateway, clapayCode: (op as any).clapayCode || "", mbiyoCode: op.mbiyoCode || "", seapayCode: (op as any).seapayCode || "", active: op.active, maintenanceAll: op.maintenanceAll, maintenanceWithdrawals: op.maintenanceWithdrawals, maintenanceDeposits: op.maintenanceDeposits, maintenancePaymentLinks: op.maintenancePaymentLinks, maintenanceApiPayment: op.maintenanceApiPayment, manualNumberId: (op as any).manualNumberId ? String((op as any).manualNumberId) : "", manualInstructions: (op as any).manualInstructions || "" });
     setOpDialogOpen(true);
   };
 
@@ -5061,13 +5132,21 @@ function WithdrawalOperatorsPanel() {
       const url = editingOp ? `/api/admin/withdrawal-operators/${editingOp.id}` : "/api/admin/withdrawal-operators";
       const method = editingOp ? "PUT" : "POST";
       const res = await fetch(url, { method, credentials: "include",
- headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(form) });
+       headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ ...form, manualPayinEnabled: isManualGatewayValue(form.gateway) }) });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (result: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/withdrawal-operators"] });
-      toast({ title: editingOp ? "Opérateur mis à jour" : "Opérateur créé" });
+      if (result?.waveLinkDisabled) {
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/wave-manual-payment-configs"] });
+      }
+      toast({
+        title: editingOp ? "Opérateur mis à jour" : "Opérateur créé",
+        ...(result?.waveLinkDisabled
+          ? { description: "Le lien + QR Wave a été désactivé. Réactivez-le séparément après avoir réglé la passerelle sur « Manuel »." }
+          : {}),
+      });
       setOpDialogOpen(false);
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
@@ -5280,67 +5359,61 @@ function WithdrawalOperatorsPanel() {
             </div>
             <div className="space-y-2">
               <Label>Passerelle de paiement</Label>
-              <Select value={form.gateway} onValueChange={v => setForm(f => ({ ...f, gateway: v }))}>
+              <Select value={form.gateway} onValueChange={v => setForm(f => ({
+                ...f,
+                gateway: v,
+                manualNumberId: isManualGatewayValue(v) ? f.manualNumberId : "",
+              }))}>
                 <SelectTrigger data-testid="select-op-gateway"><SelectValue /></SelectTrigger>
                 <SelectContent>{GATEWAYS.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}</SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">La passerelle sélectionnée sera utilisée pour tous les paiements et retraits via cet opérateur, pour tous les marchands de ce pays.</p>
-            </div>
-            <div className="rounded-md border p-3 space-y-3">
-              <div className="flex items-start gap-3">
-                <Switch checked={form.manualPayinEnabled} onCheckedChange={v => setForm(f => ({ ...f, manualPayinEnabled: v }))} data-testid="switch-op-manual-payin" />
-                <div className="space-y-1">
-                  <Label>Encaissement manuel pour cet opérateur</Label>
-                  <p className="text-xs text-muted-foreground">Remplace uniquement le prestataire d’encaissement. Les retraits et les autres opérateurs gardent leur configuration actuelle.</p>
-                </div>
-              </div>
-              {form.manualPayinEnabled && (
-                <div className="space-y-3 border-t pt-3">
-                  <div className="space-y-2">
-                    <Label>Numéro destinataire actif</Label>
-                    <Select value={form.manualNumberId || "none"} onValueChange={v => setForm(f => ({ ...f, manualNumberId: v === "none" ? "" : v }))}>
-                      <SelectTrigger data-testid="select-op-manual-number"><SelectValue placeholder="Choisir un numéro" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Choisir un numéro</SelectItem>
-                        {manualNumbers.map(number => (
-                          <SelectItem key={number.id} value={String(number.id)}>
-                            {number.phoneNumber} · {number.accountName || "nom du titulaire manquant"}{number.merchantId ? " · numéro associé à un marchand" : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {manualNumbers.length === 0 && (
-                      <p className="text-xs text-destructive">Ajoutez d’abord un numéro actif correspondant exactement à ce pays et cet opérateur dans « Numéros Mobile Money ».</p>
-                    )}
-                    {selectedManualNumber && !selectedManualNumber.accountName?.trim() && (
-                      <p className="text-xs text-destructive">Renseignez le nom du titulaire dans « Numéros Mobile Money » avant d’activer cet encaissement manuel.</p>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Modèle USSD public (facultatif)</Label>
-                    <Input
-                      value={form.manualUssdTemplate}
-                      onChange={e => setForm(f => ({ ...f, manualUssdTemplate: e.target.value }))}
-                      placeholder="*145*1*{{amount}}*{{number}}#"
-                      data-testid="input-op-manual-ussd"
-                    />
-                    <p className="text-xs text-muted-foreground">Variables facultatives : <code>{"{{amount}}"}</code> et <code>{"{{number}}"}</code>. N’inscrivez aucun PIN ni code secret.</p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Instructions affichées au client (facultatif)</Label>
-                    <textarea
-                      value={form.manualInstructions}
-                      onChange={e => setForm(f => ({ ...f, manualInstructions: e.target.value }))}
-                      maxLength={1200}
-                      rows={3}
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                      placeholder="Effectuez le paiement, puis saisissez la référence de transaction affichée."
-                      data-testid="textarea-op-manual-instructions"
-                    />
-                  </div>
-                </div>
+              {waveNeedsManualGateway && (
+                <p className="text-xs text-amber-700">
+                  Pour activer le lien/QR Wave ou le paiement Wave par numéro, choisissez d’abord « Manuel ».
+                </p>
               )}
             </div>
+            {isManualGatewayValue(form.gateway) && (
+              <div className="rounded-md border p-3 space-y-3">
+                <div className="space-y-1">
+                  <Label>Numéro destinataire actif</Label>
+                  <p className="text-xs text-muted-foreground">Ce numéro servira aux paiements et retraits manuels de cet opérateur. Les autres opérateurs gardent leur configuration.</p>
+                  <p className="text-xs text-muted-foreground">Le modèle USSD se configure dans « Numéros Mobile Money ».</p>
+                </div>
+                <div className="space-y-2">
+                  <Select value={form.manualNumberId || "none"} onValueChange={v => setForm(f => ({ ...f, manualNumberId: v === "none" ? "" : v }))}>
+                    <SelectTrigger data-testid="select-op-manual-number"><SelectValue placeholder="Choisir un numéro" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Choisir un numéro</SelectItem>
+                      {manualNumbers.map(number => (
+                        <SelectItem key={number.id} value={String(number.id)}>
+                          {number.phoneNumber} · {number.accountName || "nom du titulaire manquant"}{number.merchantId ? " · numéro associé à un marchand" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {manualNumbers.length === 0 && (
+                    <p className="text-xs text-destructive">Ajoutez d’abord un numéro actif correspondant exactement à ce pays et cet opérateur dans « Numéros Mobile Money ».</p>
+                  )}
+                  {selectedManualNumber && !selectedManualNumber.accountName?.trim() && (
+                    <p className="text-xs text-destructive">Renseignez le nom du titulaire dans « Numéros Mobile Money » avant d’activer cette configuration.</p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label>Instructions affichées au client (facultatif)</Label>
+                  <textarea
+                    value={form.manualInstructions}
+                    onChange={e => setForm(f => ({ ...f, manualInstructions: e.target.value }))}
+                    maxLength={1200}
+                    rows={3}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="Effectuez le paiement, puis saisissez la référence de transaction affichée."
+                    data-testid="textarea-op-manual-instructions"
+                  />
+                </div>
+              </div>
+            )}
             {form.gateway?.toLowerCase() === "clapay" && (
               <div className="space-y-2">
                 <Label>Code opérateur ClaPay</Label>
@@ -5378,7 +5451,7 @@ function WithdrawalOperatorsPanel() {
             </div>
             <div className="flex gap-2 justify-end pt-2">
               <Button variant="outline" onClick={() => setOpDialogOpen(false)}>Annuler</Button>
-              <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.name || !form.country || (form.manualPayinEnabled && (!form.manualNumberId || !selectedManualNumber?.accountName?.trim()))} data-testid="button-save-operator">
+              <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.name || !form.country || (isManualGatewayValue(form.gateway) && (!form.manualNumberId || !selectedManualNumber?.accountName?.trim()))} data-testid="button-save-operator">
                 {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                 {editingOp ? "Mettre à jour" : "Créer"}
               </Button>

@@ -57,6 +57,18 @@ function isWaveOperator(operator: OperatorRecord): boolean {
   return normalizedLabel(operator.name) === "wave";
 }
 
+function isManualGateway(value: unknown): boolean {
+  return typeof value === "string" && ["manual", "manuel"].includes(normalizedLabel(value));
+}
+
+async function disableWaveLinkIfEnabled(operator: OperatorRecord): Promise<boolean> {
+  if (!isWaveOperator(operator)) return false;
+  const config = await storage.getWaveManualPaymentConfigByCountry(operator.country);
+  if (!config?.enabled) return false;
+  await storage.updateWaveManualPaymentConfig(config.id, { enabled: false, updatedAt: new Date() });
+  return true;
+}
+
 function getOperatorRoutingSnapshot(operator: OperatorRecord) {
   return {
     id: operator.id,
@@ -197,6 +209,14 @@ async function saveChange(
       );
       return;
     }
+    if (change.enabled && !isManualGateway(currentOperator.gateway)) {
+      sessions.delete(chatId);
+      await ctx.reply(
+        `❌ Wave (${currentOperator.country}) utilise actuellement ${currentOperator.gateway || "un fournisseur"}. ` +
+        `Dans la fiche de l’opérateur Wave, réglez « Passerelle de paiement » sur « Manuel », puis relancez /setoperatorpayment.`,
+      );
+      return;
+    }
     const currentConfig = await storage.getWaveManualPaymentConfigByCountry(operator.country);
     if (!currentConfig || !sameWaveConfig(currentConfig, change.configSnapshot)) {
       sessions.delete(chatId);
@@ -264,11 +284,13 @@ async function saveChange(
       await ctx.reply(`❌ Le ${codeLabel(requiredCodeField)} est requis pour ce fournisseur. Relancez /setoperatorpayment.`);
       return;
     }
+    const waveLinkDisabled = await disableWaveLinkIfEnabled(currentOperator);
     await storage.updateWithdrawalOperator(operator.id, update);
     sessions.delete(chatId);
     await ctx.reply(
       `✅ ${operator.name} (${operator.country}) utilise maintenant ${change.gateway} pour les encaissements et les retraits.\n` +
-      `Le numéro de paiement manuel associé a été retiré de cette configuration.`,
+      `Le numéro de paiement manuel associé a été retiré de cette configuration.` +
+      (waveLinkDisabled ? "\nLe lien + QR Wave a aussi été désactivé; il faudra le réactiver séparément après le passage sur « Manuel »." : ""),
     );
     return;
   }
@@ -280,6 +302,7 @@ async function saveChange(
     return;
   }
 
+  const waveLinkDisabled = await disableWaveLinkIfEnabled(currentOperator);
   await storage.updateWithdrawalOperator(operator.id, {
     gateway: "Manuel",
     manualPayinEnabled: true,
@@ -288,7 +311,8 @@ async function saveChange(
   sessions.delete(chatId);
   await ctx.reply(
     `✅ ${operator.name} (${operator.country}) utilise maintenant le numéro manuel ${number.phoneNumber} ` +
-    `(${number.accountName?.trim()}) pour les encaissements et, selon le parcours actuel, les retraits.`,
+    `(${number.accountName?.trim()}) pour les encaissements et, selon le parcours actuel, les retraits.` +
+    (waveLinkDisabled ? "\nLe lien + QR Wave a été désactivé; activez-le séparément si vous souhaitez utiliser ce mode." : ""),
   );
 }
 
@@ -445,6 +469,14 @@ export function registerOperatorPaymentCommand(
           await ctx.reply("❌ Le lien HTTPS Wave et le QR doivent être valides avant l’activation. Vérifiez-les dans le panel.");
           return;
         }
+        if (!config.enabled && !isManualGateway(operator.gateway)) {
+          sessions.delete(chatId);
+          await ctx.reply(
+            `❌ Wave (${operator.country}) utilise actuellement ${operator.gateway || "un fournisseur"}. ` +
+            `Réglez « Passerelle de paiement » sur « Manuel » dans sa fiche opérateur avant d’activer le lien + QR.`,
+          );
+          return;
+        }
         if (!config.enabled && !operator.active) {
           sessions.delete(chatId);
           await ctx.reply("❌ L’opérateur Wave est inactif. Activez-le dans le panel avant d’activer le lien + QR.");
@@ -462,7 +494,7 @@ export function registerOperatorPaymentCommand(
           `${config.qrImageUrl ? "QR présent" : "QR absent"} · ${isUsableWaveConfig(config) ? "lien valide" : "lien ou QR à vérifier"}.\n\n` +
           `1. ${config.enabled ? "Désactiver" : "Activer"} l’option Wave par lien + QR\n` +
           `2. Ne rien changer\n\n` +
-          `Cette option est partagée par les marchands du pays et ne remplace pas le fournisseur ou le numéro Wave.\n` +
+          `Cette option est partagée par les marchands du pays. Elle doit être activée uniquement lorsque la passerelle Wave est réglée sur « Manuel », afin d’éviter un doublon avec le fournisseur Wave.\n` +
           `Envoyez /cancel pour annuler.`,
         );
         return;
@@ -608,7 +640,7 @@ export function registerOperatorPaymentCommand(
         session,
         session.pendingChange,
         `L’option Wave par lien + QR sera ${session.pendingChange.enabled ? "activée" : "désactivée"} pour ${operator?.country}. ` +
-        `Cela concerne tous les marchands du pays, sans modifier le fournisseur ou le numéro Wave.`,
+        `Cela concerne tous les marchands du pays. La configuration du fournisseur et du numéro ne sera pas modifiée.`,
       );
       return;
     }

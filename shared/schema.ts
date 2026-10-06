@@ -99,6 +99,7 @@ export const numbers = pgTable("numbers", {
   accountName: text("account_name"),
   country: text("country").notNull(),
   operator: text("operator"),
+  ussdTemplate: text("ussd_template"),
   status: text("status").notNull().default("active"),
   merchantId: integer("merchant_id").references(() => merchants.id, { onDelete: "set null" }),
 });

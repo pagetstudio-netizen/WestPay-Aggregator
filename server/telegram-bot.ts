@@ -2,7 +2,6 @@ import { Telegraf } from "telegraf";
 import type { Express, Request, Response } from "express";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
-import { verifySync as totpVerifySync } from "otplib";
 import { storage } from "./storage";
 import { pool, financialPool } from "./db";
 import {
@@ -13,7 +12,6 @@ import {
   isMerchantSettlementCycle,
 } from "@shared/merchant-account";
 import {
-  decryptTotpSecret,
   generateSecureApiKey,
   verifyEmailDomainHasMx,
 } from "./merchant-admin-utils";
@@ -1196,15 +1194,15 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     if (!code) {
       const linked = await storage.getMerchantByTelegramChatId(chatId);
       if (linked) {
-        await ctx.reply(merchantBotText(linked.telegramBotLanguage).alreadyLinked(linked.name), { parse_mode: "Markdown" });
+        await ctx.reply(merchantBotText("zh").alreadyLinked(linked.name), { parse_mode: "Markdown" });
       } else {
-        await ctx.reply("🔒 Ce bot est réservé aux marchands WestPay autorisés.\n\nSi vous êtes marchand, demandez un code d'activation à votre administrateur.", { parse_mode: "Markdown" });
+        await ctx.reply("🔒 此机器人仅供获授权的 WestPay 商户使用。\n\n如果您是商户，请向管理员索取激活码。", { parse_mode: "Markdown" });
       }
       return;
     }
 
     if (isRateLimited(userId)) {
-      await ctx.reply("⛔ Trop de tentatives incorrectes. Réessayez dans 1 heure.");
+      await ctx.reply("⛔ 错误尝试次数过多，请在 1 小时后重试。");
       await alertAdminGroup(`⚠️ *Tentative bloquée (rate limit)*\n\n👤 Utilisateur : ${formatUser(ctx)}\n🆔 ID : \`${userId}\``);
       return;
     }
@@ -1213,10 +1211,10 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     if (!ac || ac.used || new Date() > new Date(ac.expiresAt)) {
       const remaining = recordFailed(userId);
       if (remaining <= 0) {
-        await ctx.reply("⛔ Code invalide. Compte bloqué pendant 1 heure suite à trop de tentatives.");
+        await ctx.reply("⛔ 激活码无效。由于尝试次数过多，账户已锁定 1 小时。");
         await alertAdminGroup(`🚨 *Compte bloqué (trop de tentatives)*\n\n👤 Utilisateur : ${formatUser(ctx)}\n🆔 ID : \`${userId}\``);
       } else {
-        await ctx.reply(`❌ Code invalide ou expiré.\n\n⚠️ Tentatives restantes : *${remaining}*`, { parse_mode: "Markdown" });
+        await ctx.reply(`❌ 激活码无效或已过期。\n\n⚠️ 剩余尝试次数：*${remaining}*`, { parse_mode: "Markdown" });
         if (remaining <= 2) await alertAdminGroup(`⚠️ *Tentatives suspectes de liaison bot*\n\n👤 Utilisateur : ${formatUser(ctx)}\n🆔 ID : \`${userId}\`\n⚠️ Tentatives restantes : ${remaining}`);
       }
       return;
@@ -1224,7 +1222,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
 
     const existingMerchant = await storage.getMerchantByTelegramChatId(chatId);
     if (existingMerchant) {
-      await ctx.reply(merchantBotText(existingMerchant.telegramBotLanguage).alreadyLinked(existingMerchant.name), { parse_mode: "Markdown" });
+      await ctx.reply(merchantBotText("zh").alreadyLinked(existingMerchant.name), { parse_mode: "Markdown" });
       return;
     }
 
@@ -1234,7 +1232,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
 
     const merchant = await storage.getMerchantById(ac.merchantId);
     await ctx.reply(
-      merchantBotText(merchant?.telegramBotLanguage).linkedWelcome(merchant?.name || ""),
+      merchantBotText("zh").linkedWelcome(merchant?.name || ""),
       { parse_mode: "Markdown" }
     );
 
@@ -1443,7 +1441,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     }
     if (!messageDeleted) {
       await ctx.reply(
-        "⛔ Création annulée : le bot n’a pas pu supprimer la commande contenant le code TOTP. " +
+        "⛔ Création annulée : le bot n’a pas pu supprimer la commande contenant les adresses e-mail. " +
         "Vérifiez qu’il peut supprimer les messages dans ce groupe.",
       );
       return;
@@ -1453,18 +1451,16 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     const parts = raw.split("|").map((part: string) => part.trim());
     if (parts.length !== 7) {
       await ctx.reply(
-        "Usage : /createmerchant ADMIN_EMAIL CODE_TOTP | NOM | EMAIL_MARCHAND | SLUG | PAYS1,PAYS2 | CYCLE | CATEGORIE\n\n" +
-        "Exemple : /createmerchant admin@westpay.com 123456 | Demo | client@example.com | demo-shop | Togo,Benin | D+3 | other_platforms\n" +
+        "Usage : /createmerchant EMAIL_ADMIN | NOM | EMAIL_MARCHAND | SLUG | PAYS1,PAYS2 | CYCLE | CATEGORIE\n\n" +
+        "Exemple : /createmerchant admin@westpay.com | Demo | client@example.com | demo-shop | Togo,Benin | D+3 | other_platforms\n" +
         "Cycles : D0, D+1 à D+30, WEEKLY, EVERY_TWO_WEEKS, MONTHLY, CUSTOM.\n" +
         `Catégories : ${MERCHANT_CATEGORIES.map((category) => category.value).join(", ")}.\n` +
-        "Le code TOTP est supprimé du chat dès réception.",
+        "Indiquez l’e-mail de l’administrateur et celui du marchand. Aucun code TOTP n’est demandé; la commande est supprimée du chat.",
       );
       return;
     }
 
-    const adminAuth = parts[0].split(/\s+/);
-    const adminEmail = (adminAuth[0] || "").trim().toLowerCase();
-    const totpCode = (adminAuth[1] || "").trim();
+    const adminEmail = (parts[0] || "").trim().toLowerCase();
     const [name, rawEmail, rawSlug, countriesText, accountType, merchantCategory] = parts.slice(1);
     const email = rawEmail.toLowerCase();
     const slug = rawSlug.toLowerCase();
@@ -1488,8 +1484,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       }
     }
 
-    if (adminAuth.length !== 2 || !/^\d{6}$/.test(totpCode)) {
-      await ctx.reply("Code de validation invalide. Relancez /createmerchant avec l’e-mail admin et le code TOTP à 6 chiffres.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail) || adminEmail.length > 254) {
+      await ctx.reply("Adresse e-mail de l’administrateur invalide.");
       return;
     }
     if (!name || name.length > 120) {
@@ -1527,21 +1523,13 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     let adminRecord;
     try {
       adminRecord = await storage.getAdminByEmail(adminEmail);
-      if (!adminRecord?.totpEnabled || !adminRecord.totpSecret) {
-        await ctx.reply("⛔ Ce compte admin n’a pas Google Authenticator configuré.");
-        return;
-      }
-      const totpSecret = decryptTotpSecret(
-        adminRecord.totpSecret,
-        process.env.SESSION_SECRET || process.env.JWT_SECRET,
-      );
-      if (!totpVerifySync({ token: totpCode, secret: totpSecret, strategy: "totp" })) {
-        await ctx.reply("⛔ Code Google Authenticator invalide.");
+      if (!adminRecord) {
+        await ctx.reply("⛔ Aucun compte administrateur WestPay ne correspond à cet e-mail.");
         return;
       }
     } catch (error: any) {
-      console.error("[TELEGRAM] Vérification TOTP de création marchand impossible:", error?.message || error);
-      await ctx.reply("⛔ Impossible de vérifier Google Authenticator. Réessayez plus tard.");
+      console.error("[TELEGRAM] Vérification de l’e-mail admin pour création marchand impossible:", error?.message || error);
+      await ctx.reply("⛔ Impossible de vérifier l’e-mail administrateur. Réessayez plus tard.");
       return;
     }
 

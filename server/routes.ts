@@ -593,10 +593,19 @@ function normalizeGatewayName(value: unknown): string {
   return normalized === "lipa" ? "lipapap" : normalized;
 }
 
+function isManualGateway(value: unknown): boolean {
+  const gateway = normalizeGatewayName(value);
+  return gateway === "manual" || gateway === "manuel";
+}
+
 function normalizePaymentNetwork(value: unknown): string {
   return typeof value === "string"
     ? value.toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "")
     : "";
+}
+
+function isWaveOperatorName(value: unknown): boolean {
+  return normalizePaymentNetwork(typeof value === "string" ? value : "") === "wave";
 }
 
 async function findWithdrawalOperatorForNetwork(name: string, country: string) {
@@ -3882,7 +3891,7 @@ export async function registerRoutes(
           country,
           paymentUrl,
           qrImageUrl: savedQrUrl,
-          enabled: true,
+          enabled: false,
         });
         return res.status(201).json(created);
       } catch (err: any) {
@@ -3949,6 +3958,28 @@ export async function registerRoutes(
       if (enabled && (!config.qrImageUrl || !normalizeWavePaymentUrl(config.paymentUrl))) {
         return res.status(400).json({ message: "Ajoutez un lien Wave valide et un QR avant d’activer cette configuration." });
       }
+      if (enabled) {
+        const waveOperator = await storage.getWithdrawalOperatorByNameAndCountry("Wave", config.country);
+        if (!waveOperator) {
+          return res.status(409).json({
+            message: `Configurez d’abord l’opérateur Wave pour ${config.country}, puis réessayez.`,
+          });
+        }
+        if (!waveOperator.active) {
+          return res.status(409).json({
+            message: `L’opérateur Wave de ${config.country} est inactif. Activez-le avant le lien + QR.`,
+          });
+        }
+        if (!isManualGateway(waveOperator.gateway)) {
+          const currentGateway = String(waveOperator.gateway || "").trim() || "un fournisseur";
+          return res.status(409).json({
+            message:
+              `Wave (${config.country}) utilise actuellement ${currentGateway}. ` +
+              `Dans la fiche de l’opérateur Wave, réglez « Passerelle de paiement » sur « Manuel » ` +
+              `avant d’activer le lien + QR ou le paiement par numéro, afin d’éviter un doublon avec le fournisseur Wave.`,
+          });
+        }
+      }
       const updated = await storage.updateWaveManualPaymentConfig(id, { enabled, updatedAt: new Date() });
       return res.json(updated);
     } catch (err: any) {
@@ -3990,16 +4021,35 @@ export async function registerRoutes(
 
   app.post("/api/admin/add-number", authMiddleware("admin"), async (req, res) => {
     try {
-      const { phoneNumber, country, operator, merchantId } = req.body;
-      if (!phoneNumber || !country) return res.status(400).json({ message: "Numero et pays requis" });
+      const phoneNumber = typeof req.body.phoneNumber === "string" ? req.body.phoneNumber.trim() : "";
+      const country = typeof req.body.country === "string" ? req.body.country.trim() : "";
+      const operator = typeof req.body.operator === "string" ? req.body.operator.trim() : "";
+      const { merchantId } = req.body;
+      if (!phoneNumber || !country || !operator) {
+        return res.status(400).json({ message: "Numéro, pays et opérateur requis." });
+      }
+      const matchingOperator = (await storage.getWithdrawalOperators()).some((item) =>
+        item.country.trim().toLocaleLowerCase() === country.toLocaleLowerCase() &&
+        item.name.trim().toLocaleLowerCase() === operator.toLocaleLowerCase()
+      );
+      if (!matchingOperator) {
+        return res.status(400).json({ message: "Choisissez un opérateur configuré pour ce pays." });
+      }
       const accountName = typeof req.body.accountName === "string" ? req.body.accountName.trim() || null : null;
       if (accountName && accountName.length > 120) {
         return res.status(400).json({ message: "Le nom du titulaire ne peut pas dépasser 120 caractères." });
       }
+      if (req.body.ussdTemplate !== undefined && typeof req.body.ussdTemplate !== "string") {
+        return res.status(400).json({ message: "Le modèle USSD doit être du texte." });
+      }
+      const ussdTemplate = typeof req.body.ussdTemplate === "string" ? req.body.ussdTemplate.trim() || null : null;
+      const ussdError = validateManualUssdTemplate(ussdTemplate || "");
+      if (ussdError) return res.status(400).json({ message: ussdError });
       const num = await storage.addNumber({
         phoneNumber, country,
         accountName,
-        operator: operator || null,
+        operator,
+        ussdTemplate,
         status: "active",
         merchantId: merchantId && merchantId !== "none" ? parseInt(merchantId) : null,
       });
@@ -4018,7 +4068,16 @@ export async function registerRoutes(
       if (accountName && accountName.length > 120) {
         return res.status(400).json({ message: "Le nom du titulaire ne peut pas dépasser 120 caractères." });
       }
-      const updated = await storage.updateNumberAccountName(id, accountName);
+      if (req.body.ussdTemplate !== undefined && typeof req.body.ussdTemplate !== "string") {
+        return res.status(400).json({ message: "Le modèle USSD doit être du texte." });
+      }
+      const ussdTemplate = typeof req.body.ussdTemplate === "string" ? req.body.ussdTemplate.trim() || null : undefined;
+      const ussdError = validateManualUssdTemplate(ussdTemplate || "");
+      if (ussdError) return res.status(400).json({ message: ussdError });
+      const updated = await storage.updateNumberDetails(id, {
+        accountName,
+        ...(req.body.ussdTemplate !== undefined ? { ussdTemplate } : {}),
+      });
       res.json(updated);
     } catch (err: any) {
       if (String(err?.message || "").includes("Numero introuvable")) {
@@ -4812,28 +4871,37 @@ export async function registerRoutes(
         if (type === "api" && op.maintenanceApiPayment) return false;
         return true;
       });
-      const methods = visibleOps.map(o => ({
+      let methods = visibleOps.map(o => ({
         name: o.name,
         logo: o.logo || null,
-        manual: Boolean(o.manualPayinEnabled),
+        manual: isManualGateway(o.gateway) || Boolean(o.manualPayinEnabled),
       }));
       const waveConfig = await storage.getWaveManualPaymentConfigByCountry(country);
       const waveOperator = await storage.getWithdrawalOperatorByNameAndCountry("Wave", country);
+      const waveUsesManualGateway = isManualGateway(waveOperator?.gateway);
       const waveMethodClosed = Boolean(
         waveOperator &&
         (!waveOperator.active ||
           (type === "link" && waveOperator.maintenancePaymentLinks) ||
           (type === "api" && waveOperator.maintenanceApiPayment)),
       );
-      const waveLinkMethodAlreadyListed = methods.some((method) => isWaveManualLinkMethod(method.name));
-      if (
+      const waveLinkReady = Boolean(
         waveConfig?.enabled &&
         waveConfig.qrImageUrl &&
         normalizeWavePaymentUrl(waveConfig.paymentUrl) &&
-        !waveMethodClosed &&
-        !waveLinkMethodAlreadyListed
+        waveOperator?.active &&
+        waveUsesManualGateway &&
+        !waveMethodClosed,
+      );
+      if (
+        waveLinkReady
       ) {
-        methods.push({ name: "Wave par lien", logo: null, manual: true });
+        methods = methods.filter((method) =>
+          !isWaveOperatorName(method.name) && !isWaveManualLinkMethod(method.name),
+        );
+        methods.push({ name: "Wave par lien", logo: waveOperator?.logo || null, manual: true });
+      } else if (waveOperator && !waveUsesManualGateway && waveOperator.manualPayinEnabled) {
+        methods = methods.filter((method) => !isWaveOperatorName(method.name));
       }
       res.json({ methods });
     } catch (err: any) {
@@ -5347,11 +5415,23 @@ export async function registerRoutes(
       const waveManualConfig = usesWaveManualLink
         ? await storage.getWaveManualPaymentConfigByCountry(country)
         : undefined;
+      const operatorRecord = await storage.getWithdrawalOperatorByNameAndCountry(
+        usesWaveManualLink ? "Wave" : paymentMethod,
+        country,
+      );
       const hasActiveWaveManualLink = Boolean(
         waveManualConfig?.enabled &&
         waveManualConfig.qrImageUrl &&
-        normalizeWavePaymentUrl(waveManualConfig.paymentUrl),
+        normalizeWavePaymentUrl(waveManualConfig.paymentUrl) &&
+        operatorRecord?.active &&
+        isManualGateway(operatorRecord.gateway),
       );
+
+      if (usesWaveManualLink && !hasActiveWaveManualLink) {
+        return res.status(503).json({
+          message: "Le paiement Wave par lien n’est pas disponible. L’administrateur doit configurer l’opérateur Wave sur « Manuel » et activer le lien + QR.",
+        });
+      }
 
       if (!payerPhone && !hasActiveWaveManualLink) {
         return res.status(400).json({ message: "Numero de telephone requis" });
@@ -5378,7 +5458,6 @@ export async function registerRoutes(
         : "";
       payinFailureContext.payerNumber = msisdn;
 
-      const operatorRecord = await storage.getWithdrawalOperatorByNameAndCountry(paymentMethod, country);
       const payinGateway = resolvePayinGateway(
         merchantCountry.payinGateway,
         operatorRecord?.gateway,
@@ -5488,7 +5567,12 @@ export async function registerRoutes(
 
       if (!operatorRecord) return respondChannelUnavailable();
 
-      if (operatorRecord.manualPayinEnabled) {
+      if (operatorRecord.manualPayinEnabled || isManualGateway(operatorRecord.gateway)) {
+        if (isWaveOperatorName(operatorRecord.name) && !isManualGateway(operatorRecord.gateway)) {
+          return res.status(409).json({
+            message: "Pour payer Wave par numéro, l’administrateur doit d’abord régler sa passerelle sur « Manuel ».",
+          });
+        }
         const targetNumber = (await storage.getNumbers()).find((number) => number.id === operatorRecord.manualNumberId);
         const sameOperator = (value: string | null | undefined) =>
           (value || "").trim().toLocaleLowerCase() === paymentMethod.trim().toLocaleLowerCase();
@@ -5508,7 +5592,7 @@ export async function registerRoutes(
         let ussdCode: string | null;
         try {
           ussdCode = buildManualUssdCode(
-            operatorRecord.manualUssdTemplate,
+            targetNumber.ussdTemplate?.trim() || operatorRecord.manualUssdTemplate,
             parsedAmount,
             targetNumber.phoneNumber,
             country,
@@ -7301,7 +7385,8 @@ export async function registerRoutes(
     try {
       const { name, type, country, dailyLimit, gateway, clapayCode, mbiyoCode, seapayCode, active } = req.body;
       if (!name || !country) return res.status(400).json({ message: "Nom et pays requis" });
-      const manualPayinEnabled = req.body.manualPayinEnabled === true;
+      const requestedGateway = typeof gateway === "string" && gateway.trim() ? gateway : "ClaPay";
+      const manualPayinEnabled = isManualGateway(requestedGateway);
       const manualNumberId = req.body.manualNumberId ? Number(req.body.manualNumberId) : null;
       const manualUssdTemplate = typeof req.body.manualUssdTemplate === "string" ? req.body.manualUssdTemplate.trim() || null : null;
       const manualInstructions = typeof req.body.manualInstructions === "string" ? req.body.manualInstructions.trim() || null : null;
@@ -7326,7 +7411,7 @@ export async function registerRoutes(
         type: type || "Mobile Money",
         country,
         dailyLimit: dailyLimit ? Number(dailyLimit) : 1000000,
-        gateway: typeof gateway === "string" && gateway.trim() ? gateway.trim() : "ClaPay",
+        gateway: requestedGateway.trim(),
         clapayCode: clapayCode?.trim() || null,
         mbiyoCode: mbiyoCode?.trim() || null,
         seapayCode: seapayCode?.trim() || null,
@@ -7355,10 +7440,13 @@ export async function registerRoutes(
       const { name, type, country, dailyLimit, gateway, clapayCode, mbiyoCode, seapayCode, logo, sortOrder, active, maintenanceAll, maintenanceDeposits, maintenanceWithdrawals, maintenancePaymentLinks, maintenanceApiPayment } = req.body;
       const nextName = name ?? existing.name;
       const nextCountry = country ?? existing.country;
-      const manualPayinEnabled = req.body.manualPayinEnabled === undefined
+      const nextGateway = gateway ?? existing.gateway;
+      const manualPayinEnabled = gateway === undefined
         ? existing.manualPayinEnabled
-        : req.body.manualPayinEnabled === true;
-      const rawManualNumberId = req.body.manualNumberId === undefined ? existing.manualNumberId : req.body.manualNumberId;
+        : isManualGateway(nextGateway);
+      const rawManualNumberId = req.body.manualNumberId === undefined
+        ? (manualPayinEnabled ? existing.manualNumberId : null)
+        : req.body.manualNumberId;
       const manualNumberId = rawManualNumberId ? Number(rawManualNumberId) : null;
       const manualUssdTemplate = req.body.manualUssdTemplate === undefined
         ? existing.manualUssdTemplate
@@ -7380,6 +7468,32 @@ export async function registerRoutes(
           !number.accountName?.trim()
         ) {
           return res.status(400).json({ message: "Choisissez un numéro actif correspondant à ce pays et cet opérateur, avec le nom du titulaire renseigné." });
+        }
+      }
+      let waveLinkDisabled = false;
+      const waveRoutingChanged =
+        (isWaveOperatorName(existing.name) || isWaveOperatorName(nextName)) &&
+        (
+          normalizePaymentNetwork(existing.name) !== normalizePaymentNetwork(nextName) ||
+          normalizePaymentNetwork(existing.country) !== normalizePaymentNetwork(nextCountry) ||
+          normalizeGatewayName(existing.gateway) !== normalizeGatewayName(nextGateway)
+        );
+      if (waveRoutingChanged) {
+        const countriesToDisable: string[] = [];
+        const addCountryToDisable = (waveCountry: string) => {
+          if (!countriesToDisable.includes(waveCountry)) countriesToDisable.push(waveCountry);
+        };
+        if (isWaveOperatorName(existing.name)) addCountryToDisable(existing.country);
+        if (isWaveOperatorName(nextName)) {
+          const waveAtDestination = await storage.getWithdrawalOperatorByNameAndCountry("Wave", nextCountry);
+          if (!waveAtDestination || waveAtDestination.id === existing.id) addCountryToDisable(nextCountry);
+        }
+        for (const waveCountry of countriesToDisable) {
+          const waveConfig = await storage.getWaveManualPaymentConfigByCountry(waveCountry);
+          if (waveConfig?.enabled) {
+            await storage.updateWaveManualPaymentConfig(waveConfig.id, { enabled: false, updatedAt: new Date() });
+            waveLinkDisabled = true;
+          }
         }
       }
       const updated = await storage.updateWithdrawalOperator(id, {
@@ -7405,7 +7519,7 @@ export async function registerRoutes(
         manualUssdTemplate,
         manualInstructions,
       });
-      res.json(updated);
+      res.json({ ...updated, waveLinkDisabled });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }

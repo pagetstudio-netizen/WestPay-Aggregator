@@ -222,21 +222,39 @@ ${manualPaymentDesign}
   background: #f4fbf2;
 }
 
+.status-feedback {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  border: 1px solid #d7e0dc;
+  border-radius: 9px;
+  background: #f3f8f5;
+  color: #536169;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .wave-manual .header {
-  min-height: 166px;
+  min-height: 0;
   background: #20bde9;
   color: #fff;
 }
 
-.wave-manual .header-title {
-  display: none;
+.wave-manual .wave-brand-logo {
+  display: block;
+  width: min(100%, 230px);
+  max-height: 76px;
+  margin: 0 auto 8px;
+  border-radius: 6px;
+  object-fit: contain;
 }
 
-.wave-brand-logo {
-  display: block;
-  width: min(230px, 72vw);
-  height: auto;
-  margin: 2px auto 0;
+.wave-manual .success-content .wave-brand-logo {
+  margin-bottom: 18px;
+}
+
+.wave-manual .header-title {
+  display: none;
 }
 
 .wave-manual .operator-row {
@@ -317,6 +335,11 @@ ${manualPaymentDesign}
 }
 
 .wave-manual .verify-button:hover:not(:disabled) {
+  background: #effbff;
+}
+
+.wave-manual .status-feedback {
+  border-color: rgba(32, 189, 233, 0.4);
   background: #effbff;
 }
 
@@ -473,6 +496,10 @@ button:focus-visible {
     font-size: 15px;
   }
 
+  .status-feedback {
+    font-size: 14px;
+  }
+
   .footer {
     padding: 28px 12px 34px;
   }
@@ -498,6 +525,7 @@ export default function ManualPaymentStep({
 }: Props) {
   const [message, setMessage] = useState("");
   const [proofReference, setProofReference] = useState("");
+  const [statusFeedback, setStatusFeedback] = useState("");
   const [success, setSuccess] = useState(false);
   const [checking, setChecking] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -579,7 +607,7 @@ export default function ManualPaymentStep({
 
   const checkPayment = async () => {
     if (!proofReference.trim()) {
-      showMessage("Veuillez entrer la référence du paiement.");
+      setStatusFeedback("Veuillez entrer la référence du paiement pour vérifier son statut.");
       return;
     }
     if (checking) return;
@@ -588,6 +616,8 @@ export default function ManualPaymentStep({
       return;
     }
 
+    const checkStartedAt = performance.now();
+    setStatusFeedback("");
     setChecking(true);
     try {
       const response = await fetch(`/api/payment/${paymentId}/status`, {
@@ -599,16 +629,21 @@ export default function ManualPaymentStep({
       }
 
       if (data.status === "confirmed") {
+        setStatusFeedback("");
         setSuccessReference(proofReference.trim());
         setSuccess(true);
       } else if (data.status === "failed") {
-        showMessage("Paiement non confirmé.");
+        setStatusFeedback("Paiement non confirmé. Vérifiez la référence et réessayez si nécessaire.");
       } else {
-        showMessage("Statut actualisé.");
+        setStatusFeedback("Le paiement n’est pas encore confirmé. Vous pouvez vérifier à nouveau dans quelques instants.");
       }
     } catch (error: unknown) {
-      showMessage(error instanceof Error ? error.message : "Impossible d’actualiser le statut du paiement.");
+      setStatusFeedback(error instanceof Error ? error.message : "Impossible d’actualiser le statut du paiement.");
     } finally {
+      const minimumWaitMs = Math.max(0, 1800 - (performance.now() - checkStartedAt));
+      if (minimumWaitMs > 0) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, minimumWaitMs));
+      }
       setChecking(false);
     }
   };
@@ -652,6 +687,7 @@ export default function ManualPaymentStep({
           </button>
 
           <div className="success-content">
+            {isWavePayment && <img className="wave-brand-logo" src={waveBrandLogo} alt="Wave" />}
             <div className="success-check-animation">
               <div className="success-check-circle">
                 <span>✓</span>
@@ -702,13 +738,13 @@ export default function ManualPaymentStep({
       <style>{scopedDesign}</style>
       <div className="page">
         <header className="header">
-          {isWavePayment ? (
-            <img className="wave-brand-logo" src={waveBrandLogo} alt="Wave" />
-          ) : (
+          {!isWavePayment && (
             <div className="header-title">
               Payment
             </div>
           )}
+
+          {isWavePayment && <img className="wave-brand-logo" src={waveBrandLogo} alt="Wave" />}
 
           <div className="operator-row">
             <span>{isWavePayment ? "Montant à payer :" : "opérateur:"}</span>
@@ -838,7 +874,10 @@ export default function ManualPaymentStep({
               type="text"
               placeholder="entre la référence du paiement"
               value={proofReference}
-              onChange={(event) => setProofReference(event.target.value.slice(0, 120))}
+              onChange={(event) => {
+                setProofReference(event.target.value.slice(0, 120));
+                setStatusFeedback("");
+              }}
               maxLength={120}
               autoComplete="off"
             />
@@ -861,6 +900,12 @@ export default function ManualPaymentStep({
           >
             Actualiser le statut
           </button>
+
+          {statusFeedback && (
+            <div className="status-feedback" role="status" aria-live="polite">
+              {statusFeedback}
+            </div>
+          )}
         </section>
 
         <footer className="footer">

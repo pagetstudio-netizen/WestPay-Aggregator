@@ -150,6 +150,7 @@ export async function runAuthMigrations() {
         account_name text,
         country text NOT NULL,
         operator text,
+        ussd_template text,
         status text NOT NULL DEFAULT 'active',
         merchant_id integer REFERENCES merchants(id) ON DELETE SET NULL
       );
@@ -332,6 +333,7 @@ export async function runAuthMigrations() {
       ALTER TABLE merchants ADD COLUMN IF NOT EXISTS account_type TEXT;
       ALTER TABLE merchants ADD COLUMN IF NOT EXISTS merchant_category TEXT;
       ALTER TABLE numbers ADD COLUMN IF NOT EXISTS account_name TEXT;
+      ALTER TABLE numbers ADD COLUMN IF NOT EXISTS ussd_template TEXT;
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS manual_payin_enabled BOOLEAN NOT NULL DEFAULT false;
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS manual_number_id INTEGER;
       ALTER TABLE withdrawal_operators ADD COLUMN IF NOT EXISTS manual_ussd_template TEXT;

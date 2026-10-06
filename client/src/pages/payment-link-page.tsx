@@ -278,6 +278,7 @@ export default function PaymentLinkPage() {
   const rawMethods = dynMethods ?? (PAYMENT_METHODS[country] || []).map((n: string) => ({ name: n, logo: null as string | null }));
   const methods = rawMethods;
   const isCrypto = method === "crypto";
+  const isWaveLinkMethod = method === "Wave par lien";
   const needsOtp = method === "Orange Money" && (country === "Burkina Faso" || country === "Cote d'Ivoire");
   const otpUssd = country === "Burkina Faso" ? "*144*4*6*montant#" : "#144*82#";
   const maliOrange = method === "Orange Money" && country === "Mali";
@@ -353,7 +354,7 @@ export default function PaymentLinkPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           merchantSlug: data.merchantSlug, country, amount: effectiveAmount,
-          payerPhone: payerPhone.trim(), payerName: "Client", paymentMethod: method,
+          payerPhone: isWaveLinkMethod ? "" : payerPhone.trim(), payerName: "Client", paymentMethod: method,
           redirectUrl: data.link.redirectUrl || null,
           firstName: "Client", lastName: "RobotPay",
           operator: method.toLowerCase().includes("wave") ? "wave" : undefined,
@@ -373,7 +374,7 @@ export default function PaymentLinkPage() {
   const handlePay = () => {
     if (!isIndia && !method) { toast({ title: "Méthode requise", description: "Sélectionnez un opérateur.", variant: "destructive" }); return; }
     if (isCrypto) { doInitiate(); return; }
-    if (!isSeapayCountry && !payerPhone.trim()) { toast({ title: "Numéro requis", description: "Entrez votre numéro.", variant: "destructive" }); return; }
+    if (!isSeapayCountry && !isWaveLinkMethod && !payerPhone.trim()) { toast({ title: "Numéro requis", description: "Entrez votre numéro.", variant: "destructive" }); return; }
     if (data?.link.amountType === "flexible" && !customAmount) { toast({ title: "Montant requis", description: "Entrez le montant.", variant: "destructive" }); return; }
     if (needsOtp && !otpCode.trim()) { setShowOtpModal(true); return; }
     doInitiate();
@@ -531,7 +532,9 @@ export default function PaymentLinkPage() {
                   <div style={{ border: "2.5px solid #111", borderRadius: 18, padding: "12px 10px", display: "flex", alignItems: "center", justifyContent: "space-evenly", gap: 8 }}
                     role="radiogroup">
                     {methods.map(m => {
-                      const img = m.logo || OPERATOR_IMAGES[m.name];
+                      const img = m.logo ||
+                        (m.name === "Wave par lien" ? OPERATOR_IMAGES.Wave : undefined) ||
+                        OPERATOR_IMAGES[m.name];
                       const meta = OPERATOR_META[m.name] || { bg: "#6b7280", abbr: m.name.substring(0, 2).toUpperCase() };
                       const sel = method === m.name;
                       return (
@@ -566,7 +569,7 @@ export default function PaymentLinkPage() {
               )}
 
               {/* Phone input — hidden for SeaPay countries (Philippines, India, Pakistan) */}
-              {!isCrypto && !isSeapayCountry && (
+              {!isCrypto && !isSeapayCountry && !isWaveLinkMethod && (
                 <div>
                   <p style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>{t("payPhoneNumber")}</p>
                   <div style={{ display: "flex", alignItems: "stretch", border: "1.5px solid #d1d5db", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
@@ -599,7 +602,7 @@ export default function PaymentLinkPage() {
               {/* Pay button */}
               <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                 <button type="button" onClick={handlePay}
-                  disabled={isSubmitting || cryptoLoading || (!isIndia && !method) || (!isCrypto && !isSeapayCountry && !payerPhone.trim()) || (data.link.amountType === "flexible" && !customAmount)}
+                disabled={isSubmitting || cryptoLoading || (!isIndia && !method) || (!isCrypto && !isSeapayCountry && !isWaveLinkMethod && !payerPhone.trim()) || (data.link.amountType === "flexible" && !customAmount)}
                   className="paybtn" data-testid="button-pay"
                   style={{ background: "#f5c100", color: "#111" }}>
                   {(isSubmitting || cryptoLoading) && <Loader2 style={{ width: 18, height: 18, animation: "spin 1s linear infinite" }} />}
