@@ -4152,10 +4152,11 @@ export async function registerRoutes(
       }
       const matchingOperator = (await storage.getWithdrawalOperators()).some((item) =>
         item.country.trim().toLocaleLowerCase() === country.toLocaleLowerCase() &&
-        item.name.trim().toLocaleLowerCase() === operator.toLocaleLowerCase()
+        item.name.trim().toLocaleLowerCase() === operator.toLocaleLowerCase() &&
+        item.type.trim().toLocaleLowerCase() === "mobile money"
       );
       if (!matchingOperator) {
-        return res.status(400).json({ message: "Choisissez un opérateur configuré pour ce pays." });
+        return res.status(400).json({ message: "Choisissez un opérateur Mobile Money configuré pour ce pays." });
       }
       const accountName = typeof req.body.accountName === "string" ? req.body.accountName.trim() || null : null;
       if (accountName && accountName.length > 120) {

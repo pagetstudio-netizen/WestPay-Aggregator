@@ -2791,7 +2791,7 @@ function NumbersPanel() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Operateur</Label>
+                <Label>Opérateur Mobile Money configuré</Label>
                 <Select value={operator || "none"} onValueChange={(value) => setOperator(value === "none" ? "" : value)} disabled={Boolean(editingNumber) || !country || operatorOptions.length === 0}>
                   <SelectTrigger data-testid="select-number-operator"><SelectValue placeholder="Choisir un opérateur" /></SelectTrigger>
                   <SelectContent>
@@ -2803,6 +2803,9 @@ function NumbersPanel() {
                 </Select>
                 {!editingNumber && country && operatorOptions.length === 0 && (
                   <p className="text-xs text-destructive">Aucun opérateur n’est configuré pour ce pays.</p>
+                )}
+                {!editingNumber && country && operatorOptions.length > 0 && (
+                  <p className="text-xs text-muted-foreground">Sélectionnez un opérateur déjà configuré pour ce pays.</p>
                 )}
               </div>
               <div className="space-y-2">
@@ -2840,7 +2843,7 @@ function NumbersPanel() {
                   placeholder="*145*1*{{amount}}*{{number}}#"
                   data-testid="input-number-ussd-template"
                 />
-                <p className="text-xs text-muted-foreground">Variables facultatives : <code>{"{{amount}}"}</code> et <code>{"{{number}}"}</code>. N’inscrivez aucun PIN ni code secret.</p>
+                <p className="text-xs text-muted-foreground">Variables facultatives : <code>{"{{amount}}"}</code> et <code>{"{{number}}"}</code>. Si le modèle est vide, aucun code ni bouton USSD ne sera affiché au client. N’inscrivez aucun PIN ni code secret.</p>
               </div>
               <Button
                 type="submit"
@@ -5208,7 +5211,7 @@ function SortableOpRow({
               <span className="font-semibold text-sm">{op.name}</span>
               <Badge variant="outline" className="text-xs py-0">{op.type}</Badge>
               <Badge variant="secondary" className="text-xs py-0">{op.country}</Badge>
-              {(op as any).manualPayinEnabled && <Badge className="text-xs py-0 bg-amber-100 text-amber-800 border-amber-200">Encaissement manuel</Badge>}
+              {isManualGatewayValue(op.gateway) && <Badge className="text-xs py-0 bg-amber-100 text-amber-800 border-amber-200">Mode Manuel</Badge>}
               {!op.active && <Badge variant="destructive" className="text-xs py-0">Inactif</Badge>}
             </div>
             <span className="text-xs text-muted-foreground">
@@ -5323,7 +5326,7 @@ function WithdrawalOperatorsPanel() {
       const url = editingOp ? `/api/admin/withdrawal-operators/${editingOp.id}` : "/api/admin/withdrawal-operators";
       const method = editingOp ? "PUT" : "POST";
       const res = await fetch(url, { method, credentials: "include",
-       headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ ...form, manualPayinEnabled: isManualGatewayValue(form.gateway) }) });
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(form) });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
       return res.json();
     },
