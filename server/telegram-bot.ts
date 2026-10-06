@@ -2452,11 +2452,11 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     if (!isGroup && await isTelegramAdminUser(ctx)) {
       await ctx.reply(
         "Commandes marchand (message privé uniquement) :\n\n" +
-        "/createmerchant ADMIN_EMAIL CODE_TOTP | NOM | EMAIL | SLUG | PAYS1,PAYS2 | CYCLE | CATEGORIE\n" +
+        "/createmerchant (/creermarchand) ADMIN_EMAIL CODE_TOTP | NOM | EMAIL | SLUG | PAYS1,PAYS2 | CYCLE | CATEGORIE\n" +
         "Exemple : /createmerchant admin@westpay.com 123456 | Demo | client@example.com | demo-shop | Togo,Benin | D+3 | other_platforms\n\n" +
         "/setmerchantcode SLUG_MARCHAND — Générer le code à utiliser dans le groupe marchand\n" +
         "Exemple : /setmerchantcode demo-shop\n\n" +
-        "/activatecountry SLUG_MARCHAND | PAYS\n" +
+        "/activatecountry (/activerpays) SLUG_MARCHAND | PAYS\n" +
         "Exemple : /activatecountry demo-shop | Togo\n\n" +
         "La création se lance en privé avec le TOTP, mais le texte d’accueil et les identifiants sont publiés dans le groupe admin. Le cycle choisi est indicatif."
       );
@@ -2476,20 +2476,21 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `/merchants — Liste de tous les marchands\n` +
           `/setmerchant CODE — Lier un groupe à un marchand\n\n` +
           `/setmerchantcode SLUG — Générer un code de liaison à usage unique (24 h)\n\n` +
-          `/createmerchant — Créer un marchand (commande en message privé; identifiants publiés dans le groupe admin)\n` +
-          `/activatecountry — Activer un pays (commande en message privé)\n\n` +
+           `/createmerchant (/creermarchand) — Créer un marchand (commande en message privé; identifiants publiés dans le groupe admin)\n` +
+           `/activatecountry (/activerpays) — Activer un pays (commande en message privé)\n\n` +
            `/disablepayments — Désactiver payin et payout d'un marchand\n\n` +
            `/enablepayments (/activatepayments) — Réactiver payin et payout d'un marchand\n\n` +
            `/payin — Couper/réactiver le payin par pays et opérateur (07h–20h local)\n` +
            `/payout — Couper/réactiver le payout par pays et opérateur (07h–20h local)\n\n` +
-           `/setoperatorpayment — Changer le fournisseur ou le numéro manuel d’un opérateur; gérer Wave par lien/QR\n\n` +
+            `/setoperatorpayment (/switchoperator) — Changer le fournisseur ou le numéro manuel d’un opérateur; gérer Wave par lien/QR\n\n` +
           `📊 *Statistiques & Soldes*\n` +
           `/stats — Statistiques globales\n` +
           `/balance — Soldes détaillés de tous les marchands\n\n` +
-          `/findwithdrawal@Westpaybot — Rechercher un retrait par numéro\n` +
+           `/findwithdrawal NUMERO — Rechercher un retrait par numéro\n` +
           `/findpayment NUMERO — Rechercher tous les paiements et leur historique\n` +
-          `/findmanualpayment NUMERO — Alias historique de la commande\n` +
-          `/gatewaybalance@Westpaybot — Consulter le solde d'un gateway et ses wallets pays\n\n` +
+           `/findmanualpayment NUMERO — Alias de /findpayment\n` +
+           `/manualpayments NUMERO — Alias de /findpayment\n` +
+           `/gatewaybalance — Consulter le solde d'un gateway et ses wallets pays\n\n` +
           `📢 *Diffusion*\n` +
           `/broadcast — Envoyer un message dans les groupes\n` +
           `/groups — Lister tous les groupes où le bot est présent\n` +
@@ -2507,6 +2508,11 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `/blockip IP [reason] — Bloquer une adresse IP\n` +
           `/unblockip IP — Retirer une IP de toutes les listes\n\n` +
           `━━━━━━━━━━━━━━━━\n` +
+           `👤 *Commandes utilisables par les marchands*\n` +
+           `/start CODE — Lier le bot au compte marchand (message privé)\n` +
+           `/transactions — Voir les 5 dernières transactions (groupe ou privé marchand)\n` +
+           `/addip ADRESSE_IP — Ajouter une IP autorisée (groupe marchand)\n\n` +
+           `━━━━━━━━━━━━━━━━\n` +
           `💡 *Configurer un groupe marchand :*\n` +
           `1️⃣ Générer un code dans le dashboard WestPay\n` +
           `2️⃣ Ajouter le bot au groupe du marchand\n` +

@@ -1373,13 +1373,13 @@ ${B?`\u{1F310} URL : \`${A.url.slice(-20)}\``:""}${L}
 \`/seturl https://votre-domaine.com\``,{parse_mode:"Markdown"})}catch{await m.reply("\u274C Erreur.")}}),ge.command("seturl",async m=>{var N;let S=String(m.chat.id);if(!(m.chat.type==="group"||m.chat.type==="supergroup")||!await Et(S))return;let P=(N=(m.message.text||"").split(" ")[1])==null?void 0:N.trim();if(!P||!P.startsWith("http")){await m.reply("\u274C Usage : `/seturl https://votre-domaine.com`",{parse_mode:"Markdown"});return}await b.setSetting("platform_url",P),await m.reply(`\u2705 URL de la plateforme mise \xE0 jour :
 ${P}`,{parse_mode:"Markdown"})}),ge.command("help",async m=>{let S=String(m.chat.id),x=m.chat.type==="group"||m.chat.type==="supergroup";if(!x&&await C3(m)){await m.reply(`Commandes marchand (message priv\xE9 uniquement) :
 
-/createmerchant ADMIN_EMAIL CODE_TOTP | NOM | EMAIL | SLUG | PAYS1,PAYS2 | CYCLE | CATEGORIE
+/createmerchant (/creermarchand) ADMIN_EMAIL CODE_TOTP | NOM | EMAIL | SLUG | PAYS1,PAYS2 | CYCLE | CATEGORIE
 Exemple : /createmerchant admin@westpay.com 123456 | Demo | client@example.com | demo-shop | Togo,Benin | D+3 | other_platforms
 
 /setmerchantcode SLUG_MARCHAND \u2014 G\xE9n\xE9rer le code \xE0 utiliser dans le groupe marchand
 Exemple : /setmerchantcode demo-shop
 
-/activatecountry SLUG_MARCHAND | PAYS
+/activatecountry (/activerpays) SLUG_MARCHAND | PAYS
 Exemple : /activatecountry demo-shop | Togo
 
 La cr\xE9ation se lance en priv\xE9 avec le TOTP, mais le texte d\u2019accueil et les identifiants sont publi\xE9s dans le groupe admin. Le cycle choisi est indicatif.`);return}if(x){if(await Et(S)){await m.reply(`\u{1F4D6} *Commandes Admin \u2014 WestPay Bot*
@@ -1397,8 +1397,8 @@ La cr\xE9ation se lance en priv\xE9 avec le TOTP, mais le texte d\u2019accueil e
 
 /setmerchantcode SLUG \u2014 G\xE9n\xE9rer un code de liaison \xE0 usage unique (24 h)
 
-/createmerchant \u2014 Cr\xE9er un marchand (commande en message priv\xE9; identifiants publi\xE9s dans le groupe admin)
-/activatecountry \u2014 Activer un pays (commande en message priv\xE9)
+/createmerchant (/creermarchand) \u2014 Cr\xE9er un marchand (commande en message priv\xE9; identifiants publi\xE9s dans le groupe admin)
+/activatecountry (/activerpays) \u2014 Activer un pays (commande en message priv\xE9)
 
 /disablepayments \u2014 D\xE9sactiver payin et payout d'un marchand
 
@@ -1407,16 +1407,17 @@ La cr\xE9ation se lance en priv\xE9 avec le TOTP, mais le texte d\u2019accueil e
 /payin \u2014 Couper/r\xE9activer le payin par pays et op\xE9rateur (07h\u201320h local)
 /payout \u2014 Couper/r\xE9activer le payout par pays et op\xE9rateur (07h\u201320h local)
 
-/setoperatorpayment \u2014 Changer le fournisseur ou le num\xE9ro manuel d\u2019un op\xE9rateur; g\xE9rer Wave par lien/QR
+/setoperatorpayment (/switchoperator) \u2014 Changer le fournisseur ou le num\xE9ro manuel d\u2019un op\xE9rateur; g\xE9rer Wave par lien/QR
 
 \u{1F4CA} *Statistiques & Soldes*
 /stats \u2014 Statistiques globales
 /balance \u2014 Soldes d\xE9taill\xE9s de tous les marchands
 
-/findwithdrawal@Westpaybot \u2014 Rechercher un retrait par num\xE9ro
+/findwithdrawal NUMERO \u2014 Rechercher un retrait par num\xE9ro
 /findpayment NUMERO \u2014 Rechercher tous les paiements et leur historique
-/findmanualpayment NUMERO \u2014 Alias historique de la commande
-/gatewaybalance@Westpaybot \u2014 Consulter le solde d'un gateway et ses wallets pays
+/findmanualpayment NUMERO \u2014 Alias de /findpayment
+/manualpayments NUMERO \u2014 Alias de /findpayment
+/gatewaybalance \u2014 Consulter le solde d'un gateway et ses wallets pays
 
 \u{1F4E2} *Diffusion*
 /broadcast \u2014 Envoyer un message dans les groupes
@@ -1436,6 +1437,12 @@ La cr\xE9ation se lance en priv\xE9 avec le TOTP, mais le texte d\u2019accueil e
 /allowip IP [note] \u2014 Autoriser une adresse IP
 /blockip IP [reason] \u2014 Bloquer une adresse IP
 /unblockip IP \u2014 Retirer une IP de toutes les listes
+
+\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+\u{1F464} *Commandes utilisables par les marchands*
+/start CODE \u2014 Lier le bot au compte marchand (message priv\xE9)
+/transactions \u2014 Voir les 5 derni\xE8res transactions (groupe ou priv\xE9 marchand)
+/addip ADRESSE_IP \u2014 Ajouter une IP autoris\xE9e (groupe marchand)
 
 \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
 \u{1F4A1} *Configurer un groupe marchand :*

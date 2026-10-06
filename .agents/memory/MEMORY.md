@@ -20,6 +20,7 @@
 - [Manual pay-in handling](manual-payins.md) — Never collect secrets; show both searchable references to admins and notify merchants after approval.
 - [Wave payment options](wave-manual-payment.md) — Keep the saved Wave number separate from the admin-managed link/QR option and preserve manual review.
 - [Telegram operator payment routing](telegram-operator-payment-routing.md) — Provider changes affect payin and payout; manual numbers stay separate from the country-level Wave link/QR.
+- [Telegram help coverage](telegram-help-coverage.md) — List each admin command and alias in admin `/help`; document merchant-only commands in the right context.
 - [Node package-manager mismatch](node-package-manager-mismatch.md) — A pnpm-backed node_modules tree may lack npm .bin shims; inspect package entrypoints before attempting repair.
 - [Workflow process collisions](workflow-process-collisions.md) — After a restart, inspect processes; an older dev server may survive and cause EADDRINUSE or duplicate jobs.
 - [Pay-in failure handling](payin-failure-handling.md) — Block checkout on confirmed provider errors and alert admins in Telegram; preserve pending state when provider outcome is uncertain.
