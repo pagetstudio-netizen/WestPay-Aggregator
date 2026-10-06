@@ -26,11 +26,23 @@ import AdminCreateMerchant from "@/pages/admin-create-merchant";
 import ManualPaymentPreview from "@/pages/manual-payment-preview";
 import { useState, useEffect } from "react";
 
+const WESTPAY_ROOT_FALLBACK_URL = "https://westpay.cdf";
+
+function RedirectToWestpayFallback({ ready = true }: { ready?: boolean }) {
+  useEffect(() => {
+    if (ready) window.location.replace(WESTPAY_ROOT_FALLBACK_URL);
+  }, [ready]);
+
+  return null;
+}
+
 function Router() {
   const [adminPath, setAdminPath] = useState<string>(ADMIN_PATH);
+  const [adminPathCheckedFor, setAdminPathCheckedFor] = useState<string | null>(null);
   const [location] = useLocation();
   const hostname = window.location.hostname.toLowerCase();
   const currentPath = location.replace(/\/+$/, "") || "/";
+  const isWestpayApex = hostname === "westpay.cfd";
   const isBank2Host = hostname === "payment.bank2.westpay.cfd";
   const isSecureDocsHost = hostname === "secure.docs.westpay.cfd";
   const isDashboardHost = hostname === "dashboard.westpay.cfd";
@@ -50,18 +62,34 @@ function Router() {
       (hostname === "dashboard.westpay.cfd" && currentPath === "/")
     );
 
+  const UnmatchedRoute = isWestpayApex
+    ? () => (
+        <RedirectToWestpayFallback
+          ready={adminPathCheckedFor === window.location.pathname}
+        />
+      )
+    : NotFound;
+
   useEffect(() => {
     // Injection HTML par Node.js a fonctionné → rien à faire.
-    if (adminPath !== "/__admin_not_configured__") return;
+    const pathname = window.location.pathname;
+    if (adminPath !== "/__admin_not_configured__") {
+      setAdminPathCheckedFor(pathname);
+      return;
+    }
 
     // Fallback sécurisé : vérification serveur sans révéler le slug.
     // L'endpoint répond uniquement { isAdminPath: true|false }.
     // Il est sous /api/auth/ donc couvert par le rate-limiter existant (30 req/5 min/IP).
-    const segments = window.location.pathname.split("/").filter(Boolean);
+    const segments = pathname.split("/").filter(Boolean);
     // Le chemin admin est toujours un slug de premier niveau (1-2 segments max)
-    if (segments.length === 0 || segments.length > 2) return;
+    if (segments.length === 0 || segments.length > 2) {
+      setAdminPathCheckedFor(pathname);
+      return;
+    }
 
     const basePath = "/" + segments[0];
+    let isActive = true;
 
     fetch("/api/auth/admin/verify-path", {
       method: "POST",
@@ -71,19 +99,32 @@ function Router() {
     })
       .then((r) => r.json())
       .then((data: { isAdminPath: boolean }) => {
-        if (data.isAdminPath) {
+        if (isActive && data.isAdminPath) {
           updateAdminBase(basePath);   // met à jour adminConfig.base pour la navigation interne
           setAdminPath(basePath);      // force le re-render du Switch avec le bon chemin
         }
       })
       .catch(() => {}); // silencieux — 404 reste affiché en dernier recours
-  }, [adminPath]);
+      .finally(() => {
+        if (isActive) setAdminPathCheckedFor(pathname);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [adminPath, location]);
 
   // Fallback côté client pour les environnements qui ne passent pas par le
   // middleware Express : l'ancienne URL reste une page introuvable.
-  if (isLegacyDocsPath) return <NotFound />;
-  if (isLegacyMerchantLoginPath) return <NotFound />;
+  if (isLegacyDocsPath || isLegacyMerchantLoginPath) {
+    return isWestpayApex
+      ? <RedirectToWestpayFallback ready={adminPathCheckedFor === window.location.pathname} />
+      : <NotFound />;
+  }
   if (isHiddenPublicRoot) return <NotFound />;
+  if (isWestpayApex && currentPath === "/" && !hasQueryParameters) {
+    return <RedirectToWestpayFallback />;
+  }
   if (import.meta.env.DEV && currentPath === "/__preview/manual-payment") {
     return <ManualPaymentPreview />;
   }
@@ -121,7 +162,7 @@ function Router() {
       <Route path="/pay/:slug" component={PaymentPage} />
       <Route path="/link/:uniqueId" component={PaymentLinkPage} />
       <Route path="/c/:uniqueId" component={CryptoLinkPage} />
-      <Route component={NotFound} />
+      <Route component={UnmatchedRoute} />
     </Switch>
   );
 }
