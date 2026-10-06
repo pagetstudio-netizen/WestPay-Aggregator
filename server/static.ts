@@ -2,13 +2,21 @@ import express, { type Express } from "express";
 import fs from "fs";
 import path from "path";
 
-const WESTPAY_FALLBACK_HOSTS: Record<string, string> = {
-  "westpay.cfd": "westpay.cdf",
-  "dashboard.westpay.cfd": "dashboard.westpay.cdf",
-  "link.westpay.cfd": "link.westpay.cdf",
-  "payment.bank2.westpay.cfd": "payment.bank2.westpay.cdf",
-  "checkout1.westpay.cfd": "checkout1.westpay.cdf",
-};
+function getFallbackHost(requestHost: string): string | undefined {
+  switch (requestHost) {
+    case "westpay.cfd": return "westpay.cdf";
+    case "dashboard.westpay.cfd": return "dashboard.westpay.cdf";
+    case "link.westpay.cfd": return "link.westpay.cdf";
+    case "payment.bank2.westpay.cfd": return "payment.bank2.westpay.cfd";
+    case "checkout1.westpay.cfd": return "checkout1.westpay.cfd";
+    default: return undefined;
+  }
+}
+
+function fallbackRedirectUrl(host: string, originalUrl: string): string {
+  const parsedUrl = new URL(originalUrl, "https://westpay.local");
+  return `https://${host}${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`;
+}
 
 const BANK2_PAYMENT_QUERY_KEYS = [
   "merchant", "link", "linkId", "amount", "country", "redirect", "ref",
@@ -38,9 +46,9 @@ export function serveStatic(app: Express) {
   // La documentation est disponible uniquement via secure.docs.westpay.cfd.
   app.get("/api-docs", (req, res) => {
     const requestHost = (req.hostname || "").toLowerCase();
-    const fallbackHost = WESTPAY_FALLBACK_HOSTS[requestHost];
+    const fallbackHost = getFallbackHost(requestHost);
     if (fallbackHost) {
-      return res.redirect(302, `https://${fallbackHost}${req.originalUrl}`);
+      return res.redirect(302, fallbackRedirectUrl(fallbackHost, req.originalUrl));
     }
     res.status(404).type("text").send("Not Found");
   });
@@ -48,9 +56,9 @@ export function serveStatic(app: Express) {
   // Ancienne URL de connexion marchand définitivement désactivée.
   app.get("/merchant/login", (req, res) => {
     const requestHost = (req.hostname || "").toLowerCase();
-    const fallbackHost = WESTPAY_FALLBACK_HOSTS[requestHost];
+    const fallbackHost = getFallbackHost(requestHost);
     if (fallbackHost) {
-      return res.redirect(302, `https://${fallbackHost}${req.originalUrl}`);
+      return res.redirect(302, fallbackRedirectUrl(fallbackHost, req.originalUrl));
     }
     res.status(404).type("text").send("Not Found");
   });
@@ -71,7 +79,7 @@ export function serveStatic(app: Express) {
     // sont ouverts seuls. Les URL fonctionnelles gardent leurs paramètres ou
     // leur identifiant dans le chemin (ex: /pay?merchant=... ou /link/abc).
     const requestHost = (req.hostname || "").toLowerCase();
-    const fallbackHost = WESTPAY_FALLBACK_HOSTS[requestHost];
+    const fallbackHost = getFallbackHost(requestHost);
     const requestSearchParams = new URL(req.originalUrl, "https://westpay.local").searchParams;
     const hasRecognizedBank2Parameters = BANK2_PAYMENT_QUERY_KEYS.some(
       (key) => Boolean(requestSearchParams.get(key)),
@@ -91,7 +99,7 @@ export function serveStatic(app: Express) {
       reqPath === "/" &&
       hasRecognizedBank2Parameters;
     if (isReservedSubdomainRoot && !isRecognizedBank2PaymentRoot) {
-      return res.redirect(302, `https://${fallbackHost}${req.originalUrl}`);
+      return res.redirect(302, fallbackRedirectUrl(fallbackHost, req.originalUrl));
     }
 
     // Bank 1 ne doit pas charger le shell SPA sur /pay sans paramètres.
@@ -101,7 +109,10 @@ export function serveStatic(app: Express) {
       requestHost === "checkout1.westpay.cfd" &&
       (reqPath === "/pay" || /^\/pay\/[^/]+$/.test(reqPath));
     if (isBareBank1Payment && !hasRecognizedCheckoutParameters) {
-      return res.redirect(302, `https://${fallbackHost}${req.originalUrl}`);
+      if (fallbackHost) {
+        return res.redirect(302, fallbackRedirectUrl(fallbackHost, req.originalUrl));
+      }
+      return res.status(404).type("text").send("Not Found");
     }
 
     const isLegacyBank1CheckoutHost =
@@ -110,7 +121,7 @@ export function serveStatic(app: Express) {
       reqPath === "/pay" || /^\/pay\/[^/]+$/.test(reqPath);
     if (isLegacyBank1CheckoutHost && isLegacyBank1CheckoutPath) {
       if (requestHost === "westpay.cfd" && fallbackHost) {
-        return res.redirect(302, `https://${fallbackHost}${req.originalUrl}`);
+        return res.redirect(302, fallbackRedirectUrl(fallbackHost, req.originalUrl));
       }
       return res.status(404).type("text").send("Not Found");
     }
