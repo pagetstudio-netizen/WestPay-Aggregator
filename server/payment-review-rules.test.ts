@@ -34,6 +34,38 @@ test("manual requests waiting for customer proof can only be rejected", () => {
   );
 });
 
+test("timed-out payins remain reviewable by admins, but expired manual requests need proof", () => {
+  assert.deepEqual(
+    getPaymentReviewActions({
+      source: "pending",
+      gateway: "clapay",
+      status: "gateway_failed",
+      autoTimedOut: true,
+    }),
+    { approve: true, reject: true },
+  );
+  assert.deepEqual(
+    getPaymentReviewActions({
+      source: "pending",
+      gateway: "manual",
+      status: "gateway_failed",
+      autoTimedOut: true,
+      manualSubmissionPresent: false,
+    }),
+    { approve: false, reject: false },
+  );
+  assert.deepEqual(
+    getPaymentReviewActions({
+      source: "pending",
+      gateway: "manual",
+      status: "gateway_failed",
+      autoTimedOut: true,
+      manualSubmissionPresent: true,
+    }),
+    { approve: true, reject: true },
+  );
+});
+
 test("final and failed payments never expose review actions", () => {
   for (const status of [
     "confirmed",

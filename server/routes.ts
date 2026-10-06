@@ -62,6 +62,13 @@ import {
 } from "./seapay";
 import { runReconciliation } from "./reconciliation";
 import {
+  AUTO_TIMEOUT_ADMIN_MESSAGE,
+  AUTO_TIMEOUT_ERROR_MARKER,
+  AUTO_TIMEOUT_PUBLIC_MESSAGE,
+  MANUAL_PAYIN_EXPIRY_MS,
+  isManualPayinExpired,
+} from "./reconciliation-policy";
+import {
   clapayInitiatePayin,
   clapayInitiatePayout,
   clapayGetBalance,
@@ -977,6 +984,7 @@ function sanitizePublicPaymentMessage(
   fallback = "Le service de paiement est momentanément indisponible. Veuillez réessayer.",
 ): string {
   const message = typeof value === "string" ? value.trim() : "";
+  if (message === AUTO_TIMEOUT_ERROR_MARKER) return AUTO_TIMEOUT_PUBLIC_MESSAGE;
   if (!message || INTERNAL_PAYMENT_PROVIDER_PATTERN.test(message)) return fallback;
   return message;
 }
@@ -3786,7 +3794,15 @@ export async function registerRoutes(
       // Seuls les paiements vraiment EN COURS sont affichés ici.
       // Les confirmés et échoués apparaissent déjà via la table transactions → pas de doublon.
       const pendingItems = pendingPays
-        .filter(p => ["provider_pending", "gateway_pending", "lipapap_pending", "submitted", "pending", "manual_submitted"].includes(p.status))
+        .filter(p => {
+          const autoTimedOut =
+            p.status === "gateway_failed" &&
+            p.errorMessage === AUTO_TIMEOUT_ERROR_MARKER;
+          const timeoutCanBeReviewed = autoTimedOut &&
+            (p.gateway !== "manual" || Boolean(p.manualSubmission?.trim()));
+          return ["provider_pending", "gateway_pending", "lipapap_pending", "submitted", "pending", "manual_submitted"].includes(p.status)
+            || timeoutCanBeReviewed;
+        })
         .map(p => ({
           id: `pp-${p.id}`,
           rowId: p.id,
@@ -3806,7 +3822,10 @@ export async function registerRoutes(
           manualRecipientName: p.manualRecipientName || null,
           manualSubmission: p.gateway === "manual" ? p.manualSubmission || null : null,
           gateway: p.gateway,
-          errorMessage: (p as any).errorMessage || null,
+          autoTimedOut: p.status === "gateway_failed" && p.errorMessage === AUTO_TIMEOUT_ERROR_MARKER,
+          errorMessage: p.errorMessage === AUTO_TIMEOUT_ERROR_MARKER
+            ? AUTO_TIMEOUT_ADMIN_MESSAGE
+            : p.errorMessage || null,
           createdAt: p.createdAt,
         }));
 
@@ -4394,8 +4413,8 @@ export async function registerRoutes(
       const insert = await client.query(
         `INSERT INTO transactions
           (merchant_id, country, tx_id, amount, payer_number, payer_name, status, provider,
-           provider_tx_id, operator, provider_reference, error_message, provider_fee)
-         VALUES ($1,$2,$3,$4,$5,$6,'confirmed','lipapap',$7,$8,$9,NULL,0)
+           provider_tx_id, operator, provider_reference, error_message, provider_fee, merchant_credit)
+         VALUES ($1,$2,$3,$4,$5,$6,'confirmed','lipapap',$7,$8,$9,NULL,0,$10)
          ON CONFLICT (tx_id) DO NOTHING RETURNING id`,
         [
           pending.merchantId,
@@ -4407,6 +4426,7 @@ export async function registerRoutes(
           providerTxId || null,
           pending.paymentMethod || null,
           pending.providerReference || null,
+          credit,
         ],
       );
       inserted = Boolean(insert.rowCount);
@@ -4501,8 +4521,8 @@ export async function registerRoutes(
       const insert = await client.query(
         `INSERT INTO transactions
           (merchant_id, country, tx_id, amount, payer_number, payer_name, status, provider,
-           provider_tx_id, operator, provider_reference, error_message, provider_fee)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,'drimpay',$8,$9,$10,$11,$12)
+           provider_tx_id, operator, provider_reference, error_message, provider_fee, merchant_credit)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'drimpay',$8,$9,$10,$11,$12,$13)
          ON CONFLICT (tx_id) DO NOTHING RETURNING id`,
         [
           pending.merchantId,
@@ -4517,6 +4537,7 @@ export async function registerRoutes(
           pending.providerReference || null,
           successStatuses.has(status) ? null : `Paiement Drimpay ${status}`,
           successStatuses.has(status) ? pending.amount - credit : 0,
+          successStatuses.has(status) ? credit : null,
         ],
       );
       inserted = Boolean(insert.rowCount);
@@ -5094,8 +5115,32 @@ export async function registerRoutes(
         if (["confirmed", "completed", "paid"].includes(status)) {
           return res.json({ status: "confirmed", paymentId: pending.id });
         }
-        if (status === "manual_rejected" || (status === "manual_waiting_submission" && new Date(pending.expiresAt).getTime() <= Date.now())) {
+        if (["manual_rejected", "rejected", "gateway_failed"].includes(status)) {
           return res.json({ status: "failed", paymentId: pending.id });
+        }
+        const manualTimedOut =
+          ["manual_waiting_submission", "manual_submitted"].includes(status) &&
+          isManualPayinExpired(
+            pending.createdAt,
+            Date.now(),
+          );
+        if (manualTimedOut) {
+          const expired = await financialPool.query(
+            `UPDATE pending_payments
+                SET status = 'gateway_failed', error_message = $3
+              WHERE id = $1 AND status = $2 AND gateway = 'manual'
+              RETURNING id`,
+            [pending.id, status, AUTO_TIMEOUT_ERROR_MARKER],
+          );
+          if (expired.rowCount) return res.json({ status: "failed", paymentId: pending.id });
+          const latest = await storage.getPendingPaymentById(id);
+          const latestStatus = String(latest?.status || "").toLowerCase();
+          if (["confirmed", "completed", "paid"].includes(latestStatus)) {
+            return res.json({ status: "confirmed", paymentId: pending.id });
+          }
+          if (["manual_rejected", "rejected", "gateway_failed"].includes(latestStatus)) {
+            return res.json({ status: "failed", paymentId: pending.id });
+          }
         }
         return res.json({ status: "pending", paymentId: pending.id });
       }
@@ -5412,7 +5457,7 @@ export async function registerRoutes(
           manualInstructions,
           manualWavePaymentUrl: wavePaymentUrl,
           manualWaveQrCodeUrl: waveManualConfig.qrImageUrl,
-          expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
+          expiresAt: new Date(Date.now() + MANUAL_PAYIN_EXPIRY_MS),
         });
         await storage.createApiLog({
           merchantId: merchant.id,
@@ -5497,7 +5542,7 @@ export async function registerRoutes(
           manualRecipientName: targetNumber.accountName.trim(),
           manualUssdCode: ussdCode,
           manualInstructions,
-          expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
+          expiresAt: new Date(Date.now() + MANUAL_PAYIN_EXPIRY_MS),
         });
         await storage.createApiLog({
           merchantId: merchant.id,
@@ -6897,6 +6942,7 @@ export async function registerRoutes(
               providerReference: ref,
               errorMessage: null,
               providerFee: fee,
+              merchantCredit: credit,
             });
             notifyMerchantPayment(pp.merchantId, { txId: txRef, amount: pp.amount, payerNumber: pp.payerPhone, country: pp.country, provider: providerLabel }).catch(() => {});
             notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pp.merchantId}`, payerNumber: pp.payerPhone, country: pp.country, amount: pp.amount, provider: providerLabel, status: "confirmed" }).catch(() => {});
@@ -6927,8 +6973,12 @@ export async function registerRoutes(
             if (mc) {
               const credit = calcMerchantCreditForMerchant(txRecord.amount, txRecord.country, merchant);
               await storage.incrementMerchantCountryBalance(mc.id, credit);
+              await financialDb.update(transactions)
+                .set({ status: "confirmed", merchantCredit: credit })
+                .where(eq(transactions.id, id));
+            } else {
+              await financialDb.update(transactions).set({ status: "confirmed" }).where(eq(transactions.id, id));
             }
-            await financialDb.update(transactions).set({ status: "confirmed" }).where(eq(transactions.id, id));
           }
           const txMerchant = await storage.getMerchantById(txRecord.merchantId);
           notifyConfirmedPaymentWebhook(txRecord.merchantId, {
@@ -7010,6 +7060,8 @@ export async function registerRoutes(
           status: "gateway_pending",
           providerReference: reference,
           gateway: "mbiyo",
+          autoStatusCheckCount: 0,
+          autoStatusCheckedAt: null,
         }).where(eq(pendingPayments.id, id));
         console.log(`[ADMIN TRIGGER TX] Paiement #${id} re-déclenché chez Mbiyo — ref=${reference}`);
         return res.json({ success: true, provider: "mbiyo", reference });
@@ -7043,6 +7095,8 @@ export async function registerRoutes(
           providerTxId: result.data.trade_no || null,
           providerPaymentUrl: result.data.payment_url || null,
           gateway: "seapay",
+          autoStatusCheckCount: 0,
+          autoStatusCheckedAt: null,
         }).where(eq(pendingPayments.id, id));
         console.log(`[ADMIN TRIGGER TX] Paiement #${id} re-déclenché chez SeaPay — ref=${reference}`);
         return res.json({ success: true, provider: "seapay", reference, paymentUrl: result.data.payment_url });
@@ -7096,6 +7150,8 @@ export async function registerRoutes(
           providerTxId: result.data?.signature || null,
           providerPaymentUrl: result.data?.payment_url || null,
           gateway: "clapay",
+          autoStatusCheckCount: 0,
+          autoStatusCheckedAt: null,
         }).where(eq(pendingPayments.id, id));
         console.log(`[ADMIN TRIGGER TX] Paiement #${id} re-déclenché chez ClaPay — ref=${reference}`);
         return res.json({ success: true, provider: "clapay", reference, paymentUrl: result.data?.payment_url });
@@ -8979,6 +9035,7 @@ app.post("/api/mbiyo/callback", async (req, res) => {
           providerReference: payload.order_id,
           errorMessage: null,
           providerFee: payload.fee != null ? parseInt(String(payload.fee)) || 0 : 0,
+          merchantCredit: credit,
         });
 
         console.log(`[MBIYO CALLBACK] Paiement confirme: ${payload.order_id}`);
@@ -9408,13 +9465,13 @@ app.post("/api/seapay/callback", async (req, res) => {
           // → le crédit a déjà été appliqué lors de la tentative précédente, on ne crédite pas à nouveau.
           const txInsert = await seapayTxClient.query(
             `INSERT INTO transactions
-               (merchant_id, country, tx_id, amount, payer_number, payer_name, status, provider, provider_tx_id, operator, provider_reference, error_message, provider_fee)
-             VALUES ($1,$2,$3,$4,$5,$6,'confirmed','seapay',$7,$8,$9,NULL,$10)
+               (merchant_id, country, tx_id, amount, payer_number, payer_name, status, provider, provider_tx_id, operator, provider_reference, error_message, provider_fee, merchant_credit)
+             VALUES ($1,$2,$3,$4,$5,$6,'confirmed','seapay',$7,$8,$9,NULL,$10,$11)
              ON CONFLICT (tx_id) DO NOTHING
              RETURNING id`,
-            [pending.merchantId, pending.country, txId, pending.amount,
+             [pending.merchantId, pending.country, txId, pending.amount,
              pending.payerPhone || null, pending.payerName || null,
-             tradeNo || null, pending.paymentMethod || null, orderId, providerFee]
+             tradeNo || null, pending.paymentMethod || null, orderId, providerFee, merchantCredit]
           );
 
           if (txInsert.rowCount && txInsert.rowCount > 0) {
@@ -9598,6 +9655,7 @@ app.post("/api/clapay/callback", async (req, res) => {
             providerReference: reference,
             errorMessage: null,
             providerFee: westpayFee,
+            merchantCredit: credit,
           });
           notifyMerchantPayment(pending.merchantId, { txId: txRef, amount: pending.amount, payerNumber: pending.payerPhone, country: pending.country, provider: "clapay" }).catch(() => {});
           notifyAdminPayment({ txId: txRef, merchantName: merchant?.name || `#${pending.merchantId}`, payerNumber: pending.payerPhone, country: pending.country, amount: pending.amount, provider: "clapay", status: "confirmed" }).catch(() => {});
@@ -10153,6 +10211,7 @@ app.post("/api/admin/mbiyo/confirm-payment", authMiddleware("admin"), async (req
         operator: pending.paymentMethod || null,
         providerReference: reference,
         errorMessage: null,
+        merchantCredit: credit,
       });
 
       if (merchant) {
@@ -10505,6 +10564,7 @@ app.post("/sms/receive", async (req, res) => {
           amount,
           payerNumber: payerNumber || null,
           status: "confirmed",
+          merchantCredit: merchantCredit2,
         });
 
         await storage.incrementMerchantCountryBalance(merchantCountry.id, merchantCredit2);
@@ -10604,6 +10664,7 @@ app.post("/sms/receive", async (req, res) => {
         amount,
         payerNumber: payerNumber || null,
         status: "confirmed",
+        merchantCredit: merchantCredit3,
       });
 
       await storage.incrementMerchantCountryBalance(merchantCountry.id, merchantCredit3);

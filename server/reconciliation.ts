@@ -21,6 +21,7 @@ import {
   getDrimpayPayoutStatus,
   normalizeDrimpayStatus,
 } from "./drimpay";
+import { seapayQuery, SEAPAY_CURRENCY_COUNTRY } from "./seapay";
 import {
   notifyAdminPayment,
   notifyAdminWithdrawal,
@@ -29,6 +30,16 @@ import {
 } from "./telegram-bot";
 import { resolveProviderCode } from "@shared/provider-labels";
 import { calcMerchantCredit as calcCredit } from "./feeConfig";
+import {
+  AUTO_STATUS_CHECK_INTERVAL_MS,
+  AUTO_STATUS_MAX_CHECKS,
+  AUTO_TIMEOUT_ERROR_MARKER,
+  isAutomaticStatusCheckDue,
+  isAutomaticWithdrawal,
+  isAutomaticWithdrawalStatusOpen,
+  isManualPayinExpired,
+  isPendingOperationExpired,
+} from "./reconciliation-policy";
 
 const PAYMENT_SUCCESS = new Set([
   "success", "successful", "completed", "complete", "paid", "approved",
@@ -130,6 +141,8 @@ function referenceBelongsTo(gateway: unknown, reference: unknown): boolean {
       return value.startsWith("LP");
     case "drimpay":
       return value.startsWith("DP-PAY-") || value.startsWith("DP-WD-");
+    case "seapay":
+      return value.startsWith("SP-");
     default:
       return false;
   }
@@ -148,7 +161,7 @@ async function creditConfirmedPayment(
     `UPDATE pending_payments
         SET status = 'gateway_confirmed'
       WHERE id = $1
-        AND status IN ('gateway_pending', 'pending', 'submitted')
+        AND status IN ('gateway_pending', 'provider_pending', 'lipapap_pending', 'pending', 'submitted')
       RETURNING id`,
     [pending.id],
   );
@@ -186,6 +199,7 @@ async function creditConfirmedPayment(
     providerReference: pending.providerReference || null,
     errorMessage: null,
     providerFee: pending.amount - credit,
+    merchantCredit: credit,
   });
   notifyMerchantPayment(pending.merchantId, {
     txId: txRef,
@@ -211,7 +225,7 @@ async function recordPaymentFailure(pending: any, txRef: string, providerTxId: s
     `UPDATE pending_payments
         SET status = 'gateway_failed'
       WHERE id = $1
-        AND status IN ('gateway_pending', 'pending', 'submitted')
+        AND status IN ('gateway_pending', 'provider_pending', 'lipapap_pending', 'pending', 'submitted')
       RETURNING id`,
     [pending.id],
   );
@@ -233,17 +247,99 @@ async function recordPaymentFailure(pending: any, txRef: string, providerTxId: s
   });
 }
 
+const OPEN_PENDING_PAYMENT_STATUSES = new Set([
+  "gateway_pending",
+  "provider_pending",
+  "lipapap_pending",
+  "pending",
+  "submitted",
+  "manual_waiting_submission",
+  "manual_submitted",
+]);
+
+async function getSeapayMerchantId(country: string): Promise<string | undefined> {
+  const envPrefix = `SEAPAY_${country.trim().toUpperCase().replace(/[^A-Z]/g, "")}`;
+  const settingSuffix = country.trim().toLowerCase().replace(/[^a-z]/g, "");
+  return getConfiguredKey(`${envPrefix}_MERCHANT_ID`, `seapay_merchant_id_${settingSuffix}`);
+}
+
+async function getSeapayApiKey(country: string): Promise<string | undefined> {
+  const envPrefix = `SEAPAY_${country.trim().toUpperCase().replace(/[^A-Z]/g, "")}`;
+  const settingSuffix = country.trim().toLowerCase().replace(/[^a-z]/g, "");
+  return getConfiguredKey(`${envPrefix}_API_KEY`, `seapay_api_key_${settingSuffix}`);
+}
+
+async function claimPendingStatusCheck(pending: any): Promise<boolean> {
+  if (!isAutomaticStatusCheckDue(
+    Number(pending.autoStatusCheckCount || 0),
+    pending.autoStatusCheckedAt,
+    pending.createdAt,
+    Date.now(),
+  )) return false;
+
+  const claimed = await financialPool.query(
+    `UPDATE pending_payments
+        SET auto_status_check_count = auto_status_check_count + 1,
+            auto_status_checked_at = NOW()
+      WHERE id = $1
+        AND status = $2
+        AND auto_status_check_count < $3
+        AND (
+          (auto_status_checked_at IS NULL AND created_at <= NOW() - ($4::double precision * INTERVAL '1 millisecond'))
+          OR auto_status_checked_at <= NOW() - ($4::double precision * INTERVAL '1 millisecond')
+        )
+      RETURNING auto_status_check_count`,
+    [pending.id, pending.status, AUTO_STATUS_MAX_CHECKS, AUTO_STATUS_CHECK_INTERVAL_MS],
+  );
+  return Boolean(claimed.rowCount);
+}
+
+async function markPendingPaymentTimedOut(pending: any): Promise<boolean> {
+  const result = await financialPool.query(
+    `UPDATE pending_payments
+        SET status = 'gateway_failed',
+            error_message = $3
+      WHERE id = $1
+        AND status = $2
+        AND created_at <= NOW() - INTERVAL '3 hours'
+      RETURNING id`,
+    [pending.id, pending.status, AUTO_TIMEOUT_ERROR_MARKER],
+  );
+  return Boolean(result.rowCount);
+}
+
 async function reconcilePayments(): Promise<void> {
-  const rows = await storage.getPendingPayments();
+  const rows = await storage.getReconciliationPendingPayments();
   const now = Date.now();
-  const threeMinutes = 3 * 60 * 1000;
-  const fourHours = 4 * 60 * 60 * 1000;
 
   for (const pending of rows) {
-    if (pending.status !== "gateway_pending" || !pending.providerReference) continue;
-    const age = now - new Date(pending.createdAt).getTime();
-    if (age < threeMinutes || age >= fourHours) continue;
+    const status = normalized(pending.status);
+    if (!OPEN_PENDING_PAYMENT_STATUSES.has(status)) continue;
     const gateway = normalized(pending.gateway);
+    const isManual = gateway === "manual";
+
+    const timedOut = isManual
+      ? isManualPayinExpired(
+          pending.createdAt,
+          now,
+        )
+      : isPendingOperationExpired(pending.createdAt, now);
+    if (timedOut) {
+      await markPendingPaymentTimedOut(pending).catch(error =>
+        console.error(`[RECONCILIATION] Expiration impossible pour le paiement #${pending.id}:`, (error as any)?.message || error),
+      );
+      continue;
+    }
+
+    if (isManual || !pending.providerReference) continue;
+    if (Number(pending.autoStatusCheckCount || 0) >= AUTO_STATUS_MAX_CHECKS) continue;
+    if (!isAutomaticStatusCheckDue(
+      Number(pending.autoStatusCheckCount || 0),
+      pending.autoStatusCheckedAt,
+      pending.createdAt,
+      now,
+    )) continue;
+
     if (!referenceBelongsTo(gateway, pending.providerReference)) continue;
 
     try {
@@ -251,6 +347,7 @@ async function reconcilePayments(): Promise<void> {
         const token = await getClapayKey();
         if (!token) continue;
         const providerTxId = pending.providerTxId || pending.providerReference;
+        if (!await claimPendingStatusCheck(pending)) continue;
         const result = await clapayGetTransactionStatus(token, providerTxId);
         const status = paymentStatus(result.status);
         if (PAYMENT_SUCCESS.has(status)) {
@@ -261,6 +358,7 @@ async function reconcilePayments(): Promise<void> {
       } else if (gateway === "mbiyo") {
         const token = await getMbiyoKey();
         if (!token) continue;
+        if (!await claimPendingStatusCheck(pending)) continue;
         const result: any = await mbiyoGetStatus(token, pending.providerReference);
         const status = paymentStatus(result?.data?.status || result?.status);
         if (PAYMENT_SUCCESS.has(status)) {
@@ -272,6 +370,7 @@ async function reconcilePayments(): Promise<void> {
         const config = await getLipaPapConfig();
         if (!config) continue;
         const providerTxId = pending.providerTxId || pending.providerReference;
+        if (!await claimPendingStatusCheck(pending)) continue;
         const result = await getLipaPapTransactionStatus(config, providerTxId);
         const status = paymentStatus(result.status || result.result);
         if (PAYMENT_SUCCESS.has(status)) {
@@ -292,6 +391,7 @@ async function reconcilePayments(): Promise<void> {
         if (!pending.providerTxId) continue;
         const config = await getDrimpayConfig();
         if (!config) continue;
+        if (!await claimPendingStatusCheck(pending)) continue;
         const result = await getDrimpayPayinStatus(config, pending.providerTxId);
         const status = paymentStatus(normalizeDrimpayStatus(result));
         if (PAYMENT_SUCCESS.has(status)) {
@@ -307,6 +407,25 @@ async function reconcilePayments(): Promise<void> {
             pending.providerTxId,
             status,
           );
+        }
+      } else if (gateway === "seapay") {
+        const [merchantId, apiKey] = await Promise.all([
+          getSeapayMerchantId(pending.country),
+          getSeapayApiKey(pending.country),
+        ]);
+        if (!merchantId || !apiKey) continue;
+        if (!await claimPendingStatusCheck(pending)) continue;
+        const result = await seapayQuery(
+          merchantId,
+          pending.providerReference,
+          SEAPAY_CURRENCY_COUNTRY[pending.country] || "USD",
+          apiKey,
+        );
+        const providerStatus = paymentStatus(result.data?.status);
+        if (PAYMENT_SUCCESS.has(providerStatus)) {
+          await creditConfirmedPayment(pending, `SP-${pending.providerReference}`, pending.providerTxId || null);
+        } else if (PAYMENT_FAILURE.has(providerStatus)) {
+          await recordPaymentFailure(pending, `SP-${pending.providerReference}`, pending.providerTxId || null, providerStatus);
         }
       }
     } catch (error: any) {
@@ -329,7 +448,7 @@ async function applyWithdrawalResult(withdrawal: any, status: string): Promise<v
       const cas = await client.query(
         `UPDATE withdrawals
             SET status = 'failed'
-          WHERE id = $1 AND status = 'pending'
+          WHERE id = $1 AND status IN ('pending', 'processing')
           RETURNING id`,
         [withdrawal.id],
       );
@@ -358,7 +477,7 @@ async function applyWithdrawalResult(withdrawal: any, status: string): Promise<v
     const cas = await financialPool.query(
       `UPDATE withdrawals
           SET status = $1
-        WHERE id = $2 AND status = 'pending'
+        WHERE id = $2 AND status IN ('pending', 'processing')
         RETURNING id`,
       [nextStatus, withdrawal.id],
     );
@@ -405,22 +524,45 @@ async function applyWithdrawalResult(withdrawal: any, status: string): Promise<v
 }
 
 async function reconcileStaleWithdrawals(): Promise<void> {
-  const allPending = await storage.getPendingWithdrawals?.() || [];
+  const allPending = await storage.getReconciliationPendingWithdrawals();
   const now = Date.now();
-  const oneMinute = 60 * 1000;
-  const twentyFourHours = 24 * 60 * 60 * 1000;
 
   for (const withdrawal of allPending) {
-    if (withdrawal.status !== "pending" || !withdrawal.providerReference) continue;
-    const age = now - new Date(withdrawal.createdAt).getTime();
-    if (age < oneMinute || age >= twentyFourHours) continue;
+    if (!isAutomaticWithdrawalStatusOpen(withdrawal.status)) continue;
     const gateway = normalized(withdrawal.gateway);
+    if (!isAutomaticWithdrawal(withdrawal.withdrawalMode, gateway)) continue;
+
+    if (isPendingOperationExpired(withdrawal.createdAt, now)) {
+      await expireAutomaticWithdrawal(withdrawal).catch(error =>
+        console.error(`[RECONCILIATION-WD] Expiration impossible pour le retrait #${withdrawal.id}:`, (error as any)?.message || error),
+      );
+      continue;
+    }
+
+    if (!withdrawal.providerReference) continue;
+    if (Number(withdrawal.autoStatusCheckCount || 0) >= AUTO_STATUS_MAX_CHECKS) continue;
+    if (!isAutomaticStatusCheckDue(
+      Number(withdrawal.autoStatusCheckCount || 0),
+      withdrawal.autoStatusCheckedAt,
+      withdrawal.createdAt,
+      now,
+    )) continue;
     if (!referenceBelongsTo(gateway, withdrawal.providerReference)) continue;
 
     try {
-      if (gateway === "mbiyo") {
+      if (gateway === "clapay") {
+        const token = await getClapayKey();
+        if (!token) continue;
+        if (!await claimWithdrawalStatusCheck(withdrawal)) continue;
+        const result = await clapayGetTransactionStatus(
+          token,
+          withdrawal.providerTxId || withdrawal.providerReference,
+        );
+        await applyWithdrawalResult(withdrawal, String(result.status || ""));
+      } else if (gateway === "mbiyo") {
         const token = await getMbiyoKey();
         if (!token) continue;
+        if (!await claimWithdrawalStatusCheck(withdrawal)) continue;
         const result: any = await mbiyoGetStatus(token, withdrawal.providerReference);
         await applyWithdrawalResult(
           withdrawal,
@@ -429,6 +571,7 @@ async function reconcileStaleWithdrawals(): Promise<void> {
       } else if (gateway === "lipapap") {
         const config = await getLipaPapConfig();
         if (!config?.payerEmail) continue;
+        if (!await claimWithdrawalStatusCheck(withdrawal)) continue;
         const result = await getLipaPapPayoutStatus(
           config,
           withdrawal.providerReference,
@@ -439,8 +582,23 @@ async function reconcileStaleWithdrawals(): Promise<void> {
         if (!withdrawal.providerTxId) continue;
         const config = await getDrimpayConfig();
         if (!config) continue;
+        if (!await claimWithdrawalStatusCheck(withdrawal)) continue;
         const result = await getDrimpayPayoutStatus(config, withdrawal.providerTxId);
         await applyWithdrawalResult(withdrawal, normalizeDrimpayStatus(result));
+      } else if (gateway === "seapay") {
+        const [merchantId, apiKey] = await Promise.all([
+          getSeapayMerchantId(withdrawal.country),
+          getSeapayApiKey(withdrawal.country),
+        ]);
+        if (!merchantId || !apiKey) continue;
+        if (!await claimWithdrawalStatusCheck(withdrawal)) continue;
+        const result = await seapayQuery(
+          merchantId,
+          withdrawal.providerReference,
+          SEAPAY_CURRENCY_COUNTRY[withdrawal.country] || "USD",
+          apiKey,
+        );
+        await applyWithdrawalResult(withdrawal, String(result.data?.status || ""));
       }
     } catch (error: any) {
       console.error(`[RECONCILIATION-WD] Erreur retrait #${withdrawal.id}:`, error?.message || error);
@@ -448,15 +606,114 @@ async function reconcileStaleWithdrawals(): Promise<void> {
   }
 }
 
-export async function runReconciliation(): Promise<void> {
-  await Promise.all([
-    reconcilePayments().catch(error => console.error("[RECONCILIATION]", error)),
-    reconcileStaleWithdrawals().catch(error => console.error("[RECONCILIATION-WD]", error)),
-  ]);
+async function claimWithdrawalStatusCheck(withdrawal: any): Promise<boolean> {
+  if (!isAutomaticStatusCheckDue(
+    Number(withdrawal.autoStatusCheckCount || 0),
+    withdrawal.autoStatusCheckedAt,
+    withdrawal.createdAt,
+    Date.now(),
+  )) return false;
+
+  const claimed = await financialPool.query(
+    `UPDATE withdrawals
+        SET auto_status_check_count = auto_status_check_count + 1,
+            auto_status_checked_at = NOW()
+      WHERE id = $1
+        AND status IN ('pending', 'processing')
+        AND withdrawal_mode = 'auto'
+        AND auto_status_check_count < $2
+        AND (
+          (auto_status_checked_at IS NULL AND created_at <= NOW() - ($3::double precision * INTERVAL '1 millisecond'))
+          OR auto_status_checked_at <= NOW() - ($3::double precision * INTERVAL '1 millisecond')
+        )
+      RETURNING auto_status_check_count`,
+    [withdrawal.id, AUTO_STATUS_MAX_CHECKS, AUTO_STATUS_CHECK_INTERVAL_MS],
+  );
+  return Boolean(claimed.rowCount);
 }
 
-export function startReconciliationJob(intervalMs = 5 * 60 * 1000): void {
-  console.log(`[RECONCILIATION] Job démarré — vérification toutes les ${intervalMs / 60000}min`);
-  setTimeout(() => runReconciliation().catch(() => {}), 60_000);
-  setInterval(() => runReconciliation().catch(() => {}), intervalMs);
+async function expireAutomaticWithdrawal(withdrawal: any): Promise<void> {
+  const client = await financialPool.connect();
+  let expired = false;
+  try {
+    await client.query("BEGIN");
+    const claimed = await client.query(
+      `UPDATE withdrawals
+          SET status = 'failed',
+              admin_note = 'Délai maximal de 3 heures dépassé; solde recrédité.',
+              processed_at = NOW()
+        WHERE id = $1
+          AND status IN ('pending', 'processing')
+          AND withdrawal_mode = 'auto'
+          AND created_at <= NOW() - INTERVAL '3 hours'
+        RETURNING id`,
+      [withdrawal.id],
+    );
+    if (claimed.rowCount) {
+      const refunded = await client.query(
+        `UPDATE merchant_countries
+            SET balance = balance + $1
+          WHERE id = $2
+          RETURNING id`,
+        [Number(withdrawal.amount || 0) + Number(withdrawal.fees || 0), withdrawal.merchantCountryId],
+      );
+      if (!refunded.rowCount) {
+        throw new Error(`MerchantCountry introuvable pour le retrait expiré #${withdrawal.id}`);
+      }
+      expired = true;
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  if (!expired) return;
+  const merchant = await storage.getMerchantById(withdrawal.merchantId);
+  notifyAdminWithdrawal({
+    id: withdrawal.id,
+    merchantName: merchant?.name || `#${withdrawal.merchantId}`,
+    country: withdrawal.country,
+    amount: withdrawal.amount,
+    fees: 0,
+    phone: withdrawal.phone,
+    operator: withdrawal.operator,
+    status: "failed",
+    mode: "auto",
+  }).catch(() => {});
+  notifyMerchantWithdrawal(withdrawal.merchantId, {
+    id: withdrawal.id,
+    country: withdrawal.country,
+    amount: withdrawal.amount,
+    fees: 0,
+    phone: withdrawal.phone,
+    operator: withdrawal.operator,
+    status: "failed",
+  }).catch(() => {});
+}
+
+export async function runReconciliation(): Promise<void> {
+  if (reconciliationRunning) return;
+  reconciliationRunning = true;
+  try {
+    await Promise.all([
+      reconcilePayments().catch(error => console.error("[RECONCILIATION]", error)),
+      reconcileStaleWithdrawals().catch(error => console.error("[RECONCILIATION-WD]", error)),
+    ]);
+  } finally {
+    reconciliationRunning = false;
+  }
+}
+
+let reconciliationTimer: ReturnType<typeof setInterval> | null = null;
+let reconciliationRunning = false;
+
+export function startReconciliationJob(intervalMs = AUTO_STATUS_CHECK_INTERVAL_MS): void {
+  if (reconciliationTimer) clearInterval(reconciliationTimer);
+  console.log(`[RECONCILIATION] Job démarré — vérification toutes les ${intervalMs / 1000}s`);
+  void runReconciliation().catch(() => {});
+  reconciliationTimer = setInterval(() => void runReconciliation().catch(() => {}), intervalMs);
+  reconciliationTimer.unref?.();
 }

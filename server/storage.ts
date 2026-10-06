@@ -145,6 +145,7 @@ export interface IStorage {
   updatePendingPaymentStatus(id: number, status: string): Promise<void>;
   cleanupExpiredPayments(): Promise<number>;
   getPendingPayments(merchantId?: number): Promise<PendingPayment[]>;
+  getReconciliationPendingPayments(): Promise<PendingPayment[]>;
 
   updateMerchantWebhook(id: number, webhookUrl: string | null, webhookSecret: string | null): Promise<void>;
   createWebhookLog(log: InsertWebhookLog): Promise<WebhookLog>;
@@ -191,6 +192,7 @@ export interface IStorage {
   createWithdrawal(data: InsertWithdrawal): Promise<Withdrawal>;
   getWithdrawals(merchantId?: number): Promise<(Withdrawal & { merchantName: string; merchantWebsite?: string | null })[]>;
   getPendingWithdrawals(): Promise<(Withdrawal & { merchantName: string })[]>;
+  getReconciliationPendingWithdrawals(): Promise<Withdrawal[]>;
   getWithdrawalById(id: number): Promise<Withdrawal | undefined>;
   getWithdrawalByProviderReference(ref: string): Promise<Withdrawal | undefined>;
   getWithdrawalByProviderTxId(providerTxId: string): Promise<Withdrawal | undefined>;
@@ -804,6 +806,18 @@ export class DatabaseStorage implements IStorage {
     if (merchantId) return financialDb.select().from(pendingPayments).where(eq(pendingPayments.merchantId, merchantId)).orderBy(desc(pendingPayments.createdAt));
     return financialDb.select().from(pendingPayments).orderBy(desc(pendingPayments.createdAt));
   }
+  async getReconciliationPendingPayments(): Promise<PendingPayment[]> {
+    return financialDb.select().from(pendingPayments)
+      .where(inArray(pendingPayments.status, [
+        "gateway_pending",
+        "provider_pending",
+        "lipapap_pending",
+        "pending",
+        "submitted",
+        "manual_waiting_submission",
+        "manual_submitted",
+      ]));
+  }
   async getPendingPaymentByProviderReference(reference: string): Promise<PendingPayment | undefined> {
     const [p] = await financialDb.select().from(pendingPayments).where(eq(pendingPayments.providerReference, reference));
     return p;
@@ -985,6 +999,13 @@ export class DatabaseStorage implements IStorage {
       getMerchantNameMap(),
     ]);
     return rows.map(r => ({ ...r, merchantName: nameMap.get(r.merchantId)?.name || "" }));
+  }
+  async getReconciliationPendingWithdrawals(): Promise<Withdrawal[]> {
+    return financialDb.select().from(withdrawals)
+      .where(and(
+        inArray(withdrawals.status, ["pending", "processing"]),
+        eq(withdrawals.withdrawalMode, "auto"),
+      ));
   }
   async getWithdrawalById(id: number): Promise<Withdrawal | undefined> {
     const [w] = await financialDb.select().from(withdrawals).where(eq(withdrawals.id, id));

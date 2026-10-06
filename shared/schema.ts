@@ -77,6 +77,7 @@ export const transactions = pgTable("transactions", {
   providerReference: text("provider_reference"),
   errorMessage: text("error_message"),
   providerFee: integer("provider_fee"),
+  merchantCredit: integer("merchant_credit"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -172,6 +173,8 @@ export const pendingPayments = pgTable("pending_payments", {
   manualSubmittedAt: timestamp("manual_submitted_at"),
   manualReviewedBy: text("manual_reviewed_by"),
   manualReviewedAt: timestamp("manual_reviewed_at"),
+  autoStatusCheckCount: integer("auto_status_check_count").default(0).notNull(),
+  autoStatusCheckedAt: timestamp("auto_status_checked_at"),
   expiresAt: timestamp("expires_at").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -229,6 +232,8 @@ export const withdrawals = pgTable("withdrawals", {
   providerPayoutFee: integer("provider_payout_fee"),
   gateway: text("gateway").notNull().default("clapay"),
   providerTxId: text("provider_tx_id"),
+  autoStatusCheckCount: integer("auto_status_check_count").default(0).notNull(),
+  autoStatusCheckedAt: timestamp("auto_status_checked_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   processedAt: timestamp("processed_at"),
 });

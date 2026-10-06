@@ -1792,7 +1792,7 @@ function TransactionsPanel() {
     const matchStatus =
       statusFilter === "all" ||
       (statusFilter === "confirmed" && ["confirmed", "approved", "success", "completed"].includes(t.status)) ||
-      (statusFilter === "failed" && ["failed", "rejected", "provider_failed", "lipapap_failed"].includes(t.status)) ||
+      (statusFilter === "failed" && ["failed", "rejected", "provider_failed", "lipapap_failed", "gateway_failed"].includes(t.status)) ||
       (statusFilter === "pending" && ["pending", "provider_pending", "lipapap_pending", "submitted", "manual_submitted"].includes(t.status));
     const matchType =
       typeFilter === "all" ||
@@ -1815,7 +1815,7 @@ function TransactionsPanel() {
     a.href = url; a.download = "transactions.csv"; a.click();
   };
 
-  const failedCount = (transactions as any[]).filter((t) => ["failed", "rejected"].includes(t.status)).length;
+  const failedCount = (transactions as any[]).filter((t) => ["failed", "rejected", "gateway_failed"].includes(t.status)).length;
 
   const getTypeBadge = (type: string) => {
     if (type === "withdrawal") return <Badge className="text-xs bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400">Retrait</Badge>;
@@ -1827,7 +1827,7 @@ function TransactionsPanel() {
   const getStatusBadge = (status: string) => {
     if (["confirmed", "approved", "success", "completed"].includes(status))
       return <Badge variant="default" className="text-xs">{status === "approved" ? "Approuvé" : "Confirmé"}</Badge>;
-    if (["failed", "rejected", "provider_failed", "lipapap_failed"].includes(status))
+    if (["failed", "rejected", "provider_failed", "lipapap_failed", "gateway_failed"].includes(status))
       return <Badge variant="destructive" className="text-xs">{status === "rejected" ? "Rejeté" : "Échoué"}</Badge>;
     if (status === "manual_submitted")
       return <Badge className="text-xs bg-orange-100 text-orange-800 border-orange-200">À vérifier</Badge>;
@@ -1921,11 +1921,11 @@ function TransactionsPanel() {
             <Card><CardContent className="p-6 text-center text-muted-foreground text-sm">Aucune transaction pour cette période</CardContent></Card>
           ) : (
             filtered.map((tx: any) => {
-              const isFailed = ["failed", "rejected", "provider_failed", "lipapap_failed"].includes(tx.status);
+              const isFailed = ["failed", "rejected", "provider_failed", "lipapap_failed", "gateway_failed"].includes(tx.status);
               const isPayment = tx.type === "payment" || tx.type === "pending";
               const reviewSource = tx.type === "pending" ? "pending" : "transaction";
               const normalizedStatus = String(tx.status || "").toLowerCase();
-              const isPendingInProgress = tx.type === "pending" ||
+              const isPendingInProgress = (tx.type === "pending" && !isFailed) ||
                 ["provider_pending", "gateway_pending", "lipapap_pending", "submitted"].includes(normalizedStatus);
               const isFinalSuccess = ["confirmed", "completed", "paid", "success"].includes(normalizedStatus) ||
                 /_(confirmed|completed|paid|success)$/.test(normalizedStatus);
@@ -1934,9 +1934,18 @@ function TransactionsPanel() {
               const isReviewableStatus = [
                 "pending", "provider_pending", "gateway_pending", "lipapap_pending", "submitted", "manual_submitted",
               ].includes(normalizedStatus);
-              const canManualValidate = isPayment && !tx.manualPayment && !isFinalSuccess && !isFinalRejected &&
-                (reviewSource === "transaction" || isReviewableStatus);
-              const canReject = isPayment && !tx.manualPayment && isReviewableStatus;
+              const expiredManualProofCanBeReviewed =
+                tx.manualPayment && tx.autoTimedOut && Boolean(String(tx.manualSubmission || "").trim());
+              const canManualValidate = isPayment && !isFinalSuccess && !isFinalRejected &&
+                (
+                  expiredManualProofCanBeReviewed ||
+                  (!tx.manualPayment && (reviewSource === "transaction" || isReviewableStatus || tx.autoTimedOut))
+                );
+              const canReject = isPayment &&
+                (
+                  expiredManualProofCanBeReviewed ||
+                  (!tx.manualPayment && (isReviewableStatus || tx.autoTimedOut))
+                );
               return (
                 <Card key={tx.id} className={isFailed ? "border-destructive/40 bg-destructive/5 dark:bg-destructive/10" : isPendingInProgress ? "border-yellow-300 dark:border-yellow-700" : ""}>
                   <CardContent className="p-4">
@@ -1948,7 +1957,7 @@ function TransactionsPanel() {
                             <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={() => copyToClipboard(tx.txId, "ID transaction")} title="Copier l'ID" data-testid={`button-copy-txid-${tx.id}`}>
                               <Copy className="w-3 h-3" />
                             </Button>
-                            {getTypeBadge(tx.type)}
+                            {getTypeBadge(tx.autoTimedOut ? "payment" : tx.type)}
                             <Badge variant="secondary" className="text-xs">{tx.country}</Badge>
                             {getStatusBadge(tx.status)}
                             {tx.provider && <Badge variant="outline" className="text-xs">{getProviderName(tx.provider, tx.providerReference)}</Badge>}
@@ -2029,9 +2038,14 @@ function TransactionsPanel() {
                             {canManualValidate && (
                               <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white gap-1"
                                 disabled={validateTxMutation.isPending}
-                                onClick={async () => { if (await showConfirm("Valider cette transaction manuellement ? (à utiliser si l'argent est bien arrivé au client)")) validateTxMutation.mutate({ id: tx.rowId, source: reviewSource }); }}
+                                onClick={async () => {
+                                  const message = tx.autoTimedOut
+                                    ? "Valider cette opération malgré son délai dépassé ? Vérifiez que l’argent est bien arrivé : le solde sera crédité et le webhook payment.confirmed sera envoyé au marchand."
+                                    : "Valider cette transaction manuellement ? (à utiliser si l'argent est bien arrivé au client)";
+                                  if (await showConfirm(message)) validateTxMutation.mutate({ id: tx.rowId, source: reviewSource });
+                                }}
                                 data-testid={`button-validate-tx-${tx.id}`}>
-                                <CheckCircle className="w-3 h-3" />Valider manuellement
+                                <CheckCircle className="w-3 h-3" />{tx.autoTimedOut ? "Valider malgré l’échec" : "Valider manuellement"}
                               </Button>
                             )}
                             {canReject && (

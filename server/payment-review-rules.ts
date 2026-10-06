@@ -2,6 +2,8 @@ export type PaymentReviewSubject = {
   source: "pending" | "transaction";
   gateway: string;
   status: string;
+  autoTimedOut?: boolean;
+  manualSubmissionPresent?: boolean;
 };
 
 export type PaymentReviewActions = {
@@ -21,6 +23,14 @@ const OPEN_PAYMENT_STATUSES = new Set([
 export function getPaymentReviewActions(payment: PaymentReviewSubject): PaymentReviewActions {
   const status = payment.status.trim().toLowerCase();
   const isManual = payment.gateway.trim().toLowerCase() === "manual";
+
+  if (
+    payment.source === "pending" &&
+    payment.autoTimedOut &&
+    (!isManual || payment.manualSubmissionPresent)
+  ) {
+    return { approve: true, reject: true };
+  }
 
   if (payment.source === "pending" && isManual && status === "manual_waiting_submission") {
     return { approve: false, reject: true };

@@ -477,6 +477,7 @@ export async function runFinancialMigrations() {
         provider_reference text,
         error_message text,
         provider_fee integer,
+        merchant_credit integer,
         merchant_country_id integer,
         created_at timestamp DEFAULT now() NOT NULL
       );
@@ -539,6 +540,8 @@ export async function runFinancialMigrations() {
         manual_submitted_at timestamp,
         manual_reviewed_by text,
         manual_reviewed_at timestamp,
+        auto_status_check_count integer NOT NULL DEFAULT 0,
+        auto_status_checked_at timestamp,
         expires_at timestamp NOT NULL,
         created_at timestamp DEFAULT now() NOT NULL
       );
@@ -596,6 +599,8 @@ export async function runFinancialMigrations() {
         provider_payout_fee integer,
         gateway text NOT NULL DEFAULT 'clapay',
          provider_tx_id text,
+        auto_status_check_count integer NOT NULL DEFAULT 0,
+        auto_status_checked_at timestamp,
         created_at timestamp DEFAULT now() NOT NULL,
         processed_at timestamp
       );
@@ -708,6 +713,23 @@ export async function runFinancialMigrations() {
         ALTER TABLE payment_links
         ADD COLUMN IF NOT EXISTS bank text NOT NULL DEFAULT 'bank1';
       `);
+      await client.query(`
+        ALTER TABLE transactions ADD COLUMN IF NOT EXISTS merchant_credit integer;
+        CREATE TABLE IF NOT EXISTS payment_reversals (
+          id serial PRIMARY KEY,
+          transaction_id integer NOT NULL UNIQUE REFERENCES transactions(id),
+          merchant_id integer NOT NULL,
+          merchant_country_id integer NOT NULL,
+          country text NOT NULL,
+          tx_id text NOT NULL,
+          credited_amount integer NOT NULL,
+          balance_before integer NOT NULL,
+          balance_after integer NOT NULL,
+          telegram_user_id text,
+          telegram_admin text NOT NULL,
+          created_at timestamp DEFAULT now() NOT NULL
+        );
+      `);
       // Idempotent financial data-model bridge. Existing values are renamed in
       // place; no financial rows are deleted.
       await client.query(`
@@ -750,8 +772,21 @@ export async function runFinancialMigrations() {
         ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_submitted_at TIMESTAMP;
         ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_reviewed_by TEXT;
         ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_reviewed_at TIMESTAMP;
+        ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS auto_status_check_count INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS auto_status_checked_at TIMESTAMP;
+        ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS auto_status_check_count INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS auto_status_checked_at TIMESTAMP;
+        UPDATE pending_payments
+          SET expires_at = created_at + INTERVAL '3 hours'
+          WHERE gateway = 'manual'
+            AND status IN ('manual_waiting_submission', 'manual_submitted')
+            AND expires_at < created_at + INTERVAL '3 hours';
         CREATE INDEX IF NOT EXISTS pending_payments_manual_review_idx
           ON pending_payments (gateway, status, created_at DESC);
+        CREATE INDEX IF NOT EXISTS pending_payments_auto_status_idx
+          ON pending_payments (status, auto_status_check_count, created_at);
+        CREATE INDEX IF NOT EXISTS withdrawals_auto_status_idx
+          ON withdrawals (status, withdrawal_mode, auto_status_check_count, created_at);
         CREATE INDEX IF NOT EXISTS pending_payments_manual_recipient_idx
           ON pending_payments (manual_recipient_phone);
         UPDATE merchant_countries SET gateway_enabled = true

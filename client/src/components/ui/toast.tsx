@@ -1,7 +1,7 @@
 import * as React from "react"
 import * as ToastPrimitives from "@radix-ui/react-toast"
 import { cva, type VariantProps } from "class-variance-authority"
-import { X, AlertCircle, CheckCircle2, Info } from "lucide-react"
+import { X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -14,7 +14,7 @@ const ToastViewport = React.forwardRef<
   <ToastPrimitives.Viewport
     ref={ref}
     className={cn(
-      "fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]",
+      "pointer-events-none fixed left-0 right-0 top-0 z-[2147483647] flex max-h-screen w-full flex-col gap-2 overflow-y-auto p-3 sm:left-auto sm:right-4 sm:top-4 sm:w-[min(420px,calc(100vw-2rem))] sm:p-0",
       className
     )}
     {...props}
@@ -23,15 +23,13 @@ const ToastViewport = React.forwardRef<
 ToastViewport.displayName = ToastPrimitives.Viewport.displayName
 
 const toastVariants = cva(
-  "group pointer-events-auto relative flex w-full items-start gap-3 overflow-hidden rounded-lg border shadow-lg transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[swipe=end]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-top-full data-[state=open]:sm:slide-in-from-bottom-full p-4 pr-8",
+  "group pointer-events-auto relative flex w-full items-start gap-3 overflow-hidden rounded-[14px] border px-4 py-3.5 pr-9 shadow-[0_8px_24px_rgba(44,35,20,0.16)] transition-all data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[swipe=end]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-top-2 data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-3",
   {
     variants: {
       variant: {
-        default: "border bg-background text-foreground",
-        destructive:
-          "border-l-4 border-l-red-500 border border-gray-200 bg-white text-gray-900 dark:bg-gray-900 dark:border-gray-700 dark:border-l-red-500 dark:text-gray-100",
-        success:
-          "border-l-4 border-l-green-500 border border-gray-200 bg-white text-gray-900 dark:bg-gray-900 dark:border-gray-700 dark:border-l-green-500 dark:text-gray-100",
+        default: "border-[#f3e7cf] bg-[#fff7e8] text-[#806d50]",
+        destructive: "border-[#ead4cc] bg-[#fff7e8] text-[#806d50]",
+        success: "border-[#e4e9d1] bg-[#fff7e8] text-[#806d50]",
       },
     },
     defaultVariants: {
@@ -77,7 +75,7 @@ const ToastClose = React.forwardRef<
   <ToastPrimitives.Close
     ref={ref}
     className={cn(
-      "absolute right-2 top-2 rounded-md p-1 text-gray-400 opacity-0 transition-opacity hover:text-gray-600 focus:opacity-100 focus:outline-none focus:ring-2 group-hover:opacity-100",
+      "absolute right-2 top-2 rounded-md p-1 text-[#927d5d] opacity-0 transition-opacity hover:bg-white/70 hover:text-[#65543a] focus:opacity-100 focus:outline-none focus:ring-2 group-hover:opacity-100",
       className
     )}
     toast-close=""
@@ -94,7 +92,7 @@ const ToastTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <ToastPrimitives.Title
     ref={ref}
-    className={cn("text-sm font-semibold leading-tight", className)}
+    className={cn("text-[15px] font-semibold leading-tight text-[#69573c]", className)}
     {...props}
   />
 ))
@@ -106,7 +104,7 @@ const ToastDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <ToastPrimitives.Description
     ref={ref}
-    className={cn("text-sm text-gray-500 dark:text-gray-400 mt-0.5", className)}
+    className={cn("mt-0.5 text-[14px] leading-[1.45] text-[#806d50]", className)}
     {...props}
   />
 ))

@@ -28,6 +28,13 @@ import {
   supportsPaymentProviderStatus,
 } from "./payment-provider-status";
 import { getPaymentReviewActions } from "./payment-review-rules";
+import {
+  getPaymentReversalRecord,
+  resolveOriginalMerchantCredit,
+  reverseConfirmedPayment,
+  searchReversiblePayments,
+  type PaymentReversalRecord,
+} from "./payment-reversal-service";
 import { notifyConfirmedPaymentWebhook } from "./merchant-webhooks";
 import {
   initiatePayout as mbiyoInitiatePayout,
@@ -180,6 +187,83 @@ function currencyForCountry(country: string): string {
 function formatAmountC(n: number, country?: string | null): string {
   const cur = country ? currencyForCountry(country) : "XOF";
   return n.toLocaleString("fr-FR") + " " + cur;
+}
+
+function paymentReversalMerchantNotice(
+  language: BotLanguage,
+  payment: PaymentReversalRecord,
+  creditedAmount: number,
+): string {
+  const reference = payment.provider_reference || payment.provider_tx_id || payment.tx_id;
+  const customer = (payment.payer_name || "N/A").replace(/[\r\n]+/g, " ").slice(0, 120);
+  const phone = (payment.payer_number || "N/A").replace(/[\r\n]+/g, " ").slice(0, 80);
+  const details = {
+    fr: {
+      title: "⚠️ PAIEMENT ANNULÉ",
+      notice: "Le paiement a été annulé à la demande du client. Le crédit correspondant a été retiré de votre solde marchand.",
+      name: "Client",
+      phone: "Numéro",
+      ref: "Référence",
+      paid: "Montant payé",
+      debit: "Montant débité de votre solde",
+      action: "Veuillez débiter le compte du client sur votre propre site web pour régulariser cette annulation.",
+    },
+    en: {
+      title: "⚠️ PAYMENT REVERSED",
+      notice: "The payment was reversed at the customer's request. The corresponding credit has been removed from your merchant balance.",
+      name: "Customer",
+      phone: "Phone",
+      ref: "Reference",
+      paid: "Amount paid",
+      debit: "Amount deducted from your balance",
+      action: "Please debit the customer's account on your own website to reflect this reversal.",
+    },
+    de: {
+      title: "⚠️ ZAHLUNG STORNIERT",
+      notice: "Die Zahlung wurde auf Wunsch des Kunden storniert. Die entsprechende Gutschrift wurde von Ihrem Händlerguthaben abgezogen.",
+      name: "Kunde",
+      phone: "Telefon",
+      ref: "Referenz",
+      paid: "Gezahlter Betrag",
+      debit: "Von Ihrem Guthaben abgezogen",
+      action: "Bitte belasten Sie das Kundenkonto auf Ihrer eigenen Website entsprechend dieser Stornierung.",
+    },
+    zh: {
+      title: "⚠️ 支付已撤销",
+      notice: "应客户要求，支付已撤销，相应金额已从您的商户余额中扣除。",
+      name: "客户",
+      phone: "电话",
+      ref: "参考号",
+      paid: "支付金额",
+      debit: "从商户余额扣除",
+      action: "请在您自己的网站上扣减客户账户，以完成本次撤销处理。",
+    },
+    hi: {
+      title: "⚠️ भुगतान रद्द किया गया",
+      notice: "ग्राहक के अनुरोध पर भुगतान रद्द किया गया है। संबंधित क्रेडिट आपकी व्यापारी शेष राशि से हटा दिया गया है।",
+      name: "ग्राहक",
+      phone: "फोन",
+      ref: "संदर्भ",
+      paid: "भुगतान राशि",
+      debit: "आपकी शेष राशि से काटी गई राशि",
+      action: "इस रद्दीकरण को दर्ज करने के लिए कृपया अपनी वेबसाइट पर ग्राहक के खाते से राशि काटें।",
+    },
+  }[language];
+
+  return [
+    details.title,
+    "",
+    details.notice,
+    "",
+    `${details.name}: ${customer}`,
+    `${details.phone}: ${phone}`,
+    `${details.ref}: ${String(reference || "N/A").replace(/[\r\n]+/g, " ").slice(0, 140)}`,
+    `${details.paid}: ${formatAmountC(payment.amount, payment.country)}`,
+    `${details.debit}: ${formatAmountC(creditedAmount, payment.country)}`,
+    `Pays: ${countryLabel(payment.country)}`,
+    "",
+    details.action,
+  ].join("\n");
 }
 
 // ─── Rate Limiter ────────────────────────────────────────────────────────────
@@ -2489,6 +2573,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `/findwithdrawal@Westpaybot — Rechercher un retrait par numéro\n` +
           `/findpayment NUMERO — Rechercher tous les paiements et leur historique\n` +
           `/findmanualpayment NUMERO — Alias historique de la commande\n` +
+           `/annulerpaiement NUMÉRO CLIENT OU RÉFÉRENCE (/cancelpayment) — Annuler un paiement confirmé et débiter le solde marchand\n` +
           `/gatewaybalance@Westpaybot — Consulter le solde d'un gateway et ses wallets pays\n\n` +
           `📢 *Diffusion*\n` +
           `/broadcast — Envoyer un message dans les groupes\n` +
@@ -2580,6 +2665,208 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
   bot.command("findpayment", handlePaymentSearch);
   bot.command("findmanualpayment", handlePaymentSearch);
   bot.command("manualpayments", handlePaymentSearch);
+
+  // ─── Annulation administrative d’un paiement déjà crédité ─────────────────
+  const sendPaymentReversalPreview = async (ctx: any, id: number) => {
+    const payment = await getPaymentReversalRecord(id);
+    if (!payment) {
+      await ctx.reply("Paiement introuvable.");
+      return;
+    }
+
+    const merchant = await storage.getMerchantById(payment.merchant_id);
+    const merchantName = merchant?.name || `Marchand #${payment.merchant_id}`;
+    const creditedAmount = resolveOriginalMerchantCredit({
+      amount: payment.amount,
+      merchantCredit: payment.merchant_credit,
+      provider: payment.provider,
+      providerFee: payment.provider_fee,
+    });
+    const eligible = ["confirmed", "completed", "success", "successful", "paid"].includes(
+      String(payment.status || "").toLowerCase(),
+    );
+    const reference = payment.provider_reference || payment.provider_tx_id || payment.tx_id;
+    const lines = [
+      "⚠️ ANNULATION D’UN PAIEMENT",
+      `Marchand : ${merchantName}`,
+      `Client : ${payment.payer_name || "N/A"}`,
+      `Numéro : ${payment.payer_number || "N/A"}`,
+      `Pays : ${countryLabel(payment.country)}`,
+      `Paiement payé : ${formatAmountC(payment.amount, payment.country)}`,
+      `Référence : ${reference}`,
+      `Transaction : ${payment.tx_id}`,
+    ];
+
+    if (!eligible) {
+      lines.push("", `Aucune action : le statut actuel est « ${payment.status} ».`);
+      await ctx.reply(lines.join("\n"));
+      return;
+    }
+    if (creditedAmount == null) {
+      lines.push(
+        "",
+        "Aucune action : le montant net réellement crédité n’est pas vérifiable dans les données enregistrées.",
+        "Utilisez une transaction dont le montant crédité d’origine peut être établi.",
+      );
+      await ctx.reply(lines.join("\n"));
+      return;
+    }
+
+    lines.push(
+      `Net à retirer du solde marchand : ${formatAmountC(creditedAmount, payment.country)}`,
+      "",
+      "Confirmez-vous ? Le solde peut devenir négatif. Cette action n’effectue pas de remboursement auprès du fournisseur.",
+    );
+    await ctx.reply(lines.join("\n"), {
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "✅ Confirmer l’annulation", callback_data: `pvr:confirm:${payment.id}` },
+          { text: "Annuler", callback_data: "pvr:cancel" },
+        ]],
+      },
+    });
+  };
+
+  const handlePaymentReversalCommand = async (ctx: any) => {
+    const chatId = String(ctx.chat?.id ?? "");
+    const isGroup = ctx.chat?.type === "group" || ctx.chat?.type === "supergroup";
+    if (!isGroup || !await isAdminGroup(chatId)) {
+      if (!isGroup) await ctx.reply("Cette commande est réservée au groupe admin.");
+      return;
+    }
+
+    const query = String(ctx.message?.text || "").trim().split(/\s+/).slice(1).join(" ").trim();
+    if (!query) {
+      await ctx.reply("Usage : /annulerpaiement NUMÉRO_CLIENT ou RÉFÉRENCE");
+      return;
+    }
+
+    try {
+      const payments = await searchReversiblePayments(query);
+      if (!payments.length) {
+        await ctx.reply("Aucun paiement confirmé ne correspond à ce numéro ou à cette référence.");
+        return;
+      }
+      if (payments.length > 10) {
+        await ctx.reply("Plus de 10 paiements correspondent. Relancez la commande avec une référence exacte.");
+        return;
+      }
+      if (payments.length === 1) {
+        await sendPaymentReversalPreview(ctx, payments[0].id);
+        return;
+      }
+
+      const merchants = await Promise.all(payments.map((payment) => storage.getMerchantById(payment.merchant_id)));
+      const lines = [`Plusieurs paiements correspondent à « ${query} ». Choisissez celui à examiner :`];
+      const inlineKeyboard = payments.map((payment, index) => {
+        const merchantName = merchants[index]?.name || `Marchand #${payment.merchant_id}`;
+        const customerPhone = payment.payer_number || "numéro inconnu";
+        const label = `#${payment.id} ${payment.tx_id} · ${formatAmountC(payment.amount, payment.country)}`.slice(0, 60);
+        lines.push(`${payment.tx_id} · ${merchantName} · ${customerPhone} · ${payment.status}`);
+        return [{ text: label, callback_data: `pvr:select:${payment.id}` }];
+      });
+      await ctx.reply(lines.join("\n"), { reply_markup: { inline_keyboard: inlineKeyboard } });
+    } catch (error: any) {
+      console.error("[TELEGRAM PAYMENT REVERSAL] Recherche échouée:", error?.message || error);
+      await ctx.reply("La recherche du paiement a échoué. Aucun solde n’a été modifié.");
+    }
+  };
+  bot.command("annulerpaiement", handlePaymentReversalCommand);
+  bot.command("cancelpayment", handlePaymentReversalCommand);
+
+  bot.action(/^pvr:select:(\d+)$/, async (ctx) => {
+    const chatId = String(ctx.chat?.id ?? "");
+    if (!await isAdminGroup(chatId)) {
+      await ctx.answerCbQuery("Non autorisé");
+      return;
+    }
+    await ctx.answerCbQuery();
+    try {
+      await sendPaymentReversalPreview(ctx, Number(ctx.match![1]));
+    } catch (error: any) {
+      await ctx.reply(`Impossible de vérifier ce paiement : ${String(error?.message || "erreur").slice(0, 180)}`);
+    }
+  });
+
+  bot.action("pvr:cancel", async (ctx) => {
+    const chatId = String(ctx.chat?.id ?? "");
+    if (!await isAdminGroup(chatId)) {
+      await ctx.answerCbQuery("Non autorisé");
+      return;
+    }
+    await ctx.answerCbQuery("Annulation abandonnée");
+    await ctx.editMessageText("Annulation abandonnée. Aucun changement n’a été effectué.").catch(() => {});
+  });
+
+  bot.action(/^pvr:confirm:(\d+)$/, async (ctx) => {
+    const chatId = String(ctx.chat?.id ?? "");
+    if (!await isAdminGroup(chatId)) {
+      await ctx.answerCbQuery("Non autorisé");
+      return;
+    }
+    await ctx.answerCbQuery("Annulation en cours…");
+    try {
+      const adminName = formatUser(ctx);
+      const result = await reverseConfirmedPayment(Number(ctx.match![1]), {
+        telegramUserId: ctx.from?.id != null ? String(ctx.from.id) : null,
+        name: adminName,
+      });
+      if (result.outcome !== "reversed") {
+        const messages: Record<typeof result.outcome, string> = {
+          not_found: "Paiement introuvable. Aucun changement effectué.",
+          already_reversed: "Ce paiement a déjà été annulé. Aucun second débit effectué.",
+          not_reversible: "Le statut du paiement ne permet plus son annulation. Aucun changement effectué.",
+          credit_unverifiable: "Le net réellement crédité ne peut pas être vérifié. Aucun changement effectué.",
+          merchant_country_missing: "Le compte marchand de ce pays est introuvable. Aucun changement effectué.",
+          merchant_country_ambiguous: "Plusieurs soldes marchands correspondent à ce pays. Aucun changement effectué.",
+        };
+        await ctx.editMessageText(messages[result.outcome]).catch(() => {});
+        return;
+      }
+
+      const payment = result.payment;
+      const merchant = await storage.getMerchantById(payment.merchant_id);
+      let merchantNotified = false;
+      let notificationIssue = "";
+      if (!merchant?.telegramChatId) {
+        notificationIssue = "Marchand non notifié : aucun groupe Telegram marchand n’est lié.";
+      } else {
+        try {
+          await ctx.telegram.sendMessage(
+            merchant.telegramChatId,
+            paymentReversalMerchantNotice(
+              normalizeBotLanguage(merchant.telegramBotLanguage),
+              payment,
+              result.creditedAmount,
+            ),
+          );
+          merchantNotified = true;
+        } catch (error: any) {
+          notificationIssue = `Notification marchand échouée : ${String(error?.message || "erreur Telegram").slice(0, 160)}`;
+          console.error("[TELEGRAM PAYMENT REVERSAL] Notification marchand échouée:", error?.message || error);
+        }
+      }
+
+      const confirmation = [
+        "✅ PAIEMENT ANNULÉ",
+        `Marchand : ${merchant?.name || `#${payment.merchant_id}`}`,
+        `Client : ${payment.payer_name || "N/A"} · ${payment.payer_number || "N/A"}`,
+        `Transaction : ${payment.tx_id}`,
+        `Référence : ${payment.provider_reference || payment.provider_tx_id || payment.tx_id}`,
+        `Net débité : ${formatAmountC(result.creditedAmount, payment.country)}`,
+        `Solde avant : ${formatAmountC(result.balanceBefore, payment.country)}`,
+        `Solde après : ${formatAmountC(result.balanceAfter, payment.country)}`,
+        `Administrateur : ${adminName}`,
+        merchantNotified ? "Marchand notifié dans sa langue." : notificationIssue,
+      ].join("\n");
+      await ctx.editMessageText(confirmation).catch(() => ctx.reply(confirmation));
+    } catch (error: any) {
+      console.error("[TELEGRAM PAYMENT REVERSAL] Annulation échouée:", error?.message || error);
+      await ctx.editMessageText(
+        `L’annulation n’a pas abouti. Vérifiez le solde et le statut avant de réessayer. Aucun succès n’a été confirmé.\nDétail : ${String(error?.message || "erreur").slice(0, 180)}`,
+      ).catch(() => {});
+    }
+  });
 
   // ─── /groups (groupe admin uniquement) — liste et nettoyage des groupes connus ──
   bot.command("groups", async (ctx) => {

@@ -2,6 +2,7 @@ import { financialPool } from "./db";
 import { storage } from "./storage";
 import { calcMerchantCreditForMerchant } from "./payment-fees";
 import { getPaymentReviewActions } from "./payment-review-rules";
+import { AUTO_TIMEOUT_ERROR_MARKER } from "./reconciliation-policy";
 
 export type ManualPaymentRecord = {
   id: number;
@@ -24,6 +25,7 @@ export type ManualPaymentRecord = {
   manualSubmission?: string | null;
   manualSubmittedAt?: Date | string | null;
   createdAt?: Date | string;
+  errorMessage?: string | null;
 };
 
 export type ManualReviewResult = {
@@ -55,6 +57,7 @@ function mapPayment(row: any): ManualPaymentRecord {
     manualSubmission: row.manual_submission ?? null,
     manualSubmittedAt: row.manual_submitted_at ?? null,
     createdAt: row.created_at,
+    errorMessage: row.error_message ?? null,
   };
 }
 
@@ -77,7 +80,7 @@ export async function submitManualPaymentProof(
        AND payment_token = $2
        AND gateway = 'manual'
        AND status = 'manual_waiting_submission'
-       AND expires_at > NOW()
+        AND created_at > NOW() - INTERVAL '3 hours'
      RETURNING *`,
     [id, paymentToken, normalizedProof],
   );
@@ -92,10 +95,12 @@ export async function submitManualPaymentProof(
   const row = existing.rows[0];
   if (!row) return { outcome: "not_found" };
   if (row.status === "manual_submitted") return { outcome: "already_submitted", payment: mapPayment(row) };
-  if (["confirmed", "manual_rejected"].includes(String(row.status))) {
+  if (["confirmed", "manual_rejected", "gateway_failed", "rejected"].includes(String(row.status))) {
     return { outcome: "already_final", payment: mapPayment(row) };
   }
-  if (new Date(row.expires_at).getTime() <= Date.now()) return { outcome: "expired", payment: mapPayment(row) };
+  if (new Date(row.created_at).getTime() <= Date.now() - 3 * 60 * 60 * 1000) {
+    return { outcome: "expired", payment: mapPayment(row) };
+  }
   return { outcome: "not_found" };
 }
 
@@ -137,7 +142,11 @@ async function reviewPendingPaymentCore(
 
     const isManual = payment.gateway.toLowerCase() === "manual";
     const manualWaitingSubmission = isManual && status === "manual_waiting_submission";
-    if (!getPaymentReviewActions(payment)[action]) {
+    if (!getPaymentReviewActions({
+      ...payment,
+      autoTimedOut: payment.errorMessage === AUTO_TIMEOUT_ERROR_MARKER,
+      manualSubmissionPresent: Boolean(payment.manualSubmission?.trim()),
+    })[action]) {
       await client.query("ROLLBACK");
       return {
         outcome: manualWaitingSubmission && action === "approve" ? "not_submitted" : "not_actionable",
@@ -206,8 +215,8 @@ async function reviewPendingPaymentCore(
     await client.query(
       `INSERT INTO transactions
          (merchant_id, country, tx_id, amount, payer_number, payer_name, manual_recipient_name, status, provider,
-          provider_tx_id, operator, provider_reference, error_message, provider_fee)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'confirmed', $8, $9, $10, $11, NULL, $12)`,
+          provider_tx_id, operator, provider_reference, error_message, provider_fee, merchant_credit)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'confirmed', $8, $9, $10, $11, NULL, $12, $13)`,
       [
         payment.merchantId,
         payment.country,
@@ -221,6 +230,7 @@ async function reviewPendingPaymentCore(
         payment.paymentMethod,
         payment.providerReference || txId,
         payment.amount - credit,
+        credit,
       ],
     );
     await client.query(
@@ -342,10 +352,12 @@ export async function reviewTransactionPayment(
     const credit = calcMerchantCreditForMerchant(payment.amount, payment.country, merchant);
     const confirmed = await client.query(
       `UPDATE transactions
-          SET status = 'confirmed', provider_fee = COALESCE(provider_fee, $2)
+          SET status = 'confirmed',
+              provider_fee = COALESCE(provider_fee, $2),
+              merchant_credit = $4
         WHERE id = $1 AND status = $3
         RETURNING *`,
-      [id, payment.amount - credit, payment.status],
+      [id, payment.amount - credit, payment.status, credit],
     );
     if (!confirmed.rows[0]) {
       await client.query("ROLLBACK");
