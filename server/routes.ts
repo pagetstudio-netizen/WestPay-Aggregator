@@ -5005,7 +5005,7 @@ export async function registerRoutes(
       let methods = visibleOps.map(o => ({
         name: o.name,
         logo: o.logo || null,
-        manual: isManualGateway(o.gateway) || Boolean(o.manualPayinEnabled),
+        manual: isManualGateway(o.gateway),
       }));
       const waveConfig = await storage.getWaveManualPaymentConfigByCountry(country);
       const waveOperator = await storage.getWithdrawalOperatorByNameAndCountry("Wave", country);
@@ -5031,8 +5031,6 @@ export async function registerRoutes(
           !isWaveOperatorName(method.name) && !isWaveManualLinkMethod(method.name),
         );
         methods.push({ name: "Wave par lien", logo: waveOperator?.logo || null, manual: true });
-      } else if (waveOperator && !waveUsesManualGateway && waveOperator.manualPayinEnabled) {
-        methods = methods.filter((method) => !isWaveOperatorName(method.name));
       }
       res.json({ methods });
     } catch (err: any) {
@@ -5716,7 +5714,7 @@ export async function registerRoutes(
 
       if (!operatorRecord) return respondChannelUnavailable();
 
-      if (operatorRecord.manualPayinEnabled || isManualGateway(operatorRecord.gateway)) {
+      if (isManualGateway(operatorRecord.gateway)) {
         if (isWaveOperatorName(operatorRecord.name) && !isManualGateway(operatorRecord.gateway)) {
           return res.status(409).json({
             message: "Pour payer Wave par numéro, l’administrateur doit d’abord régler sa passerelle sur « Manuel ».",
@@ -5741,7 +5739,7 @@ export async function registerRoutes(
         let ussdCode: string | null;
         try {
           ussdCode = buildManualUssdCode(
-            targetNumber.ussdTemplate?.trim() || operatorRecord.manualUssdTemplate,
+            targetNumber.ussdTemplate?.trim(),
             parsedAmount,
             targetNumber.phoneNumber,
             country,
@@ -7614,9 +7612,7 @@ export async function registerRoutes(
       const nextName = name ?? existing.name;
       const nextCountry = country ?? existing.country;
       const nextGateway = gateway ?? existing.gateway;
-      const manualPayinEnabled = gateway === undefined
-        ? existing.manualPayinEnabled
-        : isManualGateway(nextGateway);
+      const manualPayinEnabled = isManualGateway(nextGateway);
       const rawManualNumberId = req.body.manualNumberId === undefined
         ? (manualPayinEnabled ? existing.manualNumberId : null)
         : req.body.manualNumberId;

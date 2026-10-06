@@ -855,25 +855,28 @@ export default function ManualPaymentStep({
               </div>
             </section>
 
-            <section className="card step-two">
-              <div className="step-two-title">
-                2. vous pouvez cliquer sur le bouton payé pour gagner du temps.
-              </div>
+            {payment.ussdCode?.trim() && (
+              <section className="card step-two">
+                <div className="step-two-title">
+                  2. vous pouvez cliquer sur le bouton payé pour gagner du temps.
+                </div>
 
-              <button
-                type="button"
-                className="pay-button"
-                onClick={payNow}
-              >
-                cliquez ici pour payer
-              </button>
-            </section>
+                <button
+                  type="button"
+                  className="pay-button"
+                  onClick={payNow}
+                  data-testid="button-open-ussd"
+                >
+                  cliquez ici pour payer
+                </button>
+              </section>
+            )}
           </>
         )}
 
         <section className="card step-three">
           <div className="step-three-title">
-            3. veuillez soumettre la preuve de paiement (la référence ou le
+              {payment.ussdCode?.trim() ? "3." : "2."} veuillez soumettre la preuve de paiement (la référence ou le
             message reçu)
           </div>
 
