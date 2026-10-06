@@ -1099,28 +1099,31 @@ export async function registerRoutes(
   // Enregistrée ici (avant tout autre middleware) pour éviter les fenêtres de 404 pendant
   // les redémarrages Plesk. Le secret est vérifié dynamiquement depuis la DB à chaque appel.
   app.post("/api/telegram/webhook/:secret", async (req: Request, res: Response) => {
-    // Répondre 200 immédiatement — Telegram abandonne si la réponse tarde > 1s
-    res.sendStatus(200);
     try {
       const { secret } = req.params;
       // Vérifier le secret en DB
       const storedSecret = await storage.getSetting("telegram_webhook_secret");
       if (!storedSecret || secret !== storedSecret) {
-        console.warn(`[TG-WEBHOOK] Secret invalide reçu: "${secret?.slice(0, 8)}..."`);
-        return;
+        console.warn("[TG-WEBHOOK] Requête refusée : secret invalide");
+        return res.sendStatus(403);
       }
       const body = req.body;
       if (!body || typeof body !== "object") {
         console.error("[TG-WEBHOOK] Body vide ou invalide — Content-Type incorrect ?", typeof body);
-        return;
+        return res.sendStatus(400);
       }
       const { handleWebhookUpdate } = await import("./telegram-bot");
       const handled = handleWebhookUpdate(secret, body);
       if (!handled) {
         console.warn("[TG-WEBHOOK] Bot non initialisé — update ignoré (update_id=" + body.update_id + ")");
+        return res.sendStatus(503);
       }
+      // Accuser réception après validation et remise de l'update au bot.
+      // Si la base ou le bot est temporairement indisponible, Telegram peut réessayer.
+      return res.sendStatus(200);
     } catch (err: any) {
       console.error("[TG-WEBHOOK] Erreur:", err.message);
+      if (!res.headersSent) return res.sendStatus(503);
     }
   });
 

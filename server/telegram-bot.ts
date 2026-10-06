@@ -3677,6 +3677,7 @@ let _pollingRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 let _webhookWatchdog: ReturnType<typeof setInterval> | null = null;
 let _webhookWatchdogUrl: string | null = null;
 let _webhookPendingChecks = 0;
+let _webhookLastRepairedErrorSignature: string | null = null;
 
 /**
  * Surveille le webhook en production.
@@ -3692,20 +3693,25 @@ export function startWebhookWatchdog(webhookUrl: string): void {
   if (_webhookWatchdog) clearInterval(_webhookWatchdog);
   _webhookWatchdogUrl = webhookUrl;
   _webhookPendingChecks = 0;
+  _webhookLastRepairedErrorSignature = null;
 
   const check = async () => {
     if (!bot || _webhookWatchdogUrl !== webhookUrl) return;
     try {
       const info = await bot.telegram.getWebhookInfo();
       const lastErrorDate = Number((info as any).last_error_date || 0) * 1000;
-      const hasRecentError = !!(info as any).last_error_message &&
+      const lastErrorMessage = String((info as any).last_error_message || "");
+      const errorSignature = lastErrorMessage ? `${lastErrorDate}:${lastErrorMessage}` : "";
+      const hasRecentError = !!lastErrorMessage &&
         (!lastErrorDate || Date.now() - lastErrorDate <= 10 * 60 * 1000);
+      const hasUnrepairedRecentError = hasRecentError &&
+        errorSignature !== _webhookLastRepairedErrorSignature;
       const wrongUrl = info.url !== webhookUrl;
       const pendingCount = Number(info.pending_update_count || 0);
       if (pendingCount > 0) _webhookPendingChecks++;
       else _webhookPendingChecks = 0;
       const pendingStuck = pendingCount > 0 && _webhookPendingChecks >= 2;
-      if (!wrongUrl && !hasRecentError && !pendingStuck) {
+      if (!wrongUrl && !hasUnrepairedRecentError && !pendingStuck) {
         console.log(`[TELEGRAM] Webhook watchdog : OK (en attente: ${info.pending_update_count || 0})`);
         return;
       }
@@ -3713,10 +3719,13 @@ export function startWebhookWatchdog(webhookUrl: string): void {
       console.warn(
         `[TELEGRAM] Webhook watchdog : réparation nécessaire` +
         `${wrongUrl ? ` — URL inattendue "${info.url || "(vide)"}"` : ""}` +
-        `${hasRecentError ? ` — ${String((info as any).last_error_message).slice(0, 180)}` : ""}` +
+        `${hasUnrepairedRecentError ? ` — ${lastErrorMessage.slice(0, 180)}` : ""}` +
         `${pendingStuck ? ` — ${pendingCount} update(s) en attente depuis plusieurs contrôles` : ""}`,
       );
-      if (await tryRegisterWebhook(webhookUrl, true)) _webhookPendingChecks = 0;
+      if (await tryRegisterWebhook(webhookUrl, true)) {
+        _webhookPendingChecks = 0;
+        if (hasRecentError) _webhookLastRepairedErrorSignature = errorSignature;
+      }
     } catch (err: any) {
       console.error("[TELEGRAM] Webhook watchdog indisponible:", err?.message || err);
     }
@@ -3733,6 +3742,7 @@ export function stopWebhookWatchdog(): void {
   _webhookWatchdog = null;
   _webhookWatchdogUrl = null;
   _webhookPendingChecks = 0;
+  _webhookLastRepairedErrorSignature = null;
 }
 
 export async function startPolling(): Promise<void> {
