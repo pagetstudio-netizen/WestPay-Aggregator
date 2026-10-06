@@ -1511,7 +1511,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         `Support : https://t.me/robotpay19293`;
 
       try {
-        await bot!.telegram.sendMessage(adminGroupId, welcomeText, { disable_web_page_preview: true });
+        await bot!.telegram.sendMessage(adminGroupId, welcomeText);
       } catch (sendError: any) {
         await rollback();
         console.error("[TELEGRAM] Publication des identifiants dans le groupe admin impossible:", sendError?.message || sendError);
@@ -1594,7 +1594,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       await ctx.reply(
         `✅ Code de liaison pour ${merchant.slug} : ${activationCode}\n\n` +
         `Dans le groupe du marchand, lancez : /setmerchant ${activationCode}\n` +
-        `Ce code est à usage unique et expire dans 24 heures.`,
+        `Ce code est à usage unique et expire dans 24 heures. Tout ancien code de liaison a été révoqué.`,
       );
     } catch (error: any) {
       console.error("[TELEGRAM] Génération du code de liaison impossible:", error?.message || error);
@@ -2417,9 +2417,11 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         "Commandes marchand (message privé uniquement) :\n\n" +
         "/createmerchant ADMIN_EMAIL CODE_TOTP | NOM | EMAIL | SLUG | PAYS1,PAYS2 | CYCLE | CATEGORIE\n" +
         "Exemple : /createmerchant admin@westpay.com 123456 | Demo | client@example.com | demo-shop | Togo,Benin | D+3 | other_platforms\n\n" +
+        "/setmerchantcode SLUG_MARCHAND — Générer le code à utiliser dans le groupe marchand\n" +
+        "Exemple : /setmerchantcode demo-shop\n\n" +
         "/activatecountry SLUG_MARCHAND | PAYS\n" +
         "Exemple : /activatecountry demo-shop | Togo\n\n" +
-        "Le texte d’accueil et les identifiants sont envoyés uniquement dans ce message privé. Le cycle choisi est indicatif."
+        "La création se lance en privé avec le TOTP, mais le texte d’accueil et les identifiants sont publiés dans le groupe admin. Le cycle choisi est indicatif."
       );
       return;
     }
@@ -2436,7 +2438,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `👥 *Marchands*\n` +
           `/merchants — Liste de tous les marchands\n` +
           `/setmerchant CODE — Lier un groupe à un marchand\n\n` +
-          `/createmerchant — Créer un marchand (commande en message privé; Google Authenticator requis)\n` +
+          `/setmerchantcode SLUG — Générer un code de liaison à usage unique (24 h)\n\n` +
+          `/createmerchant — Créer un marchand (commande en message privé; identifiants publiés dans le groupe admin)\n` +
           `/activatecountry — Activer un pays (commande en message privé)\n\n` +
            `/disablepayments — Désactiver payin et payout d'un marchand\n\n` +
            `/enablepayments (/activatepayments) — Réactiver payin et payout d'un marchand\n\n` +

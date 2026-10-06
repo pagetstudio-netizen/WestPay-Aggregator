@@ -23,4 +23,4 @@
 - [Workflow process collisions](workflow-process-collisions.md) — After a restart, inspect processes; an older dev server may survive and cause EADDRINUSE or duplicate jobs.
 - [Pay-in failure handling](payin-failure-handling.md) — Block checkout on confirmed provider errors and alert admins in Telegram; preserve pending state when provider outcome is uncertain.
 - [WestPay private entrypoint](westpay-private-entrypoint.md) — The user considers the project private and expects probing; a hidden root fallback is not access control.
-- [Telegram merchant onboarding](telegram-merchant-onboarding.md) — Use a separate API-doc PIN; new countries inherit the admin-configured operator gateway or manual number.
+- [Telegram merchant onboarding](telegram-merchant-onboarding.md) — Post new-account credentials to the admin group; generate `/setmerchant` codes separately and inherit operator gateway/number settings.
