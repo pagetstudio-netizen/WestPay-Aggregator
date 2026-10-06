@@ -9,6 +9,12 @@ Always display the Wave logo on the Wave link-payment header and success screen,
 
 On manual-payment success screens, say “Paiement soumis avec succès. Votre paiement est en cours de traitement.” Do not describe the payment as “manual” or “under verification” on that screen. Show a merchant-return button for API Bank1/Bank2 flows; for payment links, show it only when that specific link has a configured redirect URL.
 
+When notifying admins about a submitted Wave link/QR payment, include the exact Wave payment URL saved on that pending payment, not the country's current configuration.
+
+**Why:** The user asked admins to see which Wave link the customer used when submitting a payment.
+
+**How to apply:** Pass the persisted Wave URL to the admin notification only for Wave link/QR submissions, so later configuration changes cannot misidentify the payment destination.
+
 **Why:** The user explicitly requires the Wave logo to remain visible, and clarified that link/QR activation depends on the Wave operator being in « Manuel » mode to prevent duplicate provider options. The user also asked to preserve the existing number flow, avoid hardcoding/seeding the link or QR, and specified the success message and return-button rules.
 
 **How to apply:** Manage the link and QR through the admin config panel; default new configs to disabled, validate Manual mode on activation, and deactivate links when Wave routing changes. Preserve the number/provider options, show only one Wave checkout entry with its logo, and route link payments through the existing manual proof-review process. Apply the wording and return-button rule to manual success screens across both checkout banks.

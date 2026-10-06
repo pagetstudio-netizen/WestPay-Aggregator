@@ -5,9 +5,10 @@ import path from "path";
 import fs from "fs";
 import { storage } from "./storage";
 import { db, pool, financialDb, financialPool } from "./db";
+import { applyMerchantBalanceDelta } from "./merchant-balance-ledger";
 import { generateSecret as totpGenerateSecret, generateURI as totpGenerateURI, verifySync as totpVerifySync } from "otplib";
 import QRCode from "qrcode";
-import { admins, merchantCountries, transactions, pendingPayments, withdrawals } from "@shared/schema";
+import { admins, merchants, merchantCountries, transactions, pendingPayments, withdrawals } from "@shared/schema";
 import {
   normalizeMerchantPaymentStatus,
   removePaymentAttemptsAlreadyFinalized,
@@ -19,11 +20,18 @@ import {
 } from "@shared/merchant-account";
 import { normalizeEmailInput } from "@shared/email-validation";
 import {
+  isValidPaymentPhone,
+  normalizePaymentPhone,
+  normalizePaymentReference,
+  PAYMENT_PHONE_VALIDATION_MESSAGE,
+  PAYMENT_REFERENCE_VALIDATION_MESSAGE,
+} from "@shared/payment-validation";
+import {
   decryptTotpSecret as decryptTotpSecretWithKey,
   generateSecureApiKey,
   verifyEmailDomainHasMx,
 } from "./merchant-admin-utils";
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
@@ -1996,12 +2004,19 @@ export async function registerRoutes(
       );
       if (update.rowCount) {
         if (nextStatus === "failed") {
-          const refund = await client.query(
-            `UPDATE merchant_countries SET balance = balance + $1
-             WHERE id = $2 RETURNING id`,
-            [withdrawal.amount, withdrawal.merchantCountryId],
+          const refund = await applyMerchantBalanceDelta(
+            withdrawal.merchantCountryId,
+            Number(withdrawal.amount),
+            {
+              eventType: "refund",
+              reference: `WD-${withdrawal.id}`,
+              sourceType: "withdrawal",
+              sourceId: withdrawal.id,
+              description: "Remboursement d'un retrait Drimpay échoué",
+            },
+            client,
           );
-          if (!refund.rowCount) {
+          if (!refund.applied) {
             throw new Error(`MerchantCountry introuvable pour le retrait Drimpay #${withdrawal.id}`);
           }
         }
@@ -2221,6 +2236,7 @@ export async function registerRoutes(
             phone,
             orderId,
             webhookUrl: `${callbackBaseUrl}/api/drimpay/webhook`,
+            description: `Retrait WestPay #${withdrawal.id}`,
           });
         } catch (error: any) {
           const statusCode = error instanceof DrimpayApiError ? error.statusCode : undefined;
@@ -3640,6 +3656,9 @@ export async function registerRoutes(
       const { id, balance, adminPassword } = req.body;
       if (id === undefined || balance === undefined) return res.status(400).json({ message: "ID et solde requis" });
       if (!adminPassword) return res.status(400).json({ message: "Mot de passe administrateur requis pour créditer un compte" });
+      if (!Number.isSafeInteger(Number(id)) || Number(id) <= 0 || !Number.isSafeInteger(Number(balance)) || Number(balance) < 0) {
+        return res.status(400).json({ message: "Identifiant ou solde invalide" });
+      }
 
       // ── Vérification du mot de passe admin ───────────────────────────────────
       const adminUser = (req as any).user;
@@ -3649,18 +3668,20 @@ export async function registerRoutes(
       if (!passwordValid) return res.status(403).json({ message: "Mot de passe administrateur incorrect" });
 
       // ── Lecture du solde actuel pour calculer le crédit admin ──────────────
-      const currentMC = await storage.getMerchantCountryById(id);
+      const currentMC = await storage.getMerchantCountryById(Number(id));
       if (!currentMC) return res.status(404).json({ message: "Wallet introuvable" });
 
-      await storage.updateMerchantCountryBalance(id, balance);
+      const adjustmentReference = `ADJ-${crypto.randomUUID()}`;
+      await storage.updateMerchantCountryBalance(Number(id), Number(balance), {
+        eventType: "admin_credit",
+        reference: adjustmentReference,
+        sourceType: "admin_balance_update",
+        sourceId: adjustmentReference,
+        actorAdminId: Number(adminUser.id),
+        description: `Solde ajusté par ${adminUser.email || `admin #${adminUser.id}`}`,
+      });
 
-      // ── Si le nouveau solde > solde actuel, enregistrer le crédit admin ────
-      if (balance > (currentMC.balance ?? 0)) {
-        const creditAmount = balance - (currentMC.balance ?? 0);
-        await storage.addAdminCreditToMC(id, creditAmount);
-      }
-
-      const updatedMC = await storage.getMerchantCountryById(id);
+      const updatedMC = await storage.getMerchantCountryById(Number(id));
       if (updatedMC) {
         const balMerchant = await storage.getMerchantById(updatedMC.merchantId);
         const rawIp = (req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "").split(",")[0].trim();
@@ -3669,7 +3690,7 @@ export async function registerRoutes(
             merchantName: balMerchant?.name || `#${updatedMC.merchantId}`,
             merchantEmail: balMerchant?.email,
             country: updatedMC.country,
-            newBalance: balance,
+            newBalance: Number(balance),
             adminEmail: adminUser?.email,
             adminId: adminUser?.id,
             ip: geo.ip || rawIp,
@@ -3680,7 +3701,7 @@ export async function registerRoutes(
             merchantName: balMerchant?.name || `#${updatedMC.merchantId}`,
             merchantEmail: balMerchant?.email,
             country: updatedMC.country,
-            newBalance: balance,
+            newBalance: Number(balance),
             adminEmail: adminUser?.email,
             adminId: adminUser?.id,
             ip: rawIp,
@@ -3688,6 +3709,107 @@ export async function registerRoutes(
         });
       }
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: safeErrMsg(err) });
+    }
+  });
+
+  app.get("/api/admin/balance-ledger", authMiddleware("admin"), async (req, res) => {
+    try {
+      const page = Math.max(1, Math.min(1_000_000, Number.parseInt(String(req.query.page || "1"), 10) || 1));
+      const limit = Math.max(1, Math.min(100, Number.parseInt(String(req.query.limit || "50"), 10) || 50));
+      const filters: string[] = [];
+      const values: unknown[] = [];
+      const addFilter = (sqlPart: (placeholder: string) => string, value: unknown) => {
+        values.push(value);
+        filters.push(sqlPart(`$${values.length}`));
+      };
+
+      const merchantId = String(req.query.merchantId || "all");
+      if (merchantId !== "all") {
+        const parsedMerchantId = Number(merchantId);
+        if (!Number.isSafeInteger(parsedMerchantId) || parsedMerchantId <= 0) {
+          return res.status(400).json({ message: "Identifiant marchand invalide" });
+        }
+        addFilter((p) => `merchant_id = ${p}`, parsedMerchantId);
+      }
+
+      const eventType = String(req.query.type || "all");
+      const allowedTypes = new Set([
+        "payin", "payin_reversal", "payout", "refund", "admin_credit", "admin_debit",
+        "wallet_transfer_in", "wallet_transfer_out", "adjustment",
+      ]);
+      if (eventType !== "all") {
+        if (!allowedTypes.has(eventType)) return res.status(400).json({ message: "Type de mouvement invalide" });
+        addFilter((p) => `event_type = ${p}`, eventType);
+      }
+
+      const country = String(req.query.country || "").trim();
+      if (country) addFilter((p) => `LOWER(country) = LOWER(${p})`, country.slice(0, 80));
+
+      const reference = String(req.query.reference || "").trim();
+      if (reference) {
+        addFilter((p) => `(COALESCE(reference, '') ILIKE ${p} OR COALESCE(description, '') ILIKE ${p} OR COALESCE(source_id, '') ILIKE ${p})`, `%${reference.slice(0, 120)}%`);
+      }
+
+      const fromDate = String(req.query.from || "").trim();
+      if (fromDate) {
+        const parsed = new Date(fromDate);
+        if (Number.isNaN(parsed.getTime())) return res.status(400).json({ message: "Date de début invalide" });
+        addFilter((p) => `created_at >= ${p}`, parsed);
+      }
+      const toDate = String(req.query.to || "").trim();
+      if (toDate) {
+        const parsed = new Date(toDate);
+        if (Number.isNaN(parsed.getTime())) return res.status(400).json({ message: "Date de fin invalide" });
+        parsed.setDate(parsed.getDate() + 1);
+        addFilter((p) => `created_at < ${p}`, parsed);
+      }
+
+      const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+      const countResult = await financialPool.query(
+        `SELECT COUNT(*)::bigint AS total FROM merchant_balance_ledger ${where}`,
+        values,
+      );
+      const offset = (page - 1) * limit;
+      const rowsResult = await financialPool.query(
+        `SELECT id, merchant_country_id, merchant_id, country, event_type, amount,
+                balance_before, balance_after, reference, source_type, source_id,
+                actor_admin_id, description, created_at
+           FROM merchant_balance_ledger
+           ${where}
+          ORDER BY created_at DESC, id DESC
+          LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+        [...values, limit, offset],
+      );
+
+      const merchantIds = rowsResult.rows
+        .map((row: any) => Number(row.merchant_id))
+        .filter((id: number, index: number, all: number[]) => Number.isSafeInteger(id) && id > 0 && all.indexOf(id) === index);
+      const adminIds = rowsResult.rows
+        .map((row: any) => Number(row.actor_admin_id))
+        .filter((id: number, index: number, all: number[]) => Number.isSafeInteger(id) && id > 0 && all.indexOf(id) === index);
+      const [merchantRows, adminRows] = await Promise.all([
+        merchantIds.length
+          ? db.select({ id: merchants.id, name: merchants.name }).from(merchants).where(inArray(merchants.id, merchantIds))
+          : [],
+        adminIds.length
+          ? db.select({ id: admins.id, email: admins.email }).from(admins).where(inArray(admins.id, adminIds))
+          : [],
+      ]);
+      const merchantNames = new Map(merchantRows.map((row) => [row.id, row.name]));
+      const adminEmails = new Map(adminRows.map((row) => [row.id, row.email]));
+
+      res.json({
+        items: rowsResult.rows.map((row: any) => ({
+          ...row,
+          merchantName: merchantNames.get(Number(row.merchant_id)) || `Marchand #${row.merchant_id}`,
+          actorAdminEmail: adminEmails.get(Number(row.actor_admin_id)) || null,
+        })),
+        page,
+        limit,
+        total: Number(countResult.rows[0]?.total || 0),
+      });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }
@@ -4490,7 +4612,13 @@ export async function registerRoutes(
       );
       inserted = Boolean(insert.rowCount);
       if (inserted) {
-        await client.query("UPDATE merchant_countries SET balance = balance + $1 WHERE id = $2", [credit, merchantCountry.id]);
+        await applyMerchantBalanceDelta(merchantCountry.id, credit, {
+          eventType: "payin",
+          reference: txId,
+          sourceType: "pending_payment",
+          sourceId: pending.id,
+          description: "Dépôt LipaPap confirmé",
+        }, client);
       }
       await client.query(
         `UPDATE pending_payments SET status = 'lipapap_confirmed'
@@ -4601,10 +4729,13 @@ export async function registerRoutes(
       );
       inserted = Boolean(insert.rowCount);
       if (inserted && successStatuses.has(status)) {
-        await client.query(
-          "UPDATE merchant_countries SET balance = balance + $1 WHERE id = $2",
-          [credit, merchantCountry!.id],
-        );
+        await applyMerchantBalanceDelta(merchantCountry!.id, credit, {
+          eventType: "payin",
+          reference: txId,
+          sourceType: "pending_payment",
+          sourceId: pending.id,
+          description: "Dépôt Drimpay confirmé",
+        }, client);
       }
       await client.query("COMMIT");
     } catch (error) {
@@ -5240,10 +5371,11 @@ export async function registerRoutes(
     try {
       const id = Number(req.body?.paymentId);
       const paymentToken = String(req.body?.paymentToken || "");
-      const proof = typeof req.body?.proof === "string" ? req.body.proof : "";
+      const proof = normalizePaymentReference(req.body?.proof);
       if (!Number.isInteger(id) || id <= 0 || !/^[a-f0-9]{64}$/i.test(paymentToken)) {
         return res.status(400).json({ message: "Informations de paiement invalides." });
       }
+      if (!proof) return res.status(400).json({ message: PAYMENT_REFERENCE_VALIDATION_MESSAGE });
 
       const pending = await storage.getPendingPaymentById(id);
       const expectedToken = pending?.paymentToken || "";
@@ -5281,6 +5413,7 @@ export async function registerRoutes(
           country: result.payment.country,
           operator: result.payment.paymentMethod,
           amount: result.payment.amount,
+          wavePaymentUrl: pending.manualWavePaymentUrl || null,
         });
         if (!sent) console.error(`[MANUAL PAYIN] Notification Telegram non envoyée pour le paiement #${result.payment.id}`);
       }
@@ -5291,7 +5424,7 @@ export async function registerRoutes(
         status: "manual_submitted",
       });
     } catch (err: any) {
-      if (String(err?.message || "").includes("entre 1 et 120")) {
+      if (String(err?.message || "").includes("au moins 8 caractères")) {
         return res.status(400).json({ message: err.message });
       }
       console.error("[MANUAL PAYIN] Erreur d’enregistrement de la preuve:", err?.message || err);
@@ -5356,7 +5489,24 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Cette page de paiement n'est plus disponible à cette adresse." });
       }
 
-      const { merchantSlug, country, amount, payerPhone, payerName, paymentMethod, redirectUrl, firstName, lastName, otp, operator, paymentLinkUniqueId } = req.body;
+      const {
+        merchantSlug,
+        country,
+        amount,
+        payerPhone: rawPayerPhone,
+        payerName,
+        paymentMethod,
+        redirectUrl,
+        firstName,
+        lastName,
+        otp,
+        operator,
+        paymentLinkUniqueId,
+      } = req.body;
+      const normalizedPayerPhone = normalizePaymentPhone(rawPayerPhone);
+      const payerPhone = normalizedPayerPhone || "";
+      const hasPayerPhoneInput = rawPayerPhone !== undefined && rawPayerPhone !== null &&
+        (typeof rawPayerPhone !== "string" || rawPayerPhone.trim().length > 0);
       if (!merchantSlug || !country || !amount || !paymentMethod) {
         return res.status(400).json({ message: "Marchand, pays, montant et methode de paiement requis" });
       }
@@ -5433,6 +5583,9 @@ export async function registerRoutes(
         });
       }
 
+      if (hasPayerPhoneInput && !isValidPaymentPhone(rawPayerPhone)) {
+        return res.status(400).json({ message: PAYMENT_PHONE_VALIDATION_MESSAGE });
+      }
       if (!payerPhone && !hasActiveWaveManualLink) {
         return res.status(400).json({ message: "Numero de telephone requis" });
       }
@@ -5447,7 +5600,7 @@ export async function registerRoutes(
         "Ghana": "233", "Niger": "227", "Kenya": "254",
       };
       const dialCode = dialCodes[country] || "";
-      const cleanPhone = (payerPhone || "").replace(/[\s\-\(\)\+]/g, "");
+      const cleanPhone = payerPhone.replace(/[\s\-\(\)\+]/g, "");
       // Certains pays utilisent un 0 comme préfixe national (ex: RDC 0981556946 → international 243981556946)
       const TRUNK_PREFIX_COUNTRIES = new Set(["Congo RDC", "Congo Brazzaville", "Gabon"]);
       const localPhone = (TRUNK_PREFIX_COUNTRIES.has(country) && cleanPhone.startsWith("0") && !cleanPhone.startsWith(dialCode))
@@ -6415,7 +6568,14 @@ export async function registerRoutes(
         );
         if (!claimed.rowCount) return res.status(409).json({ message: "Le retrait a été traité entre-temps" });
         await storage.updateWithdrawalStatus(id, "failed", `Échec confirmé chez ${effectiveProvider} par l'admin`);
-        await storage.incrementMerchantCountryBalance(w.merchantCountryId, w.amount);
+        await storage.incrementMerchantCountryBalance(w.merchantCountryId, w.amount, {
+          eventType: "refund",
+          reference: `WD-${w.id}`,
+          sourceType: "withdrawal",
+          sourceId: w.id,
+          actorAdminId: Number((req as any).user?.id) || null,
+          description: "Remboursement après échec confirmé par l'administrateur",
+        });
         console.log(`[ADMIN SYNC-STATUS WD] Retrait #${id} marqué échoué suite à ${effectiveProvider} (statut: ${providerStatus})`);
         return res.json({ success: true, applied: "failed", providerStatus, data: raw });
       }
@@ -6651,7 +6811,14 @@ export async function registerRoutes(
       const merchant = await storage.getMerchantById(w.merchantId);
       await storage.updateWithdrawalStatus(id, "rejected", note || "Rejeté manuellement par l'administrateur");
       if (w.status === "pending" || w.status === "failed") {
-        await storage.incrementMerchantCountryBalance(w.merchantCountryId, w.amount);
+        await storage.incrementMerchantCountryBalance(w.merchantCountryId, w.amount, {
+          eventType: "refund",
+          reference: `WD-${w.id}`,
+          sourceType: "withdrawal",
+          sourceId: w.id,
+          actorAdminId: Number((req as any).user?.id) || null,
+          description: "Remboursement après rejet manuel par l'administrateur",
+        });
       }
       notifyAdminWithdrawal({ id, merchantName: merchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "rejected", mode: "manual" }).catch(() => {});
       notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "rejected" }).catch(() => {});
@@ -7011,7 +7178,14 @@ export async function registerRoutes(
           if (!existingTx && mc) {
             const credit = calcMerchantCreditForMerchant(pp.amount, pp.country, merchant);
             const fee = pp.amount - credit;
-            await storage.incrementMerchantCountryBalance(mc.id, credit);
+            await storage.incrementMerchantCountryBalance(mc.id, credit, {
+              eventType: "payin",
+              reference: txRef,
+              sourceType: "pending_payment",
+              sourceId: pp.id,
+              actorAdminId: Number((req as any).user?.id) || null,
+              description: "Dépôt confirmé manuellement par l'administrateur",
+            });
             await storage.createTransaction({
               merchantId: pp.merchantId,
               country: pp.country,
@@ -7056,7 +7230,14 @@ export async function registerRoutes(
             const mc = await storage.findMerchantCountryBySimAndCountry(txRecord.merchantId, txRecord.country || "");
             if (mc) {
               const credit = calcMerchantCreditForMerchant(txRecord.amount, txRecord.country, merchant);
-              await storage.incrementMerchantCountryBalance(mc.id, credit);
+              await storage.incrementMerchantCountryBalance(mc.id, credit, {
+                eventType: "payin",
+                reference: txRecord.txId,
+                sourceType: "transaction",
+                sourceId: txRecord.id,
+                actorAdminId: Number((req as any).user?.id) || null,
+                description: "Dépôt confirmé manuellement par l'administrateur",
+              });
               await financialDb.update(transactions)
                 .set({ status: "confirmed", merchantCredit: credit })
                 .where(eq(transactions.id, id));
@@ -8471,7 +8652,15 @@ export async function registerRoutes(
       if (manualPayoutNumber) {
         const internalRef = mbiyoGenerateRef();
         const fees = totalDeducted - amount;
-        await storage.updateMerchantCountryBalance(mc.id, mc.balance - totalDeducted);
+        const manualDebit = await storage.decrementMerchantCountryBalanceAtomic(mc.id, totalDeducted, {
+          eventType: "payout",
+          reference: internalRef,
+          sourceType: "sdk_payout",
+          description: "Réservation du solde pour un retrait SDK manuel",
+        });
+        if (!manualDebit) {
+          return res.status(422).json({ status: "error", message: "Solde insuffisant pour ce retrait." });
+        }
         let withdrawal: Awaited<ReturnType<typeof storage.createWithdrawal>>;
         try {
           withdrawal = await storage.createWithdrawal({
@@ -8485,11 +8674,17 @@ export async function registerRoutes(
             operator: payoutOperator.name,
             adminNote: null,
             fees,
+            balanceDebitedAmount: totalDeducted,
             gateway: "manual",
             providerReference: internalRef,
           });
         } catch (error) {
-          await storage.updateMerchantCountryBalance(mc.id, mc.balance);
+          await storage.incrementMerchantCountryBalance(mc.id, totalDeducted, {
+            eventType: "refund",
+            reference: internalRef,
+            sourceType: "sdk_payout",
+            description: "Annulation de la réservation après échec de création du retrait SDK",
+          });
           throw error;
         }
         notifyAdminWithdrawal({
@@ -8553,7 +8748,15 @@ export async function registerRoutes(
 
       const internalRef = mbiyoGenerateRef();
 
-      await storage.updateMerchantCountryBalance(mc.id, mc.balance - totalDeducted);
+      const autoDebit = await storage.decrementMerchantCountryBalanceAtomic(mc.id, totalDeducted, {
+        eventType: "payout",
+        reference: internalRef,
+        sourceType: "sdk_payout",
+        description: "Réservation du solde pour un retrait SDK",
+      });
+      if (!autoDebit) {
+        return res.status(422).json({ status: "error", message: "Solde insuffisant pour ce retrait." });
+      }
 
       const appUrl = process.env.APP_URL || "http://Westpay.cfd";
       const mbiyoResult = await mbiyoInitiatePayout({
@@ -8569,7 +8772,12 @@ export async function registerRoutes(
       });
 
       if (mbiyoResult.status !== "success" && mbiyoResult.status !== "pending") {
-        await storage.updateMerchantCountryBalance(mc.id, mc.balance);
+        await storage.incrementMerchantCountryBalance(mc.id, totalDeducted, {
+          eventType: "refund",
+          reference: internalRef,
+          sourceType: "sdk_payout",
+          description: "Remboursement après refus d'initiation du retrait SDK",
+        });
         notifyAdminWithdrawalError({
           merchantName: merchant.name,
           merchantId: merchant.id,
@@ -8596,6 +8804,7 @@ export async function registerRoutes(
         operator: metadata.network,
         adminNote: null,
         fees,
+        balanceDebitedAmount: totalDeducted,
         gateway: "mbiyo",
         providerReference: internalRef,
       });
@@ -8892,9 +9101,13 @@ export async function registerRoutes(
 
 app.post("/api/payment/validate", validateRateLimit, async (req, res) => {
     try {
-      const { paymentId, txId } = req.body;
+      const paymentId = req.body?.paymentId;
+      const txId = normalizePaymentReference(req.body?.txId);
       if (!paymentId || !txId) {
-        return res.status(400).json({ success: false, message: "ID de paiement et ID de transaction requis" });
+        return res.status(400).json({
+          success: false,
+          message: !paymentId ? "ID de paiement requis" : PAYMENT_REFERENCE_VALIDATION_MESSAGE,
+        });
       }
 
       // Per-paymentId attempt limiter (defeats distributed per-IP rate limit bypass)
@@ -9132,7 +9345,13 @@ app.post("/api/mbiyo/callback", async (req, res) => {
           return res.status(500).json({ message: "MerchantCountry introuvable — réessayez" });
         }
 
-        await storage.incrementMerchantCountryBalance(mc.id, credit);
+        await storage.incrementMerchantCountryBalance(mc.id, credit, {
+          eventType: "payin",
+          reference: String(payload.transaction_id || payload.order_id || ""),
+          sourceType: "pending_payment",
+          sourceId: pending.id,
+          description: "Dépôt Mbiyo confirmé",
+        });
 
         const txRef = payload.transaction_id || payload.order_id;
         const tx = await storage.createTransaction({
@@ -9289,7 +9508,13 @@ app.post("/api/mbiyo/payout-callback", async (req, res) => {
       // Reconciliation : retrait marqué failed chez nous mais confirmé par Mbiyo
       if (withdrawal.status === "failed" && wdIsSuccess) {
         const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
-        if (mc) await storage.decrementMerchantCountryBalance(mc.id, withdrawal.amount);
+        if (mc) await storage.decrementMerchantCountryBalance(mc.id, withdrawal.amount, {
+          eventType: "payout",
+          reference: `WD-${withdrawal.id}`,
+          sourceType: "withdrawal",
+          sourceId: withdrawal.id,
+          description: "Retrait confirmé après réconciliation avec le fournisseur",
+        });
         await storage.updateWithdrawalStatus(withdrawal.id, "approved", `Retrait confirmé`, payload.order_id, wdFees, wdFees);
         console.log(`[MBIYO PAYOUT CALLBACK] Reconciliation retrait #${withdrawal.id} — redebit balance ${withdrawal.amount}`);
         res.json({ status: "reconciled" });
@@ -9316,7 +9541,13 @@ app.post("/api/mbiyo/payout-callback", async (req, res) => {
       } else if (wdIsFailure) {
         await storage.updateWithdrawalStatus(withdrawal.id, "failed", `Transfert Mbiyo echoue - statut: ${payload.status}`, payload.order_id);
         const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
-        if (mc) await storage.incrementMerchantCountryBalance(mc.id, withdrawal.amount);
+        if (mc) await storage.incrementMerchantCountryBalance(mc.id, withdrawal.amount, {
+          eventType: "refund",
+          reference: `WD-${withdrawal.id}`,
+          sourceType: "withdrawal",
+          sourceId: withdrawal.id,
+          description: "Remboursement d'un retrait Mbiyo échoué",
+        });
         console.log(`[MBIYO PAYOUT CALLBACK] Retrait #${withdrawal.id} echoue - ref=${payload.order_id}`);
         res.json({ status: "failed" });
         setImmediate(() => {
@@ -9476,7 +9707,13 @@ app.post("/api/lipapap/callback", async (req, res) => {
               `Payout LipaPap échoué: ${body.decline_reason || body.message || status}`,
               orderId,
             );
-            await storage.incrementMerchantCountryBalance(withdrawal.merchantCountryId, withdrawal.amount);
+            await storage.incrementMerchantCountryBalance(withdrawal.merchantCountryId, withdrawal.amount, {
+              eventType: "refund",
+              reference: `WD-${withdrawal.id}`,
+              sourceType: "withdrawal",
+              sourceId: withdrawal.id,
+              description: "Remboursement d'un retrait LipaPap échoué",
+            });
             notifyAdminWithdrawal({ id: withdrawal.id, merchantName: `#${withdrawal.merchantId}`, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed", mode: withdrawal.withdrawalMode }).catch(() => {});
             notifyMerchantWithdrawal(withdrawal.merchantId, { id: withdrawal.id, country: withdrawal.country, amount: withdrawal.amount, fees: 0, phone: withdrawal.phone, operator: withdrawal.operator, status: "failed" }).catch(() => {});
           }
@@ -9590,10 +9827,13 @@ app.post("/api/seapay/callback", async (req, res) => {
 
           if (txInsert.rowCount && txInsert.rowCount > 0) {
             // Nouvelle insertion : créditer le solde marchand avec le montant net (après frais plateforme)
-            await seapayTxClient.query(
-              `UPDATE merchant_countries SET balance = balance + $1 WHERE id = $2`,
-              [merchantCredit, creditedMcId]
-            );
+            await applyMerchantBalanceDelta(creditedMcId, merchantCredit, {
+              eventType: "payin",
+              reference: txId,
+              sourceType: "pending_payment",
+              sourceId: pending.id,
+              description: "Dépôt SeaPay confirmé",
+            }, seapayTxClient);
           } else {
             // La ligne existait déjà — la tentative précédente a déjà crédité le solde. On ne crédite pas à nouveau.
             console.warn(`[SEAPAY CALLBACK] Transaction ${txId} existait déjà — crédit ignoré pour éviter le doublon`);
@@ -9687,7 +9927,13 @@ app.post("/api/seapay/payout-callback", async (req, res) => {
       } else {
         await storage.updateWithdrawalStatus(withdrawal.id, "failed", `Transfert SeaPay echoue - statut: ${status}`, orderId);
         const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
-        if (mc) await storage.incrementMerchantCountryBalance(mc.id, withdrawal.amount);
+        if (mc) await storage.incrementMerchantCountryBalance(mc.id, withdrawal.amount, {
+          eventType: "refund",
+          reference: `WD-${withdrawal.id}`,
+          sourceType: "withdrawal",
+          sourceId: withdrawal.id,
+          description: "Remboursement d'un retrait SeaPay échoué",
+        });
         console.log(`[SEAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} echoue - ref=${orderId}`);
       }
       res.json({ status: isSuccess ? "approved" : "failed" });
@@ -9754,7 +10000,13 @@ app.post("/api/clapay/callback", async (req, res) => {
         const txRef = `CP-${reference}`;
         const existingTx = await storage.getTransactionByTxId(txRef);
         if (!existingTx) {
-          await storage.incrementMerchantCountryBalance(mc.id, credit);
+          await storage.incrementMerchantCountryBalance(mc.id, credit, {
+            eventType: "payin",
+            reference: txRef,
+            sourceType: "pending_payment",
+            sourceId: pending.id,
+            description: "Dépôt ClaPay confirmé",
+          });
           await storage.createTransaction({
             merchantId: pending.merchantId,
             country: pending.country,
@@ -9856,7 +10108,13 @@ app.post("/api/clapay/payout-callback", async (req, res) => {
         if (withdrawal.status === "pending") {
           await storage.updateWithdrawalStatus(withdrawal.id, "failed", `Rejeté par ClaPay — statut ${statusUpper}`, orderId);
           const mc = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
-          if (mc) await storage.incrementMerchantCountryBalance(mc.id, withdrawal.amount);
+          if (mc) await storage.incrementMerchantCountryBalance(mc.id, withdrawal.amount, {
+            eventType: "refund",
+            reference: `WD-${withdrawal.id}`,
+            sourceType: "withdrawal",
+            sourceId: withdrawal.id,
+            description: "Remboursement d'un retrait ClaPay échoué",
+          });
         }
         console.log(`[CLAPAY PAYOUT CALLBACK] Retrait #${withdrawal.id} échoué`);
       } else {
@@ -9893,7 +10151,10 @@ app.post("/api/drimpay/webhook", async (req, res) => {
       const payload = req.body && typeof req.body === "object" ? req.body : {};
       const data = payload.data && typeof payload.data === "object" ? payload.data : payload;
       const event = String(payload.event || payload.type || data.event || "").toLowerCase();
-      const orderId = String(data.order_id || data.orderId || payload.order_id || "").trim();
+      const orderId = String(
+        data.order_id || data.orderId || data.external_ref ||
+        payload.order_id || payload.orderId || payload.external_ref || "",
+      ).trim();
       const externalReference = String(
         data.reference || data.payment_reference || data.transaction_reference ||
         payload.reference || payload.payment_reference || payload.transaction_reference || "",
@@ -10309,7 +10570,14 @@ app.post("/api/admin/mbiyo/confirm-payment", authMiddleware("admin"), async (req
 
       const mc = await storage.findMerchantCountryBySimAndCountry(pending.merchantId, pending.country);
       if (mc) {
-        await storage.incrementMerchantCountryBalance(mc.id, credit);
+        await storage.incrementMerchantCountryBalance(mc.id, credit, {
+          eventType: "payin",
+          reference: String(txId || reference),
+          sourceType: "pending_payment",
+          sourceId: pending.id,
+          actorAdminId: Number((req as any).user?.id) || null,
+          description: "Dépôt confirmé manuellement par l'administrateur",
+        });
       }
 
       const tx = await storage.createTransaction({
@@ -10457,7 +10725,12 @@ app.post("/api/merchant/transfer", apiKeyAuthMiddleware, async (req, res) => {
       });
       if (!result.success) return res.status(400).json({ message: result.message || "Transfert refusé par le fournisseur" });
 
-      const debited = await storage.decrementMerchantCountryBalanceAtomic(merchantCountry.id, parsedAmount);
+      const debited = await storage.decrementMerchantCountryBalanceAtomic(merchantCountry.id, parsedAmount, {
+        eventType: "payout",
+        reference,
+        sourceType: "merchant_transfer",
+        description: "Transfert ClaPay vers un bénéficiaire",
+      });
       if (!debited) {
         return res.status(409).json({ message: "Solde insuffisant après vérification atomique; contactez l'administrateur avec la référence.", reference });
       }
@@ -10681,7 +10954,12 @@ app.post("/sms/receive", async (req, res) => {
           merchantCredit: merchantCredit2,
         });
 
-        await storage.incrementMerchantCountryBalance(merchantCountry.id, merchantCredit2);
+        await storage.incrementMerchantCountryBalance(merchantCountry.id, merchantCredit2, {
+          eventType: "payin",
+          reference: txId,
+          sourceType: "transaction",
+          description: "Dépôt confirmé par SMS",
+        });
 
         await storage.createSmsLog({
           fromSim: normalizedSim,
@@ -10781,7 +11059,12 @@ app.post("/sms/receive", async (req, res) => {
         merchantCredit: merchantCredit3,
       });
 
-      await storage.incrementMerchantCountryBalance(merchantCountry.id, merchantCredit3);
+      await storage.incrementMerchantCountryBalance(merchantCountry.id, merchantCredit3, {
+        eventType: "payin",
+        reference: txId,
+        sourceType: "transaction",
+        description: "Dépôt confirmé par SMS",
+      });
 
       await storage.createSmsLog({
         fromSim: normalizedSim,
@@ -11225,7 +11508,14 @@ app.post("/api/merchant/wallet-transfers", authMiddleware("merchant"), async (re
       }
 
       // ── DÉBIT ATOMIQUE transfert (élimine la race condition) ──────────────────
-      const transferDebited = await storage.decrementMerchantCountryBalanceAtomic(fromMC.id, totalNeeded);
+      const transferReference = `WTR-${crypto.randomUUID()}`;
+      const transferDebited = await storage.decrementMerchantCountryBalanceAtomic(fromMC.id, totalNeeded, {
+        eventType: "wallet_transfer_out",
+        reference: transferReference,
+        sourceType: "wallet_transfer",
+        sourceId: transferReference,
+        description: `Transfert en attente de ${fromMC.country} vers ${toMC.country}`,
+      });
       if (!transferDebited) {
         return res.status(400).json({ message: "Solde insuffisant (vérification atomique échouée)" });
       }
@@ -11619,7 +11909,14 @@ app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, re
       const withdrawalFee = merchant.customFeeRate != null
         ? Math.floor(amount * merchant.customFeeRate / 100)
         : merchant.feeExempt ? 0 : calcWithdrawalFee(amount, merchantCountry.country);
-      const debit = await storage.decrementMerchantCountryBalanceAtomic(merchantCountry.id, amount);
+      const payoutReference = `WDP-${crypto.randomUUID()}`;
+      const debit = await storage.decrementMerchantCountryBalanceAtomic(merchantCountry.id, amount, {
+        eventType: "payout",
+        reference: payoutReference,
+        sourceType: "withdrawal_request",
+        sourceId: payoutReference,
+        description: `Réservation du solde pour un retrait via ${provider}`,
+      });
       if (!debit) return res.status(400).json({ message: "Solde insuffisant (vérification atomique échouée)" });
       reservedBalance = true;
 
@@ -11638,9 +11935,16 @@ app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, re
           adminNote: null,
           gateway: provider,
           fees: withdrawalFee,
+          balanceDebitedAmount: amount,
         });
       } catch (error) {
-        await storage.incrementMerchantCountryBalance(merchantCountry.id, amount);
+        await storage.incrementMerchantCountryBalance(merchantCountry.id, amount, {
+          eventType: "refund",
+          reference: payoutReference,
+          sourceType: "withdrawal_request",
+          sourceId: payoutReference,
+          description: "Annulation de la réservation après échec de création du retrait",
+        });
         reservedBalance = false;
         throw error;
       }
@@ -11708,7 +12012,13 @@ app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, re
           });
         }
         await storage.updateWithdrawalStatus(createdWithdrawal.id, "failed", payout.message);
-        await storage.incrementMerchantCountryBalance(merchantCountry.id, amount);
+        await storage.incrementMerchantCountryBalance(merchantCountry.id, amount, {
+          eventType: "refund",
+          reference: `WD-${createdWithdrawal.id}`,
+          sourceType: "withdrawal",
+          sourceId: createdWithdrawal.id,
+          description: "Remboursement après refus du fournisseur",
+        });
         reservedBalance = false;
         return res.status(502).json({ message: "Le fournisseur a refusé le retrait. Le solde a été restitué." });
       }
@@ -11735,7 +12045,11 @@ app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, re
       });
     } catch (err: any) {
       if (reservedBalance && merchantCountry && !createdWithdrawal) {
-        await storage.incrementMerchantCountryBalance(merchantCountry.id, Number(req.body?.amount) || 0).catch(() => {});
+        await storage.incrementMerchantCountryBalance(merchantCountry.id, Number(req.body?.amount) || 0, {
+          eventType: "refund",
+          sourceType: "withdrawal_request",
+          description: "Remboursement après échec de création du retrait",
+        }).catch(() => {});
       }
       return res.status(500).json({ message: safeErrMsg(err) });
     }
@@ -11860,7 +12174,14 @@ app.put("/api/admin/withdrawals/:id/reject", authMiddleware("admin"), async (req
       if (w.status !== "pending") return res.status(400).json({ message: "Reversement deja traite" });
       const rejMerchant = await storage.getMerchantById(w.merchantId);
       await storage.updateWithdrawalStatus(id, "rejected", note);
-      await storage.incrementMerchantCountryBalance(w.merchantCountryId, w.amount);
+      await storage.incrementMerchantCountryBalance(w.merchantCountryId, w.amount, {
+        eventType: "refund",
+        reference: `WD-${w.id}`,
+        sourceType: "withdrawal",
+        sourceId: w.id,
+        actorAdminId: Number((req as any).user?.id) || null,
+        description: "Remboursement après rejet du reversement",
+      });
       notifyAdminWithdrawal({ id, merchantName: rejMerchant?.name || `#${w.merchantId}`, country: w.country, amount: w.amount, fees: 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "rejected", mode: "manual" }).catch(() => {});
       notifyMerchantWithdrawal(w.merchantId, { id, country: w.country, amount: w.amount, fees: 0, phone: w.phone, accountNumber: w.accountNumber, operator: w.operator, status: "rejected" }).catch(() => {});
       res.json({ success: true });

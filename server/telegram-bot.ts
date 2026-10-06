@@ -61,6 +61,7 @@ import {
 } from "./lipapap";
 import {
   getDrimpayConfig,
+  getDrimpayWalletBalance,
   initiateDrimpayPayout,
   getDrimpayPayoutStatus,
   normalizeDrimpayStatus,
@@ -868,17 +869,21 @@ type GatewayWalletBalance = {
   amount: number;
   pending?: number;
   frozen?: number;
+  active?: boolean;
+  mode?: string;
 };
 
 type GatewayBalanceResult = {
   wallets: GatewayWalletBalance[];
   skippedCountries?: string[];
+  totalsLabel?: string;
 };
 
 const GATEWAY_BALANCE_OPTIONS = [
   { id: "mbiyo", label: "MbiyoPay" },
   { id: "seapay", label: "SeaPay" },
   { id: "clapay", label: "ClaPay" },
+  { id: "drimpay", label: "Drimpay" },
 ] as const;
 
 type GatewayBalanceId = typeof GATEWAY_BALANCE_OPTIONS[number]["id"];
@@ -910,6 +915,7 @@ function gatewayBalanceMenuMarkup() {
       ],
       [
         { text: "💰 MbiyoPay", callback_data: "gateway_balance:mbiyo" },
+        { text: "💰 Drimpay", callback_data: "gateway_balance:drimpay" },
       ],
     ],
   };
@@ -945,6 +951,10 @@ function formatGatewayBalanceMessage(
           `🌍 *${wallet.country}*`,
           `💳 ${gatewayMoney(wallet.amount, wallet.currency)}`,
         ];
+        if (wallet.active !== undefined) {
+          details.push(wallet.active ? "✅ Actif" : "⛔ Inactif");
+        }
+        if (wallet.mode) details.push(`🔐 ${wallet.mode}`);
         if (wallet.pending !== undefined) {
           details.push(`⏳ En attente : ${gatewayMoney(wallet.pending, wallet.currency)}`);
         }
@@ -956,12 +966,12 @@ function formatGatewayBalanceMessage(
     : "Aucun wallet pays retourné.";
 
   const skipped = result.skippedCountries?.length
-    ? `\n\nℹ️ *Pays non configurés :* ${result.skippedCountries.join(", ")}`
+    ? `\n\nℹ️ *Pays indisponibles ou non configurés :* ${result.skippedCountries.join(", ")}`
     : "";
 
   return (
     `🏦 *Soldes — ${gatewayLabel}*\n\n` +
-    `🌐 *Solde global du compte*\n${totalLines}\n\n` +
+    `🌐 *${result.totalsLabel || "Solde global du compte"}*\n${totalLines}\n\n` +
     `💳 *Soldes des wallets par pays*\n${walletLines}` +
     skipped +
     `\n\n🕒 Mis à jour : ${new Date().toLocaleString("fr-FR", { timeZone: "Africa/Abidjan" })}`
@@ -1016,6 +1026,58 @@ async function fetchGatewayBalances(gateway: GatewayBalanceId): Promise<GatewayB
     };
   }
 
+  if (gateway === "drimpay") {
+    const config = await getDrimpayConfig();
+    if (!config) throw new Error("Drimpay n'est pas configuré.");
+    const countriesByCode = new Map<string, { country: string; countryCode: string }>();
+    for (const [country, mapping] of Object.entries(config.countryMappings)) {
+      const countryCode = mapping.countryCode.toUpperCase();
+      if (!countriesByCode.has(countryCode)) countriesByCode.set(countryCode, { country, countryCode });
+    }
+    const countries = Array.from(countriesByCode.values());
+    if (countries.length === 0) throw new Error("Aucun code pays Drimpay n'est configuré.");
+
+    const settled: Array<{
+      country: string;
+      wallet: GatewayWalletBalance | null;
+      error?: string;
+    }> = await Promise.all(countries.map(async ({ country, countryCode }) => {
+      try {
+        const result = await getDrimpayWalletBalance(config, countryCode);
+        return {
+          country,
+          wallet: {
+            country,
+            currency: result.currency,
+            amount: normalizeGatewayAmount(result.balance),
+            active: result.active,
+            mode: result.mode,
+          },
+        };
+      } catch (error) {
+        return {
+          country,
+          wallet: null,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }));
+    const wallets = settled.flatMap((item) => item.wallet ? [item.wallet] : []);
+    const skippedCountries = settled.filter((item) => !item.wallet).map((item) => item.country);
+    if (wallets.length === 0) {
+      const firstError = settled.find((item) => item.error)?.error;
+      throw new Error(
+        `Aucun wallet Drimpay accessible (${countries.map(item => item.country).join(", ")})` +
+        (firstError ? ` : ${firstError}` : "."),
+      );
+    }
+    return {
+      wallets,
+      skippedCountries,
+      totalsLabel: "Total des wallets disponibles",
+    };
+  }
+
   const seapayCountries = Object.entries(SEAPAY_BALANCE_COUNTRIES);
   const settled = await Promise.all(seapayCountries.map(async ([country, currency]) => {
     const [merchantId, apiSecret] = await Promise.all([
@@ -1050,7 +1112,7 @@ async function fetchGatewayBalances(gateway: GatewayBalanceId): Promise<GatewayB
 async function replyGatewayBalanceMenu(ctx: any): Promise<void> {
   await ctx.reply(
     "🏦 *Soldes des gateways*\n\nSélectionnez le gateway à consulter :\n\n" +
-    "Le résultat affichera le solde global du compte et le détail des wallets par pays.",
+    "Le résultat affichera les totaux disponibles par devise et le détail des wallets par pays.",
     { parse_mode: "Markdown", reply_markup: gatewayBalanceMenuMarkup() },
   );
 }
@@ -1812,12 +1874,12 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     await ctx.answerCbQuery();
     await ctx.editMessageText(
       "🏦 *Soldes des gateways*\n\nSélectionnez le gateway à consulter :\n\n" +
-      "Le résultat affichera le solde global du compte et le détail des wallets par pays.",
+      "Le résultat affichera les totaux disponibles par devise et le détail des wallets par pays.",
       { parse_mode: "Markdown", reply_markup: gatewayBalanceMenuMarkup() },
     );
   });
 
-  bot.action(/^gateway_balance:(mbiyo|seapay|clapay)$/, async (ctx) => {
+  bot.action(/^gateway_balance:(mbiyo|seapay|clapay|drimpay)$/, async (ctx) => {
     const chatId = String(ctx.chat?.id || "");
     if (!chatId || !await isAdminGroup(chatId)) {
       await ctx.answerCbQuery("⛔ Non autorisé").catch(() => {});
@@ -2563,7 +2625,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `/findpayment NUMERO — Rechercher tous les paiements et leur historique\n` +
           `/findmanualpayment NUMERO — Alias historique de la commande\n` +
            `/annulerpaiement NUMÉRO CLIENT OU RÉFÉRENCE (/cancelpayment) — Annuler un paiement confirmé et débiter le solde marchand\n` +
-          `/gatewaybalance@Westpaybot — Consulter le solde d'un gateway et ses wallets pays\n\n` +
+           `/gatewaybalance@Westpaybot — Consulter les soldes SeaPay, ClaPay, MbiyoPay et Drimpay par pays\n\n` +
           `📢 *Diffusion*\n` +
           `/broadcast — Envoyer un message dans les groupes\n` +
           `/groups — Lister tous les groupes où le bot est présent\n` +
@@ -4464,6 +4526,7 @@ export async function notifyAdminManualPaymentSubmission(data: {
   country: string;
   operator: string;
   amount: number;
+  wavePaymentUrl?: string | null;
 }): Promise<boolean> {
   try {
     const groupId = await storage.getSetting("telegram_group_id");
@@ -4480,6 +4543,9 @@ export async function notifyAdminManualPaymentSubmission(data: {
       `Montant : ${formatAmountC(data.amount, data.country)}`,
       `Pays : ${countryLabel(data.country)}`,
       `Opérateur : ${operator}`,
+      ...(data.wavePaymentUrl?.trim()
+        ? [`Lien Wave utilisé (lien/QR) : ${data.wavePaymentUrl.trim()}`]
+        : []),
       `Nom du client : ${data.payerName || "N/A"}`,
       `Numéro du client : ${data.payerNumber || "N/A"}`,
       `Numéro destinataire : ${data.recipientPhone || "N/A"}`,

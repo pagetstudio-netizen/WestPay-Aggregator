@@ -1,4 +1,8 @@
 import { useState } from "react";
+import {
+  normalizePaymentReference,
+  PAYMENT_REFERENCE_VALIDATION_MESSAGE,
+} from "@shared/payment-validation";
 import manualPaymentDesign from "../../../attached_assets/Pasted--box-sizing-border-box-html-body-root-margin-0-padding-_1791238715582.txt?raw";
 import copyIconPng from "../../../attached_assets/copie_1791241107801.png";
 import waveBrandLogo from "../../../attached_assets/1756606482154_1791243181275.png";
@@ -572,8 +576,12 @@ export default function ManualPaymentStep({
   };
 
   const submitPayment = async () => {
-    const cleanProof = proofReference.trim();
-    if (!cleanProof || submitting || submitted) return;
+    const cleanProof = normalizePaymentReference(proofReference);
+    if (!cleanProof) {
+      showMessage(PAYMENT_REFERENCE_VALIDATION_MESSAGE);
+      return;
+    }
+    if (submitting || submitted) return;
     if (previewMode) {
       showMessage("Aperçu : l’envoi de preuve est désactivé.");
       return;
@@ -606,8 +614,9 @@ export default function ManualPaymentStep({
   };
 
   const checkPayment = async () => {
-    if (!proofReference.trim()) {
-      setStatusFeedback("Veuillez entrer la référence du paiement pour vérifier son statut.");
+    const cleanProof = normalizePaymentReference(proofReference);
+    if (!cleanProof) {
+      setStatusFeedback(PAYMENT_REFERENCE_VALIDATION_MESSAGE);
       return;
     }
     if (checking) return;
@@ -630,7 +639,7 @@ export default function ManualPaymentStep({
 
       if (data.status === "confirmed") {
         setStatusFeedback("");
-        setSuccessReference(proofReference.trim());
+        setSuccessReference(cleanProof);
         setSuccess(true);
       } else if (data.status === "failed") {
         setStatusFeedback("Paiement non confirmé. Vérifiez la référence et réessayez si nécessaire.");
@@ -884,13 +893,21 @@ export default function ManualPaymentStep({
 
             <button
               type="button"
-              className={`submit-btn ${proofReference.trim() && !submitted ? "active" : ""}`}
-              disabled={!proofReference.trim() || submitting || submitted}
+              className={`submit-btn ${normalizePaymentReference(proofReference) && !submitted ? "active" : ""}`}
+              disabled={!normalizePaymentReference(proofReference) || submitting || submitted}
               onClick={() => void submitPayment()}
             >
               Soumettre
             </button>
           </div>
+          <p style={{ color: "#64748b", fontSize: 12, margin: "6px 2px 0" }}>
+            Référence ou message reçu : au moins 8 caractères non blancs (texte ou chiffres).
+          </p>
+          {proofReference.trim() && !normalizePaymentReference(proofReference) && (
+            <p role="alert" style={{ color: "#dc2626", fontSize: 12, margin: "4px 2px 0" }}>
+              {PAYMENT_REFERENCE_VALIDATION_MESSAGE}
+            </p>
+          )}
 
           <button
             type="button"

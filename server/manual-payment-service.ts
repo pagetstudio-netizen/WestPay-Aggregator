@@ -1,8 +1,13 @@
 import { financialPool } from "./db";
 import { storage } from "./storage";
+import { applyMerchantBalanceDelta } from "./merchant-balance-ledger";
 import { calcMerchantCreditForMerchant } from "./payment-fees";
 import { getPaymentReviewActions } from "./payment-review-rules";
 import { AUTO_TIMEOUT_ERROR_MARKER } from "./reconciliation-policy";
+import {
+  normalizePaymentReference,
+  PAYMENT_REFERENCE_VALIDATION_MESSAGE,
+} from "@shared/payment-validation";
 
 export type ManualPaymentRecord = {
   id: number;
@@ -66,10 +71,8 @@ export async function submitManualPaymentProof(
   paymentToken: string,
   proof: string,
 ): Promise<{ outcome: "submitted" | "already_submitted" | "not_found" | "expired" | "already_final"; payment?: ManualPaymentRecord }> {
-  const normalizedProof = proof.trim();
-  if (!normalizedProof || normalizedProof.length > 120) {
-    throw new Error("La référence de transaction doit contenir entre 1 et 120 caractères.");
-  }
+  const normalizedProof = normalizePaymentReference(proof);
+  if (!normalizedProof) throw new Error(PAYMENT_REFERENCE_VALIDATION_MESSAGE);
 
   const { rows } = await financialPool.query(
     `UPDATE pending_payments
@@ -233,10 +236,13 @@ async function reviewPendingPaymentCore(
         credit,
       ],
     );
-    await client.query(
-      "UPDATE merchant_countries SET balance = balance + $2 WHERE id = $1",
-      [merchantCountryId, credit],
-    );
+    await applyMerchantBalanceDelta(merchantCountryId, credit, {
+      eventType: "payin",
+      reference: txId,
+      sourceType: payment.source,
+      sourceId: id,
+      description: "Validation manuelle d'un dépôt",
+    }, client);
     const confirmed = await client.query(
       `UPDATE pending_payments
           SET status = 'confirmed', manual_reviewed_by = $2, manual_reviewed_at = NOW()
@@ -363,10 +369,13 @@ export async function reviewTransactionPayment(
       await client.query("ROLLBACK");
       return { outcome: "not_actionable", payment };
     }
-    await client.query(
-      "UPDATE merchant_countries SET balance = balance + $2 WHERE id = $1",
-      [merchantCountryId, credit],
-    );
+    await applyMerchantBalanceDelta(merchantCountryId, credit, {
+      eventType: "payin",
+      reference: payment.txId || `TX-${id}`,
+      sourceType: "transaction",
+      sourceId: id,
+      description: "Validation manuelle d'un dépôt",
+    }, client);
     await client.query("COMMIT");
     const confirmedPayment = confirmed.rows[0];
     return {

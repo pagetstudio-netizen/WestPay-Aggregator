@@ -11,6 +11,9 @@ import {
   isAutomaticWithdrawalStatusOpen,
   isManualPayinExpired,
   isPendingOperationExpired,
+  getWithdrawalBalanceDebitAmount,
+  hasReachedAutomaticStatusCheckLimit,
+  shouldExpireAutomaticWithdrawal,
 } from "./reconciliation-policy";
 
 const createdAt = new Date("2026-01-01T00:00:00.000Z");
@@ -23,6 +26,15 @@ test("provider status checks wait seven seconds and stop after five attempts", (
   assert.equal(isAutomaticStatusCheckDue(2, new Date(createdAt.getTime() + 14_000), createdAt, createdAt.getTime() + 20_999), false);
   assert.equal(isAutomaticStatusCheckDue(2, new Date(createdAt.getTime() + 14_000), createdAt, createdAt.getTime() + 21_000), true);
   assert.equal(isAutomaticStatusCheckDue(5, new Date(createdAt.getTime() + 28_000), createdAt, createdAt.getTime() + 60_000), false);
+});
+
+test("unresolved automatic withdrawals stop expiring after five provider checks", () => {
+  assert.equal(hasReachedAutomaticStatusCheckLimit(4), false);
+  assert.equal(hasReachedAutomaticStatusCheckLimit(5), true);
+  assert.equal(hasReachedAutomaticStatusCheckLimit(6), true);
+  const expiredAt = createdAt.getTime() + PENDING_OPERATION_TIMEOUT_MS;
+  assert.equal(shouldExpireAutomaticWithdrawal(4, createdAt, expiredAt), true);
+  assert.equal(shouldExpireAutomaticWithdrawal(5, createdAt, expiredAt), false);
 });
 
 test("pending payment and payout deadline is exactly three hours", () => {
@@ -49,4 +61,16 @@ test("manual withdrawals are not automatically reconciled or expired", () => {
   assert.equal(isAutomaticWithdrawalStatusOpen("pending"), true);
   assert.equal(isAutomaticWithdrawalStatusOpen("processing"), true);
   assert.equal(isAutomaticWithdrawalStatusOpen("approved"), false);
+});
+
+test("withdrawal expiry refunds the recorded debit, not an uncharged fee", () => {
+  const merchantWithdrawal = { amount: 1_000, fees: 125, balanceDebitedAmount: 1_000 };
+  const sdkWithdrawal = { amount: 1_000, fees: 125, balanceDebitedAmount: 1_125 };
+  const legacyMerchantWithdrawal = { amount: 1_000, fees: 125 };
+
+  assert.equal(getWithdrawalBalanceDebitAmount(merchantWithdrawal), 1_000);
+  assert.equal(getWithdrawalBalanceDebitAmount(sdkWithdrawal), 1_125);
+  assert.equal(getWithdrawalBalanceDebitAmount(legacyMerchantWithdrawal), 1_000);
+  const invalidWithdrawal = { amount: 0, fees: 100 };
+  assert.throws(() => getWithdrawalBalanceDebitAmount(invalidWithdrawal), /Montant débité introuvable/);
 });

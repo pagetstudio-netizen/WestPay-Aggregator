@@ -1,5 +1,6 @@
 import { financialPool } from "./db";
 import { resolveOriginalMerchantCredit } from "./payment-reversal-rules";
+import { applyMerchantBalanceDelta } from "./merchant-balance-ledger";
 
 export { resolveOriginalMerchantCredit } from "./payment-reversal-rules";
 const REVERSIBLE_STATUSES = ["confirmed", "completed", "success", "successful", "paid"];
@@ -162,14 +163,22 @@ export async function reverseConfirmedPayment(
       throw new Error("Le solde marchand n’est pas un entier valide.");
     }
 
-    const balanceUpdate = await client.query<{ balance: number }>(
-      `UPDATE merchant_countries
-          SET balance = $1
-        WHERE id = $2
-        RETURNING balance`,
-      [balanceAfter, merchantCountry.id],
+    const balanceUpdate = await applyMerchantBalanceDelta(
+      merchantCountry.id,
+      -creditedAmount,
+      {
+        eventType: "payin_reversal",
+        reference: payment.tx_id,
+        sourceType: "transaction",
+        sourceId: payment.id,
+        description: "Annulation d'un pay-in confirmé",
+        allowNegativeBalance: true,
+      },
+      client,
     );
-    if (!balanceUpdate.rowCount) throw new Error("Le solde marchand n’a pas pu être mis à jour.");
+    if (!balanceUpdate.applied || balanceUpdate.balanceBefore !== balanceBefore || balanceUpdate.balanceAfter !== balanceAfter) {
+      throw new Error("Le solde marchand n’a pas pu être mis à jour.");
+    }
 
     const statusUpdate = await client.query(
       `UPDATE transactions

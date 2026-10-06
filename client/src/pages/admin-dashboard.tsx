@@ -45,7 +45,7 @@ import {
   getSettlementCycle,
 } from "@shared/merchant-account";
 
-type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "mbiyo" | "lipapap" | "drimpay" | "seapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge" | "actionlogs";
+type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "balanceLedger" | "countries" | "numbers" | "sms" | "apikeys" | "mbiyo" | "lipapap" | "drimpay" | "seapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge" | "actionlogs";
 
 function useAdminFetch(url: string, key: (string | null | undefined)[], opts?: { staleTime?: number; refetchOnWindowFocus?: boolean }) {
   const { token, logout, restoreUser } = useAuth();
@@ -2090,6 +2090,197 @@ function TransactionsPanel() {
   );
 }
 
+const BALANCE_EVENT_LABELS: Record<string, string> = {
+  payin: "Pay-in",
+  payin_reversal: "Annulation de pay-in",
+  payout: "Payout",
+  refund: "Remboursement",
+  admin_credit: "Crédit admin",
+  admin_debit: "Débit admin",
+  wallet_transfer_in: "Virement reçu",
+  wallet_transfer_out: "Virement envoyé",
+  adjustment: "Autre ajustement",
+};
+
+function BalanceLedgerPanel() {
+  const [merchantFilter, setMerchantFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [countryFilter, setCountryFilter] = useState("");
+  const [referenceFilter, setReferenceFilter] = useState("");
+  const [fromFilter, setFromFilter] = useState("");
+  const [toFilter, setToFilter] = useState("");
+  const [page, setPage] = useState(1);
+  const { data: merchants = [] } = useAdminFetch("/api/admin/merchants", ["/api/admin/merchants"]);
+
+  const apiUrl = useMemo(() => {
+    const params = new URLSearchParams({ page: String(page), limit: "50" });
+    if (merchantFilter !== "all") params.set("merchantId", merchantFilter);
+    if (typeFilter !== "all") params.set("type", typeFilter);
+    if (countryFilter.trim()) params.set("country", countryFilter.trim());
+    if (referenceFilter.trim()) params.set("reference", referenceFilter.trim());
+    if (fromFilter) params.set("from", fromFilter);
+    if (toFilter) params.set("to", toFilter);
+    return `/api/admin/balance-ledger?${params.toString()}`;
+  }, [page, merchantFilter, typeFilter, countryFilter, referenceFilter, fromFilter, toFilter]);
+
+  const { data, isLoading, isError, error, refetch } = useAdminFetch(
+    apiUrl,
+    ["/api/admin/balance-ledger", String(page), merchantFilter, typeFilter, countryFilter, referenceFilter, fromFilter, toFilter],
+  );
+  const items = data?.items || [];
+  const total = Number(data?.total || 0);
+  const totalPages = Math.max(1, Math.ceil(total / 50));
+
+  const formatAmount = (value: unknown) => {
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) return "—";
+    return Math.abs(amount).toLocaleString("fr-FR");
+  };
+  const formatDate = (value: unknown) => {
+    if (!value) return "—";
+    const date = new Date(String(value));
+    return Number.isNaN(date.getTime())
+      ? "—"
+      : date.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "medium" });
+  };
+  const resetPage = (setter: (value: string) => void) => (value: string) => {
+    setter(value);
+    setPage(1);
+  };
+
+  return (
+    <div className="space-y-4" data-testid="panel-balance-ledger">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Journal des soldes</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Mouvements des wallets marchands par pays : pay-ins, payouts, remboursements, virements et ajustements administrateur.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-2 self-start" data-testid="button-refresh-balance-ledger">
+          <RefreshCw className="w-4 h-4" />Actualiser
+        </Button>
+      </div>
+
+      <Card>
+        <CardContent className="p-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3">
+            <div className="space-y-1.5">
+              <Label>Marchand</Label>
+              <Select value={merchantFilter} onValueChange={resetPage(setMerchantFilter)}>
+                <SelectTrigger data-testid="select-ledger-merchant"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous les marchands</SelectItem>
+                  {merchants.map((merchant: any) => (
+                    <SelectItem key={merchant.id} value={String(merchant.id)}>{merchant.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Type de mouvement</Label>
+              <Select value={typeFilter} onValueChange={resetPage(setTypeFilter)}>
+                <SelectTrigger data-testid="select-ledger-type"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous les types</SelectItem>
+                  {Object.entries(BALANCE_EVENT_LABELS).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ledger-country">Pays</Label>
+              <Input id="ledger-country" value={countryFilter} onChange={(event) => resetPage(setCountryFilter)(event.target.value)} placeholder="Ex. Togo" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ledger-reference">Référence / détail</Label>
+              <Input id="ledger-reference" value={referenceFilter} onChange={(event) => resetPage(setReferenceFilter)(event.target.value)} placeholder="Référence, retrait, description…" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ledger-from">Du</Label>
+              <Input id="ledger-from" type="date" value={fromFilter} onChange={(event) => resetPage(setFromFilter)(event.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ledger-to">Au</Label>
+              <Input id="ledger-to" type="date" value={toFilter} onChange={(event) => resetPage(setToFilter)(event.target.value)} />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground mt-3">
+            Les soldes avant/après sont enregistrés à partir de l’activation du journal; les opérations antérieures n’ont pas d’instantané fiable. Les soldes crypto sont suivis séparément.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-base">Mouvements enregistrés</CardTitle>
+            <span className="text-xs text-muted-foreground">{total.toLocaleString("fr-FR")} résultat{total === 1 ? "" : "s"}</span>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="p-6 flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" />Chargement du journal…</div>
+          ) : isError ? (
+            <div className="p-6 text-sm text-destructive">{(error as Error)?.message || "Impossible de charger le journal."}</div>
+          ) : items.length === 0 ? (
+            <div className="p-10 text-center">
+              <Wallet className="w-8 h-8 text-muted-foreground/50 mx-auto mb-2" />
+              <p className="text-sm font-medium">Aucun mouvement trouvé</p>
+              <p className="text-xs text-muted-foreground mt-1">Les nouveaux changements de solde apparaîtront ici.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1050px] text-sm">
+                <thead>
+                  <tr className="border-y border-border/50 bg-muted/30">
+                    {["Date", "Marchand / pays", "Type", "Variation", "Solde avant", "Solde après", "Référence / détail", "Administrateur"].map((heading) => (
+                      <th key={heading} className="text-left px-3 py-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">{heading}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item: any) => {
+                    const amount = Number(item.amount);
+                    return (
+                      <tr key={item.id} className="border-b border-border/30 hover:bg-muted/20" data-testid={`row-balance-ledger-${item.id}`}>
+                        <td className="px-3 py-3 whitespace-nowrap text-xs text-muted-foreground">{formatDate(item.created_at)}</td>
+                        <td className="px-3 py-3">
+                          <div className="font-medium">{item.merchantName}</div>
+                          <div className="text-xs text-muted-foreground">{item.country} · Wallet #{item.merchant_country_id}</div>
+                        </td>
+                        <td className="px-3 py-3"><Badge variant="outline">{BALANCE_EVENT_LABELS[item.event_type] || item.event_type}</Badge></td>
+                        <td className={`px-3 py-3 whitespace-nowrap font-semibold ${amount >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                          {amount > 0 ? "+" : amount < 0 ? "−" : ""}{formatAmount(amount)}
+                        </td>
+                        <td className="px-3 py-3 whitespace-nowrap tabular-nums">{formatAmount(item.balance_before)}</td>
+                        <td className="px-3 py-3 whitespace-nowrap tabular-nums font-semibold">{formatAmount(item.balance_after)}</td>
+                        <td className="px-3 py-3 max-w-[260px]">
+                          <div className="font-mono text-xs break-all">{item.reference || item.source_id || "—"}</div>
+                          {item.description && <div className="text-xs text-muted-foreground mt-1">{item.description}</div>}
+                        </td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground">{item.actorAdminEmail || (item.actor_admin_id ? `Admin #${item.actor_admin_id}` : "—")}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="border-t border-border/50 px-4 py-3 flex items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground">Page {page} / {totalPages}</span>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" disabled={page <= 1 || isLoading} onClick={() => setPage((current) => Math.max(1, current - 1))}>Précédent</Button>
+              <Button variant="outline" size="sm" disabled={page >= totalPages || isLoading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Suivant</Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function CountriesPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
@@ -3944,7 +4135,7 @@ function DrimpayPanel() {
         <CardHeader><CardTitle className="text-base flex items-center gap-2"><Globe className="w-4 h-4" />Paramètres API</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
-            Utilisez les codes pays et opérateurs exacts fournis par Drimpay. Les payouts bancaires ne sont pas envoyés car le schéma documenté ne définit pas leurs champs. Aucun solde Drimpay n’est affiché sans endpoint officiel.
+            Wave est listé par Drimpay au Sénégal (SN) et en Côte d’Ivoire (CI). Configurez le code payout exact fourni par Drimpay dans « payoutOperators »; les virements bancaires ne sont pas pris en charge.
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -10588,6 +10779,7 @@ export default function AdminDashboard() {
       items: [
         { title: "Marchands", icon: Users, tab: "merchants" },
         { title: "Transactions", icon: ArrowRightLeft, tab: "transactions" },
+        { title: "Journal des soldes", icon: Wallet, tab: "balanceLedger" },
         { title: "Liens de paiement", icon: Link, tab: "paymentlinks" },
         { title: "Virements", icon: ArrowUpRight, tab: "virements" },
         { title: "Reversements", icon: Download, tab: "reversements" },
@@ -10733,6 +10925,7 @@ export default function AdminDashboard() {
             {activeTab === "merchants" && <PanelErrorBoundary label="merchants"><MerchantsPanel /></PanelErrorBoundary>}
             {activeTab === "paymentlinks" && <AdminPaymentLinksPanel />}
             {activeTab === "transactions" && <TransactionsPanel />}
+            {activeTab === "balanceLedger" && <BalanceLedgerPanel />}
             {activeTab === "countries" && <CountriesPanel />}
             {activeTab === "numbers" && <NumbersPanel />}
             {activeTab === "sms" && <SmsPanel />}

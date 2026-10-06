@@ -61,6 +61,23 @@ export const merchantCountries = pgTable("merchant_countries", {
   adminCreditsTotal: integer("admin_credits_total").default(0).notNull(),
 });
 
+export const merchantBalanceLedger = pgTable("merchant_balance_ledger", {
+  id: serial("id").primaryKey(),
+  merchantCountryId: integer("merchant_country_id").notNull(),
+  merchantId: integer("merchant_id").notNull(),
+  country: text("country").notNull(),
+  eventType: text("event_type").notNull(),
+  amount: integer("amount").notNull(),
+  balanceBefore: integer("balance_before").notNull(),
+  balanceAfter: integer("balance_after").notNull(),
+  reference: text("reference"),
+  sourceType: text("source_type"),
+  sourceId: text("source_id"),
+  actorAdminId: integer("actor_admin_id"),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const transactions = pgTable("transactions", {
   id: serial("id").primaryKey(),
   merchantId: integer("merchant_id").notNull().references(() => merchants.id, { onDelete: "cascade" }),
@@ -230,6 +247,7 @@ export const withdrawals = pgTable("withdrawals", {
   adminNote: text("admin_note"),
   providerReference: text("provider_reference"),
   fees: integer("fees").default(0),
+  balanceDebitedAmount: integer("balance_debited_amount").notNull(),
   providerPayoutFee: integer("provider_payout_fee"),
   gateway: text("gateway").notNull().default("clapay"),
   providerTxId: text("provider_tx_id"),

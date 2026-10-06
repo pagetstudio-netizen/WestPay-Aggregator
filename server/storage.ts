@@ -31,7 +31,8 @@ import {
   type SecurityLog, type InsertSecurityLog,
   type Device, type InsertDevice,
 } from "@shared/schema";
-import { authDb, financialDb } from "./db";
+import { authDb, financialDb, financialPool } from "./db";
+import { applyMerchantBalanceDelta, type MerchantBalanceChangeDetails } from "./merchant-balance-ledger";
 import { eq, desc, sql, and, gte, lt, inArray, isNull } from "drizzle-orm";
 
 // ── Helpers cross-DB ──────────────────────────────────────────────────────────
@@ -81,9 +82,9 @@ export interface IStorage {
   getMerchantCountryById(id: number): Promise<MerchantCountry | undefined>;
   addMerchantCountry(mc: InsertMerchantCountry): Promise<MerchantCountry>;
   deleteMerchantCountry(id: number): Promise<void>;
-  updateMerchantCountryBalance(id: number, balance: number): Promise<void>;
-  incrementMerchantCountryBalance(id: number, amount: number): Promise<void>;
-  decrementMerchantCountryBalanceAtomic(id: number, amount: number): Promise<boolean>;
+  updateMerchantCountryBalance(id: number, balance: number, details?: MerchantBalanceChangeDetails): Promise<void>;
+  incrementMerchantCountryBalance(id: number, amount: number, details?: MerchantBalanceChangeDetails): Promise<void>;
+  decrementMerchantCountryBalanceAtomic(id: number, amount: number, details?: MerchantBalanceChangeDetails): Promise<boolean>;
   findMerchantCountryBySimAndCountry(merchantId: number, country: string): Promise<MerchantCountry | undefined>;
   getTotalConfirmedDepositsForMC(merchantId: number, country: string): Promise<number>;
   getTotalApprovedWithdrawalsForMC(merchantCountryId: number): Promise<number>;
@@ -407,20 +408,52 @@ export class DatabaseStorage implements IStorage {
   async deleteMerchantCountry(id: number): Promise<void> {
     await financialDb.delete(merchantCountries).where(eq(merchantCountries.id, id));
   }
-  async updateMerchantCountryBalance(id: number, balance: number): Promise<void> {
-    await financialDb.update(merchantCountries).set({ balance }).where(eq(merchantCountries.id, id));
+  async updateMerchantCountryBalance(
+    id: number,
+    balance: number,
+    details: MerchantBalanceChangeDetails = { eventType: "adjustment" },
+  ): Promise<void> {
+    if (!Number.isSafeInteger(balance)) throw new Error("Le solde doit être un entier");
+    const client = await financialPool.connect();
+    try {
+      await client.query("BEGIN");
+      const current = await client.query(
+        "SELECT balance FROM merchant_countries WHERE id = $1 FOR UPDATE",
+        [id],
+      );
+      if (!current.rows[0]) throw new Error(`Portefeuille marchand introuvable: ${id}`);
+      const delta = balance - Number(current.rows[0].balance);
+      if (delta !== 0) {
+        const effectiveDetails = details.sourceType === "admin_balance_update"
+          ? { ...details, eventType: delta > 0 ? "admin_credit" as const : "admin_debit" as const }
+          : details;
+        const result = await applyMerchantBalanceDelta(id, delta, effectiveDetails, client);
+        if (!result.applied) throw new Error(`Échec de la mise à jour du portefeuille marchand: ${id}`);
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
   }
-  async incrementMerchantCountryBalance(id: number, amount: number): Promise<void> {
-    await financialDb.update(merchantCountries)
-      .set({ balance: sql`${merchantCountries.balance} + ${amount}` })
-      .where(eq(merchantCountries.id, id));
+  async incrementMerchantCountryBalance(
+    id: number,
+    amount: number,
+    details: MerchantBalanceChangeDetails = { eventType: "adjustment" },
+  ): Promise<void> {
+    const result = await applyMerchantBalanceDelta(id, amount, details);
+    if (!result.applied) throw new Error(`Portefeuille marchand introuvable: ${id}`);
   }
-  async decrementMerchantCountryBalanceAtomic(id: number, amount: number): Promise<boolean> {
-    const r = await financialDb.update(merchantCountries)
-      .set({ balance: sql`${merchantCountries.balance} - ${amount}` })
-      .where(and(eq(merchantCountries.id, id), sql`${merchantCountries.balance} >= ${amount}`))
-      .returning({ id: merchantCountries.id });
-    return r.length > 0;
+  async decrementMerchantCountryBalanceAtomic(
+    id: number,
+    amount: number,
+    details: MerchantBalanceChangeDetails = { eventType: "adjustment" },
+  ): Promise<boolean> {
+    if (!Number.isSafeInteger(amount) || amount <= 0) return false;
+    const result = await applyMerchantBalanceDelta(id, -amount, details);
+    return result.applied;
   }
   async findMerchantCountryBySimAndCountry(merchantId: number, country: string): Promise<MerchantCountry | undefined> {
     const [mc] = await financialDb.select().from(merchantCountries).where(and(
@@ -466,10 +499,13 @@ export class DatabaseStorage implements IStorage {
   async updateMerchantCountryPayinGateway(id: number, payinGateway: string): Promise<void> {
     await financialDb.update(merchantCountries).set({ payinGateway }).where(eq(merchantCountries.id, id));
   }
-  async decrementMerchantCountryBalance(id: number, amount: number): Promise<void> {
-    await financialDb.update(merchantCountries)
-      .set({ balance: sql`${merchantCountries.balance} - ${amount}` })
-      .where(eq(merchantCountries.id, id));
+  async decrementMerchantCountryBalance(
+    id: number,
+    amount: number,
+    details: MerchantBalanceChangeDetails = { eventType: "adjustment" },
+  ): Promise<void> {
+    const result = await applyMerchantBalanceDelta(id, -amount, details);
+    if (!result.applied) throw new Error(`Solde insuffisant ou portefeuille marchand introuvable: ${id}`);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -942,12 +978,24 @@ export class DatabaseStorage implements IStorage {
   async applyWalletTransfer(id: number): Promise<void> {
     const t = await this.getWalletTransferById(id);
     if (!t) throw new Error("Transfert introuvable");
-    await financialDb.update(merchantCountries).set({ balance: sql`${merchantCountries.balance} + ${t.netAmount}` }).where(eq(merchantCountries.id, t.toCountryId));
+    await this.incrementMerchantCountryBalance(t.toCountryId, t.netAmount, {
+      eventType: "wallet_transfer_in",
+      reference: `WT-${t.id}`,
+      sourceType: "wallet_transfer",
+      sourceId: t.id,
+      description: `Réception du transfert de portefeuille #${t.id}`,
+    });
   }
   async reimbursWalletTransfer(id: number): Promise<void> {
     const t = await this.getWalletTransferById(id);
     if (!t) throw new Error("Transfert introuvable");
-    await financialDb.update(merchantCountries).set({ balance: sql`${merchantCountries.balance} + ${t.amount + t.fee}` }).where(eq(merchantCountries.id, t.fromCountryId));
+    await this.incrementMerchantCountryBalance(t.fromCountryId, t.amount + t.fee, {
+      eventType: "refund",
+      reference: `WT-${t.id}`,
+      sourceType: "wallet_transfer",
+      sourceId: t.id,
+      description: `Remboursement du transfert de portefeuille #${t.id}`,
+    });
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1035,7 +1083,14 @@ export class DatabaseStorage implements IStorage {
   async applyWithdrawal(id: number): Promise<void> {
     const w = await this.getWithdrawalById(id);
     if (!w) throw new Error("Reversement introuvable");
-    await financialDb.update(merchantCountries).set({ balance: sql`${merchantCountries.balance} - ${w.amount}` }).where(eq(merchantCountries.id, w.merchantCountryId));
+    const debited = await this.decrementMerchantCountryBalanceAtomic(w.merchantCountryId, w.amount, {
+      eventType: "payout",
+      reference: `WD-${w.id}`,
+      sourceType: "withdrawal",
+      sourceId: w.id,
+      description: `Réservation du solde pour le reversement #${w.id}`,
+    });
+    if (!debited) throw new Error(`Solde insuffisant pour le reversement #${w.id}`);
   }
 
   // ══════════════════════════════════════════════════════════════════════════

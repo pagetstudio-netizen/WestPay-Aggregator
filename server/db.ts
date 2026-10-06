@@ -598,6 +598,7 @@ export async function runFinancialMigrations() {
         admin_note text,
         provider_reference text,
         fees integer DEFAULT 0,
+        balance_debited_amount integer,
         provider_payout_fee integer,
         gateway text NOT NULL DEFAULT 'clapay',
          provider_tx_id text,
@@ -778,6 +779,7 @@ export async function runFinancialMigrations() {
         ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS auto_status_checked_at TIMESTAMP;
         ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS auto_status_check_count INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS auto_status_checked_at TIMESTAMP;
+        ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS balance_debited_amount INTEGER;
         UPDATE pending_payments
           SET expires_at = created_at + INTERVAL '3 hours'
           WHERE gateway = 'manual'
@@ -822,6 +824,59 @@ export async function runFinancialMigrations() {
       await client.query(`
         ALTER TABLE withdrawals
         ADD COLUMN IF NOT EXISTS account_number text;
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS merchant_balance_ledger (
+          id serial PRIMARY KEY,
+          merchant_country_id integer NOT NULL,
+          merchant_id integer NOT NULL,
+          country text NOT NULL,
+          event_type text NOT NULL,
+          amount integer NOT NULL,
+          balance_before integer NOT NULL,
+          balance_after integer NOT NULL,
+          reference text,
+          source_type text,
+          source_id text,
+          actor_admin_id integer,
+          description text,
+          created_at timestamp DEFAULT now() NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS merchant_balance_ledger_created_idx
+          ON merchant_balance_ledger (created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS merchant_balance_ledger_merchant_idx
+          ON merchant_balance_ledger (merchant_id, created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS merchant_balance_ledger_wallet_idx
+          ON merchant_balance_ledger (merchant_country_id, created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS merchant_balance_ledger_type_idx
+          ON merchant_balance_ledger (event_type, created_at DESC, id DESC);
+      `);
+      // Retain the original debit used for expiry refunds. SDK payouts may
+      // debit amount + fees; merchant withdrawal requests debit only amount.
+      await client.query(`
+        WITH sdk_debits AS (
+          SELECT DISTINCT ON (reference)
+                 reference, -amount AS debited_amount
+            FROM merchant_balance_ledger
+           WHERE event_type = 'payout'
+             AND source_type = 'sdk_payout'
+             AND amount < 0
+             AND reference IS NOT NULL
+           ORDER BY reference, id DESC
+        )
+        UPDATE withdrawals AS w
+           SET balance_debited_amount = sdk_debits.debited_amount
+          FROM sdk_debits
+         WHERE w.balance_debited_amount IS NULL
+           AND w.provider_reference = sdk_debits.reference;
+
+        UPDATE withdrawals
+           SET balance_debited_amount = amount
+         WHERE balance_debited_amount IS NULL;
+
+        ALTER TABLE withdrawals
+          ALTER COLUMN balance_debited_amount SET NOT NULL;
       `);
 
     // pgvector (knowledge_chunks — RAG)

@@ -8,6 +8,7 @@
  */
 import { storage } from "./storage";
 import { financialPool } from "./db";
+import { applyMerchantBalanceDelta } from "./merchant-balance-ledger";
 import { getTransactionStatus as mbiyoGetStatus } from "./mbiyo";
 import { clapayGetTransactionStatus } from "./clapay";
 import {
@@ -39,6 +40,9 @@ import {
   isAutomaticWithdrawalStatusOpen,
   isManualPayinExpired,
   isPendingOperationExpired,
+  getWithdrawalBalanceDebitAmount,
+  hasReachedAutomaticStatusCheckLimit,
+  shouldExpireAutomaticWithdrawal,
 } from "./reconciliation-policy";
 
 const PAYMENT_SUCCESS = new Set([
@@ -184,7 +188,13 @@ async function creditConfirmedPayment(
       : calcCredit(pending.amount, pending.country);
   const provider = resolveProviderCode(pending.gateway, pending.providerReference);
 
-  await storage.incrementMerchantCountryBalance(merchantCountry.id, credit);
+  await storage.incrementMerchantCountryBalance(merchantCountry.id, credit, {
+    eventType: "payin",
+    reference: txRef,
+    sourceType: "pending_payment",
+    sourceId: pending.id,
+    description: "Dépôt confirmé par rapprochement automatique",
+  });
   await storage.createTransaction({
     merchantId: pending.merchantId,
     country: pending.country,
@@ -453,14 +463,19 @@ async function applyWithdrawalResult(withdrawal: any, status: string): Promise<v
         [withdrawal.id],
       );
       if (cas.rowCount) {
-        const refund = await client.query(
-          `UPDATE merchant_countries
-              SET balance = balance + $1
-            WHERE id = $2
-            RETURNING id`,
-          [withdrawal.amount, withdrawal.merchantCountryId],
+        const refund = await applyMerchantBalanceDelta(
+          withdrawal.merchantCountryId,
+          Number(withdrawal.amount),
+          {
+            eventType: "refund",
+            reference: `WD-${withdrawal.id}`,
+            sourceType: "withdrawal",
+            sourceId: withdrawal.id,
+            description: "Remboursement d'un retrait Drimpay échoué",
+          },
+          client,
         );
-        if (!refund.rowCount) {
+        if (!refund.applied) {
           throw new Error(`MerchantCountry introuvable pour le retrait Drimpay #${withdrawal.id}`);
         }
         claimed = true;
@@ -498,7 +513,13 @@ async function applyWithdrawalResult(withdrawal: any, status: string): Promise<v
   if (nextStatus === "failed" && !isDrimpayFailure) {
     const merchantCountry = await storage.getMerchantCountryById(withdrawal.merchantCountryId);
     if (merchantCountry) {
-      await storage.incrementMerchantCountryBalance(merchantCountry.id, withdrawal.amount);
+      await storage.incrementMerchantCountryBalance(merchantCountry.id, withdrawal.amount, {
+        eventType: "refund",
+        reference: `WD-${withdrawal.id}`,
+        sourceType: "withdrawal",
+        sourceId: withdrawal.id,
+        description: "Remboursement d'un retrait échoué",
+      });
     }
   }
   notifyAdminWithdrawal({
@@ -532,15 +553,20 @@ async function reconcileStaleWithdrawals(): Promise<void> {
     const gateway = normalized(withdrawal.gateway);
     if (!isAutomaticWithdrawal(withdrawal.withdrawalMode, gateway)) continue;
 
-    if (isPendingOperationExpired(withdrawal.createdAt, now)) {
+    const statusCheckCount = Number(withdrawal.autoStatusCheckCount || 0);
+    if (shouldExpireAutomaticWithdrawal(
+      statusCheckCount,
+      withdrawal.createdAt,
+      now,
+    )) {
       await expireAutomaticWithdrawal(withdrawal).catch(error =>
         console.error(`[RECONCILIATION-WD] Expiration impossible pour le retrait #${withdrawal.id}:`, (error as any)?.message || error),
       );
       continue;
     }
+    if (hasReachedAutomaticStatusCheckLimit(statusCheckCount)) continue;
 
     if (!withdrawal.providerReference) continue;
-    if (Number(withdrawal.autoStatusCheckCount || 0) >= AUTO_STATUS_MAX_CHECKS) continue;
     if (!isAutomaticStatusCheckDue(
       Number(withdrawal.autoStatusCheckCount || 0),
       withdrawal.autoStatusCheckedAt,
@@ -633,6 +659,7 @@ async function claimWithdrawalStatusCheck(withdrawal: any): Promise<boolean> {
 }
 
 async function expireAutomaticWithdrawal(withdrawal: any): Promise<void> {
+  const refundAmount = getWithdrawalBalanceDebitAmount(withdrawal);
   const client = await financialPool.connect();
   let expired = false;
   try {
@@ -650,14 +677,19 @@ async function expireAutomaticWithdrawal(withdrawal: any): Promise<void> {
       [withdrawal.id],
     );
     if (claimed.rowCount) {
-      const refunded = await client.query(
-        `UPDATE merchant_countries
-            SET balance = balance + $1
-          WHERE id = $2
-          RETURNING id`,
-        [Number(withdrawal.amount || 0) + Number(withdrawal.fees || 0), withdrawal.merchantCountryId],
+      const refunded = await applyMerchantBalanceDelta(
+        withdrawal.merchantCountryId,
+        refundAmount,
+        {
+          eventType: "refund",
+          reference: `WD-${withdrawal.id}`,
+          sourceType: "withdrawal",
+          sourceId: withdrawal.id,
+          description: "Remboursement après expiration automatique du retrait",
+        },
+        client,
       );
-      if (!refunded.rowCount) {
+      if (!refunded.applied) {
         throw new Error(`MerchantCountry introuvable pour le retrait expiré #${withdrawal.id}`);
       }
       expired = true;

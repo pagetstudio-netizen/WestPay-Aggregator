@@ -5,6 +5,12 @@ description: Safety constraints and post-approval side effects for manual mercha
 
 For manual pay-ins, never ask for, store, or include a private PIN or authentication secret. Request only the transaction reference after payment; keep it separate from dialer instructions and USSD codes.
 
+Payment phone inputs must contain at least eight digits and no letters. Manual-payment and Wave-link references may contain text or numbers, but must contain at least eight non-space characters.
+
+**Why:** the user explicitly set the minimum input requirements for payment numbers and transaction references.
+
+**How to apply:** enforce the phone and reference rules in both the public form and server routes; do not reject a valid-length text reference solely because it contains letters.
+
 When the customer submits the transaction reference, the admin-group notification must show that customer reference and the generated deposit reference as separately labeled, searchable lines, alongside the customer number, country, operator, merchant, amount, and recipient number.
 
 After a manual payment is approved, send the standard deposit notification to the merchant's linked Telegram chat/group, keep the confirmed transaction visible in merchant history, and dispatch the standard `payment.confirmed` webhook when configured. Run these side effects only for a newly approved payment, not an already-approved one.

@@ -239,20 +239,63 @@ export async function initiateDrimpayPayout(
     phone: string;
     orderId: string;
     webhookUrl: string;
+    description?: string;
   },
 ): Promise<{ reference: string; status: string; raw: any }> {
-  const raw = await requestDrimpay(config, "/payout/send", {
+  const raw = await requestDrimpay(config, "/payout/initiate", {
     amount: input.amount,
     currency: input.currency,
-    country: input.countryCode,
+    country_code: input.countryCode,
     operator: input.operator,
     phone: input.phone,
+    external_ref: input.orderId,
     order_id: input.orderId,
     webhook_url: input.webhookUrl,
+    ...(clean(input.description) ? { description: clean(input.description) } : {}),
   });
   const reference = responseReference(raw);
   if (!reference) throw new DrimpayApiError("Drimpay n’a pas renvoyé de référence fournisseur.");
   return { reference, status: responseStatus(raw), raw };
+}
+
+export async function getDrimpayWalletBalance(
+  config: DrimpayConfig,
+  countryCode: string,
+): Promise<{
+  countryCode: string;
+  currency: string;
+  balance: number;
+  active?: boolean;
+  mode?: string;
+}> {
+  const normalizedCountryCode = clean(countryCode)?.toUpperCase();
+  if (!normalizedCountryCode || !/^[A-Z]{2}$/.test(normalizedCountryCode)) {
+    throw new DrimpayApiError("Le code pays ISO Drimpay doit contenir deux lettres.");
+  }
+
+  const response = await requestDrimpay(
+    config,
+    `/payout/wallets/${encodeURIComponent(normalizedCountryCode)}/balance`,
+  );
+  const data = dataOf(response);
+  const balanceValue = data?.balance;
+  const balance = typeof balanceValue === "number"
+    ? balanceValue
+    : typeof balanceValue === "string" && balanceValue.trim()
+      ? Number(balanceValue)
+      : Number.NaN;
+  const currency = clean(data?.currency)?.toUpperCase();
+  if (!Number.isFinite(balance) || !currency) {
+    throw new DrimpayApiError("Drimpay n’a pas retourné un solde et une devise valides.");
+  }
+
+  return {
+    countryCode: clean(data?.country_code)?.toUpperCase() || normalizedCountryCode,
+    currency,
+    balance,
+    ...(typeof data?.active === "boolean" ? { active: data.active } : {}),
+    ...(clean(data?.mode) ? { mode: clean(data.mode) } : {}),
+  };
 }
 
 export async function getDrimpayPayinStatus(config: DrimpayConfig, reference: string): Promise<any> {

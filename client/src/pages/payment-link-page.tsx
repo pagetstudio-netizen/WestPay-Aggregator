@@ -7,6 +7,7 @@ import { useLanguage, detectLangFromCountry } from "@/lib/language";
 import { sanitizePaymentMessage } from "@/lib/sanitize-payment-message";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import ManualPaymentStep, { type ManualPaymentDetails } from "@/components/manual-payment-step";
+import { isValidPaymentPhone } from "@shared/payment-validation";
 
 import waveIcon      from "@assets/zOMoVcU_1779635321598.png";
 import moovIcon      from "@assets/ZJCa7PK_1779635321640.jpg";
@@ -284,6 +285,8 @@ export default function PaymentLinkPage() {
   const maliOrange = method === "Orange Money" && country === "Mali";
   const dialCode = DIAL_CODES[country] || "+";
   const isSeapayCountry = ["Philippines", "Pakistan", "India", "Nigeria"].includes(country);
+  const requiresPayerPhone = !isCrypto && !isSeapayCountry && !isWaveLinkMethod;
+  const payerPhoneIsValid = isValidPaymentPhone(payerPhone);
   // isIndia déclaré plus haut (avant le useEffect qui en dépend)
   const isSeapayRedirect = isSeapayCountry && (isIndia || !!method) && !isCrypto;
 
@@ -374,7 +377,11 @@ export default function PaymentLinkPage() {
   const handlePay = () => {
     if (!isIndia && !method) { toast({ title: "Méthode requise", description: "Sélectionnez un opérateur.", variant: "destructive" }); return; }
     if (isCrypto) { doInitiate(); return; }
-    if (!isSeapayCountry && !isWaveLinkMethod && !payerPhone.trim()) { toast({ title: "Numéro requis", description: "Entrez votre numéro.", variant: "destructive" }); return; }
+    if (requiresPayerPhone && !payerPhone.trim()) { toast({ title: "Numéro requis", description: "Entrez votre numéro.", variant: "destructive" }); return; }
+    if (requiresPayerPhone && !payerPhoneIsValid) {
+      toast({ title: t("payInvalidPhone"), description: "Saisissez au moins 8 chiffres, sans lettres.", variant: "destructive" });
+      return;
+    }
     if (data?.link.amountType === "flexible" && !customAmount) { toast({ title: "Montant requis", description: "Entrez le montant.", variant: "destructive" }); return; }
     if (needsOtp && !otpCode.trim()) { setShowOtpModal(true); return; }
     doInitiate();
@@ -579,8 +586,13 @@ export default function PaymentLinkPage() {
                     </div>
                     <input type="tel" value={payerPhone} onChange={e => setPayerPhone(e.target.value)}
                       placeholder={PHONE_PLACEHOLDERS[country] || t("payPhoneNumberPlaceholder")} data-testid="input-payer-phone"
+                      maxLength={32} aria-invalid={Boolean(payerPhone.trim()) && !payerPhoneIsValid}
                       style={{ flex: 1, padding: "12px 14px", fontSize: 15, border: "none", outline: "none", background: "transparent", color: "#111" }} />
                   </div>
+                  <p style={{ fontSize: 11, color: "#6b7280", marginTop: 5 }}>Au moins 8 chiffres; les lettres ne sont pas acceptées.</p>
+                  {payerPhone.trim() && !payerPhoneIsValid && (
+                    <p role="alert" style={{ fontSize: 12, color: "#dc2626", marginTop: 4 }}>{t("payInvalidPhone")}</p>
+                  )}
                 </div>
               )}
 
@@ -602,7 +614,7 @@ export default function PaymentLinkPage() {
               {/* Pay button */}
               <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                 <button type="button" onClick={handlePay}
-                disabled={isSubmitting || cryptoLoading || (!isIndia && !method) || (!isCrypto && !isSeapayCountry && !isWaveLinkMethod && !payerPhone.trim()) || (data.link.amountType === "flexible" && !customAmount)}
+                disabled={isSubmitting || cryptoLoading || (!isIndia && !method) || (requiresPayerPhone && !payerPhoneIsValid) || (data.link.amountType === "flexible" && !customAmount)}
                   className="paybtn" data-testid="button-pay"
                   style={{ background: "#f5c100", color: "#111" }}>
                   {(isSubmitting || cryptoLoading) && <Loader2 style={{ width: 18, height: 18, animation: "spin 1s linear infinite" }} />}

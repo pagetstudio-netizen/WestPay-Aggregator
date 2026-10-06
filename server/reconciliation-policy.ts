@@ -26,9 +26,22 @@ export function isAutomaticStatusCheckDue(
   return baseline !== null && now - baseline >= AUTO_STATUS_CHECK_INTERVAL_MS;
 }
 
+export function hasReachedAutomaticStatusCheckLimit(checkCount: number): boolean {
+  return !Number.isFinite(checkCount) || checkCount >= AUTO_STATUS_MAX_CHECKS;
+}
+
 export function isPendingOperationExpired(createdAt: Date | string, now: number): boolean {
   const created = timestamp(createdAt);
   return created !== null && now - created >= PENDING_OPERATION_TIMEOUT_MS;
+}
+
+export function shouldExpireAutomaticWithdrawal(
+  checkCount: number,
+  createdAt: Date | string,
+  now: number,
+): boolean {
+  return !hasReachedAutomaticStatusCheckLimit(checkCount)
+    && isPendingOperationExpired(createdAt, now);
 }
 
 export function isManualPayinExpired(createdAt: Date | string, now: number): boolean {
@@ -43,4 +56,15 @@ export function isAutomaticWithdrawal(withdrawalMode: unknown, gateway: unknown)
 export function isAutomaticWithdrawalStatusOpen(status: unknown): boolean {
   const normalizedStatus = String(status || "").trim().toLowerCase();
   return normalizedStatus === "pending" || normalizedStatus === "processing";
+}
+
+export function getWithdrawalBalanceDebitAmount(withdrawal: {
+  amount: unknown;
+  balanceDebitedAmount?: unknown;
+}): number {
+  const amount = Number(withdrawal.balanceDebitedAmount ?? withdrawal.amount);
+  if (!Number.isSafeInteger(amount) || amount <= 0) {
+    throw new Error("Montant débité introuvable pour le remboursement du retrait.");
+  }
+  return amount;
 }

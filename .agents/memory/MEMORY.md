@@ -14,7 +14,7 @@
 - [Admin session refresh](admin-session-refresh.md) — restore admin sessions from the httpOnly cookie; only an explicit 401 should trigger logout.
 - [LipaPap integration](lipapap-integration.md) — MOMO/MOMOPAYOUT are documented; account-balance lookup still needs an official LipaPap API.
 - [SDK manual payout tracking](sdk-manual-payout-tracking.md) — Keep local SDK payout references trackable without polling or submitting them to a provider.
-- [Drimpay integration](drimpay-integration.md) — don't invent a balance endpoint or bank payout support; keep operator codes provider-supplied.
+- [Drimpay integration](drimpay-integration.md) — mobile payouts, Wave in SN/CI, and country-wallet balance are documented; use provider-supplied operator codes.
 - [ClaPay failed-status diagnostics](clapay-status-diagnostics.md) — a FAILED status may expose only a generic observation; compare non-sensitive routing fields and don't infer the cause.
 - [Legacy gateway retirement](gateway-retirement.md) — Never relabel or reissue an operation with an existing provider reference; preserve the reference and stop old-provider polling.
 - [Manual pay-in handling](manual-payins.md) — Never collect secrets; show both searchable references to admins and notify merchants after approval.
@@ -24,5 +24,7 @@
 - [Node package-manager mismatch](node-package-manager-mismatch.md) — A pnpm-backed node_modules tree may lack npm .bin shims; inspect package entrypoints before attempting repair.
 - [Workflow process collisions](workflow-process-collisions.md) — After a restart, inspect processes; an older dev server may survive and cause EADDRINUSE or duplicate jobs.
 - [Pay-in failure handling](payin-failure-handling.md) — Block checkout on confirmed provider errors and alert admins in Telegram; preserve pending state when provider outcome is uncertain.
+- [Unresolved automatic withdrawals](automatic-withdrawal-pending.md) — after five inconclusive provider checks, keep the withdrawal open for admin resolution; do not fail or refund automatically.
 - [WestPay private entrypoint](westpay-private-entrypoint.md) — The user considers the project private and expects probing; a hidden root fallback is not access control.
 - [Telegram merchant onboarding](telegram-merchant-onboarding.md) — Post new-account credentials to the admin group; generate `/setmerchant` codes separately and inherit operator gateway/number settings.
+- [Merchant balance ledger scope](merchant-balance-ledger-scope.md) — Admin ledger covers per-country integer wallets; crypto balances remain separate until currency and precision are modeled explicitly.
