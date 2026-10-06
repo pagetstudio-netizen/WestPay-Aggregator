@@ -42,7 +42,7 @@ function Router() {
   const [location] = useLocation();
   const hostname = window.location.hostname.toLowerCase();
   const currentPath = location.replace(/\/+$/, "") || "/";
-  const isWestpayApex = hostname === "westpay.cfd";
+  const isWestpayFallbackHost = hostname === "westpay.cfd" || import.meta.env.DEV;
   const isBank2Host = hostname === "payment.bank2.westpay.cfd";
   const isSecureDocsHost = hostname === "secure.docs.westpay.cfd";
   const isDashboardHost = hostname === "dashboard.westpay.cfd";
@@ -62,7 +62,7 @@ function Router() {
       (hostname === "dashboard.westpay.cfd" && currentPath === "/")
     );
 
-  const UnmatchedRoute = isWestpayApex
+  const UnmatchedRoute = isWestpayFallbackHost
     ? () => (
         <RedirectToWestpayFallback
           ready={adminPathCheckedFor === window.location.pathname}
@@ -117,12 +117,12 @@ function Router() {
   // Fallback côté client pour les environnements qui ne passent pas par le
   // middleware Express : l'ancienne URL reste une page introuvable.
   if (isLegacyDocsPath || isLegacyMerchantLoginPath) {
-    return isWestpayApex
+    return isWestpayFallbackHost
       ? <RedirectToWestpayFallback ready={adminPathCheckedFor === window.location.pathname} />
       : <NotFound />;
   }
   if (isHiddenPublicRoot) return <NotFound />;
-  if (isWestpayApex && currentPath === "/" && !hasQueryParameters) {
+  if (isWestpayFallbackHost && currentPath === "/" && !hasQueryParameters) {
     return <RedirectToWestpayFallback />;
   }
   if (import.meta.env.DEV && currentPath === "/__preview/manual-payment") {
