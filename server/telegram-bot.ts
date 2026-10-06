@@ -753,8 +753,7 @@ async function isTelegramAdminUser(ctx: any): Promise<boolean> {
   }
 }
 
-async function isTelegramAdminCommandUser(ctx: any): Promise<boolean> {
-  if (ctx.chat?.type === "private") return isTelegramAdminUser(ctx);
+async function isTelegramAdminGroupUser(ctx: any): Promise<boolean> {
   const groupId = await getAdminGroupId();
   if (
     !groupId ||
@@ -770,6 +769,11 @@ async function isTelegramAdminCommandUser(ctx: any): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function isTelegramAdminCommandUser(ctx: any): Promise<boolean> {
+  if (ctx.chat?.type === "private") return isTelegramAdminUser(ctx);
+  return isTelegramAdminGroupUser(ctx);
 }
 
 function countryLookupKey(value: string): string {
@@ -1419,18 +1423,31 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
 
   const createMerchantFromTelegram = async (ctx: any) => {
     const messageText = String(ctx.message?.text || "");
-    await ctx.deleteMessage().catch(() => {});
-    if (ctx.chat?.type !== "private") {
-      await ctx.reply("Pour protéger les identifiants, utilisez cette commande en message privé avec le bot.");
-      return;
-    }
-    if (!await isTelegramAdminUser(ctx)) {
-      await ctx.reply("⛔ Commande réservée aux administrateurs du groupe admin WestPay.");
-      return;
-    }
+    const messageDeleted = await ctx.deleteMessage().then(
+      () => true,
+      () => false,
+    );
     const adminGroupId = await getAdminGroupId().catch(() => undefined);
     if (!adminGroupId) {
       await ctx.reply("Le groupe administrateur WestPay n’est pas configuré.");
+      return;
+    }
+    if (
+      !["group", "supergroup"].includes(ctx.chat?.type) ||
+      String(ctx.chat?.id) !== adminGroupId
+    ) {
+      await ctx.reply("⛔ Cette commande fonctionne uniquement dans le groupe administrateur WestPay.");
+      return;
+    }
+    if (!await isTelegramAdminGroupUser(ctx)) {
+      await ctx.reply("⛔ Seuls les administrateurs Telegram du groupe admin WestPay peuvent créer un marchand.");
+      return;
+    }
+    if (!messageDeleted) {
+      await ctx.reply(
+        "⛔ Création annulée : le bot n’a pas pu supprimer la commande contenant le code TOTP. " +
+        "Vérifiez qu’il peut supprimer les messages dans ce groupe.",
+      );
       return;
     }
 
@@ -2535,14 +2552,14 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
 
     if (!isGroup && await isTelegramAdminUser(ctx)) {
       await ctx.reply(
-        "Commandes marchand (message privé uniquement) :\n\n" +
-        "/createmerchant ADMIN_EMAIL CODE_TOTP | NOM | EMAIL | SLUG | PAYS1,PAYS2 | CYCLE | CATEGORIE\n" +
-        "Exemple : /createmerchant admin@westpay.com 123456 | Demo | client@example.com | demo-shop | Togo,Benin | D+3 | other_platforms\n\n" +
+        "Commandes disponibles en message privé :\n\n" +
         "/setmerchantcode SLUG_MARCHAND — Générer le code à utiliser dans le groupe marchand\n" +
         "Exemple : /setmerchantcode demo-shop\n\n" +
         "/activatecountry SLUG_MARCHAND | PAYS\n" +
         "Exemple : /activatecountry demo-shop | Togo\n\n" +
-        "La création se lance en privé avec le TOTP, mais le texte d’accueil et les identifiants sont publiés dans le groupe admin. Le cycle choisi est indicatif."
+        "La création d’un marchand se lance uniquement dans le groupe admin WestPay avec /createmerchant. " +
+        "Seuls les administrateurs Telegram de ce groupe peuvent l’utiliser; le message est supprimé automatiquement. " +
+        "Les identifiants sont publiés dans ce même groupe. Le cycle choisi est indicatif."
       );
       return;
     }
@@ -2560,7 +2577,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `/merchants — Liste de tous les marchands\n` +
           `/setmerchant CODE — Lier un groupe à un marchand\n\n` +
           `/setmerchantcode SLUG — Générer un code de liaison à usage unique (24 h)\n\n` +
-          `/createmerchant — Créer un marchand (commande en message privé; identifiants publiés dans le groupe admin)\n` +
+          `/createmerchant (/creermarchand) — Créer un marchand dans ce groupe uniquement (administrateurs Telegram; message supprimé automatiquement)\n` +
           `/activatecountry — Activer un pays (commande en message privé)\n\n` +
            `/disablepayments — Désactiver payin et payout d'un marchand\n\n` +
            `/enablepayments (/activatepayments) — Réactiver payin et payout d'un marchand\n\n` +
