@@ -9,6 +9,10 @@ import { generateSecret as totpGenerateSecret, generateURI as totpGenerateURI, v
 import QRCode from "qrcode";
 import { admins, merchantCountries, transactions, pendingPayments, withdrawals } from "@shared/schema";
 import {
+  normalizeMerchantPaymentStatus,
+  removePaymentAttemptsAlreadyFinalized,
+} from "./merchant-payment-history";
+import {
   canonicalMerchantCountryName,
   isMerchantCategory,
   isMerchantSettlementCycle,
@@ -109,7 +113,12 @@ import {
 } from "./feeConfig";
 import { calcMerchantCreditForMerchant } from "./payment-fees";
 import { buildManualUssdCode, validateManualUssdTemplate } from "./manual-payment-utils";
-import { reviewManualPayment, submitManualPaymentProof } from "./manual-payment-service";
+import {
+  reviewManualPayment,
+  reviewPendingPayment,
+  reviewTransactionPayment,
+  submitManualPaymentProof,
+} from "./manual-payment-service";
 import { assertPublicWebhookUrl, notifyConfirmedPaymentWebhook, sendWebhookNotification } from "./merchant-webhooks";
 import {
   isPaymentChannelAvailable,
@@ -3777,7 +3786,7 @@ export async function registerRoutes(
       // Seuls les paiements vraiment EN COURS sont affichés ici.
       // Les confirmés et échoués apparaissent déjà via la table transactions → pas de doublon.
       const pendingItems = pendingPays
-        .filter(p => ["gateway_pending", "lipapap_pending", "submitted", "pending", "manual_submitted"].includes(p.status))
+        .filter(p => ["provider_pending", "gateway_pending", "lipapap_pending", "submitted", "pending", "manual_submitted"].includes(p.status))
         .map(p => ({
           id: `pp-${p.id}`,
           rowId: p.id,
@@ -4268,9 +4277,13 @@ export async function registerRoutes(
 
   app.get("/api/merchant/transactions", authMiddleware("merchant"), async (req, res) => {
     try {
-      const txs = await storage.getTransactions((req as any).user.id);
+      const merchantId = (req as any).user.id;
+      const [txs, pendingPayments] = await Promise.all([
+        storage.getTransactions(merchantId),
+        storage.getPendingPayments(merchantId),
+      ]);
       // Sanitize: never expose internal provider/gateway names to merchants
-      const sanitized = txs.map((t: any) => ({
+      const sanitizedTransactions = txs.map((t: any) => ({
         ...t,
         provider: "westpay",
         errorMessage: t.errorMessage
@@ -4280,7 +4293,29 @@ export async function registerRoutes(
         providerReference: t.providerReference ? `WP-${t.id}` : undefined,
         gateway: undefined,
       }));
-      res.json(sanitized);
+      const pendingHistory = removePaymentAttemptsAlreadyFinalized(pendingPayments, txs)
+        .map((p: any) => ({
+          id: -p.id,
+          merchantId: p.merchantId,
+          country: p.country,
+          txId: p.txId || `PP-${p.id}`,
+          amount: p.amount,
+          payerNumber: p.payerPhone,
+          payerName: p.payerName,
+          status: normalizeMerchantPaymentStatus(p.status),
+          provider: "westpay",
+          providerTxId: undefined,
+          operator: p.paymentMethod,
+          providerReference: p.providerReference ? `WP-${p.id}` : undefined,
+          errorMessage: p.errorMessage
+            ? sanitizePublicPaymentMessage(p.errorMessage)
+            : p.errorMessage,
+          createdAt: p.createdAt,
+          gateway: undefined,
+        }));
+      const history = [...sanitizedTransactions, ...pendingHistory]
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      res.json(history);
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }
@@ -6502,22 +6537,70 @@ export async function registerRoutes(
     try {
       const id = Number(req.params.id);
       if (isNaN(id)) return res.status(400).json({ message: "ID de transaction invalide" });
-      const [tx] = await financialDb.select().from(transactions).where(eq(transactions.id, id));
-      if (!tx) return res.status(404).json({ message: "Transaction introuvable" });
-      if (tx.status === "confirmed") return res.json({ success: true, alreadyConfirmed: true });
-
-      // Créditer le marchand si la transaction n'était pas déjà confirmée
-      const mc = await storage.findMerchantCountryBySimAndCountry(tx.merchantId, tx.country || "");
-      const merchant = await storage.getMerchantById(tx.merchantId);
-      if (mc) {
-        const credit = calcMerchantCreditForMerchant(tx.amount, tx.country, merchant);
-        await storage.incrementMerchantCountryBalance(mc.id, credit);
+      const requestedSource = req.body?.source;
+      if (requestedSource !== undefined && requestedSource !== "pending" && requestedSource !== "transaction") {
+        return res.status(400).json({ message: "Source de paiement invalide" });
       }
-      await financialDb.update(transactions).set({ status: "confirmed" }).where(eq(transactions.id, id));
-      notifyAdminPayment({ txId: tx.txId || `TX-${id}`, merchantName: merchant?.name || `#${tx.merchantId}`, payerNumber: tx.payerNumber, country: tx.country || "", amount: tx.amount, provider: tx.provider || "manual", status: "confirmed" }).catch(() => {});
-      notifyMerchantPayment(tx.merchantId, { txId: tx.txId || `TX-${id}`, amount: tx.amount, payerNumber: tx.payerNumber, country: tx.country || "", provider: tx.provider || "manual" }).catch(() => {});
-      console.log(`[ADMIN FORCE-VALIDATE TX] Transaction #${id} validée manuellement — crédit: ${mc ? "oui" : "pays non trouvé"}`);
-      res.json({ success: true });
+      const source = requestedSource === "pending" ? "pending" : "transaction";
+      const reviewer = String((req as any).user?.email || "admin");
+      const result = source === "pending"
+        ? await reviewPendingPayment(id, reviewer, "approve")
+        : await reviewTransactionPayment(id, "approve", { allowManualOverride: true });
+
+      if (result.outcome === "not_found") {
+        return res.status(404).json({ message: source === "pending" ? "Paiement en attente introuvable" : "Transaction introuvable" });
+      }
+      if (result.outcome === "not_submitted") {
+        return res.status(409).json({ message: "Le client n’a pas encore envoyé sa référence de paiement." });
+      }
+      if (result.outcome === "not_actionable") {
+        return res.status(409).json({ message: "Cette transaction ne peut plus être validée dans son état actuel." });
+      }
+
+      if (result.outcome === "approved" && result.payment) {
+        const payment = result.payment;
+        const merchantName = result.merchant?.name || `#${payment.merchantId}`;
+        const txId = payment.txId || payment.providerReference || `WP-${payment.id}`;
+        const provider = payment.gateway || "mobile_money";
+        const creditedAmount = result.credit ?? payment.amount;
+        const platformFee = payment.amount - creditedAmount;
+
+        notifyAdminPayment({
+          txId,
+          merchantName,
+          payerNumber: payment.payerPhone,
+          country: payment.country,
+          amount: payment.amount,
+          provider,
+          status: "confirmed",
+          platformFee,
+          creditedAmount,
+        }).catch(err => console.error("[ADMIN TX VALIDATE] Notification admin échouée:", err?.message || err));
+        notifyMerchantPayment(payment.merchantId, {
+          txId,
+          amount: payment.amount,
+          payerNumber: payment.payerPhone,
+          country: payment.country,
+          provider,
+          platformFee,
+          creditedAmount,
+        }).catch(err => console.error("[ADMIN TX VALIDATE] Notification marchand échouée:", err?.message || err));
+        notifyConfirmedPaymentWebhook(payment.merchantId, {
+          event: "payment.confirmed",
+          txId,
+          amount: payment.amount,
+          currency: payment.country,
+          payer: payment.payerPhone || "",
+          country: payment.country,
+          merchantSlug: result.merchant?.slug || "",
+          provider,
+          reference: payment.providerReference || txId,
+          timestamp: new Date().toISOString(),
+        }).catch(err => console.error("[ADMIN TX VALIDATE] Webhook marchand échoué:", err?.message || err));
+      }
+
+      console.log(`[ADMIN TX VALIDATE] ${source} #${id}: ${result.outcome}`);
+      return res.json({ success: true, alreadyConfirmed: result.outcome === "already_approved", source });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }
@@ -6527,9 +6610,28 @@ export async function registerRoutes(
     try {
       const id = Number(req.params.id);
       if (isNaN(id)) return res.status(400).json({ message: "ID de transaction invalide" });
-      await financialDb.update(transactions).set({ status: "rejected" }).where(eq(transactions.id, id));
-      console.log(`[ADMIN FORCE-REJECT TX] Transaction #${id} rejetée manuellement`);
-      res.json({ success: true });
+      const requestedSource = req.body?.source;
+      if (requestedSource !== undefined && requestedSource !== "pending" && requestedSource !== "transaction") {
+        return res.status(400).json({ message: "Source de paiement invalide" });
+      }
+      const source = requestedSource === "pending" ? "pending" : "transaction";
+      const reviewer = String((req as any).user?.email || "admin");
+      const result = source === "pending"
+        ? await reviewPendingPayment(id, reviewer, "reject")
+        : await reviewTransactionPayment(id, "reject");
+
+      if (result.outcome === "not_found") {
+        return res.status(404).json({ message: source === "pending" ? "Paiement en attente introuvable" : "Transaction introuvable" });
+      }
+      if (result.outcome === "not_submitted") {
+        return res.status(409).json({ message: "Le client n’a pas encore envoyé sa référence de paiement." });
+      }
+      if (result.outcome === "not_actionable") {
+        return res.status(409).json({ message: "Cette transaction ne peut plus être rejetée dans son état actuel." });
+      }
+
+      console.log(`[ADMIN TX REJECT] ${source} #${id}: ${result.outcome}`);
+      return res.json({ success: true, alreadyRejected: result.outcome === "already_rejected", source });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }

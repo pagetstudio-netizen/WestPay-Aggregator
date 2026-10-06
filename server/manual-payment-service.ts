@@ -263,6 +263,7 @@ export async function reviewPendingPayment(
 export async function reviewTransactionPayment(
   id: number,
   action: "approve" | "reject",
+  options: { allowManualOverride?: boolean } = {},
 ): Promise<ManualReviewResult> {
   const client = await financialPool.connect();
   try {
@@ -284,15 +285,26 @@ export async function reviewTransactionPayment(
       payer_phone: row.payer_number,
     });
     const status = payment.status.toLowerCase();
-    if (action === "approve" && status === "confirmed") {
+    const isAlreadySuccessful =
+      ["confirmed", "completed", "paid", "success"].includes(status) ||
+      /_(confirmed|completed|paid|success)$/.test(status);
+    const isAlreadyRejected =
+      ["rejected", "manual_rejected"].includes(status) ||
+      /_rejected$/.test(status);
+    if (action === "approve" && isAlreadySuccessful) {
       await client.query("COMMIT");
       return { outcome: "already_approved", payment };
     }
-    if (action === "reject" && ["rejected", "manual_rejected"].includes(status)) {
+    if (action === "reject" && isAlreadyRejected) {
       await client.query("COMMIT");
       return { outcome: "already_rejected", payment };
     }
-    if (!getPaymentReviewActions(payment)[action]) {
+    const manualOverrideAllowed =
+      action === "approve" &&
+      options.allowManualOverride === true &&
+      !isAlreadySuccessful &&
+      !isAlreadyRejected;
+    if (!getPaymentReviewActions(payment)[action] && !manualOverrideAllowed) {
       await client.query("ROLLBACK");
       return { outcome: "not_actionable", payment };
     }

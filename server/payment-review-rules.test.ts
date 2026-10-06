@@ -3,7 +3,7 @@ import test from "node:test";
 import { getPaymentReviewActions } from "./payment-review-rules";
 
 test("only pending payments expose approve and reject actions", () => {
-  for (const status of ["pending", "gateway_pending", "lipapap_pending", "submitted"]) {
+  for (const status of ["pending", "provider_pending", "gateway_pending", "lipapap_pending", "submitted"]) {
     assert.deepEqual(
       getPaymentReviewActions({ source: "pending", gateway: "mbiyo", status }),
       { approve: true, reject: true },

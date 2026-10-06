@@ -1636,20 +1636,32 @@ function TransactionsPanel() {
   const { data: transactions = [], isLoading, refetch, isError, error } = useAdminFetch(apiUrl, ["/api/admin/transactions", dateFilter, startDate, endDate]);
 
   const validateTxMutation = useMutation({
-    mutationFn: async (id: number) => {
-      const res = await fetch(`/api/admin/transactions/${id}/validate`, { method: "POST", credentials: "include",
- headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
+    mutationFn: async ({ id, source }: { id: number; source: "pending" | "transaction" }) => {
+      const res = await fetch(`/api/admin/transactions/${id}/validate`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ source }),
+      });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
       return res.json();
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/transactions"] }); toast({ title: "Transaction validée" }); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      toast({ title: "Transaction validée" });
+    },
     onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
   });
 
   const rejectTxMutation = useMutation({
-    mutationFn: async (id: number) => {
-      const res = await fetch(`/api/admin/transactions/${id}/reject`, { method: "POST", credentials: "include",
- headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
+    mutationFn: async ({ id, source }: { id: number; source: "pending" | "transaction" }) => {
+      const res = await fetch(`/api/admin/transactions/${id}/reject`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ source }),
+      });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Erreur"); }
       return res.json();
     },
@@ -1910,7 +1922,21 @@ function TransactionsPanel() {
           ) : (
             filtered.map((tx: any) => {
               const isFailed = ["failed", "rejected", "provider_failed", "lipapap_failed"].includes(tx.status);
-              const isPendingInProgress = tx.type === "pending" || ["provider_pending", "lipapap_pending", "submitted"].includes(tx.status);
+              const isPayment = tx.type === "payment" || tx.type === "pending";
+              const reviewSource = tx.type === "pending" ? "pending" : "transaction";
+              const normalizedStatus = String(tx.status || "").toLowerCase();
+              const isPendingInProgress = tx.type === "pending" ||
+                ["provider_pending", "gateway_pending", "lipapap_pending", "submitted"].includes(normalizedStatus);
+              const isFinalSuccess = ["confirmed", "completed", "paid", "success"].includes(normalizedStatus) ||
+                /_(confirmed|completed|paid|success)$/.test(normalizedStatus);
+              const isFinalRejected = ["rejected", "manual_rejected"].includes(normalizedStatus) ||
+                /_rejected$/.test(normalizedStatus);
+              const isReviewableStatus = [
+                "pending", "provider_pending", "gateway_pending", "lipapap_pending", "submitted", "manual_submitted",
+              ].includes(normalizedStatus);
+              const canManualValidate = isPayment && !tx.manualPayment && !isFinalSuccess && !isFinalRejected &&
+                (reviewSource === "transaction" || isReviewableStatus);
+              const canReject = isPayment && !tx.manualPayment && isReviewableStatus;
               return (
                 <Card key={tx.id} className={isFailed ? "border-destructive/40 bg-destructive/5 dark:bg-destructive/10" : isPendingInProgress ? "border-yellow-300 dark:border-yellow-700" : ""}>
                   <CardContent className="p-4">
@@ -1969,7 +1995,7 @@ function TransactionsPanel() {
                           <p className={`text-lg font-bold ${isFailed ? "text-destructive" : "text-foreground"}`}>{tx.amount?.toLocaleString("fr-FR")}</p>
                           <p className="text-xs text-muted-foreground">F CFA</p>
                           <div className="flex gap-1 mt-1 flex-wrap justify-end">
-                            {!tx.manualPayment && ["pending", "en cours", "approved", "confirmed", "provider_pending", "lipapap_pending", "submitted"].includes(tx.status) && (
+                            {isPayment && !tx.manualPayment && ["pending", "en cours", "approved", "confirmed", "provider_pending", "gateway_pending", "lipapap_pending", "submitted"].includes(normalizedStatus) && (
                               <>
                                 <ProviderPickerButton label="Vérifier statut" icon={RefreshCw} colorClass="border-blue-400 text-blue-700 dark:text-blue-300 hover:bg-blue-50"
                                   onPick={(provider) => checkTxStatus(tx, provider)} testId={`button-check-status-tx-${tx.id}`} />
@@ -1978,7 +2004,7 @@ function TransactionsPanel() {
                                   onPick={(provider) => syncTxStatusMutation.mutate({ tx, provider })} testId={`button-sync-status-tx-${tx.id}`} />
                               </>
                             )}
-                            {!tx.manualPayment && (tx.type === "pending" || ["provider_pending", "lipapap_pending", "submitted"].includes(tx.status)) && (
+                            {isPayment && !tx.manualPayment && (tx.type === "pending" || ["provider_pending", "gateway_pending", "lipapap_pending", "submitted"].includes(normalizedStatus)) && (
                               <ProviderPickerButton label="Déclencher paiement" icon={Send} colorClass="border-orange-400 text-orange-700 dark:text-orange-300 hover:bg-orange-50"
                                 disabled={retryTxMutation.isPending}
                                 onPick={async (provider) => { if (await showConfirm(`Déclencher le paiement chez ${provider} ?\nUne nouvelle invite USSD sera envoyée au client.`)) retryTxMutation.mutate({ tx, provider }); }}
@@ -2000,18 +2026,18 @@ function TransactionsPanel() {
                                 </Button>
                               </>
                             )}
-                            {!tx.manualPayment && tx.status !== "confirmed" && tx.status !== "completed" && tx.status !== "success" && (
+                            {canManualValidate && (
                               <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white gap-1"
                                 disabled={validateTxMutation.isPending}
-                                onClick={async () => { if (await showConfirm("Valider cette transaction manuellement ? (à utiliser si l'argent est bien arrivé au client)")) validateTxMutation.mutate(tx.rowId); }}
+                                onClick={async () => { if (await showConfirm("Valider cette transaction manuellement ? (à utiliser si l'argent est bien arrivé au client)")) validateTxMutation.mutate({ id: tx.rowId, source: reviewSource }); }}
                                 data-testid={`button-validate-tx-${tx.id}`}>
                                 <CheckCircle className="w-3 h-3" />Valider manuellement
                               </Button>
                             )}
-                            {!tx.manualPayment && tx.status !== "rejected" && tx.status !== "failed" && (
+                            {canReject && (
                               <Button size="sm" variant="destructive" className="h-7 text-xs gap-1"
                                 disabled={rejectTxMutation.isPending}
-                                onClick={async () => { if (await showConfirm("Rejeter cette transaction manuellement ?")) rejectTxMutation.mutate(tx.rowId); }}
+                                onClick={async () => { if (await showConfirm("Rejeter cette transaction manuellement ?")) rejectTxMutation.mutate({ id: tx.rowId, source: reviewSource }); }}
                                 data-testid={`button-reject-tx-${tx.id}`}>
                                 <XCircle className="w-3 h-3" />Rejeter
                               </Button>

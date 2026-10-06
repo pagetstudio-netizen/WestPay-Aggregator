@@ -11,6 +11,7 @@ export type PaymentReviewActions = {
 
 const OPEN_PAYMENT_STATUSES = new Set([
   "pending",
+  "provider_pending",
   "gateway_pending",
   "lipapap_pending",
   "submitted",
