@@ -6,6 +6,49 @@ export type SettlementCycleOption = {
   descriptionZh: string;
 };
 
+export const MERCHANT_ACTIVATABLE_COUNTRIES = [
+  "Togo",
+  "Benin",
+  "Cote d'Ivoire",
+  "Senegal",
+  "Mali",
+  "Burkina Faso",
+  "Cameroun",
+  "Congo Brazzaville",
+  "Congo RDC",
+  "Gabon",
+  "Guinee",
+  "Niger",
+  "Kenya",
+  "Ghana",
+  "Gambie",
+  "Guinee-Bissau",
+  "Tchad",
+  "Centrafrique",
+  "Guinee Equatoriale",
+  "Nigeria",
+  "Pakistan",
+  "Philippines",
+  "India",
+] as const;
+
+function normalizeCountryName(value: string): string {
+  return value
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[’]/g, "'")
+    .toLowerCase();
+}
+
+export function canonicalMerchantCountryName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = normalizeCountryName(value);
+  return MERCHANT_ACTIVATABLE_COUNTRIES.find(
+    (country) => normalizeCountryName(country) === normalized,
+  );
+}
+
 const dayBasedCycles: SettlementCycleOption[] = [
   {
     value: "D0",

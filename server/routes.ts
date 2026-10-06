@@ -8,7 +8,11 @@ import { db, pool, financialDb, financialPool } from "./db";
 import { generateSecret as totpGenerateSecret, generateURI as totpGenerateURI, verifySync as totpVerifySync } from "otplib";
 import QRCode from "qrcode";
 import { admins, merchantCountries, transactions, pendingPayments, withdrawals } from "@shared/schema";
-import { isMerchantCategory, isMerchantSettlementCycle } from "@shared/merchant-account";
+import {
+  canonicalMerchantCountryName,
+  isMerchantCategory,
+  isMerchantSettlementCycle,
+} from "@shared/merchant-account";
 import { normalizeEmailInput } from "@shared/email-validation";
 import {
   decryptTotpSecret as decryptTotpSecretWithKey,
@@ -3524,14 +3528,16 @@ export async function registerRoutes(
     try {
       const { merchantId, country } = req.body;
       if (!merchantId || !country) return res.status(400).json({ message: "Marchand et pays requis" });
-      const apiKey = generateSecureApiKey(country);
-      const mc = await storage.addMerchantCountry({ merchantId, country, apiKey, balance: 0, active: true, gatewayEnabled: true });
+      const canonicalCountry = canonicalMerchantCountryName(country);
+      if (!canonicalCountry) return res.status(400).json({ message: "Pays non pris en charge" });
+      const apiKey = generateSecureApiKey(canonicalCountry);
+      const mc = await storage.addMerchantCountry({ merchantId, country: canonicalCountry, apiKey, balance: 0, active: true, gatewayEnabled: true });
 
       await storage.createApiLog({
         merchantId,
         action: "country_added",
         ip: req.ip || "",
-        description: `Pays ${country} active avec cle API generee`,
+        description: `Pays ${canonicalCountry} active avec cle API generee`,
       });
 
       res.json(mc);
@@ -3549,9 +3555,14 @@ export async function registerRoutes(
       const results = [];
       const errors = [];
       for (const country of countries) {
+        const canonicalCountry = canonicalMerchantCountryName(country);
+        if (!canonicalCountry) {
+          errors.push({ country, error: "Pays non pris en charge" });
+          continue;
+        }
         try {
-          const apiKey = generateSecureApiKey(country);
-          const mc = await storage.addMerchantCountry({ merchantId, country, apiKey, balance: 0, active: true, gatewayEnabled: true });
+          const apiKey = generateSecureApiKey(canonicalCountry);
+          const mc = await storage.addMerchantCountry({ merchantId, country: canonicalCountry, apiKey, balance: 0, active: true, gatewayEnabled: true });
           results.push(mc);
         } catch (e: any) {
           errors.push({ country, error: e.message });

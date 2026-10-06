@@ -39,7 +39,11 @@ import {
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { Merchant, MerchantCountry, Transaction, PhoneNumber, SmsLog, PaymentLink, WalletTransfer, Withdrawal, WithdrawalOperator, WaveManualPaymentConfig } from "@shared/schema";
-import { getMerchantCategory, getSettlementCycle } from "@shared/merchant-account";
+import {
+  MERCHANT_ACTIVATABLE_COUNTRIES,
+  getMerchantCategory,
+  getSettlementCycle,
+} from "@shared/merchant-account";
 
 type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "countries" | "numbers" | "sms" | "apikeys" | "mbiyo" | "lipapap" | "drimpay" | "seapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge" | "actionlogs";
 
@@ -2156,7 +2160,7 @@ function CountriesPanel() {
 
   if (isLoading) return <LoadingSkeleton />;
 
-  const availableCountries = ["Togo", "Benin", "Cote d'Ivoire", "Senegal", "Mali", "Burkina Faso", "Cameroun", "Congo Brazzaville", "Congo RDC", "Gabon", "Guinee", "Niger", "Kenya", "Ghana", "Gambie", "Guinee-Bissau", "Tchad", "Centrafrique", "Guinee Equatoriale", "Nigeria", "Pakistan", "Philippines", "India"];
+  const availableCountries = MERCHANT_ACTIVATABLE_COUNTRIES;
   const selectedMerchantName = (merchants as Merchant[]).find(m => m.id.toString() === merchantId)?.name;
   const filteredCountries = filterSearch.trim()
     ? (countries as any[]).filter((mc: any) =>

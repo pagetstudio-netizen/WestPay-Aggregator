@@ -6,6 +6,8 @@ import { verifySync as totpVerifySync } from "otplib";
 import { storage } from "./storage";
 import { pool, financialPool } from "./db";
 import {
+  MERCHANT_ACTIVATABLE_COUNTRIES,
+  canonicalMerchantCountryName,
   MERCHANT_CATEGORIES,
   isMerchantCategory,
   isMerchantSettlementCycle,
@@ -1353,13 +1355,19 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     const [name, rawEmail, rawSlug, countriesText, accountType, merchantCategory] = parts.slice(1);
     const email = rawEmail.toLowerCase();
     const slug = rawSlug.toLowerCase();
-    const countries = countriesText
+    const rawCountries = countriesText
       .split(",")
-      .map((country: string) => canonicalCountryName(country))
+      .map((country: string) => country.trim())
       .filter(Boolean);
     const uniqueCountries: string[] = [];
+    const unsupportedCountries: string[] = [];
     const countryKeys = new Set<string>();
-    for (const country of countries) {
+    for (const rawCountry of rawCountries) {
+      const country = canonicalMerchantCountryName(canonicalCountryName(rawCountry));
+      if (!country) {
+        unsupportedCountries.push(rawCountry);
+        continue;
+      }
       const key = countryLookupKey(country);
       if (!countryKeys.has(key)) {
         countryKeys.add(key);
@@ -1381,6 +1389,13 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     }
     if (!/^[a-z0-9-]{2,40}$/.test(slug)) {
       await ctx.reply("Slug invalide : utilisez 2 à 40 caractères minuscules, chiffres ou tirets.");
+      return;
+    }
+    if (unsupportedCountries.length > 0) {
+      await ctx.reply(
+        `Pays non pris en charge : ${unsupportedCountries.join(", ")}.\n\n` +
+        `Choisissez parmi les pays du panel : ${MERCHANT_ACTIVATABLE_COUNTRIES.join(", ")}.`,
+      );
       return;
     }
     if (uniqueCountries.length === 0 || uniqueCountries.length > 20 || uniqueCountries.some((country: string) => country.length > 80)) {
@@ -1619,7 +1634,13 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       return;
     }
     const [merchantRef, rawCountry] = parts;
-    const country = canonicalCountryName(rawCountry);
+    const country = canonicalMerchantCountryName(canonicalCountryName(rawCountry));
+    if (!country) {
+      await ctx.reply(
+        `Pays non pris en charge. Choisissez un pays disponible dans le panel : ${MERCHANT_ACTIVATABLE_COUNTRIES.join(", ")}.`,
+      );
+      return;
+    }
 
     try {
       const merchant = merchantRef.includes("@")
