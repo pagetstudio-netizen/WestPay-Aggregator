@@ -23,7 +23,7 @@ import vodafoneIcon     from "@assets/vodafone-brand-logo-phone-symbol-with-name
 import mtnGhanaIcon     from "@assets/XzQ5b64_1784323232515.png";
 
 /* ── types ─────────────────────────────────────────────────────────────── */
-type MerchantInfo = { name: string; slug: string; countries: string[] };
+type MerchantInfo = { name: string; slug: string; countries: string[]; website?: string | null };
 
 /* ── static data ────────────────────────────────────────────────────────── */
 const PAYMENT_METHODS: Record<string, string[]> = {
@@ -688,6 +688,8 @@ export default function PaymentPage() {
                     currency={currency}
                     operator={method}
                     payment={manualPayment}
+                    merchantReturnUrl={redirectUrl || merchantInfo?.website || null}
+                    showMerchantReturnButton
                   />
                 ) : paymentUrl ? (<>
                   <div style={{ background:"#dbeafe", borderRadius:12, padding:12, textAlign:"center", fontSize:14, fontWeight:500, color:"#1e40af" }}>

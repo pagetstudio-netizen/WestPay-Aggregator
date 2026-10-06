@@ -18,6 +18,7 @@ type MerchantInfo = {
   name: string;
   slug: string;
   countries: string[];
+  website?: string | null;
 };
 
 type PaymentMethod = {
@@ -313,7 +314,7 @@ export default function Bank2PaymentPage() {
           });
           setAmountType(data.link.amountType === "flexible" ? "flexible" : "fixed");
           setAmount(data.link.amount || 0);
-          if (data.link.redirectUrl) redirectRef.current = data.link.redirectUrl;
+          redirectRef.current = data.link.redirectUrl || "";
           setScreen("countries");
         })
         .catch((caught) => setError(sanitizePaymentMessage(caught.message, "Page de paiement indisponible")))
@@ -337,6 +338,7 @@ export default function Bank2PaymentPage() {
           (item) => item.toLowerCase() === countryParam.toLowerCase(),
         );
         if (!matchedCountry) throw new Error("Ce pays n’est pas activé pour ce marchand.");
+        if (!redirectRef.current && info.website) redirectRef.current = info.website;
         setMerchant(info);
         setCountry(matchedCountry);
         setScreen("operators");
@@ -467,6 +469,8 @@ export default function Bank2PaymentPage() {
         currency={currency}
         operator={method}
         payment={manualPayment}
+        merchantReturnUrl={buildRedirectUrl()}
+        showMerchantReturnButton={!paymentLinkUniqueId || Boolean(redirectRef.current)}
       />
     );
   }
@@ -653,6 +657,8 @@ export default function Bank2PaymentPage() {
                     currency={currency}
                     operator={method}
                     payment={manualPayment}
+                    merchantReturnUrl={buildRedirectUrl()}
+                    showMerchantReturnButton={!paymentLinkUniqueId || Boolean(redirectRef.current)}
                   />
                 </div>
               ) : (

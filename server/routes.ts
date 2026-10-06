@@ -5044,6 +5044,7 @@ export async function registerRoutes(
           name: merchant.name,
           slug: merchant.slug,
           countries: activeCountries.map(c => c.country),
+          website: merchant.website || null,
         },
       });
     } catch (err: any) {

@@ -20,6 +20,8 @@ type Props = {
   currency: string;
   operator: string;
   payment: ManualPaymentDetails;
+  merchantReturnUrl?: string | null;
+  showMerchantReturnButton?: boolean;
   previewMode?: boolean;
 };
 
@@ -490,6 +492,8 @@ export default function ManualPaymentStep({
   currency,
   operator,
   payment,
+  merchantReturnUrl = null,
+  showMerchantReturnButton = false,
   previewMode = false,
 }: Props) {
   const [message, setMessage] = useState("");
@@ -499,7 +503,6 @@ export default function ManualPaymentStep({
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [successReference, setSuccessReference] = useState("");
-  const [successStatus, setSuccessStatus] = useState<"pending" | "confirmed">("pending");
 
   const showMessage = (text: string) => {
     setMessage(text);
@@ -566,7 +569,6 @@ export default function ManualPaymentStep({
 
       setSubmitted(true);
       setSuccessReference(cleanProof);
-      setSuccessStatus("pending");
       setSuccess(true);
     } catch (error: unknown) {
       showMessage(error instanceof Error ? error.message : "Impossible d’envoyer la preuve.");
@@ -582,7 +584,7 @@ export default function ManualPaymentStep({
     }
     if (checking) return;
     if (previewMode) {
-      showMessage("Aperçu : la vérification est désactivée.");
+      showMessage("Aperçu : l’actualisation du statut est désactivée.");
       return;
     }
 
@@ -593,20 +595,19 @@ export default function ManualPaymentStep({
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(data.message || "Vérification impossible.");
+        throw new Error(data.message || "Impossible d’actualiser le statut du paiement.");
       }
 
       if (data.status === "confirmed") {
         setSuccessReference(proofReference.trim());
-        setSuccessStatus("confirmed");
         setSuccess(true);
       } else if (data.status === "failed") {
         showMessage("Paiement non confirmé.");
       } else {
-        showMessage("Vérification terminée.");
+        showMessage("Statut actualisé.");
       }
     } catch (error: unknown) {
-      showMessage(error instanceof Error ? error.message : "Vérification impossible.");
+      showMessage(error instanceof Error ? error.message : "Impossible d’actualiser le statut du paiement.");
     } finally {
       setChecking(false);
     }
@@ -617,6 +618,21 @@ export default function ManualPaymentStep({
   const isWavePayment = Boolean(payment.wavePaymentUrl && payment.waveQrCodeUrl);
   const recipientName = payment.recipientName?.trim() || "—";
   const displayedReference = successReference || paymentReference || proofReference;
+  const merchantReturnHref = (() => {
+    const raw = merchantReturnUrl?.trim();
+    if (!raw || /^(javascript|data|vbscript):/i.test(raw)) return null;
+    try {
+      const normalized = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+      const url = new URL(normalized);
+      if (!["http:", "https:"].includes(url.protocol)) return null;
+      url.searchParams.set("status", "success");
+      url.searchParams.set("amount", String(amount));
+      url.searchParams.set("ref", paymentReference || displayedReference);
+      return url.toString();
+    } catch {
+      return null;
+    }
+  })();
   const formattedAmount = amount.toLocaleString("en-US", {
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
@@ -642,10 +658,10 @@ export default function ManualPaymentStep({
               </div>
             </div>
 
-            <h1>Paiement soumis avec succès !</h1>
+            <h1>Paiement soumis avec succès.</h1>
 
             <p className="success-message">
-              Votre paiement a bien été soumis.
+              Votre paiement est en cours de traitement.
             </p>
 
             <div className="success-line"></div>
@@ -658,22 +674,19 @@ export default function ManualPaymentStep({
               {displayedReference}
             </div>
 
-            <div className="success-status">
-              <span className="success-status-dot"></span>
-              {successStatus === "confirmed" ? "Paiement confirmé" : "Paiement en cours de vérification"}
-            </div>
-
-            <p className="success-note">
-              Vous pouvez consulter le statut de votre paiement
-              depuis la page de paiement.
-            </p>
-
-            <button
-              className="success-return"
-              onClick={() => setSuccess(false)}
-            >
-              Retour au paiement
-            </button>
+            {showMerchantReturnButton && (
+              <button
+                type="button"
+                className="success-return"
+                onClick={() => {
+                  if (merchantReturnHref) window.location.assign(merchantReturnHref);
+                  else window.history.back();
+                }}
+                data-testid="button-return-to-merchant"
+              >
+                Retourner sur le site marchand
+              </button>
+            )}
           </div>
 
           <div className="success-footer">
@@ -846,7 +859,7 @@ export default function ManualPaymentStep({
             disabled={checking || submitting}
             onClick={() => void checkPayment()}
           >
-            Vérifier le statut du paiement
+            Actualiser le statut
           </button>
         </section>
 
@@ -871,11 +884,11 @@ export default function ManualPaymentStep({
               </div>
 
               <h2>
-                Paiement en cours de vérification
+                Paiement en cours de traitement
               </h2>
 
               <p>
-                Nous vérifions votre paiement.
+                Nous actualisons le statut de votre paiement.
                 <br />
                 Veuillez patienter quelques instants...
               </p>

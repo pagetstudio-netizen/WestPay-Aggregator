@@ -411,6 +411,8 @@ export default function PaymentLinkPage() {
         currency={currency}
         operator={method}
         payment={manualPayment}
+        merchantReturnUrl={redirectUrl}
+        showMerchantReturnButton={Boolean(redirectUrl)}
       />
     );
   }
@@ -638,6 +640,8 @@ export default function PaymentLinkPage() {
                     currency={currency}
                     operator={method}
                     payment={manualPayment}
+                    merchantReturnUrl={redirectUrl}
+                    showMerchantReturnButton={Boolean(redirectUrl)}
                   />
                 ) : paymentUrl ? (<>
                   <div style={{ background: "#dbeafe", borderRadius: 12, padding: 12, textAlign: "center", fontSize: 14, fontWeight: 500, color: "#1e40af" }}>
