@@ -1300,7 +1300,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
 
   const createMerchantFromTelegram = async (ctx: any) => {
     const messageText = String(ctx.message?.text || "");
-    if (ctx.chat?.type === "private") await ctx.deleteMessage().catch(() => {});
+    await ctx.deleteMessage().catch(() => {});
     if (ctx.chat?.type !== "private") {
       await ctx.reply("Pour protéger les identifiants, utilisez cette commande en message privé avec le bot.");
       return;
@@ -1417,8 +1417,19 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     let merchantId: number | undefined;
     const createdCountryIds: number[] = [];
     const rollback = async () => {
-      for (const countryId of createdCountryIds.reverse()) {
-        await storage.deleteMerchantCountry(countryId).catch((error: any) => {
+      const countryIdsToDelete = createdCountryIds.slice();
+      if (merchantId !== undefined) {
+        try {
+          const rows = await storage.getMerchantCountries(merchantId);
+          for (let i = 0; i < rows.length; i++) {
+            if (!countryIdsToDelete.includes(rows[i].id)) countryIdsToDelete.push(rows[i].id);
+          }
+        } catch (error: any) {
+          console.error("[TELEGRAM] Lecture des pays du marchand incomplet impossible:", error?.message || error);
+        }
+      }
+      for (let i = countryIdsToDelete.length - 1; i >= 0; i--) {
+        await storage.deleteMerchantCountry(countryIdsToDelete[i]).catch((error: any) => {
           console.error("[TELEGRAM] Nettoyage d’un pays de marchand impossible:", error?.message || error);
         });
       }
