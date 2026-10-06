@@ -663,6 +663,25 @@ async function isTelegramAdminUser(ctx: any): Promise<boolean> {
   }
 }
 
+async function isTelegramAdminCommandUser(ctx: any): Promise<boolean> {
+  if (ctx.chat?.type === "private") return isTelegramAdminUser(ctx);
+  const groupId = await getAdminGroupId();
+  if (
+    !groupId ||
+    !ctx.from?.id ||
+    !["group", "supergroup"].includes(ctx.chat?.type) ||
+    String(ctx.chat?.id) !== groupId
+  ) {
+    return false;
+  }
+  try {
+    const member = await ctx.telegram.getChatMember(groupId, ctx.from.id);
+    return member.status === "creator" || member.status === "administrator";
+  } catch {
+    return false;
+  }
+}
+
 function countryLookupKey(value: string): string {
   return value
     .trim()
@@ -1309,6 +1328,11 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       await ctx.reply("⛔ Commande réservée aux administrateurs du groupe admin WestPay.");
       return;
     }
+    const adminGroupId = await getAdminGroupId().catch(() => undefined);
+    if (!adminGroupId) {
+      await ctx.reply("Le groupe administrateur WestPay n’est pas configuré.");
+      return;
+    }
 
     const raw = messageText.replace(/^\/[^\s]+\s*/, "");
     const parts = raw.split("|").map((part: string) => part.trim());
@@ -1487,11 +1511,11 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         `Support : https://t.me/robotpay19293`;
 
       try {
-        await ctx.reply(welcomeText, { disable_web_page_preview: true });
+        await bot!.telegram.sendMessage(adminGroupId, welcomeText, { disable_web_page_preview: true });
       } catch (sendError: any) {
         await rollback();
-        console.error("[TELEGRAM] Livraison du message marchand impossible:", sendError?.message || sendError);
-        await ctx.reply("La création a été annulée car le message privé n’a pas pu être envoyé. Réessayez.");
+        console.error("[TELEGRAM] Publication des identifiants dans le groupe admin impossible:", sendError?.message || sendError);
+        await ctx.reply("La création a été annulée car le message n’a pas pu être publié dans le groupe admin. Vérifiez que le bot peut y envoyer des messages.");
         return;
       }
 
@@ -1522,6 +1546,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       }).catch((error: any) => {
         console.error("[TELEGRAM] Notification de création marchand impossible:", error?.message || error);
       });
+      await ctx.reply("✅ Marchand créé. Les identifiants ont été publiés dans le groupe administrateur WestPay.");
     } catch (error: any) {
       await rollback();
       console.error("[TELEGRAM] Création marchand depuis Telegram impossible:", error?.message || error);
@@ -1530,6 +1555,52 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
   };
   bot.command("createmerchant", createMerchantFromTelegram);
   bot.command("creermarchand", createMerchantFromTelegram);
+
+  bot.command("setmerchantcode", async (ctx) => {
+    if (!await isTelegramAdminCommandUser(ctx)) {
+      await ctx.reply("⛔ Commande réservée aux administrateurs du groupe admin WestPay, en privé ou dans ce groupe.");
+      return;
+    }
+
+    const messageText = String(ctx.message?.text || "");
+    const merchantRef = messageText.replace(/^\/[^\s]+\s*/, "").trim();
+    if (!merchantRef) {
+      await ctx.reply("Usage : /setmerchantcode SLUG_MARCHAND\nExemple : /setmerchantcode demo-shop");
+      return;
+    }
+
+    try {
+      const normalizedRef = merchantRef.toLowerCase();
+      const merchant =
+        await storage.getMerchantBySlug(normalizedRef) ||
+        (normalizedRef.includes("@") ? await storage.getMerchantByEmail(normalizedRef) : undefined);
+      if (!merchant) {
+        await ctx.reply("Marchand introuvable. Indiquez son slug ou son e-mail.");
+        return;
+      }
+
+      await storage.deleteTelegramActivationCodes(merchant.id);
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      let activationCode: string | undefined;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const candidate = crypto.randomBytes(4).toString("hex").toUpperCase();
+        if (await storage.getTelegramActivationCode(candidate)) continue;
+        await storage.createTelegramActivationCode(merchant.id, candidate, expiresAt);
+        activationCode = candidate;
+        break;
+      }
+      if (!activationCode) throw new Error("Impossible de générer un code Telegram unique");
+
+      await ctx.reply(
+        `✅ Code de liaison pour ${merchant.slug} : ${activationCode}\n\n` +
+        `Dans le groupe du marchand, lancez : /setmerchant ${activationCode}\n` +
+        `Ce code est à usage unique et expire dans 24 heures.`,
+      );
+    } catch (error: any) {
+      console.error("[TELEGRAM] Génération du code de liaison impossible:", error?.message || error);
+      await ctx.reply("❌ Impossible de générer le code de liaison. Réessayez.");
+    }
+  });
 
   const activateCountryFromTelegram = async (ctx: any) => {
     if (ctx.chat?.type !== "private") {
