@@ -2770,16 +2770,17 @@ function NumbersPanel() {
               <Plus className="w-4 h-4 mr-2" />Ajouter un numero
             </Button>
           </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
+          <DialogContent className="flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-lg flex-col gap-0 overflow-hidden p-0">
+            <DialogHeader className="shrink-0 border-b px-4 py-4 sm:px-6">
               <DialogTitle>{editingNumber ? "Modifier le numéro" : "Ajouter un numéro SIM"}</DialogTitle>
             </DialogHeader>
-            <form onSubmit={(e) => { e.preventDefault(); addNumberMutation.mutate(); }} className="space-y-4">
-              <div className="space-y-2">
+            <form onSubmit={(e) => { e.preventDefault(); addNumberMutation.mutate(); }} className="flex min-h-0 flex-1 flex-col">
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
+                <div className="space-y-2">
                 <Label>Numero</Label>
                 <Input value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} placeholder="+22899935673" required disabled={Boolean(editingNumber)} data-testid="input-phone-number" />
-              </div>
-              <div className="space-y-2">
+                </div>
+                <div className="space-y-2">
                 <Label>Pays</Label>
                 <Select value={country} onValueChange={(value) => { setCountry(value); setOperator(""); }} disabled={Boolean(editingNumber) || isOperatorsLoading}>
                   <SelectTrigger data-testid="select-number-country"><SelectValue placeholder="Selectionner" /></SelectTrigger>
@@ -2789,8 +2790,8 @@ function NumbersPanel() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="space-y-2">
+                </div>
+                <div className="space-y-2">
                 <Label>Opérateur Mobile Money configuré</Label>
                 <Select value={operator || "none"} onValueChange={(value) => setOperator(value === "none" ? "" : value)} disabled={Boolean(editingNumber) || !country || operatorOptions.length === 0}>
                   <SelectTrigger data-testid="select-number-operator"><SelectValue placeholder="Choisir un opérateur" /></SelectTrigger>
@@ -2807,8 +2808,8 @@ function NumbersPanel() {
                 {!editingNumber && country && operatorOptions.length > 0 && (
                   <p className="text-xs text-muted-foreground">Sélectionnez un opérateur déjà configuré pour ce pays.</p>
                 )}
-              </div>
-              <div className="space-y-2">
+                </div>
+                <div className="space-y-2">
                 <Label>Marchand (optionnel)</Label>
                 <Select value={numMerchantId} onValueChange={setNumMerchantId} disabled={Boolean(editingNumber)}>
                   <SelectTrigger data-testid="select-number-merchant"><SelectValue placeholder="Aucun" /></SelectTrigger>
@@ -2819,8 +2820,8 @@ function NumbersPanel() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="space-y-2">
+                </div>
+                <div className="space-y-2">
                 <Label>Nom du titulaire du compte Mobile Money</Label>
                 <Input
                   value={accountName}
@@ -2833,8 +2834,8 @@ function NumbersPanel() {
                 {!editingNumber && (
                   <p className="text-xs text-muted-foreground">Obligatoire si ce numéro est utilisé pour un paiement manuel.</p>
                 )}
-              </div>
-              <div className="space-y-2">
+                </div>
+                <div className="space-y-2">
                 <Label>Modèle USSD public (facultatif)</Label>
                 <Input
                   value={ussdTemplate}
@@ -2844,7 +2845,9 @@ function NumbersPanel() {
                   data-testid="input-number-ussd-template"
                 />
                 <p className="text-xs text-muted-foreground">Variables facultatives : <code>{"{{amount}}"}</code> et <code>{"{{number}}"}</code>. Si le modèle est vide, aucun code ni bouton USSD ne sera affiché au client. N’inscrivez aucun PIN ni code secret.</p>
+                </div>
               </div>
+              <div className="shrink-0 border-t bg-background p-4 sm:px-6">
               <Button
                 type="submit"
                 className="w-full"
@@ -2854,6 +2857,7 @@ function NumbersPanel() {
                 {addNumberMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                 {editingNumber ? "Enregistrer" : "Ajouter le numero"}
               </Button>
+              </div>
             </form>
           </DialogContent>
         </Dialog>
@@ -5522,11 +5526,12 @@ function WithdrawalOperatorsPanel() {
       )}
 
       <Dialog open={opDialogOpen} onOpenChange={setOpDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0">
+          <DialogHeader className="shrink-0 border-b px-4 py-4 sm:px-6">
             <DialogTitle>{editingOp ? "Modifier l'opérateur" : "Nouvel opérateur"}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
+            <div className="space-y-4">
             <div className="space-y-2">
               <Label>Nom</Label>
               <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Ex: Moov Money" data-testid="input-op-name" />
@@ -5643,13 +5648,14 @@ function WithdrawalOperatorsPanel() {
               <Switch checked={form.active} onCheckedChange={v => setForm(f => ({ ...f, active: v }))} data-testid="switch-op-active-form" />
               <Label>Actif</Label>
             </div>
-            <div className="flex gap-2 justify-end pt-2">
-              <Button variant="outline" onClick={() => setOpDialogOpen(false)}>Annuler</Button>
-              <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.name || !form.country || (isManualGatewayValue(form.gateway) && (!form.manualNumberId || !selectedManualNumber?.accountName?.trim()))} data-testid="button-save-operator">
+            </div>
+          </div>
+          <div className="shrink-0 border-t bg-background p-4 sm:flex sm:flex-row sm:justify-end sm:gap-2 sm:px-6">
+              <Button variant="outline" className="w-full sm:w-auto" onClick={() => setOpDialogOpen(false)}>Annuler</Button>
+              <Button className="mt-2 w-full sm:mt-0 sm:w-auto" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.name || !form.country || (isManualGatewayValue(form.gateway) && (!form.manualNumberId || !selectedManualNumber?.accountName?.trim()))} data-testid="button-save-operator">
                 {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                 {editingOp ? "Mettre à jour" : "Créer"}
               </Button>
-            </div>
           </div>
         </DialogContent>
       </Dialog>
