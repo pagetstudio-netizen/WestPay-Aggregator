@@ -594,7 +594,8 @@ async function findWithdrawalOperatorForNetwork(name: string, country: string) {
 /**
  * Résout le gateway du payin.
  *
- * `merchant_countries.payin_gateway` est la configuration actuelle du pays.
+ * Une valeur explicite sur merchant_countries est une surcharge. Sinon, on
+ * suit la passerelle administrée sur l'opérateur choisi pour ce pays.
  */
 function resolvePayinGateway(
   countryGateway: unknown,
@@ -612,8 +613,8 @@ function resolvePayinGateway(
   }
 
   return {
-    gateway: normalizedCountryGateway || normalizedOperatorGateway || "clapay",
-    countryGateway: normalizedCountryGateway || "clapay",
+    gateway: normalizedOperatorGateway,
+    countryGateway: normalizedCountryGateway,
     operatorGateway: normalizedOperatorGateway,
   };
 }

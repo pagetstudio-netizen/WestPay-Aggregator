@@ -57,7 +57,7 @@ export const merchantCountries = pgTable("merchant_countries", {
   balance: integer("balance").default(0).notNull(),
   active: boolean("active").default(true).notNull(),
   gatewayEnabled: boolean("gateway_enabled").default(true).notNull(),
-  payinGateway: text("payin_gateway").default("clapay").notNull(),
+  payinGateway: text("payin_gateway").default("").notNull(),
   adminCreditsTotal: integer("admin_credits_total").default(0).notNull(),
 });
 

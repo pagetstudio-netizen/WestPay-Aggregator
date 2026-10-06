@@ -457,7 +457,7 @@ export async function runFinancialMigrations() {
         balance integer NOT NULL DEFAULT 0,
         active boolean NOT NULL DEFAULT true,
         gateway_enabled boolean NOT NULL DEFAULT true,
-        payin_gateway text NOT NULL DEFAULT 'clapay',
+        payin_gateway text NOT NULL DEFAULT '',
         admin_credits_total integer NOT NULL DEFAULT 0
       );
 
@@ -736,7 +736,7 @@ export async function runFinancialMigrations() {
           END IF;
         END $$;
         ALTER TABLE merchant_countries ALTER COLUMN gateway_enabled SET DEFAULT true;
-        ALTER TABLE merchant_countries ALTER COLUMN payin_gateway SET DEFAULT 'clapay';
+        ALTER TABLE merchant_countries ALTER COLUMN payin_gateway SET DEFAULT '';
         ALTER TABLE pending_payments ALTER COLUMN gateway SET DEFAULT 'clapay';
         ALTER TABLE withdrawals ALTER COLUMN gateway SET DEFAULT 'clapay';
         ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS manual_recipient_phone TEXT;

@@ -437,7 +437,7 @@ const BOT_TEXTS: Record<BotLanguage, MerchantBotText> = {
     linkedWelcome: (name) => `✅ *Compte lié avec succès !*\n\nBienvenue, *${name}* 👋\n\nVous recevrez désormais vos notifications de paiement ici.\n\nTapez /help pour voir vos commandes.`,
     groupLinked: (name, email, help) => `✅ *Groupe lié au marchand !*\n\n🏪 Marchand : *${name}*\n📧 ${email}\n\n${help}`,
     groupActive: (name, help) => `✅ *Bot WestPay actif — ${name}*\n\n${help}`,
-    groupAdded: (groupTitle) => `👋 *Bot WestPay ajouté à ${groupTitle}.*\n\nPour lier ce groupe à un compte marchand :\n\n\`/setmerchant CODE\`\n\n_(Le code d'activation est généré depuis le dashboard WestPay)_`,
+    groupAdded: (groupTitle) => `👋 *Bot WestPay ajouté à ${groupTitle}.*\n\nPour lier ce groupe à un compte marchand :\n\n\`/setmerchant CODE\`\n\n_(Demandez le code de liaison à l'administrateur WestPay)_`,
     stats: (name, transactions, volume) => `📊 *Vos statistiques — ${name}*\n\n💳 Transactions : *${transactions}*\n💰 Volume total : *${volume}*`,
     balances: (name, details) => `💰 *Soldes — ${name}*\n\n${details}`,
     transactionsTitle: (name, personal) => personal ? `📋 *Vos 5 dernières transactions*` : `📋 *5 dernières transactions — ${name}*`,
@@ -465,7 +465,7 @@ const BOT_TEXTS: Record<BotLanguage, MerchantBotText> = {
     linkedWelcome: (name) => `✅ *Account linked successfully!*\n\nWelcome, *${name}* 👋\n\nYou will now receive your payment notifications here.\n\nType /help to see your commands.`,
     groupLinked: (name, email, help) => `✅ *Group linked to the merchant!*\n\n🏪 Merchant: *${name}*\n📧 ${email}\n\n${help}`,
     groupActive: (name, help) => `✅ *WestPay bot active — ${name}*\n\n${help}`,
-    groupAdded: (groupTitle) => `👋 *WestPay bot added to ${groupTitle}.*\n\nTo link this group to a merchant account:\n\n\`/setmerchant CODE\`\n\n_(The activation code is generated from the WestPay dashboard)_`,
+    groupAdded: (groupTitle) => `👋 *WestPay bot added to ${groupTitle}.*\n\nTo link this group to a merchant account:\n\n\`/setmerchant CODE\`\n\n_(Ask your WestPay administrator for the linking code)_`,
     stats: (name, transactions, volume) => `📊 *Your statistics — ${name}*\n\n💳 Transactions: *${transactions}*\n💰 Total volume: *${volume}*`,
     balances: (name, details) => `💰 *Balances — ${name}*\n\n${details}`,
     transactionsTitle: (name, personal) => personal ? `📋 *Your 5 latest transactions*` : `📋 *5 latest transactions — ${name}*`,
@@ -493,7 +493,7 @@ const BOT_TEXTS: Record<BotLanguage, MerchantBotText> = {
     linkedWelcome: (name) => `✅ *账户绑定成功！*\n\n欢迎，*${name}* 👋\n\n您现在将在这里收到付款通知。\n\n输入 /help 查看可用命令。`,
     groupLinked: (name, email, help) => `✅ *群组已与商户绑定！*\n\n🏪 商户：*${name}*\n📧 ${email}\n\n${help}`,
     groupActive: (name, help) => `✅ *WestPay 机器人已启用 — ${name}*\n\n${help}`,
-    groupAdded: (groupTitle) => `👋 *WestPay 机器人已添加到 ${groupTitle}。*\n\n要将此群组绑定到商户账户：\n\n\`/setmerchant CODE\`\n\n_(激活码在 WestPay 管理后台生成)_`,
+    groupAdded: (groupTitle) => `👋 *WestPay 机器人已添加到 ${groupTitle}。*\n\n要将此群组绑定到商户账户：\n\n\`/setmerchant CODE\`\n\n_(请向 WestPay 管理员索取绑定码)_`,
     stats: (name, transactions, volume) => `📊 *您的统计 — ${name}*\n\n💳 交易数：*${transactions}*\n💰 总交易量：*${volume}*`,
     balances: (name, details) => `💰 *余额 — ${name}*\n\n${details}`,
     transactionsTitle: (name, personal) => personal ? `📋 *最近 5 笔交易*` : `📋 *最近 5 笔交易 — ${name}*`,
@@ -521,7 +521,7 @@ const BOT_TEXTS: Record<BotLanguage, MerchantBotText> = {
     linkedWelcome: (name) => `✅ *Konto erfolgreich verknüpft!*\n\nWillkommen, *${name}* 👋\n\nSie erhalten Ihre Zahlungsbenachrichtigungen ab jetzt hier.\n\nGeben Sie /help ein, um Ihre Befehle zu sehen.`,
     groupLinked: (name, email, help) => `✅ *Gruppe mit dem Händler verknüpft!*\n\n🏪 Händler: *${name}*\n📧 ${email}\n\n${help}`,
     groupActive: (name, help) => `✅ *WestPay-Bot aktiv — ${name}*\n\n${help}`,
-    groupAdded: (groupTitle) => `👋 *WestPay-Bot zu ${groupTitle} hinzugefügt.*\n\nUm diese Gruppe mit einem Händlerkonto zu verknüpfen:\n\n\`/setmerchant CODE\`\n\n_(Der Aktivierungscode wird im WestPay-Dashboard erstellt)_`,
+    groupAdded: (groupTitle) => `👋 *WestPay-Bot zu ${groupTitle} hinzugefügt.*\n\nUm diese Gruppe mit einem Händlerkonto zu verknüpfen:\n\n\`/setmerchant CODE\`\n\n_(Den Verbindungscode erhalten Sie vom WestPay-Administrator)_`,
     stats: (name, transactions, volume) => `📊 *Ihre Statistik — ${name}*\n\n💳 Transaktionen: *${transactions}*\n💰 Gesamtvolumen: *${volume}*`,
     balances: (name, details) => `💰 *Kontostände — ${name}*\n\n${details}`,
     transactionsTitle: (name, personal) => personal ? `📋 *Ihre letzten 5 Transaktionen*` : `📋 *Die letzten 5 Transaktionen — ${name}*`,
@@ -549,7 +549,7 @@ const BOT_TEXTS: Record<BotLanguage, MerchantBotText> = {
     linkedWelcome: (name) => `✅ *खाता सफलतापूर्वक जुड़ गया!*\n\nस्वागत है, *${name}* 👋\n\nअब आपको भुगतान सूचनाएँ यहाँ मिलेंगी।\n\nअपने कमांड देखने के लिए /help लिखें।`,
     groupLinked: (name, email, help) => `✅ *समूह व्यापारी से जुड़ गया!*\n\n🏪 व्यापारी: *${name}*\n📧 ${email}\n\n${help}`,
     groupActive: (name, help) => `✅ *WestPay बॉट सक्रिय — ${name}*\n\n${help}`,
-    groupAdded: (groupTitle) => `👋 *WestPay बॉट ${groupTitle} में जोड़ा गया।*\n\nइस समूह को व्यापारी खाते से जोड़ने के लिए:\n\n\`/setmerchant CODE\`\n\n_(सक्रियण कोड WestPay डैशबोर्ड से बनाया जाता है)_`,
+    groupAdded: (groupTitle) => `👋 *WestPay बॉट ${groupTitle} में जोड़ा गया।*\n\nइस समूह को व्यापारी खाते से जोड़ने के लिए:\n\n\`/setmerchant CODE\`\n\n_(लिंक कोड के लिए WestPay व्यवस्थापक से पूछें)_`,
     stats: (name, transactions, volume) => `📊 *आपके आँकड़े — ${name}*\n\n💳 लेन-देन: *${transactions}*\n💰 कुल मात्रा: *${volume}*`,
     balances: (name, details) => `💰 *बैलेंस — ${name}*\n\n${details}`,
     transactionsTitle: (name, personal) => personal ? `📋 *आपके पिछले 5 लेन-देन*` : `📋 *पिछले 5 लेन-देन — ${name}*`,
@@ -1184,7 +1184,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     const code = text.split(" ")[1]?.trim();
 
     if (!code) {
-      await ctx.reply("❌ Code manquant.\n\nUtilisez : `/setmerchant CODE`\n\nLe code est généré depuis le dashboard WestPay.", { parse_mode: "Markdown" });
+      await ctx.reply("❌ Code manquant.\n\nUtilisez : `/setmerchant CODE`\n\nDemandez le code de liaison à l’administrateur WestPay.", { parse_mode: "Markdown" });
       return;
     }
 
@@ -1465,7 +1465,6 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           balance: 0,
           active: true,
           gatewayEnabled: true,
-          payinGateway: "clapay",
         });
         createdCountryIds.push(merchantCountry.id);
       }
@@ -1581,7 +1580,6 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           balance: 0,
           active: true,
           gatewayEnabled: true,
-          payinGateway: "clapay",
         });
       }
 
