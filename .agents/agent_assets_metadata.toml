@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "9vXczob2fU-Z6q5RYFrf6"
+uri = "file://attached_assets/IMG_20261005_230832_151_1791269633128.jpg"
+type = "image"
+title = "QR Wave fourni"
+description = "Image à téléverser dans Admin → Paiement manuel Wave par lien pour la configuration de Côte d’Ivoire."
+logical_id = "f17b1950-10d2-4dd0-ad85-710ab514ceb4"
+content_hash = "sha256:c0becfe28c7bf9246e77f7db1b8dc67e468560297ac8d55f0c6aafe023c02eee"
+size = 74738
+mtime_ms = 1791269639012
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:ebcea8e4-13eb-423e-9b8b-1c3a8b39b0e9/f17b1950-10d2-4dd0-ad85-710ab514ceb4/2d9318e2-436a-4cca-a30f-024bb17f4006"
+storage_version_token = "1791269792435977"
+content_type = "image/jpeg"
