@@ -741,18 +741,6 @@ async function isAdminGroup(chatId: string): Promise<boolean> {
   return !!groupId && chatId === groupId;
 }
 
-async function isTelegramAdminUser(ctx: any): Promise<boolean> {
-  if (ctx.chat?.type !== "private" || !ctx.from?.id) return false;
-  const groupId = await getAdminGroupId();
-  if (!groupId) return false;
-  try {
-    const member = await ctx.telegram.getChatMember(groupId, ctx.from.id);
-    return member.status === "creator" || member.status === "administrator";
-  } catch {
-    return false;
-  }
-}
-
 async function isTelegramAdminGroupUser(ctx: any): Promise<boolean> {
   const groupId = await getAdminGroupId();
   if (
@@ -772,7 +760,6 @@ async function isTelegramAdminGroupUser(ctx: any): Promise<boolean> {
 }
 
 async function isTelegramAdminCommandUser(ctx: any): Promise<boolean> {
-  if (ctx.chat?.type === "private") return isTelegramAdminUser(ctx);
   return isTelegramAdminGroupUser(ctx);
 }
 
@@ -1120,6 +1107,15 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     return next();
   });
 
+  // Les messages privés restent silencieux, sauf /start pour activer un compte marchand.
+  bot.use(async (ctx, next) => {
+    if (ctx.chat?.type !== "private") return next();
+
+    const text = typeof ctx.message?.text === "string" ? ctx.message.text : "";
+    if (!/^\/start(?:@[A-Za-z0-9_]+)?(?:\s|$)/i.test(text)) return;
+    return next();
+  });
+
   registerOperatorPaymentCommand(
     bot,
     isAdminGroup,
@@ -1422,6 +1418,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
   });
 
   const createMerchantFromTelegram = async (ctx: any) => {
+    if (ctx.chat?.type === "private") return;
+
     const messageText = String(ctx.message?.text || "");
     const messageDeleted = await ctx.deleteMessage().then(
       () => true,
@@ -1687,8 +1685,9 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
   bot.command("creermarchand", createMerchantFromTelegram);
 
   bot.command("setmerchantcode", async (ctx) => {
+    if (ctx.chat?.type === "private") return;
     if (!await isTelegramAdminCommandUser(ctx)) {
-      await ctx.reply("⛔ Commande réservée aux administrateurs du groupe admin WestPay, en privé ou dans ce groupe.");
+      await ctx.reply("⛔ Commande réservée aux administrateurs Telegram du groupe admin WestPay.");
       return;
     }
 
@@ -1733,12 +1732,11 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
   });
 
   const activateCountryFromTelegram = async (ctx: any) => {
-    if (ctx.chat?.type !== "private") {
-      await ctx.reply("Pour protéger les données du marchand, utilisez cette commande en message privé avec le bot.");
-      return;
-    }
-    if (!await isTelegramAdminUser(ctx)) {
-      await ctx.reply("⛔ Commande réservée aux administrateurs du groupe admin WestPay.");
+    if (ctx.chat?.type === "private") return;
+    if (!await isTelegramAdminGroupUser(ctx)) {
+      if (ctx.chat?.type === "group" || ctx.chat?.type === "supergroup") {
+        await ctx.reply("⛔ Cette commande est réservée aux administrateurs Telegram du groupe admin WestPay.");
+      }
       return;
     }
 
@@ -2550,20 +2548,6 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     const chatId = String(ctx.chat.id);
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
 
-    if (!isGroup && await isTelegramAdminUser(ctx)) {
-      await ctx.reply(
-        "Commandes disponibles en message privé :\n\n" +
-        "/setmerchantcode SLUG_MARCHAND — Générer le code à utiliser dans le groupe marchand\n" +
-        "Exemple : /setmerchantcode demo-shop\n\n" +
-        "/activatecountry SLUG_MARCHAND | PAYS\n" +
-        "Exemple : /activatecountry demo-shop | Togo\n\n" +
-        "La création d’un marchand se lance uniquement dans le groupe admin WestPay avec /createmerchant. " +
-        "Seuls les administrateurs Telegram de ce groupe peuvent l’utiliser; le message est supprimé automatiquement. " +
-        "Les identifiants sont publiés dans ce même groupe. Le cycle choisi est indicatif."
-      );
-      return;
-    }
-
     if (isGroup) {
       if (await isAdminGroup(chatId)) {
         await ctx.reply(
@@ -2578,7 +2562,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `/setmerchant CODE — Lier un groupe à un marchand\n\n` +
           `/setmerchantcode SLUG — Générer un code de liaison à usage unique (24 h)\n\n` +
           `/createmerchant (/creermarchand) — Créer un marchand dans ce groupe uniquement (administrateurs Telegram; message supprimé automatiquement)\n` +
-          `/activatecountry — Activer un pays (commande en message privé)\n\n` +
+          `/activatecountry (/activerpays) — Activer un pays dans le groupe admin uniquement\n\n` +
            `/disablepayments — Désactiver payin et payout d'un marchand\n\n` +
            `/enablepayments (/activatepayments) — Réactiver payin et payout d'un marchand\n\n` +
            `/payin — Couper/réactiver le payin par pays et opérateur (07h–20h local)\n` +
@@ -3836,6 +3820,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
   // texte (mode privacy Telegram activé). Les commandes /xxx sont TOUJOURS reçues
   // par le bot même en mode privacy, contrairement aux messages texte ordinaires.
   bot.command("addip", async (ctx) => {
+    if (ctx.chat?.type === "private") return;
+
     const chatId = String(ctx.chat.id);
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
     if (!isGroup) {
@@ -3875,6 +3861,9 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         return next();
       }
 
+      // Les messages privés non traités par /start doivent rester silencieux.
+      if (!isGroup) return next();
+
       if (isGroup) {
         // Vérifier si c'est un groupe marchand avec une IP à ajouter
         const merchant = await getMerchantForGroup(chatId);
@@ -3890,11 +3879,6 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         return;
       }
 
-      // Message privé d'un utilisateur non lié
-      const merchant = await storage.getMerchantByTelegramChatId(chatId);
-      if (!merchant) {
-        await ctx.reply("🔒 Ce bot est réservé aux marchands WestPay autorisés.\n\nSi vous êtes marchand, demandez un code d'activation à votre administrateur.");
-      }
     } catch (e: any) {
       console.error("[TG] catch-all message error:", e?.message);
     }
