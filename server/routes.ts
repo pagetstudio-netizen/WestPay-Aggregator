@@ -5389,7 +5389,7 @@ export async function registerRoutes(
         const operator = await storage.getWithdrawalOperatorByNameAndCountry(pending.paymentMethod, pending.country);
         const maintenanceDisabled = !operator || !operator.active ||
           Boolean(operator.maintenanceAll || operator.maintenanceDeposits);
-        if (!isPaymentChannelAvailable(pending.country, new Date(), maintenanceDisabled)) {
+        if (!isPaymentChannelAvailable(maintenanceDisabled)) {
           return res.status(503).json({ message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
         }
       }
@@ -5652,11 +5652,7 @@ export async function registerRoutes(
         console.log(`[PAYMENT ROUTING] pays=${country} opérateur=Wave lien manuel`);
       }
 
-      if (!isPaymentChannelAvailable(
-        country,
-        new Date(),
-        operatorRecord?.maintenanceAll || operatorRecord?.maintenanceDeposits,
-      )) {
+      if (!isPaymentChannelAvailable(Boolean(operatorRecord?.maintenanceAll || operatorRecord?.maintenanceDeposits))) {
         return res.status(503).json({ message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
       }
 
@@ -6598,11 +6594,7 @@ export async function registerRoutes(
       const operator = w.operator
         ? await storage.getWithdrawalOperatorByNameAndCountry(w.operator, w.country)
         : null;
-      if (!isPaymentChannelAvailable(
-        w.country,
-        new Date(),
-        Boolean(operator?.maintenanceAll || operator?.maintenanceWithdrawals),
-      )) {
+      if (!isPaymentChannelAvailable(Boolean(operator?.maintenanceAll || operator?.maintenanceWithdrawals))) {
         return res.status(503).json({ message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
       }
       const provider = requestedProvider || normalizeGatewayName(w.gateway) || "clapay";
@@ -8443,11 +8435,7 @@ export async function registerRoutes(
       if (!payinOperator || !payinOperator.active) {
         return res.status(503).json({ status: "error", message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
       }
-      if (!isPaymentChannelAvailable(
-        countryName,
-        new Date(),
-        Boolean(payinOperator?.maintenanceAll || payinOperator?.maintenanceDeposits),
-      )) {
+      if (!isPaymentChannelAvailable(Boolean(payinOperator?.maintenanceAll || payinOperator?.maintenanceDeposits))) {
         return res.status(503).json({ status: "error", message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
       }
 
@@ -8582,11 +8570,7 @@ export async function registerRoutes(
       if (!payoutOperator || !payoutOperator.active) {
         return res.status(503).json({ status: "error", message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
       }
-      if (!isPaymentChannelAvailable(
-        countryName,
-        new Date(),
-        Boolean(payoutOperator?.maintenanceAll || payoutOperator?.maintenanceWithdrawals),
-      )) {
+      if (!isPaymentChannelAvailable(Boolean(payoutOperator?.maintenanceAll || payoutOperator?.maintenanceWithdrawals))) {
         return res.status(503).json({ status: "error", message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
       }
 
@@ -9140,8 +9124,6 @@ app.post("/api/payment/validate", validateRateLimit, async (req, res) => {
         pending.country,
       );
       if (!isPaymentChannelAvailable(
-        pending.country,
-        new Date(),
         !payinOperator || !payinOperator.active ||
           Boolean(payinOperator.maintenanceAll || payinOperator.maintenanceDeposits),
       )) {
@@ -11829,19 +11811,12 @@ app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, re
       if (!merchantCountry || merchantCountry.merchantId !== merchantId) {
         return res.status(403).json({ message: "Wallet introuvable" });
       }
-      if (!isPaymentChannelAvailable(merchantCountry.country)) {
-        return res.status(503).json({ message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
-      }
       if (!operatorName) return res.status(400).json({ message: "Choisissez un opérateur de retrait." });
       const payoutOperator = operatorName
         ? await storage.getWithdrawalOperatorByNameAndCountry(operatorName, merchantCountry.country)
         : null;
       if (!payoutOperator || !payoutOperator.active) return res.status(400).json({ message: "Opérateur de retrait introuvable ou indisponible." });
-      if (!isPaymentChannelAvailable(
-        merchantCountry.country,
-        new Date(),
-        Boolean(payoutOperator?.maintenanceAll || payoutOperator?.maintenanceWithdrawals),
-      )) {
+      if (!isPaymentChannelAvailable(Boolean(payoutOperator?.maintenanceAll || payoutOperator?.maintenanceWithdrawals))) {
         return res.status(503).json({ message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
       }
       if (merchantCountry.balance < amount) return res.status(400).json({ message: "Solde insuffisant" });
@@ -12089,11 +12064,7 @@ app.put("/api/admin/withdrawals/:id/approve", authMiddleware("admin"), async (re
       const operator = withdrawal.operator
         ? await storage.getWithdrawalOperatorByNameAndCountry(withdrawal.operator, withdrawal.country)
         : null;
-      if (!isPaymentChannelAvailable(
-        withdrawal.country,
-        new Date(),
-        Boolean(operator?.maintenanceAll || operator?.maintenanceWithdrawals),
-      )) {
+      if (!isPaymentChannelAvailable(Boolean(operator?.maintenanceAll || operator?.maintenanceWithdrawals))) {
         return res.status(503).json({ message: PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE });
       }
       if (withdrawal.providerReference) {

@@ -5449,7 +5449,7 @@ function WithdrawalOperatorsPanel() {
         <CardContent className="pt-4 space-y-3">
           <div>
             <p className="font-medium text-sm">Disponibilité Payin / Payout</p>
-            <p className="text-xs text-muted-foreground">Les canaux sont ouverts de 7h à 20h, selon l’heure locale du pays. Une coupure ne masque pas les champs : la dernière étape est bloquée.</p>
+            <p className="text-xs text-muted-foreground">Aucune fermeture horaire automatique : ces interrupteurs contrôlent séparément le Payin et le Payout de chaque opérateur. Une coupure ne masque pas les champs et bloque la dernière étape.</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <Select value={bulkCountry} onValueChange={(value) => { setBulkCountry(value); setBulkOperatorId("all"); }}>

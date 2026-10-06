@@ -2168,7 +2168,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     operatorMaintenanceSessions.set(chatId, { step: "country", flow, operators, countries });
     const countryLines = countries.map((country, index) => `${index + 1}. ${country}`);
     await ctx.reply(
-      `Gestion du ${flow.toUpperCase()} — canaux ouverts de 7h à 20h, heure locale du pays.\n\n` +
+      `Gestion manuelle du ${flow.toUpperCase()} par pays et opérateur.\n\n` +
       `Choisissez un pays en envoyant son numéro, ou 0 pour tous les pays :\n0. Tous les pays\n${countryLines.join("\n")}\n\n` +
       `Envoyez /cancel pour annuler.`,
     );
@@ -2615,8 +2615,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `/activatecountry (/activerpays) — Activer un pays dans le groupe admin uniquement\n\n` +
            `/disablepayments — Désactiver payin et payout d'un marchand\n\n` +
            `/enablepayments (/activatepayments) — Réactiver payin et payout d'un marchand\n\n` +
-           `/payin — Couper/réactiver le payin par pays et opérateur (07h–20h local)\n` +
-           `/payout — Couper/réactiver le payout par pays et opérateur (07h–20h local)\n\n` +
+           `/payin — Couper/réactiver le payin par pays et opérateur\n` +
+           `/payout — Couper/réactiver le payout par pays et opérateur\n\n` +
            `/setoperatorpayment — Changer le fournisseur ou le numéro manuel d’un opérateur; gérer Wave par lien/QR\n\n` +
           `📊 *Statistiques & Soldes*\n` +
           `/stats — Statistiques globales\n` +
