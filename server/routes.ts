@@ -3,7 +3,6 @@ import { createServer, type Server } from "http";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { promises as dnsPromises } from "dns";
 import { storage } from "./storage";
 import { db, pool, financialDb, financialPool } from "./db";
 import { generateSecret as totpGenerateSecret, generateURI as totpGenerateURI, verifySync as totpVerifySync } from "otplib";
@@ -11,6 +10,11 @@ import QRCode from "qrcode";
 import { admins, merchantCountries, transactions, pendingPayments, withdrawals } from "@shared/schema";
 import { isMerchantCategory, isMerchantSettlementCycle } from "@shared/merchant-account";
 import { normalizeEmailInput } from "@shared/email-validation";
+import {
+  decryptTotpSecret as decryptTotpSecretWithKey,
+  generateSecureApiKey,
+  verifyEmailDomainHasMx,
+} from "./merchant-admin-utils";
 import { and, eq, or, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -333,19 +337,6 @@ function extractIp(req: Request): string {
 // Les OTPs marchands sont désormais stockés en base de données (table merchant_login_otps)
 // afin de survivre aux redémarrages du serveur. Le hash bcrypt garantit la sécurité.
 
-// ── Vérification DNS MX — l'email doit pointer vers un vrai serveur mail ─────────────
-// Protège contre la création de marchands avec des adresses email inventées.
-async function verifyEmailDomainHasMx(email: string): Promise<boolean> {
-  try {
-    const domain = email.split("@")[1];
-    if (!domain || domain.length < 4) return false;
-    const records = await dnsPromises.resolveMx(domain);
-    return records.length > 0;
-  } catch {
-    return false;
-  }
-}
-
 // ── Chiffrement AES-256-GCM des secrets TOTP — jamais stockés en clair en base ─
 // Les codes Google Authenticator (6 chiffres) ne sont JAMAIS sauvegardés — seul le secret
 // chiffré est stocké, et uniquement pour vérifier les futurs codes.
@@ -359,14 +350,7 @@ function encryptTotpSecret(plainSecret: string): string {
 }
 
 function decryptTotpSecret(stored: string): string {
-  if (!stored || !stored.startsWith("ENC:")) return stored; // rétrocompat secrets non-chiffrés
-  const parts = stored.split(":");
-  if (parts.length !== 4) throw new Error("Format secret TOTP invalide");
-  const key = crypto.createHash("sha256").update(JWT_SECRET + ":totp-key-v1").digest();
-  const [, ivHex, tagHex, encHex] = parts;
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivHex, "hex"));
-  decipher.setAuthTag(Buffer.from(tagHex, "hex"));
-  return decipher.update(Buffer.from(encHex, "hex")).toString("utf8") + decipher.final("utf8");
+  return decryptTotpSecretWithKey(stored, JWT_SECRET);
 }
 
 function cleanConfiguredSecret(value: unknown): string | undefined {
@@ -700,18 +684,6 @@ function prependDialCode(phone: string, country: string): string {
   const TRUNK_PREFIX_COUNTRIES = new Set(["Congo RDC", "Congo Brazzaville", "Gabon"]);
   const local = (TRUNK_PREFIX_COUNTRIES.has(country) && cleaned.startsWith("0")) ? cleaned.slice(1) : cleaned;
   return `${dialCode}${local}`;
-}
-
-function generateSecureApiKey(country: string): string {
-  const prefixes: Record<string, string> = {
-    "Togo": "TGO", "Benin": "BEN", "Cote d'Ivoire": "CIV",
-    "Senegal": "SEN", "Mali": "MLI", "Burkina Faso": "BFA",
-    "Cameroun": "CMR", "Congo Brazzaville": "COG", "Gabon": "GAB",
-    "Congo RDC": "COD", "Guinee": "GIN", "Gambie": "GMB",
-  };
-  const prefix = prefixes[country] || country.substring(0, 3).toUpperCase();
-  const randomPart = crypto.randomBytes(20).toString("hex").toUpperCase();
-  return `${prefix}-${randomPart}`;
 }
 
 function signToken(payload: { id: number; role: string; email: string; sessionId?: string }) {

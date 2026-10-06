@@ -1,8 +1,20 @@
 import { Telegraf } from "telegraf";
 import type { Express, Request, Response } from "express";
 import crypto from "crypto";
+import bcrypt from "bcryptjs";
+import { verifySync as totpVerifySync } from "otplib";
 import { storage } from "./storage";
 import { pool, financialPool } from "./db";
+import {
+  MERCHANT_CATEGORIES,
+  isMerchantCategory,
+  isMerchantSettlementCycle,
+} from "@shared/merchant-account";
+import {
+  decryptTotpSecret,
+  generateSecureApiKey,
+  verifyEmailDomainHasMx,
+} from "./merchant-admin-utils";
 import {
   reviewPendingPayment,
   reviewTransactionPayment,
@@ -639,6 +651,46 @@ async function isAdminGroup(chatId: string): Promise<boolean> {
   return !!groupId && chatId === groupId;
 }
 
+async function isTelegramAdminUser(ctx: any): Promise<boolean> {
+  if (ctx.chat?.type !== "private" || !ctx.from?.id) return false;
+  const groupId = await getAdminGroupId();
+  if (!groupId) return false;
+  try {
+    const member = await ctx.telegram.getChatMember(groupId, ctx.from.id);
+    return member.status === "creator" || member.status === "administrator";
+  } catch {
+    return false;
+  }
+}
+
+function countryLookupKey(value: string): string {
+  return value
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[’]/g, "'")
+    .toLocaleLowerCase();
+}
+
+function canonicalCountryName(value: string): string {
+  const trimmed = value.trim();
+  const known: Record<string, string> = {
+    togo: "Togo",
+    benin: "Benin",
+    "cote d'ivoire": "Cote d'Ivoire",
+    senegal: "Senegal",
+    mali: "Mali",
+    "burkina faso": "Burkina Faso",
+    cameroun: "Cameroun",
+    "congo brazzaville": "Congo Brazzaville",
+    gabon: "Gabon",
+    "congo rdc": "Congo RDC",
+    guinee: "Guinee",
+    gambie: "Gambie",
+  };
+  return known[countryLookupKey(trimmed)] || trimmed;
+}
+
 async function alertAdminGroup(message: string): Promise<void> {
   if (!bot) return;
   const groupId = await getAdminGroupId();
@@ -1245,6 +1297,300 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
       );
     } catch { await ctx.reply("❌ Erreur."); }
   });
+
+  const createMerchantFromTelegram = async (ctx: any) => {
+    const messageText = String(ctx.message?.text || "");
+    if (ctx.chat?.type === "private") await ctx.deleteMessage().catch(() => {});
+    if (ctx.chat?.type !== "private") {
+      await ctx.reply("Pour protéger les identifiants, utilisez cette commande en message privé avec le bot.");
+      return;
+    }
+    if (!await isTelegramAdminUser(ctx)) {
+      await ctx.reply("⛔ Commande réservée aux administrateurs du groupe admin WestPay.");
+      return;
+    }
+
+    const raw = messageText.replace(/^\/[^\s]+\s*/, "");
+    const parts = raw.split("|").map((part: string) => part.trim());
+    if (parts.length !== 7) {
+      await ctx.reply(
+        "Usage : /createmerchant ADMIN_EMAIL CODE_TOTP | NOM | EMAIL_MARCHAND | SLUG | PAYS1,PAYS2 | CYCLE | CATEGORIE\n\n" +
+        "Exemple : /createmerchant admin@westpay.com 123456 | Demo | client@example.com | demo-shop | Togo,Benin | D+3 | other_platforms\n" +
+        "Cycles : D0, D+1 à D+30, WEEKLY, EVERY_TWO_WEEKS, MONTHLY, CUSTOM.\n" +
+        `Catégories : ${MERCHANT_CATEGORIES.map((category) => category.value).join(", ")}.\n` +
+        "Le code TOTP est supprimé du chat dès réception.",
+      );
+      return;
+    }
+
+    const adminAuth = parts[0].split(/\s+/);
+    const adminEmail = (adminAuth[0] || "").trim().toLowerCase();
+    const totpCode = (adminAuth[1] || "").trim();
+    const [name, rawEmail, rawSlug, countriesText, accountType, merchantCategory] = parts.slice(1);
+    const email = rawEmail.toLowerCase();
+    const slug = rawSlug.toLowerCase();
+    const countries = countriesText
+      .split(",")
+      .map((country: string) => canonicalCountryName(country))
+      .filter(Boolean);
+    const uniqueCountries: string[] = [];
+    const countryKeys = new Set<string>();
+    for (const country of countries) {
+      const key = countryLookupKey(country);
+      if (!countryKeys.has(key)) {
+        countryKeys.add(key);
+        uniqueCountries.push(country);
+      }
+    }
+
+    if (adminAuth.length !== 2 || !/^\d{6}$/.test(totpCode)) {
+      await ctx.reply("Code de validation invalide. Relancez /createmerchant avec l’e-mail admin et le code TOTP à 6 chiffres.");
+      return;
+    }
+    if (!name || name.length > 120) {
+      await ctx.reply("Nom de marchand requis (maximum 120 caractères).");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
+      await ctx.reply("Adresse e-mail du marchand invalide.");
+      return;
+    }
+    if (!/^[a-z0-9-]{2,40}$/.test(slug)) {
+      await ctx.reply("Slug invalide : utilisez 2 à 40 caractères minuscules, chiffres ou tirets.");
+      return;
+    }
+    if (uniqueCountries.length === 0 || uniqueCountries.length > 20 || uniqueCountries.some((country: string) => country.length > 80)) {
+      await ctx.reply("Indiquez de 1 à 20 pays, séparés par des virgules.");
+      return;
+    }
+    if (!isMerchantSettlementCycle(accountType)) {
+      await ctx.reply("Cycle invalide. Choisissez D0, D+1 à D+30, WEEKLY, EVERY_TWO_WEEKS, MONTHLY ou CUSTOM.");
+      return;
+    }
+    if (!isMerchantCategory(merchantCategory)) {
+      await ctx.reply(`Catégorie invalide. Valeurs possibles : ${MERCHANT_CATEGORIES.map((category) => category.value).join(", ")}.`);
+      return;
+    }
+
+    let adminRecord;
+    try {
+      adminRecord = await storage.getAdminByEmail(adminEmail);
+      if (!adminRecord?.totpEnabled || !adminRecord.totpSecret) {
+        await ctx.reply("⛔ Ce compte admin n’a pas Google Authenticator configuré.");
+        return;
+      }
+      const totpSecret = decryptTotpSecret(
+        adminRecord.totpSecret,
+        process.env.SESSION_SECRET || process.env.JWT_SECRET,
+      );
+      if (!totpVerifySync({ token: totpCode, secret: totpSecret, strategy: "totp" })) {
+        await ctx.reply("⛔ Code Google Authenticator invalide.");
+        return;
+      }
+    } catch (error: any) {
+      console.error("[TELEGRAM] Vérification TOTP de création marchand impossible:", error?.message || error);
+      await ctx.reply("⛔ Impossible de vérifier Google Authenticator. Réessayez plus tard.");
+      return;
+    }
+
+    try {
+      if (!await verifyEmailDomainHasMx(email)) {
+        await ctx.reply("L’adresse e-mail semble invalide ou son domaine n’a pas de serveur mail.");
+        return;
+      }
+      if (await storage.getMerchantByEmail(email)) {
+        await ctx.reply("Cette adresse e-mail est déjà utilisée.");
+        return;
+      }
+      if (await storage.getMerchantBySlug(slug)) {
+        await ctx.reply("Ce slug est déjà utilisé.");
+        return;
+      }
+    } catch (error: any) {
+      console.error("[TELEGRAM] Vérification du marchand impossible:", error?.message || error);
+      await ctx.reply("Impossible de vérifier l’adresse ou le slug. Réessayez plus tard.");
+      return;
+    }
+
+    const password = crypto.randomBytes(18).toString("hex");
+    const docsPin = crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
+    let merchantId: number | undefined;
+    const createdCountryIds: number[] = [];
+    const rollback = async () => {
+      for (const countryId of createdCountryIds.reverse()) {
+        await storage.deleteMerchantCountry(countryId).catch((error: any) => {
+          console.error("[TELEGRAM] Nettoyage d’un pays de marchand impossible:", error?.message || error);
+        });
+      }
+      if (merchantId !== undefined) {
+        await storage.deleteMerchant(merchantId).catch((error: any) => {
+          console.error("[TELEGRAM] Nettoyage d’un marchand incomplet impossible:", error?.message || error);
+        });
+      }
+    };
+
+    try {
+      const passwordHash = await bcrypt.hash(password, 10);
+      const merchant = await storage.createMerchant({
+        name,
+        email,
+        slug,
+        passwordHash,
+        suspended: false,
+        website: null,
+        accountType,
+        merchantCategory,
+        payinDisabled: false,
+        withdrawalsDisabled: false,
+      });
+      merchantId = merchant.id;
+      await storage.upsertMerchantPin(merchant.id, await bcrypt.hash(docsPin, 10));
+
+      for (const country of uniqueCountries) {
+        const merchantCountry = await storage.addMerchantCountry({
+          merchantId: merchant.id,
+          country,
+          apiKey: generateSecureApiKey(country),
+          balance: 0,
+          active: true,
+          gatewayEnabled: true,
+          payinGateway: "clapay",
+        });
+        createdCountryIds.push(merchantCountry.id);
+      }
+
+      const welcomeText =
+        `Bienvenue chez WestPay, ${name} !\n\n` +
+        `Votre compte marchand est actif.\n\n` +
+        `Connexion marchand : https://westpay.cdf/merchant-login\n` +
+        `Slug : ${slug}\n` +
+        `Pays activés : ${uniqueCountries.join(", ")}\n` +
+        `E-mail : ${email}\n` +
+        `Mot de passe : ${password}\n\n` +
+        `Documentation API : https://westpay.cdf/api-docs\n` +
+        `E-mail : ${email}\n` +
+        `PIN d’accès : ${docsPin}\n\n` +
+        `Frais :\n` +
+        `Payin : 5.5 %\n` +
+        `Payout : 4.5 %\n` +
+        `Transfert interwallet : 3 %\n\n` +
+        `Support : https://t.me/robotpay19293`;
+
+      try {
+        await ctx.reply(welcomeText, { disable_web_page_preview: true });
+      } catch (sendError: any) {
+        await rollback();
+        console.error("[TELEGRAM] Livraison du message marchand impossible:", sendError?.message || sendError);
+        await ctx.reply("La création a été annulée car le message privé n’a pas pu être envoyé. Réessayez.");
+        return;
+      }
+
+      await Promise.all([
+        storage.createApiLog({
+          merchantId: merchant.id,
+          action: "merchant_created_telegram",
+          ip: "telegram",
+          description: `Marchand ${name} créé depuis Telegram`,
+        }),
+        storage.createApiLog({
+          merchantId: merchant.id,
+          action: "countries_added",
+          ip: "telegram",
+          description: `Pays activés depuis Telegram : ${uniqueCountries.join(", ")}`,
+        }),
+      ]).catch((error: any) => {
+        console.error("[TELEGRAM] Journalisation de la création marchand impossible:", error?.message || error);
+      });
+
+      await notifyAdminMerchantCreated({
+        merchantName: name,
+        merchantEmail: email,
+        merchantSlug: slug,
+        merchantId: merchant.id,
+        adminEmail,
+        adminId: adminRecord.id,
+      }).catch((error: any) => {
+        console.error("[TELEGRAM] Notification de création marchand impossible:", error?.message || error);
+      });
+    } catch (error: any) {
+      await rollback();
+      console.error("[TELEGRAM] Création marchand depuis Telegram impossible:", error?.message || error);
+      await ctx.reply("❌ La création du marchand a échoué. Vérifiez les données puis réessayez.");
+    }
+  };
+  bot.command("createmerchant", createMerchantFromTelegram);
+  bot.command("creermarchand", createMerchantFromTelegram);
+
+  const activateCountryFromTelegram = async (ctx: any) => {
+    if (ctx.chat?.type !== "private") {
+      await ctx.reply("Pour protéger les données du marchand, utilisez cette commande en message privé avec le bot.");
+      return;
+    }
+    if (!await isTelegramAdminUser(ctx)) {
+      await ctx.reply("⛔ Commande réservée aux administrateurs du groupe admin WestPay.");
+      return;
+    }
+
+    const raw = String(ctx.message?.text || "").replace(/^\/[^\s]+\s*/, "");
+    const parts = raw.split("|").map((part: string) => part.trim());
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      await ctx.reply("Usage : /activatecountry SLUG_MARCHAND | PAYS\nExemple : /activatecountry demo-shop | Togo");
+      return;
+    }
+    const [merchantRef, rawCountry] = parts;
+    const country = canonicalCountryName(rawCountry);
+
+    try {
+      const merchant = merchantRef.includes("@")
+        ? await storage.getMerchantByEmail(merchantRef.toLowerCase())
+        : await storage.getMerchantBySlug(merchantRef.toLowerCase());
+      if (!merchant) {
+        await ctx.reply("Aucun marchand trouvé avec cet e-mail ou ce slug.");
+        return;
+      }
+
+      const existingCountries = await storage.getMerchantCountries(merchant.id);
+      const existing = existingCountries.find(
+        (item) => countryLookupKey(item.country) === countryLookupKey(country),
+      );
+      if (existing?.active) {
+        await ctx.reply(`Le pays ${existing.country} est déjà actif pour ${merchant.name} (${merchant.slug}).`);
+        return;
+      }
+
+      let activatedCountry = country;
+      if (existing) {
+        await storage.updateMerchantCountryActive(existing.id, true);
+        activatedCountry = existing.country;
+      } else {
+        await storage.addMerchantCountry({
+          merchantId: merchant.id,
+          country,
+          apiKey: generateSecureApiKey(country),
+          balance: 0,
+          active: true,
+          gatewayEnabled: true,
+          payinGateway: "clapay",
+        });
+      }
+
+      await storage.createApiLog({
+        merchantId: merchant.id,
+        action: existing ? "country_reactivated_telegram" : "country_added_telegram",
+        ip: "telegram",
+        description: `Pays ${activatedCountry} activé depuis Telegram`,
+      }).catch((error: any) => {
+        console.error("[TELEGRAM] Journalisation de l’activation pays impossible:", error?.message || error);
+      });
+
+      await ctx.reply(`✅ Pays ${activatedCountry} activé pour ${merchant.name} (${merchant.slug}).`);
+    } catch (error: any) {
+      console.error("[TELEGRAM] Activation pays depuis Telegram impossible:", error?.message || error);
+      await ctx.reply("❌ Impossible d’activer ce pays. Vérifiez le marchand et réessayez.");
+    }
+  };
+  bot.command("activatecountry", activateCountryFromTelegram);
+  bot.command("activerpays", activateCountryFromTelegram);
 
   // ─── /gatewaybalance (groupe admin uniquement) ────────────────────────────
   bot.command("gatewaybalance", async (ctx) => {
@@ -1986,6 +2332,18 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     const chatId = String(ctx.chat.id);
     const isGroup = ctx.chat.type === "group" || ctx.chat.type === "supergroup";
 
+    if (!isGroup && await isTelegramAdminUser(ctx)) {
+      await ctx.reply(
+        "Commandes marchand (message privé uniquement) :\n\n" +
+        "/createmerchant ADMIN_EMAIL CODE_TOTP | NOM | EMAIL | SLUG | PAYS1,PAYS2 | CYCLE | CATEGORIE\n" +
+        "Exemple : /createmerchant admin@westpay.com 123456 | Demo | client@example.com | demo-shop | Togo,Benin | D+3 | other_platforms\n\n" +
+        "/activatecountry SLUG_MARCHAND | PAYS\n" +
+        "Exemple : /activatecountry demo-shop | Togo\n\n" +
+        "Le texte d’accueil et les identifiants sont envoyés uniquement dans ce message privé. Le cycle choisi est indicatif."
+      );
+      return;
+    }
+
     if (isGroup) {
       if (await isAdminGroup(chatId)) {
         await ctx.reply(
@@ -1998,6 +2356,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `👥 *Marchands*\n` +
           `/merchants — Liste de tous les marchands\n` +
           `/setmerchant CODE — Lier un groupe à un marchand\n\n` +
+          `/createmerchant — Créer un marchand (commande en message privé; Google Authenticator requis)\n` +
+          `/activatecountry — Activer un pays (commande en message privé)\n\n` +
            `/disablepayments — Désactiver payin et payout d'un marchand\n\n` +
            `/enablepayments (/activatepayments) — Réactiver payin et payout d'un marchand\n\n` +
            `/payin — Couper/réactiver le payin par pays et opérateur (07h–20h local)\n` +
