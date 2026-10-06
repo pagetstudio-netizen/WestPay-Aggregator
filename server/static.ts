@@ -2,6 +2,24 @@ import express, { type Express } from "express";
 import fs from "fs";
 import path from "path";
 
+const WESTPAY_FALLBACK_HOSTS: Record<string, string> = {
+  "westpay.cfd": "westpay.cdf",
+  "dashboard.westpay.cfd": "dashboard.westpay.cdf",
+  "link.westpay.cfd": "link.westpay.cdf",
+  "payment.bank2.westpay.cfd": "payment.bank2.westpay.cdf",
+  "checkout1.westpay.cfd": "checkout1.westpay.cdf",
+};
+
+const BANK2_PAYMENT_QUERY_KEYS = [
+  "merchant", "link", "linkId", "amount", "country", "redirect", "ref",
+  "payment_status", "phone", "payerPhone", "name", "payerName",
+];
+
+const CHECKOUT_PAYMENT_QUERY_KEYS = [
+  "merchant", "amount", "country", "redirect", "payment_status",
+  "clapay_return", "ref", "phone", "payerPhone", "name", "payerName",
+];
+
 export function serveStatic(app: Express) {
   const distPath = path.resolve(__dirname, "public");
   if (!fs.existsSync(distPath)) {
@@ -18,12 +36,22 @@ export function serveStatic(app: Express) {
 
   // L'ancienne URL est définitivement désactivée sur le domaine principal.
   // La documentation est disponible uniquement via secure.docs.westpay.cfd.
-  app.get("/api-docs", (_req, res) => {
+  app.get("/api-docs", (req, res) => {
+    const requestHost = (req.hostname || "").toLowerCase();
+    const fallbackHost = WESTPAY_FALLBACK_HOSTS[requestHost];
+    if (fallbackHost) {
+      return res.redirect(302, `https://${fallbackHost}${req.originalUrl}`);
+    }
     res.status(404).type("text").send("Not Found");
   });
 
   // Ancienne URL de connexion marchand définitivement désactivée.
-  app.get("/merchant/login", (_req, res) => {
+  app.get("/merchant/login", (req, res) => {
+    const requestHost = (req.hostname || "").toLowerCase();
+    const fallbackHost = WESTPAY_FALLBACK_HOSTS[requestHost];
+    if (fallbackHost) {
+      return res.redirect(302, `https://${fallbackHost}${req.originalUrl}`);
+    }
     res.status(404).type("text").send("Not Found");
   });
 
@@ -43,20 +71,27 @@ export function serveStatic(app: Express) {
     // sont ouverts seuls. Les URL fonctionnelles gardent leurs paramètres ou
     // leur identifiant dans le chemin (ex: /pay?merchant=... ou /link/abc).
     const requestHost = (req.hostname || "").toLowerCase();
-    const hasQueryParameters = Object.keys(req.query || {}).length > 0;
+    const fallbackHost = WESTPAY_FALLBACK_HOSTS[requestHost];
+    const requestSearchParams = new URL(req.originalUrl, "https://westpay.local").searchParams;
+    const hasRecognizedBank2Parameters = BANK2_PAYMENT_QUERY_KEYS.some(
+      (key) => Boolean(requestSearchParams.get(key)),
+    );
+    const hasRecognizedCheckoutParameters = CHECKOUT_PAYMENT_QUERY_KEYS.some(
+      (key) => Boolean(requestSearchParams.get(key)),
+    );
 
-    // Les racines seules sont volontairement neutres. Le DNS ne pouvant pas
-    // distinguer une URL avec/sans query string, on bloque au niveau HTTP.
+    // Les routes de paiement restent sur .cfd seulement avec leurs paramètres
+    // fonctionnels. Les racines de sous-domaines sans route reconnue vont vers .cdf.
     const isReservedSubdomainRoot =
       reqPath === "/" &&
-      (
-        requestHost === "checkout1.westpay.cfd" ||
-        requestHost === "dashboard.westpay.cfd" ||
-        requestHost === "link.westpay.cfd" ||
-        requestHost === "payment.bank2.westpay.cfd"
-      );
-    if (isReservedSubdomainRoot && !hasQueryParameters) {
-      return res.status(404).type("text").send("Not Found");
+      fallbackHost !== undefined &&
+      requestHost !== "westpay.cfd";
+    const isRecognizedBank2PaymentRoot =
+      requestHost === "payment.bank2.westpay.cfd" &&
+      reqPath === "/" &&
+      hasRecognizedBank2Parameters;
+    if (isReservedSubdomainRoot && !isRecognizedBank2PaymentRoot) {
+      return res.redirect(302, `https://${fallbackHost}${req.originalUrl}`);
     }
 
     // Bank 1 ne doit pas charger le shell SPA sur /pay sans paramètres.
@@ -65,8 +100,8 @@ export function serveStatic(app: Express) {
     const isBareBank1Payment =
       requestHost === "checkout1.westpay.cfd" &&
       (reqPath === "/pay" || /^\/pay\/[^/]+$/.test(reqPath));
-    if (isBareBank1Payment && !hasQueryParameters) {
-      return res.status(404).type("text").send("Not Found");
+    if (isBareBank1Payment && !hasRecognizedCheckoutParameters) {
+      return res.redirect(302, `https://${fallbackHost}${req.originalUrl}`);
     }
 
     const isLegacyBank1CheckoutHost =
@@ -74,6 +109,9 @@ export function serveStatic(app: Express) {
     const isLegacyBank1CheckoutPath =
       reqPath === "/pay" || /^\/pay\/[^/]+$/.test(reqPath);
     if (isLegacyBank1CheckoutHost && isLegacyBank1CheckoutPath) {
+      if (requestHost === "westpay.cfd" && fallbackHost) {
+        return res.redirect(302, `https://${fallbackHost}${req.originalUrl}`);
+      }
       return res.status(404).type("text").send("Not Found");
     }
 

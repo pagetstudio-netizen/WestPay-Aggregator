@@ -20,18 +20,48 @@ import CryptoPaymentPage from "@/pages/crypto-payment";
 import CryptoDocsPage from "@/pages/crypto-docs";
 import CryptoLinkPage from "@/pages/crypto-link-page";
 import NotFound from "@/pages/not-found";
-import Bank2UnavailablePage from "@/pages/bank2-unavailable";
 import IpVerificationPage from "@/pages/ip-verification";
 import AdminCreateMerchant from "@/pages/admin-create-merchant";
 import ManualPaymentPreview from "@/pages/manual-payment-preview";
 import { useState, useEffect } from "react";
 
-const WESTPAY_ROOT_FALLBACK_URL = "https://westpay.cdf";
+const WESTPAY_FALLBACK_HOSTS: Record<string, string> = {
+  "westpay.cfd": "westpay.cdf",
+  "dashboard.westpay.cfd": "dashboard.westpay.cdf",
+  "link.westpay.cfd": "link.westpay.cdf",
+  "payment.bank2.westpay.cfd": "payment.bank2.westpay.cdf",
+  "checkout1.westpay.cfd": "checkout1.westpay.cdf",
+};
 
-function RedirectToWestpayFallback({ ready = true }: { ready?: boolean }) {
+const BANK2_PAYMENT_QUERY_KEYS = [
+  "merchant", "link", "linkId", "amount", "country", "redirect", "ref",
+  "payment_status", "phone", "payerPhone", "name", "payerName",
+];
+
+const CHECKOUT_PAYMENT_QUERY_KEYS = [
+  "merchant", "amount", "country", "redirect", "payment_status",
+  "clapay_return", "ref", "phone", "payerPhone", "name", "payerName",
+];
+
+function getFallbackHostname(hostname: string): string | null {
+  return WESTPAY_FALLBACK_HOSTS[hostname] ?? (import.meta.env.DEV ? "westpay.cdf" : null);
+}
+
+function RedirectToFallbackHost({
+  targetHostname,
+  ready = true,
+}: {
+  targetHostname: string;
+  ready?: boolean;
+}) {
   useEffect(() => {
-    if (ready) window.location.replace(WESTPAY_ROOT_FALLBACK_URL);
-  }, [ready]);
+    if (!ready) return;
+    const targetUrl = new URL(window.location.href);
+    targetUrl.protocol = "https:";
+    targetUrl.hostname = targetHostname;
+    targetUrl.port = "";
+    window.location.replace(targetUrl.toString());
+  }, [ready, targetHostname]);
 
   return null;
 }
@@ -42,7 +72,7 @@ function Router() {
   const [location] = useLocation();
   const hostname = window.location.hostname.toLowerCase();
   const currentPath = location.replace(/\/+$/, "") || "/";
-  const isWestpayFallbackHost = hostname === "westpay.cfd" || import.meta.env.DEV;
+  const fallbackHostname = getFallbackHostname(hostname);
   const isBank2Host = hostname === "payment.bank2.westpay.cfd";
   const isSecureDocsHost = hostname === "secure.docs.westpay.cfd";
   const isDashboardHost = hostname === "dashboard.westpay.cfd";
@@ -51,20 +81,30 @@ function Router() {
   const isMerchantLoginPath = currentPath === "/merchant/index/login";
   const isLegacyMerchantLoginPath =
     currentPath === "/merchant/login";
-  const hasQueryParameters = new URLSearchParams(window.location.search).toString() !== "";
-  const isBank2Root = currentPath === "/" && !hasQueryParameters;
-  const isHiddenPublicRoot =
-    !hasQueryParameters &&
+  const searchParams = new URLSearchParams(window.location.search);
+  const hasQueryParameters = searchParams.toString() !== "";
+  const hasRecognizedBank2Parameters = BANK2_PAYMENT_QUERY_KEYS.some((key) => Boolean(searchParams.get(key)));
+  const hasRecognizedCheckoutParameters = CHECKOUT_PAYMENT_QUERY_KEYS.some((key) => Boolean(searchParams.get(key)));
+  const isCheckout1Host = hostname === "checkout1.westpay.cfd";
+  const isBareCheckoutPaymentPath =
+    isCheckout1Host &&
+    (currentPath === "/pay" || /^\/pay\/[^/]+$/.test(currentPath)) &&
+    !hasRecognizedCheckoutParameters;
+  const shouldRedirectFallbackRoot =
+    fallbackHostname !== null &&
+    currentPath === "/" &&
     (
-      (hostname === "checkout1.westpay.cfd" && (currentPath === "/" || currentPath === "/pay")) ||
-      (hostname === "payment.bank2.westpay.cfd" && currentPath === "/") ||
-      (hostname === "link.westpay.cfd" && currentPath === "/") ||
-      (hostname === "dashboard.westpay.cfd" && currentPath === "/")
+      hostname === "westpay.cfd"
+        ? !hasQueryParameters
+        : hostname === "payment.bank2.westpay.cfd"
+          ? !hasRecognizedBank2Parameters
+          : hostname in WESTPAY_FALLBACK_HOSTS || !hasQueryParameters
     );
 
-  const UnmatchedRoute = isWestpayFallbackHost
+  const UnmatchedRoute = fallbackHostname
     ? () => (
-        <RedirectToWestpayFallback
+        <RedirectToFallbackHost
+          targetHostname={fallbackHostname}
           ready={adminPathCheckedFor === window.location.pathname}
         />
       )
@@ -117,13 +157,15 @@ function Router() {
   // Fallback côté client pour les environnements qui ne passent pas par le
   // middleware Express : l'ancienne URL reste une page introuvable.
   if (isLegacyDocsPath || isLegacyMerchantLoginPath) {
-    return isWestpayFallbackHost
-      ? <RedirectToWestpayFallback ready={adminPathCheckedFor === window.location.pathname} />
+    return fallbackHostname
+      ? <RedirectToFallbackHost targetHostname={fallbackHostname} ready={adminPathCheckedFor === window.location.pathname} />
       : <NotFound />;
   }
-  if (isHiddenPublicRoot) return <NotFound />;
-  if (isWestpayFallbackHost && currentPath === "/" && !hasQueryParameters) {
-    return <RedirectToWestpayFallback />;
+  if (shouldRedirectFallbackRoot && fallbackHostname) {
+    return <RedirectToFallbackHost targetHostname={fallbackHostname} />;
+  }
+  if (isBareCheckoutPaymentPath && fallbackHostname) {
+    return <RedirectToFallbackHost targetHostname={fallbackHostname} />;
   }
   if (import.meta.env.DEV && currentPath === "/__preview/manual-payment") {
     return <ManualPaymentPreview />;
@@ -136,8 +178,10 @@ function Router() {
   }
 
   if (isBank2Host) {
-    if (isBank2Root) {
-      return <Bank2UnavailablePage />;
+    if (currentPath !== "/" || !hasRecognizedBank2Parameters) {
+      return fallbackHostname
+        ? <RedirectToFallbackHost targetHostname={fallbackHostname} />
+        : <NotFound />;
     }
     return <Bank2PaymentPage />;
   }
