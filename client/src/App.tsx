@@ -104,7 +104,7 @@ function Router() {
           setAdminPath(basePath);      // force le re-render du Switch avec le bon chemin
         }
       })
-      .catch(() => {}); // silencieux — 404 reste affiché en dernier recours
+      .catch(() => {}) // silencieux; le chemin revient au fallback une fois la vérification terminée
       .finally(() => {
         if (isActive) setAdminPathCheckedFor(pathname);
       });

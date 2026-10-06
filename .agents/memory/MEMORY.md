@@ -22,3 +22,4 @@
 - [Node package-manager mismatch](node-package-manager-mismatch.md) — A pnpm-backed node_modules tree may lack npm .bin shims; inspect package entrypoints before attempting repair.
 - [Workflow process collisions](workflow-process-collisions.md) — After a restart, inspect processes; an older dev server may survive and cause EADDRINUSE or duplicate jobs.
 - [Pay-in failure handling](payin-failure-handling.md) — Block checkout on confirmed provider errors and alert admins in Telegram; preserve pending state when provider outcome is uncertain.
+- [WestPay private entrypoint](westpay-private-entrypoint.md) — The user considers the project private and expects probing; a hidden root fallback is not access control.
