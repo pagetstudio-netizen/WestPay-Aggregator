@@ -65,6 +65,10 @@ import {
 import {
   WESTPAY_PAYOUT_BENEFICIARY,
 } from "./payout-constants";
+import {
+  cancelOperatorPaymentSession,
+  registerOperatorPaymentCommand,
+} from "./telegram-operator-payment-command";
 
 export interface GeoInfo {
   ip: string;
@@ -1028,6 +1032,16 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     return next();
   });
 
+  registerOperatorPaymentCommand(
+    bot,
+    isAdminGroup,
+    (chatId) =>
+      operatorMaintenanceSessions.has(chatId) ||
+      merchantPaymentToggleSessions.has(chatId) ||
+      broadcastSessions.has(chatId) ||
+      commanderSessions.has(chatId),
+  );
+
   // ─── Initialisation : forcer groupe admin + reconstruire la liste des groupes connus ──
   (async () => {
     try {
@@ -1912,7 +1926,9 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
   // ─── /cancel (annule le broadcast ou la recherche de retrait en cours) ────
   bot.command("cancel", async (ctx) => {
     const chatId = String(ctx.chat.id);
-    if (operatorMaintenanceSessions.has(chatId)) {
+    if (cancelOperatorPaymentSession(chatId)) {
+      await ctx.reply("❌ Modification de la configuration opérateur annulée.");
+    } else if (operatorMaintenanceSessions.has(chatId)) {
       operatorMaintenanceSessions.delete(chatId);
       await ctx.reply("❌ Réglage de disponibilité annulé.");
     } else if (merchantPaymentToggleSessions.has(chatId)) {
@@ -2466,6 +2482,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
            `/enablepayments (/activatepayments) — Réactiver payin et payout d'un marchand\n\n` +
            `/payin — Couper/réactiver le payin par pays et opérateur (07h–20h local)\n` +
            `/payout — Couper/réactiver le payout par pays et opérateur (07h–20h local)\n\n` +
+           `/setoperatorpayment — Changer le fournisseur ou le numéro manuel d’un opérateur; gérer Wave par lien/QR\n\n` +
           `📊 *Statistiques & Soldes*\n` +
           `/stats — Statistiques globales\n` +
           `/balance — Soldes détaillés de tous les marchands\n\n` +
