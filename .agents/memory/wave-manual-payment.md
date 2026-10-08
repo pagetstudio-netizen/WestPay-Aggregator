@@ -5,7 +5,7 @@ description: Product constraints for adding a configurable Wave payment link and
 
 Keep the existing Wave number and account-holder details available for number payments. Store the separate Wave payment-link/QR only as admin-managed configuration—never hardcode or seed it—and make it easy to disable, delete, or replace without changing number or API-provider settings. New link/QR configs start disabled and can only be activated when the country’s Wave operator is active and set to « Manuel ». If operator routing changes, disable the active link/QR and require explicit reactivation. When link/QR is active, expose one Wave checkout option rather than a duplicate provider option. Customers submit proof for manual review; the link flow must not credit a merchant automatically.
 
-Always display the Wave logo on the Wave link-payment header and success screen, and keep the configured QR code unchanged.
+Keep the configured QR code unchanged. On the Wave link/QR instruction page, omit the Wave logo from the top header; keep the logo on the success screen.
 
 On manual-payment success screens, say “Paiement soumis avec succès. Votre paiement est en cours de traitement.” Do not describe the payment as “manual” or “under verification” on that screen. Show a merchant-return button for API Bank1/Bank2 flows; for payment links, show it only when that specific link has a configured redirect URL.
 
@@ -15,6 +15,6 @@ When notifying admins about a submitted Wave link/QR payment, include the exact 
 
 **How to apply:** Pass the persisted Wave URL to the admin notification only for Wave link/QR submissions, so later configuration changes cannot misidentify the payment destination.
 
-**Why:** The user explicitly requires the Wave logo to remain visible, and clarified that link/QR activation depends on the Wave operator being in « Manuel » mode to prevent duplicate provider options. The user also asked to preserve the existing number flow, avoid hardcoding/seeding the link or QR, and specified the success message and return-button rules.
+**Why:** The user explicitly changed the header-logo requirement: remove the Wave logo from the QR payment instruction page, while keeping it on the success screen. Other confirmed constraints remain: link/QR activation depends on the Wave operator being in « Manuel » mode, the existing number flow remains available, and payment-link QR submissions keep manual review.
 
-**How to apply:** Manage the link and QR through the admin config panel; default new configs to disabled, validate Manual mode on activation, and deactivate links when Wave routing changes. Preserve the number/provider options, show only one Wave checkout entry with its logo, and route link payments through the existing manual proof-review process. Apply the wording and return-button rule to manual success screens across both checkout banks.
+**How to apply:** Manage the link and QR through the admin config panel; default new configs to disabled, validate Manual mode on activation, and deactivate links when Wave routing changes. Preserve the number/provider options and the Wave icon in the checkout-method selector. Omit only the logo at the top of the QR instruction page; keep it on success. Route link payments through the existing manual proof-review process and preserve the success-message and return-button rules.

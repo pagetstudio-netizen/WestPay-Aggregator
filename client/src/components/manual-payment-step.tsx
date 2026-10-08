@@ -753,8 +753,6 @@ export default function ManualPaymentStep({
             </div>
           )}
 
-          {isWavePayment && <img className="wave-brand-logo" src={waveBrandLogo} alt="Wave" />}
-
           <div className="operator-row">
             <span>{isWavePayment ? "Montant à payer :" : "opérateur:"}</span>
             <span>{isWavePayment ? `${formattedAmount} ${currency}` : operatorName}</span>
