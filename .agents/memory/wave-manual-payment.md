@@ -7,6 +7,8 @@ Keep the existing Wave number and account-holder details available for number pa
 
 Keep the configured QR code unchanged. On the Wave link/QR instruction page, omit the Wave logo from the top header; keep the logo on the success screen.
 
+Show and require the payer's phone number on the Wave link/QR checkout, and pass it with the payment-initiation request.
+
 On manual-payment success screens, say “Paiement soumis avec succès. Votre paiement est en cours de traitement.” Do not describe the payment as “manual” or “under verification” on that screen. Show a merchant-return button for API Bank1/Bank2 flows; for payment links, show it only when that specific link has a configured redirect URL.
 
 When notifying admins about a submitted Wave link/QR payment, include the exact Wave payment URL saved on that pending payment, not the country's current configuration.
@@ -15,6 +17,6 @@ When notifying admins about a submitted Wave link/QR payment, include the exact 
 
 **How to apply:** Pass the persisted Wave URL to the admin notification only for Wave link/QR submissions, so later configuration changes cannot misidentify the payment destination.
 
-**Why:** The user explicitly changed the header-logo requirement: remove the Wave logo from the QR payment instruction page, while keeping it on the success screen. Other confirmed constraints remain: link/QR activation depends on the Wave operator being in « Manuel » mode, the existing number flow remains available, and payment-link QR submissions keep manual review.
+**Why:** The user explicitly changed the header-logo requirement: remove the Wave logo from the QR payment instruction page, while keeping it on the success screen. The user also confirmed the payer's phone number is needed for the Wave link/QR flow. Other confirmed constraints remain: link/QR activation depends on the Wave operator being in « Manuel » mode, the existing number flow remains available, and payment-link QR submissions keep manual review.
 
-**How to apply:** Manage the link and QR through the admin config panel; default new configs to disabled, validate Manual mode on activation, and deactivate links when Wave routing changes. Preserve the number/provider options and the Wave icon in the checkout-method selector. Omit only the logo at the top of the QR instruction page; keep it on success. Route link payments through the existing manual proof-review process and preserve the success-message and return-button rules.
+**How to apply:** Manage the link and QR through the admin config panel; default new configs to disabled, validate Manual mode on activation, and deactivate links when Wave routing changes. Preserve the number/provider options and the Wave icon in the checkout-method selector. Require and pass the payer's phone number for Wave link/QR checkouts. Omit only the logo at the top of the QR instruction page; keep it on success. Route link payments through the existing manual proof-review process and preserve the success-message and return-button rules.

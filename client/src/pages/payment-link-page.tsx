@@ -279,13 +279,12 @@ export default function PaymentLinkPage() {
   const rawMethods = dynMethods ?? (PAYMENT_METHODS[country] || []).map((n: string) => ({ name: n, logo: null as string | null }));
   const methods = rawMethods;
   const isCrypto = method === "crypto";
-  const isWaveLinkMethod = method === "Wave par lien";
   const needsOtp = method === "Orange Money" && (country === "Burkina Faso" || country === "Cote d'Ivoire");
   const otpUssd = country === "Burkina Faso" ? "*144*4*6*montant#" : "#144*82#";
   const maliOrange = method === "Orange Money" && country === "Mali";
   const dialCode = DIAL_CODES[country] || "+";
   const isSeapayCountry = ["Philippines", "Pakistan", "India", "Nigeria"].includes(country);
-  const requiresPayerPhone = !isCrypto && !isSeapayCountry && !isWaveLinkMethod;
+  const requiresPayerPhone = !isCrypto && !isSeapayCountry;
   const payerPhoneIsValid = isValidPaymentPhone(payerPhone);
   // isIndia déclaré plus haut (avant le useEffect qui en dépend)
   const isSeapayRedirect = isSeapayCountry && (isIndia || !!method) && !isCrypto;
@@ -357,7 +356,7 @@ export default function PaymentLinkPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           merchantSlug: data.merchantSlug, country, amount: effectiveAmount,
-          payerPhone: isWaveLinkMethod ? "" : payerPhone.trim(), payerName: "Client", paymentMethod: method,
+          payerPhone: payerPhone.trim(), payerName: "Client", paymentMethod: method,
           redirectUrl: data.link.redirectUrl || null,
           firstName: "Client", lastName: "RobotPay",
           operator: method.toLowerCase().includes("wave") ? "wave" : undefined,
@@ -576,7 +575,7 @@ export default function PaymentLinkPage() {
               )}
 
               {/* Phone input — hidden for SeaPay countries (Philippines, India, Pakistan) */}
-              {!isCrypto && !isSeapayCountry && !isWaveLinkMethod && (
+              {!isCrypto && !isSeapayCountry && (
                 <div>
                   <p style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>{t("payPhoneNumber")}</p>
                   <div style={{ display: "flex", alignItems: "stretch", border: "1.5px solid #d1d5db", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
