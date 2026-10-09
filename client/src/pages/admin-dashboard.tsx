@@ -44,6 +44,7 @@ import {
   getMerchantCategory,
   getSettlementCycle,
 } from "@shared/merchant-account";
+import { BOT_LANGUAGE_OPTIONS } from "@shared/telegram-bot-language";
 
 type AdminTab = "overview" | "analytics" | "merchants" | "paymentlinks" | "transactions" | "balanceLedger" | "countries" | "numbers" | "sms" | "apikeys" | "mbiyo" | "lipapap" | "drimpay" | "seapay" | "cryptoagg" | "cryptowithdrawals" | "virements" | "reversements" | "admins" | "settings" | "sdk" | "security" | "notifications" | "userbot" | "knowledge" | "actionlogs";
 
@@ -122,14 +123,6 @@ function StatCard({ title, value, icon: Icon, subtitle, accent }: { title: strin
   );
 }
 
-const BOT_LANGUAGES = [
-  { value: "fr", label: "🇫🇷 Français" },
-  { value: "en", label: "🇬🇧 English" },
-  { value: "zh", label: "🇨🇳 中文 (Chinois)" },
-  { value: "de", label: "🇩🇪 Deutsch (Allemand)" },
-  { value: "hi", label: "🇮🇳 हिन्दी (Hindi)" },
-];
-
 function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string }) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
@@ -190,7 +183,7 @@ function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string
       if (!res.ok) throw new Error("Erreur");
       setSelectedLang(lang);
       queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
-      toast({ title: "Langue du bot mise à jour", description: BOT_LANGUAGES.find(l => l.value === lang)?.label });
+      toast({ title: "Langue du bot mise à jour", description: BOT_LANGUAGE_OPTIONS.find(l => l.value === lang)?.label });
     } catch (err: any) {
       toast({ title: "Erreur", description: err.message, variant: "destructive" });
     } finally {
@@ -237,7 +230,7 @@ function TelegramDialog({ merchant, token }: { merchant: Merchant; token: string
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {BOT_LANGUAGES.map(l => (
+                  {BOT_LANGUAGE_OPTIONS.map(l => (
                     <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
                   ))}
                 </SelectContent>
@@ -5666,7 +5659,13 @@ function WithdrawalOperatorsPanel() {
 function AdminWithdrawalsPanel() {
   const { token } = useAuth();
   const { toast } = useToast();
-  const { data: wdList = [], isLoading } = useAdminFetch("/api/admin/withdrawals", ["/api/admin/withdrawals"]);
+  const {
+    data: wdList = [],
+    isLoading,
+    isError: withdrawalsLoadFailed,
+    error: withdrawalsLoadError,
+    refetch: refetchWithdrawals,
+  } = useAdminFetch("/api/admin/withdrawals", ["/api/admin/withdrawals"]);
   const { data: platformFlags, refetch: refetchFlags } = useQuery<{ withdrawalsDisabled: boolean; withdrawalMinAmount: number }>({
     queryKey: ["/api/public/platform-flags"],
     queryFn: () => fetch("/api/public/platform-flags").then(r => r.json()),
@@ -5882,7 +5881,7 @@ function AdminWithdrawalsPanel() {
     return <Badge variant="destructive" className="gap-1"><XCircle className="w-3 h-3" />Rejeté</Badge>;
   };
 
-  const allWd = (wdList as any[]);
+  const allWd = Array.isArray(wdList) ? (wdList as any[]) : [];
   const pending = allWd.filter(w => w.status === "pending");
 
   const filteredWd = allWd.filter((w) => {
@@ -5901,6 +5900,26 @@ function AdminWithdrawalsPanel() {
         <h2 className="text-lg font-semibold text-foreground">Reversements (Retraits Marchands)</h2>
         {pending.length > 0 && <Badge className="bg-orange-500">{pending.length} en attente</Badge>}
       </div>
+
+      {withdrawalsLoadFailed && (
+        <Card className="border-destructive/40">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+            <div className="flex items-start gap-2 text-sm text-destructive">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <p className="font-medium">Impossible de charger les reversements.</p>
+                <p className="text-xs text-muted-foreground">
+                  {withdrawalsLoadError instanceof Error ? withdrawalsLoadError.message : "Vérifiez la connexion puis réessayez."}
+                </p>
+              </div>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => { void refetchWithdrawals(); }}>
+              <RefreshCw className="mr-2 h-3.5 w-3.5" />
+              Réessayer
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Contrôle global des retraits */}
       <div className={`flex items-center justify-between gap-4 p-4 rounded-xl border-2 ${platformFlags?.withdrawalsDisabled ? "border-red-400 bg-red-50 dark:bg-red-950/20" : "border-green-300 bg-green-50 dark:bg-green-950/20"}`}>
@@ -10946,7 +10965,7 @@ export default function AdminDashboard() {
             {activeTab === "cryptoagg" && <CryptoAggPanel />}
             {activeTab === "cryptowithdrawals" && <CryptoWithdrawalsAdminPanel />}
             {activeTab === "virements" && <AdminWalletTransfersPanel />}
-            {activeTab === "reversements" && <AdminWithdrawalsPanel />}
+            {activeTab === "reversements" && <PanelErrorBoundary label="reversements"><AdminWithdrawalsPanel /></PanelErrorBoundary>}
             {activeTab === "admins" && <AdminsPanel />}
             {activeTab === "security" && <SecurityIpsPanel />}
             {activeTab === "actionlogs" && <AdminActionLogsPanel />}

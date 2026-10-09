@@ -11,6 +11,7 @@ import {
   isMerchantCategory,
   isMerchantSettlementCycle,
 } from "@shared/merchant-account";
+import { BOT_LANGUAGE_OPTIONS, isBotLanguage, type BotLanguage } from "@shared/telegram-bot-language";
 import {
   generateSecureApiKey,
   verifyEmailDomainHasMx,
@@ -480,7 +481,9 @@ async function getMerchantForGroup(chatId: string) {
   return merchant;
 }
 
-type BotLanguage = "fr" | "en" | "zh" | "de" | "hi";
+export function invalidateMerchantTelegramChatCache(chatId: string | null | undefined): void {
+  if (chatId) _cache.merchantByChat.delete(String(chatId));
+}
 
 const BOT_DATE_LOCALES: Record<BotLanguage, string> = {
   fr: "fr-FR",
@@ -655,7 +658,7 @@ const BOT_TEXTS: Record<BotLanguage, MerchantBotText> = {
 };
 
 function normalizeBotLanguage(language: unknown): BotLanguage {
-  return language === "en" || language === "zh" || language === "de" || language === "hi" ? language : "fr";
+  return isBotLanguage(language) ? language : "fr";
 }
 
 function merchantBotText(language: unknown): MerchantBotText {
@@ -1734,6 +1737,56 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
   bot.command("createmerchant", createMerchantFromTelegram);
   bot.command("creermarchand", createMerchantFromTelegram);
 
+  bot.command("setmerchantlanguage", async (ctx) => {
+    if (ctx.chat?.type === "private") return;
+    if (!await isTelegramAdminCommandUser(ctx)) {
+      await ctx.reply("⛔ Commande réservée aux administrateurs Telegram du groupe admin WestPay.");
+      return;
+    }
+
+    const args = String(ctx.message?.text || "")
+      .replace(/^\/[^\s]+\s*/, "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    if (args.length !== 2) {
+      await ctx.reply(
+        "Usage : /setmerchantlanguage SLUG_MARCHAND CODE_LANGUE\n" +
+        "Exemple : /setmerchantlanguage demo-shop en\n" +
+        "Langues : fr, en, zh, de, hi.",
+      );
+      return;
+    }
+
+    const merchantRef = args[0].toLowerCase();
+    const languageCode = args[1].toLowerCase();
+    if (!isBotLanguage(languageCode)) {
+      await ctx.reply("Langue non prise en charge. Choisissez l’un de ces codes : fr, en, zh, de, hi.");
+      return;
+    }
+
+    try {
+      const merchant =
+        await storage.getMerchantBySlug(merchantRef) ||
+        (merchantRef.includes("@") ? await storage.getMerchantByEmail(merchantRef) : undefined);
+      if (!merchant) {
+        await ctx.reply("Marchand introuvable. Indiquez son slug ou son e-mail.");
+        return;
+      }
+
+      await storage.updateMerchantTelegramBotLanguage(merchant.id, languageCode);
+      invalidateMerchantTelegramChatCache(merchant.telegramChatId);
+      const languageLabel = BOT_LANGUAGE_OPTIONS.find((option) => option.value === languageCode)?.label || languageCode;
+      await ctx.reply(
+        `✅ Langue du bot de ${merchant.name} définie sur ${languageLabel} (${languageCode}). ` +
+        "Les prochains messages utiliseront cette langue.",
+      );
+    } catch (error: any) {
+      console.error("[TELEGRAM] Mise à jour de la langue marchand impossible:", error?.message || error);
+      await ctx.reply("❌ Impossible de modifier la langue du bot. Réessayez.");
+    }
+  });
+
   bot.command("setmerchantcode", async (ctx) => {
     if (ctx.chat?.type === "private") return;
     if (!await isTelegramAdminCommandUser(ctx)) {
@@ -2611,6 +2664,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `/merchants — Liste de tous les marchands\n` +
           `/setmerchant CODE — Lier un groupe à un marchand\n\n` +
           `/setmerchantcode SLUG — Générer un code de liaison à usage unique (24 h)\n\n` +
+          `/setmerchantlanguage SLUG CODE — Choisir la langue du bot marchand (fr, en, zh, de, hi)\n\n` +
           `/createmerchant (/creermarchand) — Créer un marchand dans ce groupe uniquement (administrateurs Telegram; message supprimé automatiquement)\n` +
           `/activatecountry (/activerpays) — Activer un pays dans le groupe admin uniquement\n\n` +
            `/disablepayments — Désactiver payin et payout d'un marchand\n\n` +
@@ -2644,9 +2698,10 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `/unblockip IP — Retirer une IP de toutes les listes\n\n` +
           `━━━━━━━━━━━━━━━━\n` +
           `💡 *Configurer un groupe marchand :*\n` +
-          `1️⃣ Générer un code dans le dashboard WestPay\n` +
+          `1️⃣ Dans ce groupe admin, générer un code avec \`/setmerchantcode SLUG\` (ou depuis le dashboard)\n` +
           `2️⃣ Ajouter le bot au groupe du marchand\n` +
-          `3️⃣ Envoyer \`/setmerchant CODE\` dans ce groupe`,
+          `3️⃣ Envoyer \`/setmerchant CODE\` dans ce groupe\n` +
+          `Pour une liaison en message privé : envoyer \`/start CODE\` au bot.`,
           { parse_mode: "Markdown" }
         );
         return;

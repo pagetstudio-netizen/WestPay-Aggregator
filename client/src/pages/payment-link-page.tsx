@@ -378,7 +378,7 @@ export default function PaymentLinkPage() {
     if (isCrypto) { doInitiate(); return; }
     if (requiresPayerPhone && !payerPhone.trim()) { toast({ title: "Numéro requis", description: "Entrez votre numéro.", variant: "destructive" }); return; }
     if (requiresPayerPhone && !payerPhoneIsValid) {
-      toast({ title: t("payInvalidPhone"), description: "Saisissez au moins 8 chiffres, sans lettres.", variant: "destructive" });
+      toast({ title: t("payInvalidPhone"), variant: "destructive" });
       return;
     }
     if (data?.link.amountType === "flexible" && !customAmount) { toast({ title: "Montant requis", description: "Entrez le montant.", variant: "destructive" }); return; }
@@ -588,7 +588,6 @@ export default function PaymentLinkPage() {
                       maxLength={32} aria-invalid={Boolean(payerPhone.trim()) && !payerPhoneIsValid}
                       style={{ flex: 1, padding: "12px 14px", fontSize: 15, border: "none", outline: "none", background: "transparent", color: "#111" }} />
                   </div>
-                  <p style={{ fontSize: 11, color: "#6b7280", marginTop: 5 }}>Au moins 8 chiffres; les lettres ne sont pas acceptées.</p>
                   {payerPhone.trim() && !payerPhoneIsValid && (
                     <p role="alert" style={{ fontSize: 12, color: "#dc2626", marginTop: 4 }}>{t("payInvalidPhone")}</p>
                   )}

@@ -1,11 +1,11 @@
 import { useState } from "react";
-import {
-  normalizePaymentReference,
-  PAYMENT_REFERENCE_VALIDATION_MESSAGE,
-} from "@shared/payment-validation";
+import { normalizePaymentReference } from "@shared/payment-validation";
+import { sanitizePaymentMessage } from "@/lib/sanitize-payment-message";
 import manualPaymentDesign from "../../../attached_assets/Pasted--box-sizing-border-box-html-body-root-margin-0-padding-_1791238715582.txt?raw";
 import copyIconPng from "../../../attached_assets/copie_1791241107801.png";
 import waveBrandLogo from "../../../attached_assets/1756606482154_1791243181275.png";
+
+const INVALID_PAYMENT_REFERENCE_MESSAGE = "Référence invalide.";
 
 export type ManualPaymentDetails = {
   recipientPhone: string;
@@ -578,7 +578,7 @@ export default function ManualPaymentStep({
   const submitPayment = async () => {
     const cleanProof = normalizePaymentReference(proofReference);
     if (!cleanProof) {
-      showMessage(PAYMENT_REFERENCE_VALIDATION_MESSAGE);
+      showMessage(INVALID_PAYMENT_REFERENCE_MESSAGE);
       return;
     }
     if (submitting || submitted) return;
@@ -607,7 +607,8 @@ export default function ManualPaymentStep({
       setSuccessReference(cleanProof);
       setSuccess(true);
     } catch (error: unknown) {
-      showMessage(error instanceof Error ? error.message : "Impossible d’envoyer la preuve.");
+      const message = error instanceof Error ? error.message : "";
+      showMessage(sanitizePaymentMessage(message, "Impossible d’envoyer la preuve."));
     } finally {
       setSubmitting(false);
     }
@@ -616,7 +617,7 @@ export default function ManualPaymentStep({
   const checkPayment = async () => {
     const cleanProof = normalizePaymentReference(proofReference);
     if (!cleanProof) {
-      setStatusFeedback(PAYMENT_REFERENCE_VALIDATION_MESSAGE);
+      setStatusFeedback(INVALID_PAYMENT_REFERENCE_MESSAGE);
       return;
     }
     if (checking) return;
@@ -647,7 +648,8 @@ export default function ManualPaymentStep({
         setStatusFeedback("Le paiement n’est pas encore confirmé. Vous pouvez vérifier à nouveau dans quelques instants.");
       }
     } catch (error: unknown) {
-      setStatusFeedback(error instanceof Error ? error.message : "Impossible d’actualiser le statut du paiement.");
+      const message = error instanceof Error ? error.message : "";
+      setStatusFeedback(sanitizePaymentMessage(message, "Impossible d’actualiser le statut du paiement."));
     } finally {
       const minimumWaitMs = Math.max(0, 1800 - (performance.now() - checkStartedAt));
       if (minimumWaitMs > 0) {
@@ -901,12 +903,9 @@ export default function ManualPaymentStep({
               Soumettre
             </button>
           </div>
-          <p style={{ color: "#64748b", fontSize: 12, margin: "6px 2px 0" }}>
-            Référence ou message reçu : au moins 8 caractères non blancs (texte ou chiffres).
-          </p>
           {proofReference.trim() && !normalizePaymentReference(proofReference) && (
             <p role="alert" style={{ color: "#dc2626", fontSize: 12, margin: "4px 2px 0" }}>
-              {PAYMENT_REFERENCE_VALIDATION_MESSAGE}
+              {INVALID_PAYMENT_REFERENCE_MESSAGE}
             </p>
           )}
 

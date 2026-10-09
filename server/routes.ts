@@ -19,6 +19,7 @@ import {
   isMerchantSettlementCycle,
 } from "@shared/merchant-account";
 import { normalizeEmailInput } from "@shared/email-validation";
+import { isBotLanguage } from "@shared/telegram-bot-language";
 import {
   isValidPaymentPhone,
   normalizePaymentPhone,
@@ -36,7 +37,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { sendMerchantOtpEmail } from "./email";
-import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminManualPaymentSubmission, notifyAdminPaymentError, notifyAdminWithdrawal, notifyAdminWithdrawalError, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, notifyAdminMerchantCreated, notifyAdminAdminCreated, getGeoInfo, notifyAdminMerchantLogin, notifyAdminIpBlocked, notifyAdminBruteForce, notifyAdminDeviceBlocked, notifyAdminNewDevice, notifyAdminOtp, notifyAdminVpn, notifyAdminCountryBlocked, notifyAdminLocationJump, notifyAdminNewMerchantIp, broadcastToMerchants, sendTelegramMessage } from "./telegram-bot";
+import { notifyMerchantPayment, notifyAdminGroup, notifyAdminPayment, notifyAdminManualPaymentSubmission, notifyAdminPaymentError, notifyAdminWithdrawal, notifyAdminWithdrawalError, notifyAdminWalletTransfer, notifyAdminBalanceUpdate, notifyMerchantWithdrawal, notifyMerchantWalletTransfer, notifyAdminLogin, notifyAdminMerchantCreated, notifyAdminAdminCreated, getGeoInfo, notifyAdminMerchantLogin, notifyAdminIpBlocked, notifyAdminBruteForce, notifyAdminDeviceBlocked, notifyAdminNewDevice, notifyAdminOtp, notifyAdminVpn, notifyAdminCountryBlocked, notifyAdminLocationJump, notifyAdminNewMerchantIp, broadcastToMerchants, invalidateMerchantTelegramChatCache, sendTelegramMessage } from "./telegram-bot";
 import {
   createInvoice as oxapayCreateInvoice,
   createWhiteLabel as oxapayCreateWhiteLabel,
@@ -4424,11 +4425,14 @@ export async function registerRoutes(
 
   app.put("/api/admin/merchant/:id/telegram/language", authMiddleware("admin"), async (req, res) => {
     try {
-      const merchantId = parseInt(req.params.id);
+      const merchantId = Number(req.params.id);
       const { language } = req.body;
-      const allowed = ["fr", "en", "zh", "de", "hi"];
-      if (!allowed.includes(language)) return res.status(400).json({ message: "Langue non supportee" });
+      if (!Number.isSafeInteger(merchantId) || merchantId <= 0) return res.status(400).json({ message: "Identifiant marchand invalide" });
+      if (!isBotLanguage(language)) return res.status(400).json({ message: "Langue non supportee" });
+      const merchant = await storage.getMerchantById(merchantId);
+      if (!merchant) return res.status(404).json({ message: "Marchand non trouve" });
       await storage.updateMerchantTelegramBotLanguage(merchantId, language);
+      invalidateMerchantTelegramChatCache(merchant.telegramChatId);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
