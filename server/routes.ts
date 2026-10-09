@@ -1792,6 +1792,7 @@ export async function registerRoutes(
       "westpay.cfd",
       "www.westpay.cfd",
       "dashboard.westpay.cfd",
+      "secure.docs.westpay.cfd",
       "payment.bank2.westpay.cfd",
     ];
     // Toujours inclure les domaines Replit (dev ET production déployée)
