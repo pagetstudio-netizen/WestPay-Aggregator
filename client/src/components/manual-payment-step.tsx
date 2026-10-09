@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { normalizePaymentReference } from "@shared/payment-validation";
 import { sanitizePaymentMessage } from "@/lib/sanitize-payment-message";
+import { addWaveAmountToPaymentUrl } from "@/lib/wave-payment-url";
 import manualPaymentDesign from "../../../attached_assets/Pasted--box-sizing-border-box-html-body-root-margin-0-padding-_1791238715582.txt?raw";
 import copyIconPng from "../../../attached_assets/copie_1791241107801.png";
 import waveBrandLogo from "../../../attached_assets/1756606482154_1791243181275.png";
@@ -563,7 +564,7 @@ export default function ManualPaymentStep({
     }
     if (payment.wavePaymentUrl) {
       showMessage("Ouverture de Wave...");
-      window.location.assign(payment.wavePaymentUrl);
+      window.location.assign(addWaveAmountToPaymentUrl(payment.wavePaymentUrl, amount, currency));
       return;
     }
     if (!payment.ussdCode?.trim()) {
