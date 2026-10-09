@@ -450,14 +450,18 @@ const WESTPAY_KNOWLEDGE: Array<{ category: string; title: string; content: strin
 ];
 
 export async function seedKnowledge(): Promise<void> {
-  const client = await pool.connect();
   try {
-    const existing = await client.query("SELECT COUNT(*) FROM knowledge_chunks");
-    if (parseInt(existing.rows[0].count) > 0) {
+    const client = await pool.connect();
+    let existingCount = 0;
+    try {
+      const existing = await client.query("SELECT COUNT(*) FROM knowledge_chunks");
+      existingCount = parseInt(existing.rows[0]?.count ?? "0", 10);
+    } finally {
+      client.release();
+    }
+
+    if (existingCount > 0) {
       console.log("[KNOWLEDGE] Already seeded, skipping. Run reembedAll() for missing embeddings.");
-      client.release();
-      // Still try to embed any un-embedded chunks
-      client.release();
       await reembedAll();
       return;
     }
@@ -468,17 +472,19 @@ export async function seedKnowledge(): Promise<void> {
       const embedding = await embedText(`${chunk.title}. ${chunk.content}`);
       const vec = embedding ? `[${embedding.join(",")}]` : null;
       const c2 = await pool.connect();
-      await c2.query(
-        `INSERT INTO knowledge_chunks (category, title, content, embedding) VALUES ($1,$2,$3,$4::vector)`,
-        [chunk.category, chunk.title, chunk.content, vec]
-      );
-      c2.release();
+      try {
+        await c2.query(
+          `INSERT INTO knowledge_chunks (category, title, content, embedding) VALUES ($1,$2,$3,$4::vector)`,
+          [chunk.category, chunk.title, chunk.content, vec]
+        );
+      } finally {
+        c2.release();
+      }
       await new Promise(r => setTimeout(r, 80));
     }
 
     console.log("[KNOWLEDGE] Seed complete.");
   } catch (err: any) {
     console.error("[KNOWLEDGE] Seed error:", err.message);
-    try { client.release(); } catch {}
   }
 }
