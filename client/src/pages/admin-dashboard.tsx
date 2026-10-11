@@ -5921,6 +5921,29 @@ function AdminWithdrawalsPanel() {
         </Card>
       )}
 
+      <div className="flex flex-wrap gap-1 border-b" role="tablist" aria-label="Gestion des reversements">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSubTab === "requests"}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeSubTab === "requests" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setActiveSubTab("requests")}
+          data-testid="tab-wd-requests"
+        >
+          Demandes{pending.length > 0 && <Badge variant="secondary" className="ml-2 text-xs">{pending.length}</Badge>}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSubTab === "operators"}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeSubTab === "operators" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setActiveSubTab("operators")}
+          data-testid="tab-wd-operators"
+        >
+          Opérateurs, pays et fournisseurs
+        </button>
+      </div>
+
       {/* Contrôle global des retraits */}
       <div className={`flex items-center justify-between gap-4 p-4 rounded-xl border-2 ${platformFlags?.withdrawalsDisabled ? "border-red-400 bg-red-50 dark:bg-red-950/20" : "border-green-300 bg-green-50 dark:bg-green-950/20"}`}>
         <div className="flex items-center gap-3">
@@ -5979,17 +6002,6 @@ function AdminWithdrawalsPanel() {
             Enregistrer
           </button>
         </div>
-      </div>
-
-      <div className="flex gap-1 border-b">
-        <button className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeSubTab === "requests" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-          onClick={() => setActiveSubTab("requests")} data-testid="tab-wd-requests">
-          Demandes{pending.length > 0 && <Badge variant="secondary" className="ml-2 text-xs">{pending.length}</Badge>}
-        </button>
-        <button className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeSubTab === "operators" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-          onClick={() => setActiveSubTab("operators")} data-testid="tab-wd-operators">
-          Opérateurs
-        </button>
       </div>
 
       {activeSubTab === "operators" && <WithdrawalOperatorsPanel />}
