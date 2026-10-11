@@ -32,6 +32,7 @@ const WESTPAY_FALLBACK_HOSTS: Record<string, string> = {
   "payment.bank2.westpay.cfd": "payment.bank2.westpay.cdf",
   "checkout1.westpay.cfd": "checkout1.westpay.cdf",
 };
+const SECURE_DOCS_HOST = "secure.docs.westpay.cfd";
 
 const BANK2_PAYMENT_QUERY_KEYS = [
   "merchant", "link", "linkId", "amount", "country", "redirect", "ref",
@@ -62,6 +63,15 @@ function RedirectToFallbackHost({
     targetUrl.port = "";
     window.location.replace(targetUrl.toString());
   }, [ready, targetHostname]);
+
+  return null;
+}
+
+function RedirectToSecureDocs({ ready = true }: { ready?: boolean }) {
+  useEffect(() => {
+    if (!ready) return;
+    window.location.replace(`https://${SECURE_DOCS_HOST}/`);
+  }, [ready]);
 
   return null;
 }
@@ -154,9 +164,12 @@ function Router() {
     };
   }, [adminPath, location]);
 
-  // Fallback côté client pour les environnements qui ne passent pas par le
-  // middleware Express : l'ancienne URL reste une page introuvable.
-  if (isLegacyDocsPath || isLegacyMerchantLoginPath) {
+  // L'ancienne URL de documentation reste protégée : elle rejoint son hôte
+  // officiel, où ApiDocsPage demande toujours le PIN.
+  if (isLegacyDocsPath) {
+    return <RedirectToSecureDocs />;
+  }
+  if (isLegacyMerchantLoginPath) {
     return fallbackHostname
       ? <RedirectToFallbackHost targetHostname={fallbackHostname} ready={adminPathCheckedFor === window.location.pathname} />
       : <NotFound />;

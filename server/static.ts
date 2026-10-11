@@ -42,17 +42,6 @@ export function serveStatic(app: Express) {
   // Serve static assets (JS, CSS, images) — index.html excluded (served below)
   app.use(express.static(distPath, { index: false }));
 
-  // L'ancienne URL est définitivement désactivée sur le domaine principal.
-  // La documentation est disponible uniquement via secure.docs.westpay.cfd.
-  app.get("/api-docs", (req, res) => {
-    const requestHost = (req.hostname || "").toLowerCase();
-    const fallbackHost = getFallbackHost(requestHost);
-    if (fallbackHost) {
-      return res.redirect(302, fallbackRedirectUrl(fallbackHost, req.originalUrl));
-    }
-    res.status(404).type("text").send("Not Found");
-  });
-
   // Ancienne URL de connexion marchand définitivement désactivée.
   app.get("/merchant/login", (req, res) => {
     const requestHost = (req.hostname || "").toLowerCase();

@@ -320,7 +320,7 @@ Each merchant has a unique identifier called a "slug" (e.g. "ecomat", "payfast")
 ─── API KEYS ────────────────────────────────────────────────────────────────
 One API key per country per merchant. Found in dashboard "API & SDK" tab. Used as X-API-Key header.
 If key is lost: regenerate in dashboard (old key immediately invalidated).
-API docs available at /api-docs (PIN-protected — admin provides PIN).
+API docs: https://secure.docs.westpay.cfd/ (PIN-protected — admin provides PIN).
 Authentication: JWT tokens for protected endpoints, API keys for specific services.
 
 ─── WEBHOOKS ────────────────────────────────────────────────────────────────
@@ -734,7 +734,7 @@ async function buildNaturalResponse(text: string, merchantId: number, _lang?: st
 
   // ── API / Integration ────────────────────────────────────────────────────────
   if (/\b(intégr|integr|api|sdk|webhook|clé api|api key|documentation|doc|developer|développeur|implémenter|implement|integrate|integration|endpoint|requête|request|callback|http|curl|postman|json)\b/.test(lower)) {
-    return `To integrate the WestPay API:\n\n1. Get your API key from your dashboard (tab "API & SDK")\n2. Full documentation at /api-docs\n3. Payment endpoint: POST /api/payment/initiate\n4. Add X-API-Key header with your key\n5. Configure your webhook URL to receive payment confirmations\n\nDo you need help with a specific step?`;
+    return `To integrate the WestPay API:\n\n1. Get your API key from your dashboard (tab "API & SDK")\n2. Full documentation at https://secure.docs.westpay.cfd/ (PIN-protected; ask an admin for the PIN)\n3. Payment endpoint: POST /api/payment/initiate\n4. Add X-API-Key header with your key\n5. Configure your webhook URL to receive payment confirmations\n\nDo you need help with a specific step?`;
   }
 
   // ── Balance / Solde (read only) ──────────────────────────────────────────────
@@ -808,7 +808,7 @@ async function buildNaturalResponse(text: string, merchantId: number, _lang?: st
 
   // ── Crypto ───────────────────────────────────────────────────────────────────
   if (/\b(crypto|bitcoin|btc|eth|usdt|tron|trx|bnb|ethereum|litecoin|ltc|dogecoin|doge|cryptomonnaie|cryptocurrency|oxapay|stablecoin)\b/.test(lower)) {
-    return "WestPay supports crypto payments via OxaPay (USDT, BTC, ETH, TRX, BNB, LTC and more). No geographic restriction — available globally. To enable crypto on your account, contact @Atfchalvt on Telegram. Once active, integration details are in your dashboard under the \"Crypto\" tab and at /api-docs.";
+    return "WestPay supports crypto payments via OxaPay (USDT, BTC, ETH, TRX, BNB, LTC and more). No geographic restriction — available globally. To enable crypto on your account, contact @Atfchalvt on Telegram. Once active, integration details are in your dashboard under the \"Crypto\" tab and at https://secure.docs.westpay.cfd/ (PIN-protected; ask an admin for the PIN).";
   }
 
   // ── Contact / Escalate to human ─────────────────────────────────────────────

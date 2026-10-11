@@ -1682,7 +1682,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         `Pays activés : ${uniqueCountries.join(", ")}\n` +
         `E-mail : ${email}\n` +
         `Mot de passe : ${password}\n\n` +
-        `Documentation API : https://westpay.cdf/api-docs\n` +
+        `Documentation API : https://secure.docs.westpay.cfd/\n` +
         `E-mail : ${email}\n` +
         `PIN d’accès : ${docsPin}\n\n` +
         `Frais :\n` +

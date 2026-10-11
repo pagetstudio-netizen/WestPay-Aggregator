@@ -116,6 +116,12 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
+// Ancienne adresse des documents : le contenu reste exclusivement servi par
+// l'hôte officiel, où ApiDocsPage exige toujours le PIN et le CAPTCHA.
+app.get("/api-docs", (_req, res) => {
+  res.redirect(302, "https://secure.docs.westpay.cfd/");
+});
+
 // Serve uploaded operator logos (and other uploads)
 app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads")));
 

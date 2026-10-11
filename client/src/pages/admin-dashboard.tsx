@@ -10899,6 +10899,7 @@ export default function AdminDashboard() {
                     {group.items.map((item) => (
                       <SidebarMenuItem key={item.tab}>
                         <SidebarMenuButton
+                          type="button"
                           onClick={() => setActiveTab(item.tab)}
                           isActive={activeTab === item.tab}
                           data-testid={`nav-${item.tab}`}
