@@ -539,61 +539,68 @@ export function registerOperatorPaymentCommand(
     }
 
     if (session.step === "provider_code") {
-      const operator = session.selectedOperator;
-      const gateway = session.selectedGateway;
-      const field = session.codeField;
-      if (!operator || !gateway || !field) {
-        sessions.delete(chatId);
-        await ctx.reply("❌ Configuration fournisseur incomplète. Relancez /setoperatorpayment.");
-        return;
-      }
-      const input = text.trim();
-      const existingCode = codeValue(operator, field);
-      const required = isProviderCodeRequired(gateway, operator);
-      let action: CodeAction;
-      let value: string | null = null;
-      if (input.toLocaleUpperCase() === "GARDER") {
-        if (!existingCode && required) {
-          await ctx.reply(`Aucune valeur actuelle à garder. Le ${codeLabel(field)} est obligatoire.`);
+      try {
+        const operator = session.selectedOperator;
+        const gateway = session.selectedGateway;
+        const field = session.codeField;
+        if (!operator || !gateway || !field) {
+          sessions.delete(chatId);
+          await ctx.reply("❌ Configuration fournisseur incomplète. Relancez /setoperatorpayment.");
           return;
         }
-        action = "keep";
-      } else if (input.toLocaleUpperCase() === "VIDE") {
-        if (gateway !== "ClaPay" || required) {
-          await ctx.reply(`Le ${codeLabel(field)} est obligatoire pour ${gateway}; envoyez le code exact ou GARDER.`);
+        const input = text.trim();
+        const existingCode = codeValue(operator, field);
+        const required = isProviderCodeRequired(gateway, operator);
+        let action: CodeAction;
+        let value: string | null = null;
+        if (input.toLocaleUpperCase() === "GARDER") {
+          if (!existingCode && required) {
+            await ctx.reply(`Aucune valeur actuelle à garder. Le ${codeLabel(field)} est obligatoire.`);
+            return;
+          }
+          action = "keep";
+        } else if (input.toLocaleUpperCase() === "VIDE") {
+          if (gateway !== "ClaPay" || required) {
+            await ctx.reply(`Le ${codeLabel(field)} est obligatoire pour ${gateway}; envoyez le code exact ou GARDER.`);
+            return;
+          }
+          action = "clear";
+        } else if (input.length > 100 || input.includes("\n")) {
+          await ctx.reply("Code invalide : 100 caractères maximum sur une seule ligne.");
           return;
+        } else if (!input) {
+          await ctx.reply(`Le ${codeLabel(field)} est requis. Envoyez GARDER${existingCode ? " ou le code exact" : " ou le code exact"}.`);
+          return;
+        } else {
+          action = "set";
+          value = input;
         }
-        action = "clear";
-      } else if (input.length > 100 || input.includes("\n")) {
-        await ctx.reply("Code invalide : 100 caractères maximum sur une seule ligne.");
-        return;
-      } else if (!input) {
-        await ctx.reply(`Le ${codeLabel(field)} est requis. Envoyez GARDER${existingCode ? " ou le code exact" : " ou le code exact"}.`);
-        return;
-      } else {
-        action = "set";
-        value = input;
+        session.pendingChange = {
+          kind: "gateway",
+          gateway,
+          codeField: field,
+          codeAction: action,
+          codeValue: value,
+        };
+        session.step = "confirm";
+        sessions.set(chatId, session);
+        const codeSummary = action === "set"
+          ? `${codeLabel(field)} : ${value}`
+          : action === "clear"
+            ? `${codeLabel(field)} : effacé`
+            : `${codeLabel(field)} : conservé`;
+        await ctx.reply(
+          `⚠️ ${operator.name} (${operator.country}) passera sur ${gateway}.\n` +
+          `${codeSummary}.\n` +
+          `Le numéro manuel sera désactivé. Le fournisseur choisi sera utilisé pour les encaissements et les retraits.\n\n` +
+          `Envoyez OUI pour appliquer, ou /cancel pour annuler.`,
+        );
+      } catch (error: any) {
+        console.error("[TELEGRAM] Erreur pendant la saisie du code fournisseur:", error?.message || error);
+        await ctx.reply(
+          "❌ Impossible de traiter cette étape. Aucun code n’a été journalisé. Envoyez /cancel puis relancez /setoperatorpayment.",
+        ).catch(() => {});
       }
-      session.pendingChange = {
-        kind: "gateway",
-        gateway,
-        codeField: field,
-        codeAction: action,
-        codeValue: value,
-      };
-      session.step = "confirm";
-      sessions.set(chatId, session);
-      const codeSummary = action === "set"
-        ? `${codeLabel(field)} : ${value}`
-        : action === "clear"
-          ? `${codeLabel(field)} : effacé`
-          : `${codeLabel(field)} : conservé`;
-      await ctx.reply(
-        `⚠️ ${operator.name} (${operator.country}) passera sur ${gateway}.\n` +
-        `${codeSummary}.\n` +
-        `Le numéro manuel sera désactivé. Le fournisseur choisi sera utilisé pour les encaissements et les retraits.\n\n` +
-        `Envoyez OUI pour appliquer, ou /cancel pour annuler.`,
-      );
       return;
     }
 
