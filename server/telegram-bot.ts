@@ -1,9 +1,11 @@
 import { Telegraf } from "telegraf";
+import type { PoolClient } from "pg";
 import type { Express, Request, Response } from "express";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { storage } from "./storage";
 import { pool, financialPool } from "./db";
+import { applyMerchantBalanceDelta } from "./merchant-balance-ledger";
 import {
   MERCHANT_ACTIVATABLE_COUNTRIES,
   canonicalMerchantCountryName,
@@ -2475,6 +2477,9 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
                 { text: "🚀 Déclencher fournisseur", callback_data: `wd:trigger:${w.id}` },
                 { text: "🔍 Vérifier fournisseur", callback_data: `wd:check:${w.id}` },
               ],
+              ...(w.status === "pending"
+                ? [[{ text: "❌ Rejeter", callback_data: `wd:reject:${w.id}` }]]
+                : []),
             ],
           },
         });
@@ -2664,7 +2669,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `/merchants — Liste de tous les marchands\n` +
           `/setmerchant CODE — Lier un groupe à un marchand\n\n` +
           `/setmerchantcode SLUG — Générer un code de liaison à usage unique (24 h)\n\n` +
-          `/setmerchantlanguage SLUG CODE — Choisir la langue du bot marchand (fr, en, zh, de, hi)\n\n` +
+          `/setmerchantlanguage SLUG CODE_LANGUE — Choisir la langue des messages du bot dans le groupe marchand (fr, en, zh, de, hi)\n` +
+          `Exemple : \`/setmerchantlanguage demo-shop en\` — à lancer dans ce groupe admin.\n\n` +
           `/createmerchant (/creermarchand) — Créer un marchand dans ce groupe uniquement (administrateurs Telegram; message supprimé automatiquement)\n` +
           `/activatecountry (/activerpays) — Activer un pays dans le groupe admin uniquement\n\n` +
            `/disablepayments — Désactiver payin et payout d'un marchand\n\n` +
@@ -2675,7 +2681,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
           `📊 *Statistiques & Soldes*\n` +
           `/stats — Statistiques globales\n` +
           `/balance — Soldes détaillés de tous les marchands\n\n` +
-          `/findwithdrawal@Westpaybot — Rechercher un retrait par numéro\n` +
+          `/findwithdrawal@Westpaybot — Rechercher un retrait, vérifier son statut ou rejeter un retrait en attente\n` +
           `/findpayment NUMERO — Rechercher tous les paiements et leur historique\n` +
           `/findmanualpayment NUMERO — Alias historique de la commande\n` +
            `/annulerpaiement NUMÉRO CLIENT OU RÉFÉRENCE (/cancelpayment) — Annuler un paiement confirmé et débiter le solde marchand\n` +
@@ -3397,6 +3403,138 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
     } catch (e: any) {
       await ctx.answerCbQuery("❌ " + String(e.message || "Erreur").slice(0, 60));
     }
+  });
+
+  // wd:reject — rejette uniquement un retrait encore pending, après confirmation,
+  // et restitue le solde dans la même transaction financière.
+  bot.action(/^wd:reject:(\d+)$/, async (ctx) => {
+    const chatId = String(ctx.chat?.id ?? "");
+    if (!await isTelegramAdminGroupUser(ctx)) { await ctx.answerCbQuery("⛔ Réservé aux administrateurs"); return; }
+    const id = Number(ctx.match![1]);
+    const withdrawal = await storage.getWithdrawalById(id);
+    if (!withdrawal) { await ctx.answerCbQuery("❌ Retrait introuvable"); return; }
+    if (withdrawal.status !== "pending") {
+      await ctx.answerCbQuery("ℹ️ Ce retrait n’est plus en attente");
+      return;
+    }
+
+    const providerWarning = withdrawal.providerReference
+      ? "\n\n⚠️ Ce retrait possède une référence fournisseur. Vérifiez son statut avant de confirmer pour éviter un paiement en double."
+      : "";
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      `⚠️ Confirmer le rejet du retrait #${id} ?\nLe solde marchand sera restitué.${providerWarning}`,
+      {
+        reply_markup: {
+          inline_keyboard: [[
+            { text: "Confirmer le rejet", callback_data: `wd:reject-confirm:${id}` },
+            { text: "Annuler", callback_data: `wd:reject-cancel:${id}` },
+          ]],
+        },
+      },
+    );
+  });
+
+  bot.action(/^wd:reject-cancel:(\d+)$/, async (ctx) => {
+    if (!await isTelegramAdminGroupUser(ctx)) { await ctx.answerCbQuery("⛔ Réservé aux administrateurs"); return; }
+    await ctx.answerCbQuery("Rejet annulé");
+    await ctx.editMessageText("Rejet annulé — le retrait n’a pas été modifié.", {
+      reply_markup: { inline_keyboard: [] },
+    }).catch(() => {});
+  });
+
+  bot.action(/^wd:reject-confirm:(\d+)$/, async (ctx) => {
+    if (!await isTelegramAdminGroupUser(ctx)) { await ctx.answerCbQuery("⛔ Réservé aux administrateurs"); return; }
+    const id = Number(ctx.match![1]);
+    const admin = formatUser(ctx);
+    const now = new Date().toLocaleString("fr-FR", {
+      timeZone: "Africa/Abidjan",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    const adminNote = `Rejeté via Telegram par ${admin} à ${now}`;
+    let client: PoolClient | undefined;
+    let rejectedWithdrawal: any;
+
+    await ctx.answerCbQuery("⏳ Rejet et restitution en cours...");
+    try {
+      client = await financialPool.connect();
+      await client.query("BEGIN");
+      const result = await client.query(
+        `UPDATE withdrawals
+         SET status = 'rejected',
+             admin_note = LEFT(CONCAT_WS(' | ', NULLIF(admin_note, ''), $2), 1000),
+             processed_at = NOW()
+         WHERE id = $1 AND status = 'pending'
+         RETURNING merchant_id, merchant_country_id, amount, country, phone,
+                   account_number, operator, withdrawal_mode`,
+        [id, adminNote],
+      );
+      const w = result.rows[0];
+      if (!w) {
+        await client.query("ROLLBACK");
+        await ctx.editMessageText(`Le retrait #${id} n’est plus en attente. Aucun changement appliqué.`, {
+          reply_markup: { inline_keyboard: [] },
+        }).catch(() => {});
+        return;
+      }
+
+      const refund = await applyMerchantBalanceDelta(
+        Number(w.merchant_country_id),
+        Number(w.amount),
+        {
+          eventType: "refund",
+          reference: `WD-${id}`,
+          sourceType: "withdrawal",
+          sourceId: id,
+          description: `Remboursement après rejet Telegram par ${admin}`,
+        },
+        client,
+      );
+      if (!refund.applied) throw new Error("Portefeuille marchand introuvable");
+      await client.query("COMMIT");
+      rejectedWithdrawal = w;
+    } catch (error: any) {
+      if (client) await client.query("ROLLBACK").catch(() => {});
+      await ctx.reply(`❌ Impossible de rejeter le retrait #${id} : ${String(error?.message || "erreur").slice(0, 200)}`);
+      return;
+    } finally {
+      client?.release();
+    }
+
+    const merchant = await storage.getMerchantById(Number(rejectedWithdrawal.merchant_id)).catch(() => undefined);
+    const mode = rejectedWithdrawal.withdrawal_mode === "auto" ? "auto" : "manual";
+    notifyAdminWithdrawal({
+      id,
+      merchantName: merchant?.name || `#${rejectedWithdrawal.merchant_id}`,
+      country: rejectedWithdrawal.country,
+      amount: Number(rejectedWithdrawal.amount),
+      fees: 0,
+      phone: rejectedWithdrawal.phone,
+      accountNumber: rejectedWithdrawal.account_number,
+      operator: rejectedWithdrawal.operator,
+      status: "rejected",
+      mode,
+    }).catch(() => {});
+    notifyMerchantWithdrawal(Number(rejectedWithdrawal.merchant_id), {
+      id,
+      country: rejectedWithdrawal.country,
+      amount: Number(rejectedWithdrawal.amount),
+      fees: 0,
+      phone: rejectedWithdrawal.phone,
+      accountNumber: rejectedWithdrawal.account_number,
+      operator: rejectedWithdrawal.operator,
+      status: "rejected",
+    }).catch(() => {});
+
+    await ctx.editMessageText(`❌ Retrait #${id} rejeté. Le solde marchand a été restitué.`, {
+      reply_markup: {
+        inline_keyboard: [[{
+          text: `Rejeté par ${admin}`,
+          callback_data: "wd:noop",
+        }]],
+      },
+    }).catch(() => {});
   });
 
   // wd:trigger — déclenche le paiement chez le fournisseur configuré sur le retrait
