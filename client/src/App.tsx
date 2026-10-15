@@ -45,7 +45,12 @@ const CHECKOUT_PAYMENT_QUERY_KEYS = [
 ];
 
 function getFallbackHostname(hostname: string): string | null {
-  return WESTPAY_FALLBACK_HOSTS[hostname] ?? (import.meta.env.DEV ? "westpay.cdf" : null);
+  // Ce sous-domaine est l'hôte officiel de la documentation, jamais un hôte
+  // leurre, y compris dans l'environnement de développement.
+  if (hostname === SECURE_DOCS_HOST) return null;
+  // Ne pas rediriger les hôtes de développement (Replit, localhost, preview)
+  // vers le domaine leurre : seuls les hôtes .cfd listés explicitement migrent.
+  return WESTPAY_FALLBACK_HOSTS[hostname] ?? null;
 }
 
 function RedirectToFallbackHost({
@@ -86,6 +91,11 @@ function Router() {
   const isBank2Host = hostname === "payment.bank2.westpay.cfd";
   const isSecureDocsHost = hostname === "secure.docs.westpay.cfd";
   const isDashboardHost = hostname === "dashboard.westpay.cfd";
+  // Si la vérification du slug admin échoue temporairement (ex. API indisponible),
+  // ne jamais envoyer cette URL officielle vers le domaine leurre.
+  const isPotentialAdminPath =
+    hostname === "westpay.cfd" &&
+    /^\/admin-[^/]+(?:\/.*)?$/.test(currentPath);
   const isLegacyDocsPath = !isSecureDocsHost &&
     currentPath === "/api-docs";
   const isMerchantLoginPath = currentPath === "/merchant/index/login";
@@ -111,7 +121,7 @@ function Router() {
           : hostname in WESTPAY_FALLBACK_HOSTS || !hasQueryParameters
     );
 
-  const UnmatchedRoute = fallbackHostname
+  const UnmatchedRoute = fallbackHostname && !isPotentialAdminPath
     ? () => (
         <RedirectToFallbackHost
           targetHostname={fallbackHostname}
