@@ -21,3 +21,6 @@ attached_assets/*.txt
 *.pfx
 secrets/
 config/secrets*
+
+# Temporary build output; the final dist/ artifacts remain tracked for Plesk.
+dist/.build-stage-*/

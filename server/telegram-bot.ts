@@ -1676,22 +1676,52 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         createdCountryIds.push(merchantCountry.id);
       }
 
-      const welcomeText =
-        `Bienvenue chez WestPay, ${name} !\n\n` +
-        `Votre compte marchand est actif.\n\n` +
-        `Connexion marchand : https://westpay.cdf/merchant-login\n` +
-        `Slug : ${slug}\n` +
-        `Pays activés : ${uniqueCountries.join(", ")}\n` +
-        `E-mail : ${email}\n` +
-        `Mot de passe : ${password}\n\n` +
-        `Documentation API : https://secure.docs.westpay.cfd/\n` +
-        `E-mail : ${email}\n` +
-        `PIN d’accès : ${docsPin}\n\n` +
-        `Frais :\n` +
-        `Payin : 5.5 %\n` +
-        `Payout : 4.5 %\n` +
-        `Transfert interwallet : 3 %\n\n` +
-        `Support : https://t.me/robotpay19293`;
+      const welcomeText = [
+        "Hello,",
+        "",
+        "Your WestPay merchant account has been successfully created. Below are the details to access your account.",
+        "",
+        "Merchant Login URL",
+        "https://dashboard.westpay.cfd/merchant/index/login",
+        "",
+        "Login Credentials",
+        `E-mail: ${email}`,
+        `Password: ${password}`,
+        "",
+        "---",
+        "",
+        "API Documentation Access",
+        "https://secure.docs.westpay.cfd/",
+        "",
+        "Credentials required to access the API documentation:",
+        "",
+        `Email: ${email}`,
+        `Password: ${docsPin}`,
+        "",
+        "---",
+        "",
+        `Merchant Slug: ${slug}`,
+        "",
+        "---",
+        "",
+        "Countries activated on your account:",
+        ...uniqueCountries.map((country) => `• ${country}`),
+        "",
+        "If you want to add other countries that are not listed, please contact our customer support.",
+        "---",
+        "Platform Fees",
+        "",
+        "Payin (Incoming Payments): 5.5%",
+        "Payout (Withdrawals): 4.5%",
+        "Interwallet Transfers: 3%",
+        "",
+        "---",
+        "",
+        "If you need assistance with integration or have any questions, please contact our support team.",
+        "",
+        "Best regards,",
+        "WestPay Support Team",
+      ].join("\n");
 
       try {
         await bot!.telegram.sendMessage(adminGroupId, welcomeText);
@@ -4117,7 +4147,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         const candidate = ipMatch[1];
         console.log(`[TG] IP détectée (texte) dans groupe marchand ${chatId}: ${candidate}`);
 
-        await ctx.reply("⏳ Ajout de l’adresse IP en cours...");
+        await ctx.reply(merchantBotText(merchant.telegramBotLanguage).ipProcessing);
         await whitelistMerchantIp(ctx, candidate, merchant);
         return;
       }
