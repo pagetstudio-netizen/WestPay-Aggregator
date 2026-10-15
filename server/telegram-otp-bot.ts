@@ -7,6 +7,7 @@
 
 import { Telegraf } from "telegraf";
 import { storage } from "./storage";
+import { getOtpTranslation } from "./otp-translations";
 
 let otpBot: Telegraf | null = null;
 let otpBotUsername: string | null = null;
@@ -71,36 +72,34 @@ export function getOtpBotStatus(): { running: boolean; username: string | null }
 
 /**
  * Send an OTP code to a merchant Telegram group.
- * Messages are always in English, formatted for clarity.
+ * The message language follows the merchant group's saved bot language.
  * Returns true on success, false on any failure.
  */
 export async function sendOtpViaDedicatedBot(
   chatId: string,
   otp: string,
-  merchantName: string
+  merchantName: string,
+  language: unknown = "fr"
 ): Promise<boolean> {
   if (!otpBot) {
     console.log(`[OTP BOT] Not running — code for ${merchantName} (${chatId}): ${otp}`);
     return false;
   }
 
+  const tr = getOtpTranslation(language);
   const digits = otp.split("").join("  ");
 
   const message = [
-    `🔐 *WestPay — Secure Login*`,
+    `🤖 *${escapeMarkdown(tr.title)}*`,
     ``,
-    `👤 *Merchant:* ${escapeMarkdown(merchantName)}`,
-    `━━━━━━━━━━━━━━━━━━━━━━`,
+    `👤 *${escapeMarkdown(tr.merchant)} :* ${escapeMarkdown(merchantName)}`,
     ``,
-    `Your one\\-time login code:`,
+    `🔑 *${escapeMarkdown(tr.otpLabel)}*`,
     ``,
     `\`  ${digits}  \``,
     ``,
-    `━━━━━━━━━━━━━━━━━━━━━━`,
-    `⏱ Valid for *5 minutes* · Single use only`,
-    `🔒 *Never share this code with anyone*`,
-    ``,
-    `_WestPay · Secure Payment Platform_`,
+    `⏱️ _${escapeMarkdown(tr.validity)}_`,
+    `🔒 _${escapeMarkdown(tr.warning)}_`,
   ].join("\n");
 
   try {
@@ -115,19 +114,16 @@ export async function sendOtpViaDedicatedBot(
     // Fallback: try plain text if Markdown fails
     try {
       const plain = [
-        `🔐 WestPay — Secure Login`,
+        `🤖 ${tr.title}`,
         ``,
-        `Merchant: ${merchantName}`,
-        `──────────────────────`,
-        `Your one-time login code:`,
+        `👤 ${tr.merchant} : ${merchantName}`,
+        ``,
+        `🔑 ${tr.otpLabel}`,
         ``,
         `  ${otp}  `,
         ``,
-        `──────────────────────`,
-        `⏱ Valid for 5 minutes · Single use only`,
-        `🔒 Never share this code with anyone`,
-        ``,
-        `WestPay · Secure Payment Platform`,
+        `⏱️ ${tr.validity}`,
+        `🔒 ${tr.warning}`,
       ].join("\n");
 
       await otpBot.telegram.sendMessage(chatId, plain);

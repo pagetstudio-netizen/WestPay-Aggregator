@@ -14,6 +14,7 @@ import {
   isMerchantSettlementCycle,
 } from "@shared/merchant-account";
 import { BOT_LANGUAGE_OPTIONS, isBotLanguage, type BotLanguage } from "@shared/telegram-bot-language";
+import { getOtpTranslation } from "./otp-translations";
 import {
   generateSecureApiKey,
   verifyEmailDomainHasMx,
@@ -5942,20 +5943,12 @@ export async function reloadMainBot(newToken: string): Promise<{ ok: boolean; er
   }
 }
 
-const OTP_TRANSLATIONS: Record<string, { title: string; merchant: string; otpLabel: string; validity: string; warning: string }> = {
-  fr: { title: "RobotPay — Code de connexion", merchant: "Marchand", otpLabel: "Votre code OTP :", validity: "Valide 5 minutes — usage unique.", warning: "Ne communiquez jamais ce code." },
-  en: { title: "RobotPay — Login code", merchant: "Merchant", otpLabel: "Your OTP code:", validity: "Valid 5 minutes — single use.", warning: "Never share this code." },
-  zh: { title: "RobotPay — 登录验证码", merchant: "商户", otpLabel: "您的 OTP 验证码：", validity: "有效期 5 分钟 — 仅限一次使用。", warning: "请勿向任何人透露此验证码。" },
-  de: { title: "RobotPay — Anmeldecode", merchant: "Händler", otpLabel: "Ihr OTP-Code:", validity: "Gültig 5 Minuten — Einmalverwendung.", warning: "Geben Sie diesen Code niemals weiter." },
-  hi: { title: "RobotPay — लॉगिन कोड", merchant: "व्यापारी", otpLabel: "आपका OTP कोड:", validity: "5 मिनट के लिए मान्य — एकल उपयोग।", warning: "यह कोड कभी किसी को न बताएँ।" },
-};
-
-export async function sendMerchantOtpTelegram(chatId: string, otp: string, merchantName: string, lang = "fr"): Promise<boolean> {
+export async function sendMerchantOtpTelegram(chatId: string, otp: string, merchantName: string, lang: unknown = "fr"): Promise<boolean> {
   if (!bot) {
     console.log(`[TELEGRAM OTP] Bot non initialisé — OTP pour ${chatId}: ${otp}`);
     return false;
   }
-  const tr = OTP_TRANSLATIONS[lang] || OTP_TRANSLATIONS["fr"];
+  const tr = getOtpTranslation(lang);
   const msg = [
     `🤖 *${tr.title}*`,
     ``,

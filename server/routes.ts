@@ -2526,12 +2526,12 @@ export async function registerRoutes(
           try {
             // 1st priority: dedicated OTP bot (separate token, single responsibility)
             const { sendOtpViaDedicatedBot } = await import("./telegram-otp-bot");
-            const sent = await sendOtpViaDedicatedBot(merchant.telegramChatId, otpValue, merchant.name);
+            const sent = await sendOtpViaDedicatedBot(merchant.telegramChatId, otpValue, merchant.name, merchant.telegramBotLanguage);
             if (sent) return;
 
             // 2nd priority: main notification bot fallback
             const { sendMerchantOtpTelegram } = await import("./telegram-bot");
-            const sentFallback = await sendMerchantOtpTelegram(merchant.telegramChatId, otpValue, merchant.name);
+            const sentFallback = await sendMerchantOtpTelegram(merchant.telegramChatId, otpValue, merchant.name, merchant.telegramBotLanguage);
             if (sentFallback) return;
           } catch (err) {
             console.error("[MERCHANT OTP] Telegram error, falling back to email:", err);
@@ -3118,9 +3118,16 @@ export async function registerRoutes(
     try {
       const { chatId, merchantName } = req.body;
       if (!chatId) return res.status(400).json({ message: "chatId required" });
+      const normalizedChatId = String(chatId);
+      const linkedMerchant = await storage.getMerchantByTelegramChatId(normalizedChatId);
       const { sendOtpViaDedicatedBot } = await import("./telegram-otp-bot");
       const testOtp = String(Math.floor(100000 + Math.random() * 900000));
-      const sent = await sendOtpViaDedicatedBot(String(chatId), testOtp, merchantName || "Test Merchant");
+      const sent = await sendOtpViaDedicatedBot(
+        normalizedChatId,
+        testOtp,
+        merchantName || linkedMerchant?.name || "Test Merchant",
+        linkedMerchant?.telegramBotLanguage,
+      );
       if (!sent) return res.status(500).json({ message: "Failed to send — check bot token and chat ID" });
       res.json({ success: true, otp: testOtp });
     } catch (err: any) {
