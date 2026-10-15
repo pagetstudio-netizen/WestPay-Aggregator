@@ -435,7 +435,7 @@ async function registerKnownGroup(chatId: string): Promise<void> {
     groups.push(chatId);
     await storage.setSetting("telegram_known_groups", JSON.stringify(groups));
     _invalidateGroupCache(); // forcer rechargement au prochain appel
-    console.log(`[TELEGRAM] Groupe enregistré: ${chatId} (total: ${groups.length})`);
+    console.log(`[TELEGRAM] Groupe marchand enregistré (total: ${groups.length})`);
   }
 }
 
@@ -1136,9 +1136,8 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
   // Sans ce handler, une erreur non capturée dans un command/middleware arrête le traitement
   // de tous les updates suivants sans aucun message d'erreur visible.
   bot.catch((err: any, ctx: any) => {
-    const chatId = ctx?.chat?.id || ctx?.from?.id || "?";
     const updateType = ctx?.updateType || "unknown";
-    console.error(`[TELEGRAM] Erreur non capturée (update: ${updateType}, chat: ${chatId}):`, err?.message || err);
+    console.error(`[TELEGRAM] Erreur non capturée (update: ${updateType})`);
     // Tenter d'informer l'utilisateur si possible
     if (ctx?.reply) {
       ctx.reply("❌ Une erreur interne s'est produite. Veuillez réessayer.").catch(() => {});
@@ -1156,8 +1155,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         : (ctx.update as any).edited_message ? "edited_message"
         : "other";
       const chatId = ctx.chat ? String(ctx.chat.id) : ctx.from ? String(ctx.from.id) : "?";
-      const text = (ctx.update as any).message?.text || (ctx.update as any).callback_query?.data || "";
-      console.log(`[TG] update=${updateType} chat=${chatId} text="${text.slice(0, 60)}"`);
+      console.log(`[TG] Update received (${updateType})`);
 
       // Auto-enregistrement des groupes
       if (ctx.chat && (ctx.chat.type === "group" || ctx.chat.type === "supergroup")) {
@@ -4131,7 +4129,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
 
       // Ignorer les commandes — elles sont gérées par bot.command() ci-dessus
       if (text.startsWith("/")) {
-        console.log(`[TG] commande non matchée: "${text}" (chat=${chatId}) — ignoré`);
+        console.log("[TG] Command ignored");
         return next();
       }
 
@@ -4146,7 +4144,7 @@ export function initTelegramBot(overrideToken?: string): Telegraf | null {
         const ipMatch = text.match(IP_EXTRACT_REGEX);
         if (!ipMatch || !isValidIpv4(ipMatch[1])) return next();
         const candidate = ipMatch[1];
-        console.log(`[TG] IP détectée (texte) dans groupe marchand ${chatId}: ${candidate}`);
+        console.log("[TG] Merchant group IP submission received");
 
         await ctx.reply(merchantBotText(merchant.telegramBotLanguage).ipProcessing);
         await whitelistMerchantIp(ctx, candidate, merchant);
@@ -4173,16 +4171,8 @@ export function setupWebhook(app: Express, secret: string): void {
 
 export function handleWebhookUpdate(secret: string, body: any): boolean {
   if (!bot) return false;
-  const updateId = body.update_id;
-  const type = body.message ? "message"
-    : body.callback_query ? "callback_query"
-    : body.my_chat_member ? "my_chat_member"
-    : body.edited_message ? "edited_message"
-    : "unknown";
-  const chatId = body.message?.chat?.id || body.callback_query?.message?.chat?.id || "?";
-  const text = body.message?.text || body.callback_query?.data || "";
-  console.log(`[TG-WEBHOOK] update_id=${updateId} type=${type} chat=${chatId} text="${String(text).slice(0, 80)}"`);
-  bot.handleUpdate(body).catch((err: any) => console.error("[TG-WEBHOOK] Erreur handleUpdate:", err.message));
+  console.log("[TG-WEBHOOK] Update received");
+  bot.handleUpdate(body).catch(() => console.error("[TG-WEBHOOK] Update processing failed"));
   return true;
 }
 
@@ -4664,8 +4654,8 @@ export async function broadcastToMerchants(options: {
       await safeSendWithMedia(chatId, options.message, options.fileId || options.imageUrl, options.buttons);
       sent++;
       await new Promise(r => setTimeout(r, 100));
-    } catch (err: any) {
-      console.error(`[TELEGRAM] Echec broadcast vers ${chatId}:`, err.message);
+    } catch {
+      console.error("[TELEGRAM] Broadcast delivery failed");
       failed++;
     }
   }
@@ -5945,7 +5935,7 @@ export async function reloadMainBot(newToken: string): Promise<{ ok: boolean; er
 
 export async function sendMerchantOtpTelegram(chatId: string, otp: string, merchantName: string, lang: unknown = "fr"): Promise<boolean> {
   if (!bot) {
-    console.log(`[TELEGRAM OTP] Bot non initialisé — OTP pour ${chatId}: ${otp}`);
+    console.warn("[TELEGRAM OTP] Bot non initialisé; code non envoyé");
     return false;
   }
   const tr = getOtpTranslation(lang);
@@ -5966,8 +5956,8 @@ export async function sendMerchantOtpTelegram(chatId: string, otp: string, merch
   try {
     await safeSend(chatId, msg);
     return true;
-  } catch (err: any) {
-    console.error("[TELEGRAM OTP] Échec envoi:", err.message);
+  } catch {
+    console.error("[TELEGRAM OTP] Échec de livraison du code");
     return false;
   }
 }

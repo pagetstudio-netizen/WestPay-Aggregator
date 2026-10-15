@@ -57,3 +57,24 @@ Public payment initiation and status endpoints require request-rate limits. The 
 Admin routes require admin authentication and geographic checks. Merchant dashboard routes require merchant authentication and suspension checks; API-key routes must scope every operation to the matching merchant and country.
 
 **Required guarantees:** Every `/api/merchant/` route must have the appropriate authentication middleware, including operator listing and payout operations. Never accept a merchant or country identifier without ownership validation.
+
+## Security Audit Status — 2026-10-15
+
+### Protections Added
+
+- Production client IPs are derived only through the local Plesk proxy or Cloudflare's published proxy ranges. Raw `X-Forwarded-For` and `CF-Connecting-IP` headers are not trusted by application code. Development continues to trust the single managed Replit preview proxy.
+- Merchant-country API keys are restricted to their associated country and rejected for inactive countries or suspended/deleted merchants. Bearer-token fallbacks use the full merchant authentication checks, including session revocation and suspension. Crypto API keys also reject suspended merchants.
+- Merchant webhook requests resolve every DNS answer, reject private/reserved addresses, pin the connection to a validated public IP, reject embedded URL credentials and nonstandard ports, do not follow redirects, cap responses, and time out requests.
+- OTP values, Telegram message text/chat identifiers, API response bodies/path identifiers, callback bodies, and callback signatures are no longer written to application logs. Webhook URLs are not written to console logs.
+- New operator-logo uploads reject SVG. Existing SVG uploads are served with `nosniff` and a restrictive sandbox CSP; upload routes remain admin-authenticated and size-limited.
+- Documentation tokens no longer return crypto credentials after a merchant is suspended.
+- Vulnerable direct/transitive packages with published fixes were updated in both lockfiles. `tailwindcss-animate` is build-only and is now a development dependency.
+
+### Remaining Risks and Scan Limitations
+
+- The dependency scan still reports three lockfile occurrences of `braces@3.0.3` as high severity. The npm registry currently has no later `braces` release; its remaining use is in the Tailwind build tree, not the production dependency tree. `npm audit --omit=dev` reports zero production vulnerabilities. Recheck when upstream publishes a fix.
+- LipaPap and SeaPay currently require MD5-based request formulas. Do not replace these hashes unilaterally; obtain a provider-supported stronger signing scheme first. LipaPap response verification uses HMAC-SHA-256, and SeaPay signature comparison is constant-time.
+- The SAST findings for generated random seed values and the fixed-host redirects in `server/static.ts` were reviewed as false positives: seed inputs come from cryptographic randomness, and redirects use an allowlisted host mapping.
+- HoundDog data-flow scanning could not complete because the scanner returned a JSON schema validation error twice. No clean result is claimed for that scan.
+- Custom rate-limit and account-lock maps are process-local. Deployments with multiple workers or frequent restarts should move these controls to a shared store to preserve limits across instances.
+- The application unconditionally runs migrations and seeding at startup. Those routines can make schema/data/config updates (including withdrawal-operator corrections and missing-PIN backfills); do not use the production database for a development preview without explicit migration approval. Prefer a separate development database or an explicit startup migration gate.

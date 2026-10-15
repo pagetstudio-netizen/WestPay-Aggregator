@@ -31,7 +31,7 @@ import {
   type SecurityLog, type InsertSecurityLog,
   type Device, type InsertDevice,
 } from "@shared/schema";
-import { authDb, financialDb, financialPool } from "./db";
+import { authDb, authPool, financialDb, financialPool } from "./db";
 import { applyMerchantBalanceDelta, type MerchantBalanceChangeDetails } from "./merchant-balance-ledger";
 import { eq, desc, sql, and, gte, lt, inArray, isNull } from "drizzle-orm";
 
@@ -76,7 +76,7 @@ export interface IStorage {
   getMerchantBySlug(slug: string): Promise<Merchant | undefined>;
   createMerchant(merchant: InsertMerchant): Promise<Merchant>;
   updateMerchant(id: number, data: Partial<Merchant>): Promise<void>;
-  deleteMerchant(id: number): Promise<void>;
+  deleteMerchant(id: number): Promise<{ deleted: boolean; deletedWalletCount: number }>;
 
   getMerchantCountries(merchantId?: number): Promise<MerchantCountry[]>;
   getMerchantCountryById(id: number): Promise<MerchantCountry | undefined>;
@@ -359,8 +359,90 @@ export class DatabaseStorage implements IStorage {
   async updateMerchant(id: number, data: Partial<Merchant>): Promise<void> {
     await authDb.update(merchants).set(data).where(eq(merchants.id, id));
   }
-  async deleteMerchant(id: number): Promise<void> {
-    await authDb.delete(merchants).where(eq(merchants.id, id));
+  async deleteMerchant(id: number): Promise<{ deleted: boolean; deletedWalletCount: number }> {
+    const authClient = await authPool.connect();
+    let authTransactionOpen = false;
+    let authDeleteAttempted = false;
+    let deletedWallets: MerchantCountry[] = [];
+    try {
+      await authClient.query("BEGIN");
+      authTransactionOpen = true;
+      // Serialize duplicate delete requests for the same merchant across app instances.
+      await authClient.query("SELECT pg_advisory_xact_lock($1, $2)", [7412, id]);
+      const existingMerchant = await authClient.query(
+        "SELECT id FROM merchants WHERE id = $1 FOR UPDATE",
+        [id],
+      );
+      if (existingMerchant.rowCount === 0) {
+        await authClient.query("ROLLBACK");
+        authTransactionOpen = false;
+        return { deleted: false, deletedWalletCount: 0 };
+      }
+
+      // The financial DB is separate from Auth and cannot cascade this deletion.
+      // Keep the Auth row locked until wallet deletion and merchant deletion finish.
+      await financialDb.transaction(async (tx) => {
+        deletedWallets = await tx.delete(merchantCountries)
+          .where(eq(merchantCountries.merchantId, id))
+          .returning();
+      });
+
+      const deletedMerchants = await authClient.query(
+        "DELETE FROM merchants WHERE id = $1 RETURNING id",
+        [id],
+      );
+      authDeleteAttempted = true;
+      if (deletedMerchants.rowCount === 0) {
+        await authClient.query("ROLLBACK");
+        authTransactionOpen = false;
+        await financialDb.transaction(async (tx) => {
+          if (deletedWallets.length) {
+            await tx.insert(merchantCountries).values(deletedWallets).onConflictDoNothing();
+          }
+        });
+        return { deleted: false, deletedWalletCount: 0 };
+      }
+
+      await authClient.query("COMMIT");
+      authTransactionOpen = false;
+      return { deleted: true, deletedWalletCount: deletedWallets.length };
+    } catch (deleteError) {
+      if (authTransactionOpen) {
+        try {
+          await authClient.query("ROLLBACK");
+        } catch {}
+        authTransactionOpen = false;
+      }
+
+      if (!authDeleteAttempted && !deletedWallets.length) throw deleteError;
+
+      // A network error can make the Auth commit outcome uncertain. Keep the
+      // wallets deleted if the merchant is gone; otherwise restore them.
+      try {
+        const [merchant] = await authDb
+          .select({ id: merchants.id })
+          .from(merchants)
+          .where(eq(merchants.id, id));
+        if (!merchant) {
+          return { deleted: true, deletedWalletCount: deletedWallets.length };
+        }
+      } catch {
+        throw new Error("Suppression non confirmée; vérifiez le marchand et ses wallets avant de réessayer.");
+      }
+
+      try {
+        if (deletedWallets.length) {
+          await financialDb.transaction(async (tx) => {
+            await tx.insert(merchantCountries).values(deletedWallets).onConflictDoNothing();
+          });
+        }
+      } catch {
+        throw new Error("La suppression a échoué et les wallets n’ont pas pu être restaurés; une réconciliation est nécessaire.");
+      }
+      throw deleteError;
+    } finally {
+      authClient.release();
+    }
   }
 
   // ── Cross-DB : merchants(auth) + merchantPins(auth) + paymentLinks/transactions(financial) ──

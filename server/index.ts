@@ -21,31 +21,47 @@ import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import path from "path";
 import { createServer } from "http";
+import { BlockList, isIP } from "node:net";
 // NOTE: routes et static sont importés dynamiquement plus bas (dans l'IIFE async)
 // pour garantir que httpServer.listen() s'exécute AVANT tout code module-level
 // de ces fichiers (db.ts throws, mkdirSync, SESSION_SECRET check, etc.).
 
 const app = express();
-// Trust exactement 1 niveau de proxy (Replit reverse-proxy).
-// "true" ferait confiance à TOUS les X-Forwarded-For envoyés par le client → spoofing d'IP possible.
-// "1" signifie : seul le dernier proxy connu est fiable — le client ne peut pas forger req.ip.
-app.set("trust proxy", 1);
+const cloudflareProxyRanges = new BlockList();
+for (const [network, prefix] of [
+  ["173.245.48.0", 20], ["103.21.244.0", 22], ["103.22.200.0", 22],
+  ["103.31.4.0", 22], ["141.101.64.0", 18], ["108.162.192.0", 18],
+  ["190.93.240.0", 20], ["188.114.96.0", 20], ["197.234.240.0", 22],
+  ["198.41.128.0", 17], ["162.158.0.0", 15], ["104.16.0.0", 13],
+  ["104.24.0.0", 14], ["172.64.0.0", 13], ["131.0.72.0", 22],
+  ["2400:cb00::", 32], ["2606:4700::", 32], ["2803:f800::", 32],
+  ["2405:b500::", 32], ["2405:8100::", 32], ["2a06:98c0::", 29],
+  ["2c0f:f248::", 32],
+] as const) {
+  cloudflareProxyRanges.addSubnet(network, prefix, network.includes(":") ? "ipv6" : "ipv4");
+}
 
-// ── IP réelle derrière Cloudflare ─────────────────────────────────────────────
-// En production (Plesk), le site passe par Cloudflare : req.ip vaut l'IP de
-// Cloudflare (ex: 104.23.x.x) et non celle du visiteur → géolocalisation fausse
-// (tous les visiteurs paraissaient "hors Afrique"). Cloudflare transmet la vraie
-// IP dans l'en-tête CF-Connecting-IP, qu'on utilise en priorité quand présent.
-app.use((req, _res, next) => {
-  const cfIp = req.headers["cf-connecting-ip"];
-  if (typeof cfIp === "string" && cfIp.length > 0 && cfIp.length < 64) {
-    Object.defineProperty(req, "ip", {
-      value: cfIp.replace(/^::ffff:/, "").trim(),
-      configurable: true,
-    });
-  }
-  next();
-});
+const localProxyRanges = new BlockList();
+localProxyRanges.addSubnet("127.0.0.0", 8, "ipv4");
+localProxyRanges.addAddress("::1", "ipv6");
+
+function normalizeProxyAddress(address: string): string {
+  return address.trim().replace(/^::ffff:/i, "");
+}
+
+function isTrustedProductionProxy(address: string): boolean {
+  const normalized = normalizeProxyAddress(address);
+  const family = isIP(normalized);
+  if (family === 0) return false;
+  const type = family === 6 ? "ipv6" : "ipv4";
+  return localProxyRanges.check(normalized, type)
+    || cloudflareProxyRanges.check(normalized, type);
+}
+
+// In production, trust only the local Plesk reverse proxy and Cloudflare's
+// published proxy ranges. A direct client therefore cannot spoof X-Forwarded-For.
+// Replit's development preview uses its own managed proxy and remains one hop.
+app.set("trust proxy", process.env.NODE_ENV === "production" ? isTrustedProductionProxy : 1);
 
 // ── Security headers — couche Helmet (baseline globale) ──────────────────────
 // La couche complète est dans registerRoutes() (routes.ts) qui s'exécute après
@@ -122,8 +138,16 @@ app.get("/api-docs", (_req, res) => {
   res.redirect(302, "https://secure.docs.westpay.cfd/");
 });
 
-// Serve uploaded operator logos (and other uploads)
-app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads")));
+// Serve uploaded images with content sniffing disabled. SVG files already on
+// disk stay displayable as images but cannot execute same-origin active content.
+app.use("/uploads", express.static(path.resolve(process.cwd(), "uploads"), {
+  setHeaders: (res, filePath) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    if (path.extname(filePath).toLowerCase() === ".svg") {
+      res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'none'; object-src 'none'; style-src 'unsafe-inline'; sandbox");
+    }
+  },
+}));
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -138,41 +162,11 @@ export function log(message: string, source = "express") {
 
 app.use((req, res, next) => {
   const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
+  const isApiRequest = req.path.startsWith("/api");
 
   res.on("finish", () => {
     const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        // Redact sensitive fields before logging
-        const SENSITIVE_KEYS = new Set([
-          "token", "accessToken", "refreshToken", "apiKey", "api_key",
-          "secret", "webhookSecret", "password", "hash", "privateKey",
-        ]);
-        const redacted = JSON.parse(JSON.stringify(capturedJsonResponse));
-        const redactObj = (obj: Record<string, any>) => {
-          for (const key of Object.keys(obj)) {
-            if (SENSITIVE_KEYS.has(key)) {
-              obj[key] = "[REDACTED]";
-            } else if (obj[key] && typeof obj[key] === "object") {
-              redactObj(obj[key]);
-            }
-          }
-        };
-        if (typeof redacted === "object" && redacted !== null) redactObj(redacted);
-        logLine += ` :: ${JSON.stringify(redacted)}`;
-      }
-
-      log(logLine);
-    }
+    if (isApiRequest) log(`${req.method} API ${res.statusCode} in ${duration}ms`);
   });
 
   next();
@@ -430,8 +424,8 @@ async function setupDevelopmentFrontend(): Promise<boolean> {
   try {
     const { initOtpBot } = await import("./telegram-otp-bot");
     await initOtpBot();
-  } catch (err: any) {
-    console.error("[OTP BOT] Init failed (non-fatal):", err.message);
+  } catch {
+    console.error("[OTP BOT] Init failed (non-fatal)");
   }
 
   // Reconciliation job

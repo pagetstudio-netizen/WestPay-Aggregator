@@ -1357,14 +1357,22 @@ function MerchantsPanel() {
       const res = await fetch(`/api/admin/delete-merchant/${id}`, {
         method: "DELETE",
         credentials: "include",
-
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ confirmWalletDeletion: true }),
       });
-      if (!res.ok) throw new Error("Erreur");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Erreur lors de la suppression");
+      return data as { deletedWalletCount: number };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/merchants"] });
-      toast({ title: "Marchand supprime" });
+      toast({
+        title: "Marchand supprimé",
+        description: `${result.deletedWalletCount} wallet(s) supprimé(s). L’historique financier est conservé.`,
+      });
     },
   });
 
@@ -1560,7 +1568,7 @@ function MerchantsPanel() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={async () => { if (await showConfirm("Supprimer ce marchand ?", { variant: "destructive", confirmLabel: "Supprimer", message: "Cette action est irréversible." })) deleteMutation.mutate(merchant.id); }}
+                      onClick={async () => { if (await showConfirm("Supprimer ce marchand ?", { variant: "destructive", confirmLabel: "Supprimer", message: "Le compte et tous ses wallets par pays (soldes et réglages) seront supprimés. Les transactions et l’historique du ledger seront conservés. Cette action est irréversible." })) deleteMutation.mutate(merchant.id); }}
                       data-testid={`button-delete-${merchant.id}`}
                     >
                       <Trash2 className="w-4 h-4 text-destructive" />

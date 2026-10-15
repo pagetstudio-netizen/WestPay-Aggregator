@@ -41,8 +41,8 @@ export async function initOtpBot(): Promise<void> {
     otpBotUsername = me.username || null;
     otpBot = bot;
     console.log("[OTP BOT] Started — ready to deliver OTP codes");
-  } catch (err: any) {
-    console.error("[OTP BOT] Failed to initialize:", err.message);
+  } catch {
+    console.error("[OTP BOT] Failed to initialize");
     otpBot = null;
   }
 }
@@ -58,7 +58,7 @@ export async function reloadOtpBot(): Promise<{ ok: boolean; username?: string; 
     if (otpBot) return { ok: true, username: otpBotUsername || undefined };
     return { ok: false, error: "Token missing or invalid" };
   } catch (err: any) {
-    return { ok: false, error: err.message };
+    return { ok: false, error: "Could not initialize OTP bot" };
   }
 }
 
@@ -82,7 +82,7 @@ export async function sendOtpViaDedicatedBot(
   language: unknown = "fr"
 ): Promise<boolean> {
   if (!otpBot) {
-    console.log(`[OTP BOT] Not running — code for ${merchantName} (${chatId}): ${otp}`);
+    console.warn("[OTP BOT] Not running; code not sent");
     return false;
   }
 
@@ -106,10 +106,10 @@ export async function sendOtpViaDedicatedBot(
     await otpBot.telegram.sendMessage(chatId, message, {
       parse_mode: "MarkdownV2",
     });
-    console.log(`[OTP BOT] Code delivered to ${merchantName} (${chatId})`);
+    console.log("[OTP BOT] Code delivered");
     return true;
-  } catch (err: any) {
-    console.error(`[OTP BOT] Delivery failed for ${merchantName} (${chatId}):`, err.message);
+  } catch {
+    console.error("[OTP BOT] Delivery failed");
 
     // Fallback: try plain text if Markdown fails
     try {
@@ -127,10 +127,10 @@ export async function sendOtpViaDedicatedBot(
       ].join("\n");
 
       await otpBot.telegram.sendMessage(chatId, plain);
-      console.log(`[OTP BOT] Code delivered (plain text fallback) to ${merchantName}`);
+      console.log("[OTP BOT] Plain-text fallback delivered");
       return true;
-    } catch (err2: any) {
-      console.error(`[OTP BOT] Plain text fallback also failed:`, err2.message);
+    } catch {
+      console.error("[OTP BOT] Plain-text fallback failed");
       return false;
     }
   }
@@ -154,8 +154,8 @@ export async function sendActivationLinkViaDedicatedBot(
   try {
     await otpBot.telegram.sendMessage(chatId, message, { reply_markup: replyMarkup });
     return true;
-  } catch (err: any) {
-    console.error("[OTP BOT] Activation link delivery failed:", err.message);
+  } catch {
+    console.error("[OTP BOT] Activation link delivery failed");
     return false;
   }
 }

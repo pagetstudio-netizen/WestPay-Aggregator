@@ -909,12 +909,11 @@ async function handleMessage(event: any): Promise<void> {
     await linkGroupToMerchant(chatId, merchantId);
     await storage.markTelegramActivationCodeUsed(code);
 
-    const merchant = await storage.getMerchantById(merchantId);
     await client.sendMessage(chat, {
       message: `切都好`,
       replyTo: message.id,
     });
-    console.log(`[USERBOT] Group ${chatId} linked to merchant #${merchantId} (${merchant?.name})`);
+    console.log("[USERBOT] Merchant group linked");
     return;
   }
 

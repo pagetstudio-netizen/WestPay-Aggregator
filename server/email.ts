@@ -82,12 +82,12 @@ export async function sendMerchantOtpEmail(to: string, otp: string, merchantName
       html,
     });
     if (result.error) {
-      console.error("[EMAIL OTP] Erreur Resend:", result.error);
+      console.error("[EMAIL OTP] Échec d’envoi");
       return false;
     }
     return true;
-  } catch (err) {
-    console.error("[EMAIL OTP] Exception:", err);
+  } catch {
+    console.error("[EMAIL OTP] Échec d’envoi");
     return false;
   }
 }

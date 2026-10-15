@@ -396,7 +396,7 @@ async function ensurePinsExist() {
       const defaultPin = crypto.randomBytes(16).toString("hex");
       const pinHash = await bcrypt.hash(defaultPin, 10);
       await storage.upsertMerchantPin(merchant.id, pinHash);
-      console.log(`PIN backfilled for merchant ${merchant.name}`);
+      console.log("PIN backfilled for a merchant");
     }
   }
 }

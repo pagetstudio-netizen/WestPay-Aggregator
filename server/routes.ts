@@ -135,7 +135,12 @@ import {
   reviewTransactionPayment,
   submitManualPaymentProof,
 } from "./manual-payment-service";
-import { assertPublicWebhookUrl, notifyConfirmedPaymentWebhook, sendWebhookNotification } from "./merchant-webhooks";
+import {
+  assertPublicWebhookUrl,
+  notifyConfirmedPaymentWebhook,
+  requestPublicWebhook,
+  sendWebhookNotification,
+} from "./merchant-webhooks";
 import {
   isPaymentChannelAvailable,
   PAYMENT_CHANNEL_UNAVAILABLE_MESSAGE,
@@ -238,7 +243,7 @@ const broadcastStorage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, BROADCAST_DIR),
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
-    cb(null, `bc-${Date.now()}-${Math.random().toString(36).substr(2, 6)}${ext}`);
+    cb(null, `bc-${crypto.randomBytes(16).toString("hex")}${ext}`);
   },
 });
 const broadcastUpload = multer({
@@ -255,16 +260,16 @@ const logoStorage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, LOGOS_DIR),
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase() || ".png";
-    cb(null, `op-${Date.now()}-${Math.random().toString(36).substr(2, 6)}${ext}`);
+    cb(null, `op-${crypto.randomBytes(16).toString("hex")}${ext}`);
   },
 });
 const logoUpload = multer({
   storage: logoStorage,
   limits: { fileSize: 2 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const allowed = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"];
+    const allowed = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
     if (allowed.includes(path.extname(file.originalname).toLowerCase())) cb(null, true);
-    else cb(new Error("Format non supporté (jpg, png, webp, gif, svg)"));
+    else cb(new Error("Format non supporté (jpg, png, webp, gif)"));
   },
 });
 
@@ -344,22 +349,9 @@ async function checkAdminGeoAllowed(ip: string): Promise<{ allowed: boolean; cou
 
 // Extraction IP minimale utilisable hors de registerRoutes (authMiddleware)
 function extractIp(req: Request): string {
-  // Cloudflare transmet la vraie IP du visiteur dans CF-Connecting-IP (non spoofable
-  // tant que le trafic passe par Cloudflare) — priorité absolue quand présent.
-  const cfIp = req.headers["cf-connecting-ip"];
-  if (typeof cfIp === "string" && cfIp.length > 0 && cfIp.length < 64) {
-    return cfIp.replace(/^::ffff:/, "").trim();
-  }
-  const forwarded = req.headers["x-forwarded-for"];
-  if (forwarded) {
-    const first = (Array.isArray(forwarded) ? forwarded[0] : forwarded).split(",")[0].trim().replace(/^::ffff:/, "");
-    // Plages privées/réservées = tentative de spoofing → bloquer
-    if (/^(0\.|10\.|127\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|192\.0\.2\.|192\.168\.|198\.51\.100\.|203\.0\.113\.|224\.|240\.|255\.255\.255\.255$)/.test(first)) {
-      return `SPOOFED:${first}`;
-    }
-    return first;
-  }
-  return (req.ip || req.socket?.remoteAddress || "unknown").replace(/^::ffff:/, "");
+  // Express req.ip is derived only from the reverse proxies trusted in index.ts.
+  // Never prefer raw X-Forwarded-For or CF-Connecting-IP request headers here.
+  return (req.ip || req.socket?.remoteAddress || "unknown").trim().replace(/^::ffff:/i, "");
 }
 
 // ── OTP marchands — JAMAIS stockés en base de données, uniquement en mémoire RAM ──────
@@ -851,6 +843,10 @@ async function apiKeyAuthMiddleware(req: Request, res: Response, next: NextFunct
     try {
       const mc = await storage.findMerchantCountryByApiKey(apiKey);
       if (mc) {
+        const merchant = await storage.getMerchantById(mc.merchantId);
+        if (!merchant || merchant.suspended || !mc.active) {
+          return res.status(401).json({ message: "Clé API invalide ou compte marchand indisponible." });
+        }
         (req as any).user = { id: mc.merchantId, role: "merchant" };
         (req as any).apiKeyMerchantCountry = mc;
         return next();
@@ -860,13 +856,7 @@ async function apiKeyAuthMiddleware(req: Request, res: Response, next: NextFunct
 
   const auth = req.headers.authorization;
   if (auth && auth.startsWith("Bearer ")) {
-    try {
-      const decoded = jwt.verify(auth.split(" ")[1], JWT_SECRET) as any;
-      if (decoded.role === "merchant") {
-        (req as any).user = decoded;
-        return next();
-      }
-    } catch {}
+    return authMiddleware("merchant")(req, res, next);
   }
 
   return res.status(401).json({ message: "Non autorise. Fournissez un Bearer token JWT ou un header X-API-KEY valide." });
@@ -879,6 +869,9 @@ async function cryptoApiKeyAuthMiddleware(req: Request, res: Response, next: Nex
     try {
       const merchantByCryptoKey = await storage.getMerchantByCryptoApiKey(apiKey);
       if (merchantByCryptoKey) {
+        if (merchantByCryptoKey.suspended) {
+          return res.status(401).json({ message: "Clé API invalide ou compte marchand indisponible." });
+        }
         (req as any).user = { id: merchantByCryptoKey.id, role: "merchant" };
         return next();
       }
@@ -887,13 +880,7 @@ async function cryptoApiKeyAuthMiddleware(req: Request, res: Response, next: Nex
 
   const auth = req.headers.authorization;
   if (auth && auth.startsWith("Bearer ")) {
-    try {
-      const decoded = jwt.verify(auth.split(" ")[1], JWT_SECRET) as any;
-      if (decoded.role === "merchant") {
-        (req as any).user = decoded;
-        return next();
-      }
-    } catch {}
+    return authMiddleware("merchant")(req, res, next);
   }
 
   return res.status(401).json({ message: "Non autorise. Fournissez un Bearer token JWT ou un header X-API-KEY crypto (WP-CRYPTO-...) valide." });
@@ -904,37 +891,27 @@ const CRYPTO_FEE_RATE = 0.05;
 async function notifyCryptoWebhook(merchant: { id: number; webhookUrl?: string | null; webhookSecret?: string | null }, payload: Record<string, any>): Promise<void> {
   if (!merchant.webhookUrl) return;
   try {
-    assertPublicWebhookUrl(merchant.webhookUrl);
     const payloadStr = JSON.stringify(payload);
     const signature = merchant.webhookSecret
       ? crypto.createHmac("sha256", merchant.webhookSecret).update(payloadStr).digest("hex")
       : "";
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
-      const res = await fetch(merchant.webhookUrl, {
-        method: "POST",
-        headers: {
+      const result = await requestPublicWebhook(merchant.webhookUrl, payloadStr, {
           "Content-Type": "application/json",
           "X-RobotPay-Signature": signature,
           "X-RobotPay-Event": payload.event || "crypto.payment.confirmed",
-        },
-        body: payloadStr,
-        signal: controller.signal,
       });
-      clearTimeout(timeout);
       await storage.createWebhookLog({
         merchantId: merchant.id,
         url: merchant.webhookUrl,
         payload: payloadStr,
-        statusCode: res.status,
-        response: (await res.text().catch(() => "")).substring(0, 500),
-        success: res.status >= 200 && res.status < 300,
+        statusCode: result.statusCode,
+        response: result.response.substring(0, 500),
+        success: result.statusCode >= 200 && result.statusCode < 300,
       });
-      console.log(`[CRYPTO WEBHOOK] Envoyé à ${merchant.webhookUrl} → ${res.status}`);
+      console.log(`[CRYPTO WEBHOOK] Livraison terminée pour le marchand #${merchant.id} → ${result.statusCode}`);
     } catch (fetchErr: any) {
-      clearTimeout(timeout);
-      const errMsg = fetchErr.name === "AbortError" ? "Timeout (10s)" : fetchErr.message;
+      const errMsg = fetchErr.message;
       await storage.createWebhookLog({
         merchantId: merchant.id, url: merchant.webhookUrl, payload: payloadStr, statusCode: 0, response: errMsg, success: false,
       });
@@ -1367,41 +1344,8 @@ export async function registerRoutes(
     }
   };
 
-  // ── Extraction IP réelle — résistante au spoofing X-Forwarded-For ────────────
-  // L'attaquant peut injecter de fausses IPs dans X-Forwarded-For (ex: 198.51.100.x)
-  // Cette fonction détecte les plages réservées/RFC-5737 et les marque comme spoofées.
-  function isReservedIp(ip: string): boolean {
-    if (!ip) return false;
-    // Plages IANA réservées qui ne peuvent jamais être de vraies IPs client publiques
-    // (incluant les plages privées utilisées pour contourner le check géo)
-    const reserved = [
-      /^0\./,                          // 0.0.0.0/8
-      /^10\./,                         // 10.0.0.0/8 — privé (spoofé pour bypass geo)
-      /^127\./,                        // loopback
-      /^169\.254\./,                   // link-local
-      /^172\.(1[6-9]|2\d|3[01])\./,   // 172.16.0.0/12 — privé (spoofé pour bypass geo)
-      /^192\.0\.2\./,                  // TEST-NET-1 (RFC 5737)
-      /^192\.168\./,                   // 192.168.0.0/16 — privé
-      /^198\.51\.100\./,               // TEST-NET-2 (RFC 5737) ← utilisé par l'attaquant
-      /^203\.0\.113\./,                // TEST-NET-3 (RFC 5737) ← utilisé par l'attaquant
-      /^224\./,                        // multicast
-      /^240\./,                        // réservé
-      /^255\.255\.255\.255$/,          // broadcast
-    ];
-    return reserved.some(r => r.test(ip));
-  }
-
   function getClientIp(req: Request): string {
-    // Check X-Forwarded-For first — only flag as spoofed if injected via header
-    const forwarded = req.headers["x-forwarded-for"];
-    if (forwarded) {
-      const firstIp = (Array.isArray(forwarded) ? forwarded[0] : forwarded).split(",")[0].trim().replace(/^::ffff:/, "");
-      if (isReservedIp(firstIp)) return `SPOOFED:${firstIp}`;
-      return firstIp;
-    }
-    // Direct connection — use socket IP as-is (never flag as spoofed)
-    const raw = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
-    return raw || "unknown";
+    return extractIp(req);
   }
 
   // ── Helpers sécurité ─────────────────────────────────────────────────────────
@@ -2533,12 +2477,12 @@ export async function registerRoutes(
             const { sendMerchantOtpTelegram } = await import("./telegram-bot");
             const sentFallback = await sendMerchantOtpTelegram(merchant.telegramChatId, otpValue, merchant.name, merchant.telegramBotLanguage);
             if (sentFallback) return;
-          } catch (err) {
-            console.error("[MERCHANT OTP] Telegram error, falling back to email:", err);
+          } catch {
+            console.error("[MERCHANT OTP] Telegram delivery failed; falling back to email");
           }
         }
         await sendMerchantOtpEmail(merchant.email, otpValue, merchant.name);
-      })().catch((err) => console.error("[MERCHANT OTP] Delivery error:", err));
+      })().catch(() => console.error("[MERCHANT OTP] Code delivery failed"));
 
       // Les journaux et alertes ne doivent pas retarder l'écran OTP.
       seenBeforePromise.then((seenBefore) => {
@@ -3571,8 +3515,19 @@ export async function registerRoutes(
 
   app.delete("/api/admin/delete-merchant/:id", authMiddleware("admin"), async (req, res) => {
     try {
-      await storage.deleteMerchant(parseInt(req.params.id as string));
-      res.json({ success: true });
+      const merchantId = Number(req.params.id);
+      if (!Number.isSafeInteger(merchantId) || merchantId <= 0) {
+        return res.status(400).json({ message: "Identifiant marchand invalide" });
+      }
+      if (req.body?.confirmWalletDeletion !== true) {
+        return res.status(400).json({ message: "Confirmation requise pour supprimer aussi les wallets du marchand" });
+      }
+      const result = await storage.deleteMerchant(merchantId);
+      if (!result.deleted) return res.status(404).json({ message: "Marchand introuvable" });
+      res.json({
+        success: true,
+        deletedWalletCount: result.deletedWalletCount,
+      });
     } catch (err: any) {
       res.status(500).json({ message: safeErrMsg(err) });
     }
@@ -3693,7 +3648,7 @@ export async function registerRoutes(
       const updatedMC = await storage.getMerchantCountryById(Number(id));
       if (updatedMC) {
         const balMerchant = await storage.getMerchantById(updatedMC.merchantId);
-        const rawIp = (req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "").split(",")[0].trim();
+        const rawIp = extractIp(req);
         getGeoInfo(rawIp).then(geo => {
           notifyAdminBalanceUpdate({
             merchantName: balMerchant?.name || `#${updatedMC.merchantId}`,
@@ -4940,7 +4895,7 @@ export async function registerRoutes(
       try { payload = jwt.verify(token, JWT_SECRET); } catch { return res.status(401).json({ message: "Token invalide ou expiré" }); }
       if (payload.purpose !== "docs") return res.status(403).json({ message: "Accès interdit" });
       const merchant = await storage.getMerchantById(payload.merchantId);
-      if (!merchant) return res.status(404).json({ message: "Marchand introuvable" });
+      if (!merchant || merchant.suspended) return res.status(404).json({ message: "Marchand introuvable ou suspendu" });
       const aggs = await storage.getCryptoAggregatorsByMerchant(merchant.id);
       res.json({
         name: merchant.name,
@@ -8285,7 +8240,7 @@ export async function registerRoutes(
       }
       const valid = oxapayVerifyWebhook(agg.callbackKey, payload);
       if (!valid) {
-        console.warn(`[OXAPAY CALLBACK] Signature HMAC invalide pour trackId=${trackId} — agrégateur ${agg.id}`);
+        console.warn("[OXAPAY CALLBACK] Signature HMAC invalide");
         return res.status(401).json({ message: "Signature HMAC invalide" });
       }
       if (status) {
@@ -9273,9 +9228,6 @@ app.post("/api/mbiyo/callback", async (req, res) => {
       ) as string;
       const webhookSecret = await getMbiyoWebhookSecret();
 
-      console.log(`[MBIYO CALLBACK] Headers: ${JSON.stringify(req.headers)}`);
-      console.log(`[MBIYO CALLBACK] Body: ${rawBody}`);
-
       // SÉCURITÉ : rejet fail-closed — secret obligatoire
       if (!webhookSecret) {
         console.error("[MBIYO CALLBACK] SÉCURITÉ: Secret webhook Mbiyo non configuré — webhook rejeté. Configurez mbiyo_webhook_secret dans les paramètres admin.");
@@ -9285,16 +9237,14 @@ app.post("/api/mbiyo/callback", async (req, res) => {
         console.error("[MBIYO CALLBACK] Signature manquante dans les headers");
         return res.status(401).json({ message: "Signature manquante" });
       }
-      const expected = crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
-      console.log(`[MBIYO CALLBACK] Signature recue: ${signature} — attendue: ${expected}`);
       const isValid = mbiyoVerifySignature(webhookSecret, signature, rawBody);
       if (!isValid) {
-        console.error(`[MBIYO CALLBACK] Signature invalide — recue: ${signature} — attendue: ${expected}`);
+        console.warn("[MBIYO CALLBACK] Signature invalide");
         return res.status(401).json({ message: "Signature invalide" });
       }
 
       const payload = req.body as MbiyoWebhookPayload;
-      console.log(`[MBIYO CALLBACK] Recu: order_id=${payload.order_id} status=${payload.status}`);
+      console.log("[MBIYO CALLBACK] Signature vérifiée");
 
       if (!payload.order_id) {
         return res.status(400).json({ message: "order_id manquant" });
@@ -9369,7 +9319,6 @@ app.post("/api/mbiyo/callback", async (req, res) => {
           try {
             if (merchant?.webhookUrl) {
               try {
-                const fetch = (await import("node-fetch")).default;
                 const webhookPayload = {
                   event: "payment.confirmed",
                   txId: tx.txId,
@@ -9381,11 +9330,11 @@ app.post("/api/mbiyo/callback", async (req, res) => {
                   reference: payload.order_id,
                   provider: "mbiyo",
                 };
-                const hmac = crypto.createHmac("sha256", merchant.webhookSecret || "").update(JSON.stringify(webhookPayload)).digest("hex");
-                await fetch(merchant.webhookUrl, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json", "X-Signature": hmac },
-                  body: JSON.stringify(webhookPayload),
+                const body = JSON.stringify(webhookPayload);
+                const hmac = crypto.createHmac("sha256", merchant.webhookSecret || "").update(body).digest("hex");
+                await requestPublicWebhook(merchant.webhookUrl, body, {
+                  "Content-Type": "application/json",
+                  "X-Signature": hmac,
                 });
               } catch {}
             }
@@ -9435,9 +9384,6 @@ app.post("/api/mbiyo/payout-callback", async (req, res) => {
       ) as string;
       const webhookSecret = await getMbiyoWebhookSecret();
 
-      console.log(`[MBIYO PAYOUT CALLBACK] Headers: ${JSON.stringify(req.headers)}`);
-      console.log(`[MBIYO PAYOUT CALLBACK] Body: ${rawBody}`);
-
       // SÉCURITÉ : rejet fail-closed — secret obligatoire
       if (!webhookSecret) {
         console.error("[MBIYO PAYOUT CALLBACK] SÉCURITÉ: Secret webhook Mbiyo non configuré — webhook rejeté. Configurez mbiyo_webhook_secret dans les paramètres admin.");
@@ -9447,16 +9393,14 @@ app.post("/api/mbiyo/payout-callback", async (req, res) => {
         console.error("[MBIYO PAYOUT CALLBACK] Signature manquante dans les headers");
         return res.status(401).json({ message: "Signature manquante" });
       }
-      const expected = crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
-      console.log(`[MBIYO PAYOUT CALLBACK] Signature recue: ${signature} — attendue: ${expected}`);
       const isValid = mbiyoVerifySignature(webhookSecret, signature, rawBody);
       if (!isValid) {
-        console.error(`[MBIYO PAYOUT CALLBACK] Signature invalide — recue: ${signature} — attendue: ${expected}`);
+        console.warn("[MBIYO PAYOUT CALLBACK] Signature invalide");
         return res.status(401).json({ message: "Signature invalide" });
       }
 
       const payload = req.body as MbiyoPayoutWebhookPayload;
-      console.log(`[MBIYO PAYOUT CALLBACK] Recu: event=${payload.event} order_id=${payload.order_id} status=${payload.status}`);
+      console.log("[MBIYO PAYOUT CALLBACK] Signature vérifiée");
 
       if (!payload.order_id) {
         return res.status(400).json({ message: "order_id manquant" });
@@ -9669,7 +9613,7 @@ app.post("/api/lipapap/callback", async (req, res) => {
       const config = await getLipaPapConfig();
       if (!config) return res.status(503).json({ message: "LipaPap non configure" });
       if (!verifyLipaPapResponseHash(body, config.secretKey, body.hash)) {
-        console.error(`[LIPAPAP CALLBACK] Signature invalide — ref=${orderId}`);
+        console.error("[LIPAPAP CALLBACK] Signature invalide");
         return res.status(403).json({ message: "Signature invalide" });
       }
 
@@ -9732,7 +9676,6 @@ app.post("/api/lipapap/callback", async (req, res) => {
 app.post("/api/seapay/callback", async (req, res) => {
     try {
       const body = req.body as Record<string, any>;
-      console.log(`[SEAPAY CALLBACK] Body: ${JSON.stringify(body)}`);
 
       const orderId = body.order_id || body.out_trade_no || "";
       if (!orderId) { return res.status(200).send("ok"); }
@@ -9873,7 +9816,6 @@ app.post("/api/seapay/callback", async (req, res) => {
 app.post("/api/seapay/payout-callback", async (req, res) => {
     try {
       const body = req.body as Record<string, any>;
-      console.log(`[SEAPAY PAYOUT CALLBACK] Body: ${JSON.stringify(body)}`);
 
       const orderId = body.order_id || body.out_trade_no || "";
       const status = (body.status || "").toLowerCase();
@@ -10681,6 +10623,10 @@ app.post("/api/merchant/transfer", apiKeyAuthMiddleware, async (req, res) => {
       const merchantCountry = await storage.findMerchantCountryBySimAndCountry(merchantId, country);
       if (!merchantCountry || !merchantCountry.active) {
         return res.status(400).json({ message: `Pays "${country}" non configure ou desactive sur ce compte marchand` });
+      }
+      const apiKeyMerchantCountry = (req as any).apiKeyMerchantCountry;
+      if (apiKeyMerchantCountry && apiKeyMerchantCountry.id !== merchantCountry.id) {
+        return res.status(403).json({ message: "Cette clé API n’autorise pas les transferts dans ce pays." });
       }
       if (!merchantCountry.gatewayEnabled) return res.status(400).json({ message: "Les paiements sont désactivés pour ce pays" });
       const merchant = await storage.getMerchantById(merchantId);
@@ -11933,7 +11879,7 @@ app.post("/api/merchant/withdrawals", authMiddleware("merchant"), async (req, re
         throw error;
       }
 
-      const rawIp = (req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "").split(",")[0].trim();
+      const rawIp = extractIp(req);
       getGeoInfo(rawIp).then(geo => {
         notifyAdminWithdrawal({
           id: createdWithdrawal.id, merchantName: merchant.name, merchantEmail: merchant.email, merchantId,
